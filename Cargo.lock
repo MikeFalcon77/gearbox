@@ -130,6 +130,7 @@ dependencies = [
  "gearbox-ir",
  "insta",
  "serde",
+ "serde_json",
  "thiserror",
  "toml",
 ]
