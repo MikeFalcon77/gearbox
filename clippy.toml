@@ -1,0 +1,49 @@
+# Clippy configuration.
+#
+# Ported from gears-rust/clippy.toml so a contributor moving between the two
+# repositories meets one set of rules. Kept in sync deliberately: if you change
+# a threshold here, change it there too, or record why they differ.
+avoid-breaking-exported-api = false
+
+check-inconsistent-struct-field-initializers = true
+
+lint-commented-code = true
+
+#
+# Workspace-level lints are configured in Cargo.toml [workspace.lints.clippy].
+#
+# NOT PORTED from gears-rust: its `disallowed-methods` list, which forbids the
+# SeaORM query-execution methods that bypass its secure-ORM wrappers. Every
+# entry names a `sea_orm::*` path, and this workspace has no SeaORM dependency,
+# so the paths cannot resolve. Re-add it verbatim if a database ever appears
+# here.
+
+# Type complexity threshold (default is 250)
+type-complexity-threshold = 190
+# Cognitive complexity threshold (default is 25)
+cognitive-complexity-threshold = 20
+
+# Function length threshold (default is 100)
+too-many-lines-threshold = 200
+
+# `unwrap`/`expect` are denied workspace-wide, but a test that cannot unwrap is
+# a test written around the lint rather than around the behaviour. Note this
+# covers `#[test]` functions and `#[cfg(test)]` modules only -- helpers in an
+# integration test file need a file-level allow.
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true
+
+# Stricter thresholds for LLM-generated code
+single-char-binding-names-threshold = 4
+large-error-threshold = 128
+
+# Stack size limits
+stack-size-threshold = 512000
+
+# Struct field limits
+max-struct-bools = 2
+
+# Disallowed types (prevent common LLM mistakes)
+disallowed-types = [
+    { path = "std::collections::LinkedList", reason = "Use Vec instead - LinkedList has poor cache locality" },
+]
