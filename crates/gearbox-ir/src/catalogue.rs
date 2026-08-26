@@ -1,0 +1,461 @@
+//! The catalogue: developer-owned facts about what exists.
+//!
+//! One of the model's three separate representations. This one answers "what is
+//! there and what does it need", says nothing about what anyone wants, and is
+//! derived entirely from `gear.gdl` files cross-checked against Rust source.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+use crate::contract::{CargoRef, ContractDescriptor, ProviderDescriptor};
+use crate::diagnostics::Diagnostics;
+use crate::ids::{ContractId, GearId, RelPath, SourceId};
+use crate::requirement::{ClusterProviderDecl, Requirement};
+
+/// A runtime capability a gear declares.
+///
+/// The complete closed set of seven. Each corresponds one-to-one with a trait the
+/// gear macro asserts an implementation of at compile time, which is why no
+/// eighth value can be invented here: there would be no trait behind it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeCap {
+    /// Owns database schema and participates in migrations.
+    Db,
+    /// Contributes REST routes, mounted by the process's REST host.
+    Rest,
+    /// Hosts the process-wide REST surface. At most one per process.
+    RestHost,
+    /// Has a start/stop lifecycle and background work.
+    Stateful,
+    /// Participates in the early and late system phases.
+    System,
+    /// Hosts the process-wide gRPC surface. At most one per process.
+    GrpcHub,
+    /// Registers gRPC services.
+    Grpc,
+}
+
+impl RuntimeCap {
+    pub const ALL: &'static [Self] = &[
+        Self::Db,
+        Self::Rest,
+        Self::RestHost,
+        Self::Stateful,
+        Self::System,
+        Self::GrpcHub,
+        Self::Grpc,
+    ];
+
+    /// The spelling used in `#[toolkit::gear(capabilities = [...])]`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Db => "db",
+            Self::Rest => "rest",
+            Self::RestHost => "rest_host",
+            Self::Stateful => "stateful",
+            Self::System => "system",
+            Self::GrpcHub => "grpc_hub",
+            Self::Grpc => "grpc",
+        }
+    }
+
+    /// The trait the gear macro asserts an implementation of.
+    ///
+    /// Recorded so a diagnostic can name the trait a gear is missing rather than
+    /// just the capability it claimed.
+    #[must_use]
+    pub const fn asserted_trait(self) -> &'static str {
+        match self {
+            Self::Db => "DatabaseCapability",
+            Self::Rest => "RestApiCapability",
+            Self::RestHost => "ApiGatewayCapability",
+            Self::Stateful => "RunnableCapability",
+            Self::System => "SystemCapability",
+            Self::GrpcHub => "GrpcHubCapability",
+            Self::Grpc => "GrpcServiceCapability",
+        }
+    }
+
+    /// Whether a process may contain at most one gear with this capability.
+    ///
+    /// The runtime registry enforces this at startup; the resolver enforces it
+    /// earlier so an invalid composition never gets built.
+    #[must_use]
+    pub const fn is_process_singleton(self) -> bool {
+        matches!(self, Self::RestHost | Self::GrpcHub)
+    }
+
+    /// Parse the spelling used in the gear macro.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|c| c.as_str() == s)
+    }
+}
+
+impl std::fmt::Display for RuntimeCap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Whether a gear is meant to be selected directly by an integrator.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Visibility {
+    /// Composable by an integrator.
+    Public,
+    /// Present because something else needs it; not offered as a choice.
+    #[default]
+    Internal,
+}
+
+/// A gear's lifecycle declaration.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LifecycleDecl {
+    /// The method name the runtime calls to start background work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
+
+    /// How long to wait for a graceful stop, spelled as the runtime spells it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_timeout: Option<String>,
+
+    /// Whether startup waits for this gear to report ready.
+    #[serde(default)]
+    pub await_ready: bool,
+}
+
+/// Something a gear listens on.
+///
+/// `config_key` is the real per-gear configuration key, not an invention: the
+/// REST host and the gRPC hub spell their bind addresses differently, and the
+/// generator has to write whichever one this gear actually reads.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct EndpointDecl {
+    /// A short name, unique within the gear, e.g. `rest` or `grpc`.
+    pub name: String,
+
+    /// The per-gear configuration key carrying the bind address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_key: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_port: Option<u16>,
+
+    /// Set when this gear does not bind anything itself but is mounted on the
+    /// process's REST host, or on a worker's own out-of-process router.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
+}
+
+impl EndpointDecl {
+    /// Whether this endpoint binds its own socket.
+    #[must_use]
+    pub const fn binds_own_socket(&self) -> bool {
+        self.config_key.is_some() && self.via.is_none()
+    }
+}
+
+/// A role declared in a description but not resolvable.
+///
+/// Kept so a description written for a future runtime survives round-tripping,
+/// and excluded from resolution entirely. A worker's directory identity is a
+/// single name fixed in its binary with no configuration override, which is
+/// exactly what role-qualified registration would need.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DeclaredRole {
+    pub name: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory_name: Option<String>,
+
+    #[serde(default)]
+    pub sharded: bool,
+
+    #[serde(default)]
+    pub instance_addressable: bool,
+}
+
+/// Where a gear's source comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceKind {
+    /// A local directory.
+    Path,
+    /// A Git repository at a pinned revision.
+    Git,
+}
+
+impl SourceKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Path => "path",
+            Self::Git => "git",
+        }
+    }
+}
+
+/// A source, resolved to something on disk with a recorded digest.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ResolvedSource {
+    pub id: SourceId,
+    pub kind: SourceKind,
+
+    /// The path or URL, as declared.
+    pub location: String,
+
+    /// What was actually read.
+    ///
+    /// For a Git worktree this is the commit, marked dirty when the tree has
+    /// uncommitted changes; for a plain path it is a content digest. Either way
+    /// it is what makes a lock reproducible rather than merely repeatable.
+    pub digest: String,
+}
+
+/// Everything known about one gear.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct GearDescriptor {
+    pub id: GearId,
+
+    /// Human-readable name. Free to change without breaking references, which is
+    /// the entire reason it is separate from `id`.
+    pub display_name: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+
+    #[serde(default)]
+    pub visibility: Visibility,
+
+    /// Which declared source this gear was read from.
+    pub source: SourceId,
+
+    /// Where its description lives, relative to that source's root.
+    pub gdl_path: RelPath,
+
+    pub package: CargoRef,
+
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub runtime_caps: BTreeSet<RuntimeCap>,
+
+    /// Gears that must be in the same binary as this one.
+    ///
+    /// Link-time, not logical: the gear macro emits a hidden re-export for each,
+    /// so the crate is physically present, and the registry treats a declared
+    /// dependency that is absent as a hard failure. These edges can therefore
+    /// never be severed by the resolver -- they form a closure that pulls each
+    /// dependency into every process reaching it, rather than a partition.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub colocated_deps: BTreeSet<GearId>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<LifecycleDecl>,
+
+    /// Contracts this gear provides.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provides: Vec<ProviderDescriptor>,
+
+    /// Declared contract edges. Severable, unlike `colocated_deps`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub consumes: Vec<Requirement>,
+
+    /// Non-contract requirements, which today means cluster primitives.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires: Vec<Requirement>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub serves: Vec<EndpointDecl>,
+
+    /// The client trait the gear macro asserts is object-safe, if declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_trait: Option<String>,
+
+    /// Cluster providers this gear registers. Only the cluster gear has any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cluster_providers: Vec<ClusterProviderDecl>,
+
+    /// Roles declared for forward compatibility and excluded from resolution.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declared_roles: Vec<DeclaredRole>,
+
+    /// An opaque pointer to a runtime configuration schema, carried through to
+    /// the lock and otherwise unused for now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_schema: Option<RelPath>,
+}
+
+impl GearDescriptor {
+    #[must_use]
+    pub fn has_cap(&self, cap: RuntimeCap) -> bool {
+        self.runtime_caps.contains(&cap)
+    }
+
+    /// The single-per-process capabilities this gear claims.
+    pub fn singleton_caps(&self) -> impl Iterator<Item = RuntimeCap> + '_ {
+        self.runtime_caps
+            .iter()
+            .copied()
+            .filter(|c| c.is_process_singleton())
+    }
+
+    /// The contracts this gear provides.
+    pub fn provided_contracts(&self) -> impl Iterator<Item = &ContractId> + '_ {
+        self.provides.iter().map(|p| &p.contract)
+    }
+
+    /// The directory holding this gear's description, relative to its source root.
+    #[must_use]
+    pub fn gdl_dir(&self) -> RelPath {
+        self.gdl_path.parent()
+    }
+
+    /// The gear's crate directory, relative to its source root.
+    ///
+    /// # Errors
+    /// Returns [`crate::IdError`] if the declared crate path escapes the source root.
+    pub fn crate_dir(&self) -> Result<RelPath, crate::IdError> {
+        self.gdl_dir().resolve(self.package.path.as_str())
+    }
+
+    /// Whether this gear declared anything the runtime cannot realize.
+    ///
+    /// Used to decide whether to attach the corresponding refusal diagnostics,
+    /// which are per-gear rather than per-product.
+    #[must_use]
+    pub fn declares_unsupported(&self) -> bool {
+        !self.declared_roles.is_empty()
+    }
+
+    /// Whether any declared role asks for sharding or per-instance addressing.
+    #[must_use]
+    pub fn declares_shards(&self) -> bool {
+        self.declared_roles
+            .iter()
+            .any(|r| r.sharded || r.instance_addressable)
+    }
+}
+
+/// What exists.
+///
+/// Ordered maps throughout: iteration order is part of the determinism guarantee,
+/// not an implementation detail.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Catalogue {
+    pub gears: BTreeMap<GearId, GearDescriptor>,
+    pub contracts: BTreeMap<ContractId, ContractDescriptor>,
+    pub sources: BTreeMap<SourceId, ResolvedSource>,
+
+    /// Problems found while building the catalogue.
+    #[serde(default)]
+    pub diagnostics: Diagnostics,
+}
+
+impl Catalogue {
+    #[must_use]
+    pub fn gear(&self, id: &GearId) -> Option<&GearDescriptor> {
+        self.gears.get(id)
+    }
+
+    #[must_use]
+    pub fn contract(&self, id: &ContractId) -> Option<&ContractDescriptor> {
+        self.contracts.get(id)
+    }
+
+    /// Which gears provide `contract`.
+    ///
+    /// Returns a vector rather than an option: nothing forbids two gears from
+    /// providing the same contract, and the resolver has to be able to say so.
+    #[must_use]
+    pub fn providers_of(&self, contract: &ContractId) -> Vec<&GearDescriptor> {
+        self.gears
+            .values()
+            .filter(|g| g.provided_contracts().any(|c| c == contract))
+            .collect()
+    }
+
+    /// Every version of the contract family `contract` belongs to.
+    ///
+    /// Used to explain a major mismatch by listing what the provider does offer.
+    #[must_use]
+    pub fn contract_family(&self, contract: &ContractId) -> Vec<&ContractDescriptor> {
+        let Some(target) = self.contract(contract) else {
+            return Vec::new();
+        };
+        self.contracts
+            .values()
+            .filter(|c| c.owner == target.owner && c.base_name == target.base_name)
+            .collect()
+    }
+
+    /// The cluster provider declarations found anywhere in the catalogue.
+    ///
+    /// Only the cluster gear declares any, but resolving through the catalogue
+    /// rather than a hard-coded gear id keeps the resolver from knowing that gear
+    /// by name.
+    #[must_use]
+    pub fn cluster_providers(&self) -> Vec<&ClusterProviderDecl> {
+        self.gears
+            .values()
+            .flat_map(|g| g.cluster_providers.iter())
+            .collect()
+    }
+
+    /// Find a cluster provider by the name used in configuration.
+    #[must_use]
+    pub fn cluster_provider(&self, name: &str) -> Option<&ClusterProviderDecl> {
+        self.cluster_providers()
+            .into_iter()
+            .find(|p| p.name == name)
+    }
+
+    /// The transitive co-location closure of `root`, including `root` itself.
+    ///
+    /// This is the set of gears that must be in the same binary as `root`. It is
+    /// a closure, not an equivalence class: two gears sharing a dependency do not
+    /// thereby belong together, which is why processes overlap rather than
+    /// partition.
+    ///
+    /// Unknown ids are skipped; reporting them is the resolver's job, and this
+    /// needs to stay usable on an incomplete catalogue so a UI can still draw a
+    /// partial graph.
+    #[must_use]
+    pub fn colocation_closure(&self, root: &GearId) -> BTreeSet<GearId> {
+        let mut closed = BTreeSet::new();
+        let mut queue = BTreeSet::from([root.clone()]);
+
+        while let Some(next) = queue.pop_first() {
+            if !closed.insert(next.clone()) {
+                continue;
+            }
+            if let Some(descriptor) = self.gears.get(&next) {
+                for dep in &descriptor.colocated_deps {
+                    if !closed.contains(dep) {
+                        queue.insert(dep.clone());
+                    }
+                }
+            }
+        }
+
+        closed
+    }
+
+    /// Whether `provider` is inside `consumer`'s co-location closure.
+    ///
+    /// When it is, the runtime short-circuits to the in-process instance whatever
+    /// the configuration says, so the binding is local no matter what anyone asks
+    /// for.
+    #[must_use]
+    pub fn is_colocated_with(&self, consumer: &GearId, provider: &GearId) -> bool {
+        self.colocation_closure(consumer).contains(provider)
+    }
+}

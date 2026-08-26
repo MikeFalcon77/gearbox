@@ -1,0 +1,289 @@
+//! The explanation graph.
+//!
+//! Provenance is recorded **while** resolution happens, never reconstructed
+//! afterwards (`cpt-gearbox-nfr-provenance-during-resolution`). Reconstruction
+//! would infer a rationale it did not observe, and would drift from the resolver
+//! as the resolver changed.
+//!
+//! Node identifiers are derived from content rather than from a counter, so the
+//! same inputs produce the same graph byte for byte
+//! (`cpt-gearbox-nfr-determinism`).
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+use crate::diagnostics::Location;
+use crate::ids::NodeId;
+
+/// What a node stands for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum NodeKind {
+    Gear,
+    Contract,
+    Requirement,
+    Capability,
+    ClusterProvider,
+    Process,
+    Binding,
+    /// A choice the resolver made. The nodes worth asking "why" about.
+    Decision,
+    Preference,
+    /// A hard rule that eliminated alternatives.
+    Constraint,
+    Diagnostic,
+    Source,
+    Profile,
+}
+
+impl NodeKind {
+    /// The identifier prefix for this kind, so a node id is self-describing.
+    #[must_use]
+    pub const fn prefix(self) -> &'static str {
+        match self {
+            Self::Gear => "gear",
+            Self::Contract => "contract",
+            Self::Requirement => "requirement",
+            Self::Capability => "capability",
+            Self::ClusterProvider => "cluster-provider",
+            Self::Process => "process",
+            Self::Binding => "binding",
+            Self::Decision => "decision",
+            Self::Preference => "preference",
+            Self::Constraint => "constraint",
+            Self::Diagnostic => "diagnostic",
+            Self::Source => "source",
+            Self::Profile => "profile",
+        }
+    }
+}
+
+/// One thing in the graph.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ExplanationNode {
+    pub id: NodeId,
+    pub kind: NodeKind,
+
+    /// How to show it.
+    pub label: String,
+
+    /// Where the underlying fact was declared, when it came from a file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<Location>,
+}
+
+impl ExplanationNode {
+    #[must_use]
+    pub fn new(id: NodeId, kind: NodeKind, label: impl Into<String>) -> Self {
+        Self {
+            id,
+            kind,
+            label: label.into(),
+            origin: None,
+        }
+    }
+
+    #[must_use]
+    pub fn at(mut self, origin: Location) -> Self {
+        self.origin = Some(origin);
+        self
+    }
+}
+
+/// Why one node follows from another.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProvenanceKind {
+    /// A description file stated it.
+    Declared,
+    /// A co-location closure pulled it in.
+    ColocatedBy,
+    /// The product description selected it.
+    SelectedBy,
+    /// The resolver derived it from other facts.
+    DerivedFrom,
+    /// A hard rule eliminated an alternative.
+    ConstrainedBy,
+    /// A preference ranked one valid candidate above another.
+    PreferredOver,
+    /// What was asked for differed from what was produced.
+    DowngradedBy,
+    /// A diagnostic attaches here.
+    Diagnosed,
+}
+
+impl ProvenanceKind {
+    /// A phrase that reads naturally between two node labels.
+    #[must_use]
+    pub const fn phrase(self) -> &'static str {
+        match self {
+            Self::Declared => "declared by",
+            Self::ColocatedBy => "co-located by",
+            Self::SelectedBy => "selected by",
+            Self::DerivedFrom => "derived from",
+            Self::ConstrainedBy => "constrained by",
+            Self::PreferredOver => "preferred over",
+            Self::DowngradedBy => "downgraded by",
+            Self::Diagnosed => "diagnosed by",
+        }
+    }
+}
+
+/// An edge, carrying its own reason.
+///
+/// `because` is written at the moment the edge is created, while the resolver
+/// still knows the specifics. That is what makes an explanation an account of
+/// what happened rather than a plausible story about it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ProvenanceEdge {
+    pub from: NodeId,
+    pub to: NodeId,
+    pub kind: ProvenanceKind,
+
+    /// One sentence of already-resolved "why".
+    pub because: String,
+}
+
+impl ProvenanceEdge {
+    #[must_use]
+    pub fn new(from: NodeId, to: NodeId, kind: ProvenanceKind, because: impl Into<String>) -> Self {
+        Self {
+            from,
+            to,
+            kind,
+            because: because.into(),
+        }
+    }
+
+    /// The sort key that puts the graph in canonical order.
+    fn sort_key(&self) -> (&str, ProvenanceKind, &str) {
+        (self.from.as_str(), self.kind, self.to.as_str())
+    }
+}
+
+/// Why the product is the way it is.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ExplanationGraph {
+    pub nodes: BTreeMap<NodeId, ExplanationNode>,
+    pub edges: Vec<ProvenanceEdge>,
+}
+
+impl ExplanationGraph {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a node, keeping the first label if one is already present.
+    ///
+    /// Re-recording is expected: the same gear or contract is reached from
+    /// several directions during resolution, and the first mention is the one
+    /// with the most specific origin.
+    pub fn add_node(&mut self, node: ExplanationNode) {
+        self.nodes.entry(node.id.clone()).or_insert(node);
+    }
+
+    pub fn add_edge(&mut self, edge: ProvenanceEdge) {
+        self.edges.push(edge);
+    }
+
+    /// Put the graph in canonical order and drop duplicate edges.
+    pub fn finish(&mut self) {
+        self.edges.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
+        self.edges.dedup();
+    }
+
+    #[must_use]
+    pub fn node(&self, id: &NodeId) -> Option<&ExplanationNode> {
+        self.nodes.get(id)
+    }
+
+    /// Edges pointing away from `id` -- the reasons behind it.
+    #[must_use]
+    pub fn outgoing(&self, id: &NodeId) -> Vec<&ProvenanceEdge> {
+        self.edges.iter().filter(|e| &e.from == id).collect()
+    }
+
+    /// Edges pointing at `id` -- what it explains.
+    #[must_use]
+    pub fn incoming(&self, id: &NodeId) -> Vec<&ProvenanceEdge> {
+        self.edges.iter().filter(|e| &e.to == id).collect()
+    }
+
+    /// The subgraph reachable from `root` by following reasons, up to `depth`.
+    ///
+    /// This is what answers a "why" question: start at the decision and walk
+    /// outward through everything that produced it.
+    #[must_use]
+    pub fn because_of(&self, root: &NodeId, depth: usize) -> Self {
+        let mut out = Self::new();
+        let mut frontier = vec![root.clone()];
+        let mut seen = std::collections::BTreeSet::new();
+
+        for _ in 0..=depth {
+            let mut next = Vec::new();
+            for id in std::mem::take(&mut frontier) {
+                if !seen.insert(id.clone()) {
+                    continue;
+                }
+                if let Some(node) = self.nodes.get(&id) {
+                    out.add_node(node.clone());
+                }
+                for edge in self.outgoing(&id) {
+                    out.add_edge(edge.clone());
+                    next.push(edge.to.clone());
+                }
+            }
+            frontier = next;
+            if frontier.is_empty() {
+                break;
+            }
+        }
+
+        // Include the far end of every retained edge, so no edge dangles.
+        let targets: Vec<NodeId> = out.edges.iter().map(|e| e.to.clone()).collect();
+        for target in targets {
+            if let Some(node) = self.nodes.get(&target) {
+                out.add_node(node.clone());
+            }
+        }
+
+        out.finish();
+        out
+    }
+
+    /// Render the reasons behind `root` as ordered prose.
+    ///
+    /// Each line is `<label> <phrase> <label> -- <because>`. No language model is
+    /// involved: the resolver already recorded every clause
+    /// (`cpt-gearbox-nfr-explainability`).
+    #[must_use]
+    pub fn narrate(&self, root: &NodeId, depth: usize) -> Vec<String> {
+        let sub = self.because_of(root, depth);
+        let label = |id: &NodeId| -> String {
+            sub.nodes
+                .get(id)
+                .map_or_else(|| id.to_string(), |n| n.label.clone())
+        };
+
+        sub.edges
+            .iter()
+            .map(|e| {
+                format!(
+                    "{} {} {} -- {}",
+                    label(&e.from),
+                    e.kind.phrase(),
+                    label(&e.to),
+                    e.because
+                )
+            })
+            .collect()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty() && self.edges.is_empty()
+    }
+}

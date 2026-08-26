@@ -1,0 +1,822 @@
+//! Diagnostics.
+//!
+//! Every diagnostic the engine can emit is declared here, once, as an enum
+//! variant. That makes the set exhaustive and greppable, lets the compiler catch
+//! a mistyped code, and gives each code a single home for its title, default
+//! severity, and doc comment.
+//!
+//! Two rules from the PRD are enforced structurally rather than by review:
+//!
+//! - `cpt-gearbox-nfr-actionable-diagnostics` -- every error-severity code
+//!   carries a remedy. [`Diagnostic::error`] demands one.
+//! - `cpt-gearbox-nfr-evidence-cited` -- every code asserting the runtime does
+//!   not support something carries a `file:line` in `gears-rust`.
+//!   [`DiagnosticCode::requires_evidence`] marks those, and
+//!   [`Diagnostic::validate`] rejects them without it.
+
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+use crate::ids::NodeId;
+
+/// How much a diagnostic matters.
+///
+/// `Error` blocks writing the lock and generating artifacts (unless explicitly
+/// overridden); the rest are informational. Resolution itself never stops on an
+/// error -- a partial product plus its errors is more useful to a UI than
+/// nothing at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    /// Informational; the smallest thing worth saying.
+    Hint,
+    /// Worth knowing, no action implied.
+    Info,
+    /// The product resolved, but not the way it was asked for.
+    Warning,
+    /// The product is invalid. Blocks lock write and generation.
+    Error,
+}
+
+impl Severity {
+    #[must_use]
+    pub const fn is_error(self) -> bool {
+        matches!(self, Self::Error)
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Hint => "hint",
+            Self::Info => "info",
+            Self::Warning => "warning",
+            Self::Error => "error",
+        }
+    }
+}
+
+impl std::fmt::Display for Severity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Which part of the pipeline produced a diagnostic.
+///
+/// Mirrors the numeric ranges of the codes, so a reader can place a code without
+/// consulting a table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum DiagnosticDomain {
+    /// `GBX01xx` -- parsing and evaluating GDL.
+    Gdl,
+    /// `GBX02xx` -- cross-checking `gear.gdl` against Rust source.
+    Validate,
+    /// `GBX03xx` -- process topology and structural constraints.
+    Topology,
+    /// `GBX04xx` -- contract bindings and severability.
+    Binding,
+    /// `GBX05xx` -- cluster capabilities and providers.
+    Cluster,
+    /// `GBX06xx` -- capabilities the runtime does not implement.
+    RuntimeGap,
+    /// `GBX07xx` -- artifact generation.
+    Generator,
+}
+
+impl DiagnosticDomain {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Gdl => "gdl",
+            Self::Validate => "validate",
+            Self::Topology => "topology",
+            Self::Binding => "binding",
+            Self::Cluster => "cluster",
+            Self::RuntimeGap => "runtime-gap",
+            Self::Generator => "generator",
+        }
+    }
+}
+
+/// Declares the diagnostic catalogue.
+///
+/// Each entry is `Variant = "CODE", domain, default severity, evidence
+/// requirement, title`. The doc comment on a variant is the canonical
+/// explanation of the condition, and is what a generated reference page shows.
+macro_rules! diagnostic_codes {
+    (
+        $(
+            $(#[doc = $doc:literal])+
+            $variant:ident = $code:literal, $domain:ident, $severity:ident, $evidence:literal, $title:literal;
+        )+
+    ) => {
+        /// A stable diagnostic code.
+        ///
+        /// Serializes as its string form (`"GBX0402"`) so a code in a
+        /// `product.lock` or an RPC payload stays readable and stable even if
+        /// this enum is reordered.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, TS)]
+        #[ts(type = "string")]
+        #[non_exhaustive]
+        pub enum DiagnosticCode {
+            $(
+                $(#[doc = $doc])+
+                $variant,
+            )+
+        }
+
+        impl DiagnosticCode {
+            /// Every code, in declaration order.
+            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            /// The stable string form, e.g. `"GBX0402"`.
+            #[must_use]
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $code,)+
+                }
+            }
+
+            /// Which pipeline stage owns this code.
+            #[must_use]
+            pub const fn domain(self) -> DiagnosticDomain {
+                match self {
+                    $(Self::$variant => DiagnosticDomain::$domain,)+
+                }
+            }
+
+            /// The severity used unless a call site deliberately raises or lowers it.
+            #[must_use]
+            pub const fn default_severity(self) -> Severity {
+                match self {
+                    $(Self::$variant => Severity::$severity,)+
+                }
+            }
+
+            /// Whether this code asserts a runtime limitation and therefore must
+            /// cite a `file:line` in `gears-rust`
+            /// (`cpt-gearbox-nfr-evidence-cited`).
+            #[must_use]
+            pub const fn requires_evidence(self) -> bool {
+                match self {
+                    $(Self::$variant => $evidence,)+
+                }
+            }
+
+            /// A short human title, independent of any particular occurrence.
+            #[must_use]
+            pub const fn title(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $title,)+
+                }
+            }
+
+            /// Parse a code from its string form.
+            ///
+            /// # Errors
+            /// Returns [`UnknownDiagnosticCode`] if `s` is not a known code.
+            pub fn parse(s: &str) -> Result<Self, UnknownDiagnosticCode> {
+                match s {
+                    $($code => Ok(Self::$variant),)+
+                    other => Err(UnknownDiagnosticCode(other.to_owned())),
+                }
+            }
+        }
+    };
+}
+
+diagnostic_codes! {
+    // ---------------------------------------------------------------- GBX01xx
+    /// A `.gdl` file could not be parsed as Starlark.
+    GdlParse = "GBX0101", Gdl, Error, false, "GDL parse error";
+
+    /// A `.gdl` file parsed but failed during evaluation.
+    GdlEval = "GBX0102", Gdl, Error, false, "GDL evaluation error";
+
+    /// A GDL file used a construct that encodes a decision -- `if`, `for`,
+    /// `while`, `def`, `lambda`, a conditional expression, a comprehension, or a
+    /// boolean short-circuit.
+    ///
+    /// GDL describes facts; the resolver makes decisions. Allowing a branch here
+    /// would move a decision out of the resolver and destroy determinism and
+    /// explainability (`cpt-gearbox-fr-gdl-declarative`).
+    GdlForbiddenConstruct = "GBX0103", Gdl, Error, false, "forbidden GDL construct";
+
+    /// A `load()` referenced a path outside the declaring file's source root.
+    GdlLoadEscape = "GBX0104", Gdl, Error, false, "GDL load escapes its source root";
+
+    /// A file declared no `gear()`/`product()`, or more than one.
+    GdlCardinality = "GBX0105", Gdl, Error, false, "wrong number of top-level declarations";
+
+    /// A call received an argument this vocabulary does not define.
+    GdlUnknownArgument = "GBX0106", Gdl, Error, false, "unknown GDL argument";
+
+    /// A construct was accepted for forward compatibility but excluded from
+    /// resolution.
+    GdlDowngraded = "GBX0107", Gdl, Warning, true, "GDL construct accepted but not resolved";
+
+    /// Two declarations scoped to the same profile collide.
+    GdlDuplicateProfileScoped = "GBX0110", Gdl, Error, false, "duplicate profile-scoped declaration";
+
+    // ---------------------------------------------------------------- GBX02xx
+    /// `gear.gdl`'s `id` differs from `#[toolkit::gear(name = ...)]`.
+    ValidateNameMismatch = "GBX0201", Validate, Error, false, "gear id does not match the gear macro";
+
+    /// Declared co-location dependencies differ from `#[toolkit::gear(deps = ...)]`.
+    ValidateDepsMismatch = "GBX0202", Validate, Error, false, "co-location dependencies do not match the gear macro";
+
+    /// Declared runtime capabilities differ from
+    /// `#[toolkit::gear(capabilities = ...)]`.
+    ValidateCapsMismatch = "GBX0203", Validate, Error, false, "runtime capabilities do not match the gear macro";
+
+    /// Declared provided contracts, or the cluster gear's declared provider set,
+    /// differ from the Rust source.
+    ///
+    /// The cluster provider registry is assembled in hand-written Rust, so a new
+    /// provider registration that is not mirrored in `gear.gdl` would silently
+    /// widen what the resolver believes is available.
+    ValidateProvidesMismatch = "GBX0204", Validate, Error, false, "provided contracts or cluster providers do not match the Rust source";
+
+    /// Declared consumed contracts differ from `#[toolkit::consumes]`.
+    ValidateConsumesMismatch = "GBX0205", Validate, Error, false, "consumed contracts do not match the Rust source";
+
+    /// The gear's name is not the kebab-case form of the annotated struct's
+    /// identifier.
+    ///
+    /// `#[toolkit::consumes]` derives the owner gear from the struct identifier,
+    /// not from `#[toolkit::gear(name = ...)]`, and uses it as the configuration
+    /// key for the static endpoint override. A mismatch means that override key
+    /// never resolves, and the runtime only warns.
+    ValidateOwnerGearMismatch = "GBX0206", Validate, Error, true, "gear name is not kebab-case of its struct identifier";
+
+    /// A contract's trait-name suffix or trailing major disagrees with its
+    /// declared kind or version.
+    ValidateContractShape = "GBX0207", Validate, Error, false, "contract suffix or version disagrees with the declaration";
+
+    /// A selected gear crate has no `gear.gdl`.
+    ValidateMissingDescription = "GBX0208", Validate, Error, false, "gear has no gear.gdl";
+
+    /// The declared library identifier does not match the crate's actual one.
+    ///
+    /// A crate without an explicit `[lib]` section takes its library identifier
+    /// from the package name, which is why the identifier must be declared
+    /// rather than derived.
+    ValidateLibIdentMismatch = "GBX0209", Validate, Error, false, "declared library identifier does not match the crate";
+
+    // ---------------------------------------------------------------- GBX03xx
+    /// A selected or depended-upon gear is not in the catalogue.
+    TopologyUnknownGear = "GBX0301", Topology, Error, false, "unknown gear";
+
+    /// Co-location dependencies form a cycle.
+    TopologyDepsCycle = "GBX0302", Topology, Error, false, "co-location dependency cycle";
+
+    /// A process contains more than one REST host gear.
+    ///
+    /// The runtime registry permits exactly one.
+    TopologyMultipleRestHost = "GBX0303", Topology, Error, true, "more than one REST host in a process";
+
+    /// A process contains more than one gRPC hub gear.
+    TopologyMultipleGrpcHub = "GBX0304", Topology, Error, true, "more than one gRPC hub in a process";
+
+    /// A process exposes REST interfaces but contains no REST host to mount them.
+    TopologyRestWithoutHost = "GBX0305", Topology, Error, false, "REST gears with no REST host";
+
+    /// A process contains a database-backed gear but no database is configured.
+    TopologyDbWithoutDatabase = "GBX0306", Topology, Error, false, "database gear with no database configured";
+
+    /// The requested shape cannot exist in the `embedded` profile, which is a
+    /// single process by definition.
+    TopologyEmbeddedViolation = "GBX0307", Topology, Warning, false, "request is incompatible with the embedded profile";
+
+    /// Directory-based discovery was selected but the host process has no
+    /// directory server gear.
+    TopologyNoOrchestrator = "GBX0308", Topology, Error, false, "directory discovery without a directory server";
+
+    /// Directory-based discovery was selected but the host process has no gRPC
+    /// hub.
+    ///
+    /// The host's worker-spawn phase blocks waiting for the gRPC hub endpoint,
+    /// because that is the directory address it hands to each child.
+    TopologyNoGrpcHub = "GBX0309", Topology, Error, true, "directory discovery without a gRPC hub";
+
+    /// A worker process has no resolvable executable path.
+    TopologyNoTargetDir = "GBX0310", Topology, Error, false, "worker has no resolvable executable path";
+
+    /// A gear in the closure was not placed in any process.
+    TopologyOrphanGear = "GBX0311", Topology, Error, false, "gear placed in no process";
+
+    /// A worker process contains a REST host gear.
+    ///
+    /// A worker serves over its own out-of-process HTTP router, not through the
+    /// API gateway, so a REST host there would never receive traffic.
+    TopologyRestHostInWorker = "GBX0312", Topology, Error, true, "REST host in a worker process";
+
+    // ---------------------------------------------------------------- GBX04xx
+    /// This consumer and provider could be placed in separate processes, but the
+    /// dependency between them is not declared as a contract consumption.
+    ///
+    /// Not an error: it is the actionable work list
+    /// (`cpt-gearbox-fr-report-cuttable-if-declared`). Direct type-keyed client
+    /// lookups are widespread, so separating an undeclared pair would fail at
+    /// runtime; the accompanying help text is the exact edit that would make the
+    /// separation legal.
+    BindingCuttableIfDeclared = "GBX0401", Binding, Info, false, "edge would be severable if declared";
+
+    /// gRPC was requested for a severed edge, and is not available there.
+    ///
+    /// The consumption macro emits a REST resolving client only; there is no
+    /// gRPC path. Cross-process gRPC exists in the runtime, but only through
+    /// hand-written wiring.
+    BindingGrpcUnsupported = "GBX0402", Binding, Warning, true, "gRPC is unavailable on a severed edge";
+
+    /// An in-process-only contract would cross a process boundary.
+    ///
+    /// Only the remote-capable contract kinds may cross; the others are
+    /// in-process by definition of their kind.
+    BindingInProcessOnlyContract = "GBX0403", Binding, Error, true, "in-process-only contract crosses a process boundary";
+
+    /// A consumed contract has no provider in the product.
+    BindingNoProvider = "GBX0404", Binding, Error, false, "consumed contract has no provider";
+
+    /// The provider offers no matching major version of the consumed contract.
+    ///
+    /// Compatibility is exact major equality: parallel majors coexist by design
+    /// and there is no adapter between them.
+    BindingMajorMismatch = "GBX0405", Binding, Error, false, "contract major version mismatch";
+
+    /// The provider declares no remote-capable transport, so the edge cannot be
+    /// severed.
+    BindingNoRemoteTransport = "GBX0406", Binding, Warning, false, "provider declares no remote transport";
+
+    /// The binding is local because the provider is inside the consumer's
+    /// co-location closure, regardless of configuration.
+    ///
+    /// The runtime short-circuits to a local instance when one is present in the
+    /// process, so configuring a remote endpoint here would have no effect.
+    BindingForcedLocal = "GBX0407", Binding, Info, true, "binding forced local by co-location";
+
+    /// A remote binding depends on a directory that the resolved topology does
+    /// not make reachable.
+    BindingDirectoryUnreachable = "GBX0408", Binding, Error, false, "directory unreachable for a remote binding";
+
+    /// The consumer endpoint override cannot be expressed as an environment
+    /// variable and must be written into configuration.
+    ///
+    /// The runtime's environment-key remapping converts underscores to hyphens
+    /// only in the segment immediately following the gears prefix, so a
+    /// hyphenated dependency name nested deeper can never be matched.
+    BindingEnvCannotExpressWiring = "GBX0409", Binding, Warning, true, "endpoint override cannot come from the environment";
+
+    // ---------------------------------------------------------------- GBX05xx
+    /// A cluster provider was selected automatically.
+    ClusterAutoSelected = "GBX0501", Cluster, Info, false, "cluster provider selected automatically";
+
+    /// No registered provider satisfies the required capabilities.
+    ClusterUnsatisfiable = "GBX0502", Cluster, Error, true, "no cluster provider satisfies the required capabilities";
+
+    /// A process-local coordination backend was selected for a topology with
+    /// more than one process or replica.
+    ///
+    /// This is a silent correctness failure at runtime rather than a startup
+    /// error: an in-memory backend starts successfully in every replica and
+    /// elects one leader per replica.
+    ClusterProcessLocalInMultiProcess = "GBX0503", Cluster, Error, true, "process-local cluster backend in a multi-process topology";
+
+    /// The primitive resolved to the SDK's compare-and-swap default layered over
+    /// the profile's cache, because no dedicated backend is registered for it.
+    ClusterSdkDefault = "GBX0504", Cluster, Info, true, "resolved to the SDK compare-and-swap default";
+
+    /// The named cluster provider is not registered in the runtime.
+    ClusterUnregisteredProvider = "GBX0505", Cluster, Error, true, "cluster provider is not registered";
+
+    /// The selected provider needs credentials and none were supplied.
+    ClusterNoCredentialSource = "GBX0506", Cluster, Error, false, "cluster provider has no credential source";
+
+    /// A stateful gear runs with several replicas and nothing coordinates them.
+    ///
+    /// Filed as a cluster concern rather than a runtime gap: the runtime is
+    /// perfectly capable of leader election, so this is a statement about the
+    /// product, not about a missing capability.
+    ClusterStatefulReplicasWithoutElection = "GBX0507", Cluster, Warning, false, "replicated stateful gear without leader election";
+
+    // ---------------------------------------------------------------- GBX06xx
+    /// Roles were declared. The runtime has no role concept.
+    ///
+    /// A worker's directory identity is a single name fixed in its binary, with
+    /// no configuration override, which is exactly what role-qualified
+    /// registration would require.
+    GapRoles = "GBX0601", RuntimeGap, Warning, true, "roles are not supported by the runtime";
+
+    /// Sharding or per-instance addressability was declared and cannot be
+    /// realized.
+    ///
+    /// Instance labels exist only on the out-of-process path, selection is
+    /// equality-only, and in-process gears carry no labels at all.
+    GapShards = "GBX0602", RuntimeGap, Warning, true, "sharding and per-instance addressing are not supported";
+
+    /// The Kubernetes profile resolves endpoints statically because no
+    /// cluster-native endpoint resolver exists.
+    GapNoK8sDnsResolver = "GBX0603", RuntimeGap, Warning, true, "no cluster-native endpoint resolver exists";
+
+    /// Workers are local operating-system processes; no other spawn backend is
+    /// implemented.
+    GapNoRemoteSpawnBackend = "GBX0604", RuntimeGap, Warning, true, "only local process spawning is implemented";
+
+    /// A registry-sourced gear was requested. Out of scope for this release.
+    GapRegistrySource = "GBX0605", RuntimeGap, Error, false, "registry sources are not supported";
+
+    /// The deployment profile is a composition-time concept, not a runtime type.
+    ///
+    /// It is projected onto per-gear runtime kind and deployment topology.
+    GapProfileNotRuntimeType = "GBX0606", RuntimeGap, Hint, true, "deployment profile is not a runtime type";
+
+    // ---------------------------------------------------------------- GBX07xx
+    /// Generation would overwrite an operator-owned file whose edits cannot be
+    /// merged.
+    GenClobberOperatorFile = "GBX0701", Generator, Error, false, "would overwrite operator-owned edits";
+
+    /// A generated path escapes its output root.
+    GenPathEscape = "GBX0702", Generator, Error, false, "generated path escapes the output root";
+
+    /// Chart rendering or linting failed.
+    GenHelmFailed = "GBX0703", Generator, Error, false, "chart render or lint failed";
+
+    /// Package metadata for a gear crate could not be read.
+    GenCargoMetadataFailed = "GBX0704", Generator, Error, false, "could not read package metadata";
+}
+
+/// A diagnostic code string that this build does not know.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown diagnostic code `{0}`")]
+pub struct UnknownDiagnosticCode(pub String);
+
+impl std::fmt::Display for DiagnosticCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for DiagnosticCode {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for DiagnosticCode {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        Self::parse(&raw).map_err(serde::de::Error::custom)
+    }
+}
+
+impl schemars::JsonSchema for DiagnosticCode {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("DiagnosticCode")
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let codes: Vec<&str> = Self::ALL.iter().map(|c| c.as_str()).collect();
+        schemars::json_schema!({
+            "type": "string",
+            "description": "stable Gearbox diagnostic code",
+            "enum": codes,
+        })
+    }
+}
+
+/// A zero-based text position, matching Language Server Protocol semantics so it
+/// can be handed to an editor without conversion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+pub struct Position {
+    pub line: u32,
+    pub character: u32,
+}
+
+impl Position {
+    #[must_use]
+    pub const fn new(line: u32, character: u32) -> Self {
+        Self { line, character }
+    }
+
+    /// The start of a file, used when a diagnostic concerns a file as a whole.
+    #[must_use]
+    pub const fn origin() -> Self {
+        Self::new(0, 0)
+    }
+}
+
+/// A half-open span between two positions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+pub struct Range {
+    pub start: Position,
+    pub end: Position,
+}
+
+impl Range {
+    #[must_use]
+    pub const fn new(start: Position, end: Position) -> Self {
+        Self { start, end }
+    }
+
+    /// A zero-width range at the start of a file.
+    #[must_use]
+    pub const fn whole_file() -> Self {
+        Self::new(Position::origin(), Position::origin())
+    }
+}
+
+/// Where a fact lives.
+///
+/// `uri` is a `file://` URI so it can be passed to an editor unchanged.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+pub struct Location {
+    pub uri: String,
+    pub range: Range,
+}
+
+impl Location {
+    #[must_use]
+    pub fn new(uri: impl Into<String>, range: Range) -> Self {
+        Self {
+            uri: uri.into(),
+            range,
+        }
+    }
+
+    /// A whole file, with no interesting span inside it.
+    #[must_use]
+    pub fn file(uri: impl Into<String>) -> Self {
+        Self::new(uri, Range::whole_file())
+    }
+}
+
+/// A secondary location that helps explain a diagnostic.
+///
+/// Maps onto the Language Server Protocol's related-information, so an editor
+/// renders these as navigable sub-entries.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct RelatedLocation {
+    pub location: Location,
+    pub message: String,
+}
+
+impl RelatedLocation {
+    #[must_use]
+    pub fn new(location: Location, message: impl Into<String>) -> Self {
+        Self {
+            location,
+            message: message.into(),
+        }
+    }
+}
+
+/// One thing the engine has to say.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Diagnostic {
+    pub code: DiagnosticCode,
+    pub severity: Severity,
+
+    /// What is wrong, in one sentence, naming the specific subjects involved.
+    pub message: String,
+
+    /// Where in a file this arose, when it arose in a file at all. Resolution
+    /// diagnostics often have no location and are anchored by the client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<Location>,
+
+    /// Other places that help explain this.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related: Vec<RelatedLocation>,
+
+    /// The graph node this concerns, so a client can select it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<NodeId>,
+
+    /// What to do about it. Required for errors
+    /// (`cpt-gearbox-nfr-actionable-diagnostics`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
+
+    /// The `file:line` in `gears-rust` that substantiates the claim. Required
+    /// for codes that assert a runtime limitation
+    /// (`cpt-gearbox-nfr-evidence-cited`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+}
+
+impl Diagnostic {
+    /// Start a diagnostic at its code's default severity.
+    #[must_use]
+    pub fn new(code: DiagnosticCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            severity: code.default_severity(),
+            message: message.into(),
+            location: None,
+            related: Vec::new(),
+            subject: None,
+            help: None,
+            evidence: None,
+        }
+    }
+
+    /// Start an error, which must carry a remedy.
+    ///
+    /// Taking `help` as a parameter rather than a builder step is deliberate:
+    /// it makes an actionless error impossible to write.
+    #[must_use]
+    pub fn error(
+        code: DiagnosticCode,
+        message: impl Into<String>,
+        help: impl Into<String>,
+    ) -> Self {
+        Self::new(code, message)
+            .with_severity(Severity::Error)
+            .with_help(help)
+    }
+
+    #[must_use]
+    pub fn with_severity(mut self, severity: Severity) -> Self {
+        self.severity = severity;
+        self
+    }
+
+    #[must_use]
+    pub fn at(mut self, location: Location) -> Self {
+        self.location = Some(location);
+        self
+    }
+
+    #[must_use]
+    pub fn with_related(mut self, related: RelatedLocation) -> Self {
+        self.related.push(related);
+        self
+    }
+
+    #[must_use]
+    pub fn about(mut self, subject: NodeId) -> Self {
+        self.subject = Some(subject);
+        self
+    }
+
+    #[must_use]
+    pub fn with_help(mut self, help: impl Into<String>) -> Self {
+        self.help = Some(help.into());
+        self
+    }
+
+    /// Cite the source that proves the claim, as `path:line`.
+    #[must_use]
+    pub fn with_evidence(mut self, evidence: impl Into<String>) -> Self {
+        self.evidence = Some(evidence.into());
+        self
+    }
+
+    #[must_use]
+    pub const fn is_error(&self) -> bool {
+        self.severity.is_error()
+    }
+
+    /// Check the invariants the PRD requires of every diagnostic.
+    ///
+    /// Called by a test over the whole emitted set rather than on every
+    /// construction, so a violation is a build failure rather than a runtime
+    /// panic in front of a user.
+    ///
+    /// # Errors
+    /// Returns a description of each violated invariant.
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut problems = Vec::new();
+
+        if self.message.trim().is_empty() {
+            problems.push(format!("{}: message is empty", self.code));
+        }
+        if self.is_error() && self.help.as_ref().is_none_or(|h| h.trim().is_empty()) {
+            problems.push(format!(
+                "{}: error severity requires a remedy (cpt-gearbox-nfr-actionable-diagnostics)",
+                self.code
+            ));
+        }
+        if self.code.requires_evidence()
+            && self.evidence.as_ref().is_none_or(|e| e.trim().is_empty())
+        {
+            problems.push(format!(
+                "{}: asserts a runtime limitation and requires cited evidence \
+                 (cpt-gearbox-nfr-evidence-cited)",
+                self.code
+            ));
+        }
+
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(problems)
+        }
+    }
+}
+
+/// A set of diagnostics, kept in a stable order.
+///
+/// Ordering is by `(code, message)` rather than emission order, so the same
+/// resolution always yields the same sequence regardless of internal iteration
+/// (`cpt-gearbox-nfr-determinism`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, TS)]
+pub struct Diagnostics(Vec<Diagnostic>);
+
+impl Serialize for Diagnostics {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for Diagnostics {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Vec::<Diagnostic>::deserialize(d).map(Self)
+    }
+}
+
+impl Diagnostics {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    pub fn push(&mut self, diagnostic: Diagnostic) {
+        self.0.push(diagnostic);
+    }
+
+    pub fn extend(&mut self, other: impl IntoIterator<Item = Diagnostic>) {
+        self.0.extend(other);
+    }
+
+    /// Sort into canonical order and drop exact duplicates.
+    ///
+    /// Duplicates are expected: the same structural fact is often reached from
+    /// several directions during resolution.
+    pub fn finish(&mut self) {
+        self.0.sort_by(|a, b| {
+            a.code
+                .cmp(&b.code)
+                .then_with(|| a.message.cmp(&b.message))
+                .then_with(|| a.location.cmp(&b.location))
+        });
+        self.0.dedup();
+    }
+
+    #[must_use]
+    pub fn has_errors(&self) -> bool {
+        self.0.iter().any(Diagnostic::is_error)
+    }
+
+    pub fn errors(&self) -> impl Iterator<Item = &Diagnostic> {
+        self.0.iter().filter(|d| d.is_error())
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    #[must_use]
+    pub fn as_slice(&self) -> &[Diagnostic] {
+        &self.0
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, Diagnostic> {
+        self.0.iter()
+    }
+
+    /// Highest severity present, if any.
+    #[must_use]
+    pub fn max_severity(&self) -> Option<Severity> {
+        self.0.iter().map(|d| d.severity).max()
+    }
+}
+
+impl FromIterator<Diagnostic> for Diagnostics {
+    fn from_iter<I: IntoIterator<Item = Diagnostic>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl IntoIterator for Diagnostics {
+    type Item = Diagnostic;
+    type IntoIter = std::vec::IntoIter<Diagnostic>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Diagnostics {
+    type Item = &'a Diagnostic;
+    type IntoIter = std::slice::Iter<'a, Diagnostic>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
