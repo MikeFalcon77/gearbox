@@ -366,6 +366,42 @@ product(
 Note what it does **not** list: `grpc-hub`, `authn-resolver`, `types-registry`, `cluster` — they
 arrive via `colocated_deps` closure, which is exactly the fact the Graph widget makes visible.
 
+**What shipped in M2, and where it differs from the example above.**
+`products/payments-demo/product.gdl` exists and evaluates
+(`gearbox product --file products/payments-demo/product.gdl`). It lists the four slice gears rather
+than five: `payments-audit` is the new custom gear and arrives with M6, so a `use_gear` naming it
+today would reference a gear no source provides. Its cluster scope is `event-broker`, the one profile
+name a real `impl ClusterProfile` supplies.
+
+Three surface decisions settled by implementing it:
+
+- **Single-argument constructors are positional** — `path("…")`, `provider("…")`, `use_gear("…")`,
+  `process("…")`. Everything else stays keyword-only, so `path(at = "…")` would only name the obvious
+  while `bind(consumer = …, contract = …)` genuinely needs the labels.
+- **`provider(...)` is the only function taking `**kwargs`.** A cluster plugin's option schema is
+  genuinely open — the SDK hands a plugin a raw JSON map and keeps the schema out of the framework —
+  so there is no arity to check. Everywhere else the parameters are spelled out, which is what makes
+  an unknown argument GBX0106 instead of a silently ignored key. Options are sorted by key on the way
+  into the IR, because `SmallMap` preserves the order the author happened to type and the lock must
+  not depend on it.
+- **`gear()` and `product()` live in different global sets**, so a file that calls the wrong one fails
+  at the call rather than producing half of each.
+
+An option that is not a string, integer, bool, list or map is refused rather than encoded as JSON
+`null` — the lock is TOML, and TOML has no null.
+
+**GBX0110 is now reachable, and GBX0107 appears not to be.** Duplicate profile-scoped declarations
+are real and tested: two `bind` entries for one edge in one profile, an unscoped entry colliding with
+a scoped one, one cluster scope bound twice, and a duplicate profile id. Disjoint scopes correctly do
+*not* collide, which is the whole point of declaring profiles as data.
+
+`GBX0107` (`GdlDowngraded`, "accepted for forward compatibility but excluded from resolution") has no
+honest firing site at evaluation time: every case it was meant to cover has a more specific code —
+`GBX0601`/`GBX0602` for roles and shards, `GBX0605` for registry sources. It also carries
+`requires_evidence = true`, so firing it would mean citing a runtime limitation it does not name.
+Either it belongs to the resolver (M4) or it should be retired the way `GBX0201`-`GBX0205` were; not
+invented a use for in the meantime.
+
 ---
 
 ## 4. Typed IR (`crates/gearbox-ir/`)

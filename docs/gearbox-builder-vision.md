@@ -772,6 +772,42 @@ product(
 
 This is intentionally much smaller than repeating Gear definitions.
 
+## 18.1 As implemented
+
+The sketch above predates the implemented surface. What `products/payments-demo/product.gdl`
+actually says, and why it differs:
+
+```python
+product(
+    id = "payments-demo", name = "Payments Demo", version = "0.1.0",
+    sources = [source(id = "gears-rust", at = path("../../../gears-rust"))],
+    profiles = [                                   # every profile, as DATA
+        embedded(id = "dev"),
+        host_workers(id = "local", host = "gateway", worker_discovery = "directory"),
+        kubernetes(id = "prod", discovery = "static", namespace = "payments"),
+    ],
+    default_profile = "dev",
+    gears = [use_gear("api-gateway", source = "gears-rust")],
+    bindings = [bind(consumer = "…", contract = "…/PaymentApi@v1",
+                     mode = binding_mode.remote, profiles = ["local", "prod"])],
+    preferences = [prefer.existing_infrastructure()],
+)
+```
+
+- **`deployment = kubernetes()` became `profiles = [...]` plus `default_profile`.** One product needs
+  to describe dev, on-premise and Kubernetes at once; a single `deployment` field would force one
+  file per topology, and then the three would drift. Profile-scoping is a `profiles = [...]` list
+  field on `bind`, `cluster_profile` and `process` — **not** an `if`, because GDL has none and a
+  description that could branch on the resolve target would be a program whose output depends on how
+  it was invoked.
+- **`use(...)` became `use_gear(...)`,** because `use` is a Starlark-adjacent word that reads as an
+  import.
+- **Sources are declared once with an id and referenced by it,** rather than inlined per gear. Four
+  gears from one checkout would otherwise repeat the path four times, and a lock has to record each
+  source once anyway.
+- **`prefer_existing_infrastructure()` became `prefer.existing_infrastructure()`,** a namespace, so
+  the preference set is discoverable by completion rather than by memory.
+
 ---
 
 # 19. Source Resolution: Path, Git, Registry
@@ -780,13 +816,22 @@ A product must be able to obtain Gears from different locations.
 
 This should be independent of GDL semantics.
 
-Supported source model:
+Source model:
 
 ```text
-path
-git
-registry
+path        implemented
+git         implemented (tag, rev or branch; a branch must pin something)
+registry    NOT implemented - refused with GBX0605
 ```
+
+**`registry` is refused, not merely absent.** No registry client exists in `gears-rust`: a gear is a
+Cargo path or git dependency, and there is nothing to fetch a published gear from. `registry(...)` is
+still spelled in the GDL vocabulary purely so the diagnostic can name it and point at `path()` or
+`git()`, rather than reporting an unknown function — which would read as a typo.
+
+A `git` source pinned to a **branch** is accepted and recorded as not immutable
+(`SourceDecl::is_immutable()`), because a lock built from a branch is repeatable but not
+reproducible. A `git` source that pins nothing at all is refused.
 
 Example:
 
