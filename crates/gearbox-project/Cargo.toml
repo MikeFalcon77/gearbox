@@ -1,0 +1,19 @@
+[package]
+name = "gearbox-project"
+description = "Projects gear facts out of Rust attributes, which own them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gearbox-ir.workspace = true
+heck.workspace = true
+proc-macro2.workspace = true
+syn.workspace = true
+thiserror.workspace = true
+walkdir.workspace = true

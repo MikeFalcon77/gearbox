@@ -1,0 +1,281 @@
+//! The merge, against the real `gears-rust` tree.
+//!
+//! These assert the half of each fact that comes from Rust, on facts that
+//! appear in **no** `gear.gdl`. That is the whole point of ADR
+//! `cpt-gearbox-adr-macro-projected-catalogue`: if these pass while the
+//! descriptions stay silent about capabilities and dependencies, each fact is
+//! authored exactly once.
+//!
+//! Skipped when the sibling checkout is absent, so the suite still runs
+//! standalone.
+
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
+)]
+
+use std::path::{Path, PathBuf};
+
+use gearbox_engine::{SourceRoot, load_catalogue};
+use gearbox_ir::{Catalogue, GearId, RuntimeCap, SourceId};
+
+fn gears_rust() -> Option<PathBuf> {
+    let candidate = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .map(|p| p.join("../gears-rust"))?;
+    candidate
+        .canonicalize()
+        .ok()
+        .filter(|p| p.join("gears").is_dir())
+}
+
+fn catalogue() -> Option<Catalogue> {
+    let root = gears_rust()?;
+    let source = SourceRoot::open(SourceId::new("gears-rust").unwrap(), root).ok()?;
+    Some(load_catalogue(&[source]).catalogue)
+}
+
+macro_rules! require_tree {
+    () => {
+        match catalogue() {
+            Some(c) => c,
+            None => {
+                eprintln!("skipping: ../gears-rust not present");
+                return;
+            }
+        }
+    };
+}
+
+fn gid(s: &str) -> GearId {
+    GearId::new(s).unwrap()
+}
+
+#[test]
+fn the_slice_loads_without_diagnostics() {
+    let catalogue = require_tree!();
+    let problems: Vec<String> = catalogue
+        .diagnostics
+        .iter()
+        .map(|d| format!("[{}] {}", d.code, d.message))
+        .collect();
+    assert!(
+        problems.is_empty(),
+        "unexpected diagnostics:\n{}",
+        problems.join("\n")
+    );
+    assert_eq!(catalogue.gears.len(), 8, "the eight slice gears");
+}
+
+#[test]
+fn identity_is_projected_from_the_gear_attribute() {
+    // No gear.gdl contains an `id`; every one of these came from
+    // #[toolkit::gear(name = "...")].
+    let catalogue = require_tree!();
+    for expected in [
+        "api-gateway",
+        "grpc-hub",
+        "gear-orchestrator",
+        "authn-resolver",
+        "types-registry",
+        "cluster",
+        "api-contracts",
+        "api-contracts-consumer",
+    ] {
+        assert!(
+            catalogue.gears.contains_key(&gid(expected)),
+            "`{expected}` should have been projected from its gear attribute"
+        );
+    }
+}
+
+#[test]
+fn capabilities_and_dependencies_are_projected() {
+    let catalogue = require_tree!();
+    let gateway = catalogue.gear(&gid("api-gateway")).expect("api-gateway");
+
+    // From `capabilities = [rest_host, rest, stateful]`, in the IR's canonical
+    // order rather than declaration order.
+    assert_eq!(
+        gateway.runtime_caps.iter().copied().collect::<Vec<_>>(),
+        [RuntimeCap::Rest, RuntimeCap::RestHost, RuntimeCap::Stateful]
+    );
+
+    // From `deps = [grpc_hub, authn_resolver]`, snake to kebab as the macro does.
+    assert_eq!(
+        gateway
+            .colocated_deps
+            .iter()
+            .map(GearId::as_str)
+            .collect::<Vec<_>>(),
+        ["authn-resolver", "grpc-hub"]
+    );
+
+    // And the closure the whole resolver rests on is therefore real.
+    let closure = catalogue.colocation_closure(&gid("api-gateway"));
+    assert!(
+        closure.contains(&gid("types-registry")),
+        "transitively, via authn-resolver"
+    );
+}
+
+#[test]
+fn lifecycle_is_projected_including_its_absences() {
+    let catalogue = require_tree!();
+
+    let gateway = catalogue.gear(&gid("api-gateway")).unwrap();
+    let lc = gateway
+        .lifecycle
+        .as_ref()
+        .expect("api-gateway has a lifecycle");
+    assert_eq!(lc.entry.as_deref(), Some("serve"));
+    assert_eq!(lc.stop_timeout.as_deref(), Some("30s"));
+    assert!(lc.await_ready, "the bare `await_ready` flag form");
+
+    // grpc-hub declares lifecycle(entry, await_ready) with NO stop_timeout.
+    // Projecting a default here would invent a fact.
+    let hub = catalogue.gear(&gid("grpc-hub")).unwrap();
+    let lc = hub.lifecycle.as_ref().expect("grpc-hub has a lifecycle");
+    assert_eq!(lc.stop_timeout, None, "absent, not defaulted");
+    assert!(lc.await_ready);
+
+    // types-registry declares no lifecycle at all.
+    assert!(
+        catalogue
+            .gear(&gid("types-registry"))
+            .unwrap()
+            .lifecycle
+            .is_none()
+    );
+}
+
+#[test]
+fn the_client_trait_is_projected() {
+    let catalogue = require_tree!();
+    assert_eq!(
+        catalogue
+            .gear(&gid("gear-orchestrator"))
+            .unwrap()
+            .client_trait
+            .as_deref(),
+        Some("cf_system_sdks::directory::DirectoryClient")
+    );
+    assert!(
+        catalogue
+            .gear(&gid("api-gateway"))
+            .unwrap()
+            .client_trait
+            .is_none()
+    );
+}
+
+#[test]
+fn contract_identity_is_projected_from_the_contract_attribute() {
+    // No gear.gdl states a version or a kind; both majors came from
+    // #[toolkit::contract(gear, version)] plus the trait-name suffix.
+    let catalogue = require_tree!();
+    let ids: Vec<&str> = catalogue
+        .contracts
+        .keys()
+        .map(gearbox_ir::ContractId::as_str)
+        .collect();
+    assert_eq!(
+        ids,
+        ["api-contracts/PaymentApi@v1", "api-contracts/PaymentApi@v2"]
+    );
+
+    let v2 = catalogue
+        .contracts
+        .values()
+        .find(|c| c.version.major == 2)
+        .expect("v2");
+    assert_eq!(v2.base_name, "PaymentApi", "the trailing major is stripped");
+    assert_eq!(
+        v2.rust_path, "api_contracts_sdk::PaymentApiV2",
+        "but the path keeps it"
+    );
+    assert_eq!(v2.owner.as_str(), "api-contracts");
+    assert!(v2.remote_capable(), "Api kind, from the suffix");
+    // The REST projection is declared, so it survives the merge.
+    assert_eq!(v2.rest.as_ref().unwrap().base_path, "/api-contracts/v2");
+    assert!(v2.rest.as_ref().unwrap().require_full_coverage);
+}
+
+#[test]
+fn declared_facts_survive_the_merge() {
+    let catalogue = require_tree!();
+    let gateway = catalogue.gear(&gid("api-gateway")).unwrap();
+
+    assert_eq!(gateway.display_name, "API Gateway");
+    assert_eq!(gateway.category.as_deref(), Some("platform"));
+    // The endpoint's real config key -- a runtime-configuration fact with no
+    // Rust attribute to own it.
+    assert_eq!(gateway.serves[0].config_key.as_deref(), Some("bind_addr"));
+    assert_eq!(gateway.serves[0].default_port, Some(8087));
+
+    // The lib idents that cannot be derived, because those crates have no [lib].
+    assert_eq!(
+        catalogue
+            .gear(&gid("api-contracts"))
+            .unwrap()
+            .package
+            .lib_ident,
+        "cf_api_contracts"
+    );
+}
+
+#[test]
+fn a_multi_gear_crate_needs_an_attr_and_says_so() {
+    // mini-chat declares three gears in one crate. Without `attr` the locator
+    // must refuse and list the candidates -- guessing would silently project
+    // the wrong gear's facts.
+    let Some(root) = gears_rust() else {
+        eprintln!("skipping: ../gears-rust not present");
+        return;
+    };
+    let crate_dir = root.join("gears/mini-chat/mini-chat");
+    let files = gearbox_project::scan_crate(&crate_dir).expect("scan mini-chat");
+
+    let err = gearbox_project::locate_gear_attribute(&files, "mini-chat", None)
+        .expect_err("three gears must be ambiguous");
+    let message = err.to_string();
+    assert!(message.contains("declares 3 gears"), "{message}");
+    assert!(
+        message.contains("src/gear.rs"),
+        "candidates listed: {message}"
+    );
+    assert!(message.contains("attr ="), "the remedy is named: {message}");
+
+    // Narrowed, it resolves to exactly one.
+    let site = gearbox_project::locate_gear_attribute(&files, "mini-chat", Some("src/gear.rs"))
+        .expect("narrowing resolves it");
+    let projected = gearbox_project::project_gear(&site).expect("parse");
+    assert_eq!(projected.name, "mini-chat");
+    assert_eq!(projected.struct_ident, "MiniChatGear");
+}
+
+#[test]
+fn an_attr_that_escapes_the_crate_is_refused() {
+    let Some(root) = gears_rust() else { return };
+    let files = gearbox_project::scan_crate(&root.join("gears/system/api-gateway")).unwrap();
+    let err = gearbox_project::locate_gear_attribute(
+        &files,
+        "api-gateway",
+        Some("../../../etc/passwd.rs"),
+    )
+    .expect_err("an escaping attr must be refused");
+    assert!(err.to_string().contains("escapes the crate root"), "{err}");
+}
+
+#[test]
+fn the_catalogue_is_deterministic() {
+    let a = require_tree!();
+    let b = catalogue().expect("second load");
+    assert_eq!(
+        serde_json::to_string(&a).unwrap(),
+        serde_json::to_string(&b).unwrap(),
+        "two loads of the same tree must be byte-identical"
+    );
+}

@@ -1,0 +1,22 @@
+[package]
+name = "gearbox-cli"
+description = "The `gearbox` command-line interface."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "gearbox"
+path = "src/main.rs"
+
+[dependencies]
+gearbox-engine.workspace = true
+gearbox-ir.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
