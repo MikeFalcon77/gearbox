@@ -91,67 +91,15 @@ impl GdlEngine {
                   taking &self now keeps adding them non-breaking"
     )]
     pub fn eval_gear(&self, identity: &FileIdentity, source: &str) -> EvalOutcome<GearDecl> {
-        let forbidden = scan_forbidden_tokens(&identity.uri, source);
-        if !forbidden.is_empty() {
-            let mut diagnostics: Diagnostics = forbidden.into_iter().collect();
-            diagnostics.finish();
-            return EvalOutcome::failed(diagnostics);
-        }
-
-        let ast = match AstModule::parse(&identity.uri, source.to_owned(), &dialect()) {
-            Ok(ast) => ast,
-            Err(e) => {
-                return EvalOutcome::failed(
-                    [starlark_error(&identity.uri, &e, DiagnosticCode::GdlParse)]
-                        .into_iter()
-                        .collect(),
-                );
-            }
-        };
-
-        let globals = gear_globals();
-        let sink = GdlSink::new();
-
-        // Declared before the evaluator: `set_loader` borrows it for the
-        // evaluator's whole lifetime.
-        let loader = identity
-            .load_paths
-            .as_ref()
-            .map(|p| GdlLoader::new(p.base.clone(), p.root.clone(), &globals));
-
-        let eval_err = Module::with_temp_heap(|module| {
-            let mut eval = Evaluator::new(&module);
-            eval.extra = Some(&sink);
-            if let Some(loader) = loader.as_ref() {
-                eval.set_loader(loader);
-            }
-            eval.eval_module(ast, &globals).err()
-        });
-
-        let mut diagnostics = sink.take_diagnostics();
-
-        if let Some(e) = eval_err {
-            diagnostics.push(starlark_error(&identity.uri, &e, classify(&e)));
-            diagnostics.finish();
-            return EvalOutcome::failed(diagnostics);
-        }
-
-        if sink.saw_duplicate() {
-            diagnostics.push(cardinality_error(
-                &identity.uri,
-                "more than one `gear()` declaration",
-                "a gear.gdl describes exactly one gear; split the extra declaration into its own file",
-            ));
-        }
-
-        let Some(decl) = sink.take_gear() else {
-            diagnostics.push(cardinality_error(
-                &identity.uri,
-                "no `gear()` declaration",
-                "add a `gear(package = cargo(...))` call",
-            ));
-            diagnostics.finish();
-            return EvalOutcome::failed(diagnostics);
+        let (decl, mut diagnostics) = match evaluate(
+            identity,
+            source,
+            &gear_globals(),
+            "gear",
+            GdlSink::take_gear,
+        ) {
+            Ok(pair) => pair,
+            Err(diagnostics) => return EvalOutcome::failed(diagnostics),
         };
 
         if decl.package.is_none() {
@@ -174,6 +122,132 @@ impl GdlEngine {
             diagnostics,
         }
     }
+
+    /// Evaluate one `product.gdl` into operator intent.
+    ///
+    /// The conversion is where a product description is checked for internal
+    /// consistency -- ids well-formed, `default_profile` naming a declared
+    /// profile, no two declarations colliding on the same profile -- because
+    /// those are questions the file can answer about itself, with no catalogue
+    /// needed. Whether a named gear or provider *exists* is the resolver's
+    /// question, and deliberately not asked here.
+    #[must_use]
+    #[expect(
+        clippy::unused_self,
+        reason = "symmetry with eval_gear; cached Globals will live on the engine"
+    )]
+    pub fn eval_product(
+        &self,
+        identity: &FileIdentity,
+        source: &str,
+    ) -> EvalOutcome<gearbox_ir::ProductIntent> {
+        let (decl, mut diagnostics) = match evaluate(
+            identity,
+            source,
+            &crate::product::product_globals(),
+            "product",
+            GdlSink::take_product,
+        ) {
+            Ok(pair) => pair,
+            Err(diagnostics) => return EvalOutcome::failed(diagnostics),
+        };
+
+        let intent = crate::product_intent::build(identity, &decl, &mut diagnostics);
+        diagnostics.finish();
+        match intent {
+            Some(intent) if !diagnostics.has_errors() => EvalOutcome {
+                value: Some(intent),
+                diagnostics,
+            },
+            _ => EvalOutcome::failed(diagnostics),
+        }
+    }
+}
+
+/// The shared pipeline: token scan, parse, evaluate, drain the sink.
+///
+/// The order is deliberate. Scanning first means a file full of conditionals
+/// reports every one of them (GBX0103) instead of stopping at whatever the
+/// parser happens to dislike first.
+///
+/// `decl_name` is the top-level call this file is expected to make, so the
+/// cardinality diagnostic can name it. `gear()` and `product()` are registered
+/// in different global sets, so a file that calls the wrong one fails at the
+/// call rather than producing half of each.
+fn evaluate<T>(
+    identity: &FileIdentity,
+    source: &str,
+    globals: &starlark::environment::Globals,
+    decl_name: &str,
+    take: impl FnOnce(&GdlSink) -> Option<T>,
+) -> Result<(T, Diagnostics), Diagnostics> {
+    let forbidden = scan_forbidden_tokens(&identity.uri, source);
+    if !forbidden.is_empty() {
+        let mut diagnostics: Diagnostics = forbidden.into_iter().collect();
+        diagnostics.finish();
+        return Err(diagnostics);
+    }
+
+    let ast = match AstModule::parse(&identity.uri, source.to_owned(), &dialect()) {
+        Ok(ast) => ast,
+        Err(e) => {
+            let mut diagnostics: Diagnostics =
+                [starlark_error(&identity.uri, &e, DiagnosticCode::GdlParse)]
+                    .into_iter()
+                    .collect();
+            diagnostics.finish();
+            return Err(diagnostics);
+        }
+    };
+
+    let sink = GdlSink::new();
+
+    // Declared before the evaluator: `set_loader` borrows it for the
+    // evaluator's whole lifetime.
+    let loader = identity
+        .load_paths
+        .as_ref()
+        .map(|p| GdlLoader::new(p.base.clone(), p.root.clone(), globals));
+
+    let eval_err = Module::with_temp_heap(|module| {
+        let mut eval = Evaluator::new(&module);
+        eval.extra = Some(&sink);
+        if let Some(loader) = loader.as_ref() {
+            eval.set_loader(loader);
+        }
+        eval.eval_module(ast, globals).err()
+    });
+
+    let mut diagnostics = sink.take_diagnostics();
+
+    if let Some(e) = eval_err {
+        diagnostics.push(starlark_error(&identity.uri, &e, classify(&e)));
+        diagnostics.finish();
+        return Err(diagnostics);
+    }
+
+    if sink.saw_duplicate() {
+        diagnostics.push(cardinality_error(
+            &identity.uri,
+            &format!("more than one `{decl_name}()` declaration"),
+            &format!(
+                "a {decl_name}.gdl describes exactly one {decl_name}; split the extra \
+                 declaration into its own file"
+            ),
+        ));
+    }
+
+    let Some(value) = take(&sink) else {
+        diagnostics.push(cardinality_error(
+            &identity.uri,
+            &format!("no `{decl_name}()` declaration"),
+            &format!("add a `{decl_name}(...)` call"),
+        ));
+        diagnostics.finish();
+        return Err(diagnostics);
+    };
+
+    Ok((value, diagnostics))
 }
 
 /// Which diagnostic code a starlark failure deserves.

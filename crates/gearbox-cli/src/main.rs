@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use gearbox_engine::{SourceRoot, load_catalogue};
+use gearbox_engine::{SourceRoot, load_catalogue, load_product};
 use gearbox_ir::{Diagnostic, Severity, SourceId};
 
 #[derive(Parser)]
@@ -39,6 +39,20 @@ enum Command {
         /// The id to record for the source. Defaults to the root's directory name.
         #[arg(long, value_name = "ID")]
         source_id: Option<String>,
+
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+
+    /// Evaluate a `product.gdl` and print the operator intent it declares.
+    ///
+    /// Evaluation only: no catalogue is read, so this reports what the file says
+    /// and whether it is internally consistent, not whether the gears it names
+    /// exist. That is `gearbox resolve`'s question.
+    Product {
+        /// Path to the product description.
+        #[arg(long, value_name = "FILE")]
+        file: PathBuf,
 
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
@@ -71,6 +85,107 @@ fn run() -> anyhow::Result<ExitCode> {
             source_id,
             format,
         } => catalogue(&root, source_id.as_deref(), format),
+        Command::Product { file, format } => product(&file, format),
+    }
+}
+
+fn product(file: &std::path::Path, format: Format) -> anyhow::Result<ExitCode> {
+    let scan = load_product(file, None);
+
+    if let Some(intent) = &scan.intent {
+        match format {
+            Format::Json => println!("{}", serde_json::to_string_pretty(intent)?),
+            Format::Text => print_intent(intent),
+        }
+    }
+
+    report(scan.diagnostics.as_slice());
+
+    Ok(if scan.diagnostics.has_errors() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+fn print_intent(intent: &gearbox_ir::ProductIntent) {
+    println!(
+        "{} {} ({}), default profile `{}`",
+        intent.id, intent.version, intent.display_name, intent.default_profile
+    );
+
+    println!("\n  sources");
+    for (id, source) in &intent.sources {
+        let pinned = if source.is_immutable() {
+            ""
+        } else {
+            "  [not immutable: repeatable, not reproducible]"
+        };
+        println!("    {id}: {}{pinned}", describe_source(source));
+    }
+
+    println!("\n  profiles");
+    for (id, profile) in &intent.profiles {
+        let default = if *id == intent.default_profile {
+            " (default)"
+        } else {
+            ""
+        };
+        println!("    {id}: {}{default}", profile.kind());
+    }
+
+    println!("\n  gears");
+    for selection in &intent.selected_gears {
+        println!("    {} from {}", selection.gear, selection.source);
+    }
+
+    // Profile-scoped declarations are printed per profile, because that is the
+    // only way to see what a given `--profile` will actually resolve.
+    for id in intent.profiles.keys() {
+        let bindings = intent.bindings_for(id);
+        let scopes = intent.cluster_scopes_for(id);
+        let pins = intent.process_pins_for(id);
+        if bindings.is_empty() && scopes.is_empty() && pins.is_empty() {
+            continue;
+        }
+        println!("\n  profile `{id}`");
+        for binding in bindings {
+            let transport = binding
+                .transport
+                .map(|t| format!(" over {t}"))
+                .unwrap_or_default();
+            println!(
+                "    bind {} -> {} as {}{transport}",
+                binding.consumer,
+                binding.contract,
+                describe_mode(binding.mode)
+            );
+        }
+        for scope in scopes {
+            println!(
+                "    cluster `{}` cache = {}{}",
+                scope.scope,
+                scope.cache.provider,
+                if scope.cache.options.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({} option(s))", scope.cache.options.len())
+                }
+            );
+        }
+        for pin in pins {
+            println!(
+                "    process `{}` anchored on {} x{}",
+                pin.name, pin.anchor, pin.replicas
+            );
+        }
+    }
+
+    if !intent.preferences.is_empty() {
+        println!("\n  preferences");
+        for preference in &intent.preferences {
+            println!("    {}", describe_preference(preference));
+        }
     }
 }
 
@@ -215,5 +330,45 @@ const fn label(severity: Severity) -> &'static str {
         Severity::Warning => "warning",
         Severity::Info => "info",
         Severity::Hint => "hint",
+    }
+}
+
+/// Describe a source for a human.
+///
+/// Spelled out here rather than as a `Display` impl on the IR type: this is one
+/// presentation, and the IR should not own a phrasing only the CLI uses.
+fn describe_source(source: &gearbox_ir::SourceDecl) -> String {
+    match source {
+        gearbox_ir::SourceDecl::Path { at } => format!("path {at}"),
+        gearbox_ir::SourceDecl::Git {
+            url,
+            tag,
+            rev,
+            branch,
+        } => {
+            let pin = tag
+                .as_ref()
+                .map(|t| format!("tag {t}"))
+                .or_else(|| rev.as_ref().map(|r| format!("rev {r}")))
+                .or_else(|| branch.as_ref().map(|b| format!("branch {b}")))
+                .unwrap_or_else(|| "unpinned".to_owned());
+            format!("git {url} @ {pin}")
+        }
+    }
+}
+
+fn describe_mode(mode: gearbox_ir::BindingMode) -> &'static str {
+    match mode {
+        gearbox_ir::BindingMode::Auto => "auto",
+        gearbox_ir::BindingMode::Local => "local",
+        gearbox_ir::BindingMode::Remote => "remote",
+    }
+}
+
+fn describe_preference(preference: &gearbox_ir::Preference) -> String {
+    match preference {
+        gearbox_ir::Preference::ExistingInfrastructure => "existing-infrastructure".to_owned(),
+        gearbox_ir::Preference::FewerProcesses => "fewer-processes".to_owned(),
+        gearbox_ir::Preference::Isolate { gear } => format!("isolate {gear}"),
     }
 }

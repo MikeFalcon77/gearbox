@@ -32,6 +32,7 @@ dependencies = [
  "ctor",
  "hashbrown 0.16.1",
  "num-bigint",
+ "serde_json",
 ]
 
 [[package]]
@@ -727,6 +728,7 @@ dependencies = [
  "anyhow",
  "gearbox-ir",
  "serde",
+ "serde_json",
  "starlark",
  "starlark_syntax",
  "thiserror",

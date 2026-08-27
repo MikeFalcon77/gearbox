@@ -13,9 +13,11 @@
 pub mod catalogue;
 pub mod cluster;
 pub mod merge;
+pub mod product;
 pub mod source;
 
 pub use catalogue::{CatalogueScan, load_catalogue};
 pub use cluster::ClusterProjection;
 pub use merge::{MergedGear, merge};
+pub use product::{ProductScan, load_product};
 pub use source::{SourceRoot, SourceRootError};

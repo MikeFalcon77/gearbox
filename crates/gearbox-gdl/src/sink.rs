@@ -20,7 +20,7 @@
 
 use std::cell::RefCell;
 
-use gearbox_ir::{Diagnostic, Diagnostics, ProductIntent};
+use gearbox_ir::{Diagnostic, Diagnostics};
 use starlark::any::ProvidesStaticType;
 
 use crate::records::{ConsumeRecord, ProvideRecord, RoleRecord};
@@ -52,11 +52,32 @@ pub struct GearDecl {
     pub config_schema: Option<String>,
 }
 
+/// The raw result of one `product(...)` call.
+///
+/// Mirrors [`GearDecl`]: host functions cannot build a `ProductIntent` because
+/// it carries the description's own path, which only the caller knows. So
+/// `product()` records what the file said and [`crate::engine`] converts,
+/// validating ids and profile references on the way.
+#[derive(Debug, Clone, Default)]
+pub struct ProductDecl {
+    pub id: String,
+    pub display_name: String,
+    pub version: String,
+    pub default_profile: String,
+    pub sources: Vec<crate::records::SourceRecord>,
+    pub profiles: Vec<crate::records::ProfileRecord>,
+    pub gears: Vec<crate::records::UseGearRecord>,
+    pub bindings: Vec<crate::records::BindRecord>,
+    pub cluster_profiles: Vec<crate::records::ClusterProfileRecord>,
+    pub processes: Vec<crate::records::ProcessRecord>,
+    pub preferences: Vec<crate::records::PreferenceRecord>,
+}
+
 /// Collects one file's declaration and any diagnostics raised while evaluating it.
 #[derive(Debug, Default, ProvidesStaticType)]
 pub struct GdlSink {
     gear: RefCell<Option<GearDecl>>,
-    product: RefCell<Option<ProductIntent>>,
+    product: RefCell<Option<ProductDecl>>,
     diagnostics: RefCell<Diagnostics>,
     /// Set when a second `gear()`/`product()` call is seen, so the engine can
     /// report GBX0105 without the host function needing to fail the evaluation.
@@ -84,7 +105,7 @@ impl GdlSink {
     }
 
     /// Record the file's `product(...)` declaration. Same write-once rule.
-    pub fn set_product(&self, intent: ProductIntent) {
+    pub fn set_product(&self, intent: ProductDecl) {
         let mut slot = self.product.borrow_mut();
         if slot.is_some() {
             *self.duplicate.borrow_mut() = true;
@@ -110,7 +131,7 @@ impl GdlSink {
 
     /// Take the recorded product intent, leaving the sink empty.
     #[must_use]
-    pub fn take_product(&self) -> Option<ProductIntent> {
+    pub fn take_product(&self) -> Option<ProductDecl> {
         self.product.borrow_mut().take()
     }
 

@@ -21,11 +21,14 @@ pub mod declarative;
 pub mod engine;
 pub mod globals;
 pub mod loader;
+pub mod product;
+pub mod product_intent;
 pub mod records;
 pub mod sink;
 pub mod values;
 pub mod vocabulary;
 
 pub use engine::{EvalOutcome, FileIdentity, GdlEngine};
-pub use sink::GearDecl;
+pub use product::product_globals;
+pub use sink::{GearDecl, ProductDecl};
 pub use values::{GdlEnum, GdlNamespace};

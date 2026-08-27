@@ -65,7 +65,12 @@ gearbox-cli = { path = "crates/gearbox-cli" }
 # GDL host. Exact pins: starlark is pre-1.0 and 0.14 broke hard from 0.13.
 starlark = "=0.14.2"
 starlark_syntax = "=0.14.2"
-allocative = "0.3.6"
+# The `serde_json` feature supplies `Allocative for serde_json::Value`, which the
+# GDL record derive needs: a cluster provider's options are free-form JSON,
+# because each plugin defines its own option schema and the SDK deliberately
+# keeps that schema out of the framework. serde_json is already in the tree, so
+# this adds a feature rather than a dependency.
+allocative = { version = "0.3.6", features = ["serde_json"] }
 
 # Data
 serde = { version = "1", features = ["derive"] }

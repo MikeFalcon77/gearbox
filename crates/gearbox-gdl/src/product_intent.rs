@@ -1,0 +1,601 @@
+//! Converting a `product(...)` declaration into typed operator intent.
+//!
+//! Everything checked here is a question the file can answer about *itself*:
+//! are the ids well-formed, does `default_profile` name a declared profile, do
+//! two declarations collide on the same profile. None of it needs a catalogue.
+//!
+//! What is deliberately **not** checked: whether a named gear, contract or
+//! provider exists. Those are the resolver's questions, and answering them here
+//! would mean a product description could not be edited in an editor until
+//! every source it names had been scanned -- which is exactly the latency the
+//! RPC surface is meant to avoid.
+//!
+//! Errors accumulate rather than stopping at the first. An operator fixing a
+//! product file wants the whole list, and a single missing profile id should not
+//! hide five malformed gear names.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use gearbox_ir::{
+    BindingIntent, BindingMode, ClusterScopeIntent, ContractId, DeploymentProfileDecl, Diagnostic,
+    DiagnosticCode, Diagnostics, Discovery, GearId, GearSelection, Location, Preference, ProcessId,
+    ProcessPin, ProductIntent, ProfileId, ProviderBinding, SourceDecl, SourceId, Transport,
+};
+
+use crate::engine::FileIdentity;
+use crate::records::{ClusterProfileRecord, ProfileRecord, ProviderBindingRecord};
+use crate::sink::ProductDecl;
+
+/// The declared profiles, which everything else is scoped against.
+type Profiles = BTreeMap<ProfileId, DeploymentProfileDecl>;
+
+/// A `(subject, key, profile)` claim, used to detect two declarations covering
+/// the same thing in the same profile.
+type ScopeKey = (String, String, Option<ProfileId>);
+
+fn invalid(uri: &str, message: impl Into<String>, help: impl Into<String>) -> Diagnostic {
+    Diagnostic::error(DiagnosticCode::GdlEval, message, help).at(Location::file(uri.to_owned()))
+}
+
+fn collision(uri: &str, message: impl Into<String>, help: impl Into<String>) -> Diagnostic {
+    Diagnostic::error(DiagnosticCode::GdlDuplicateProfileScoped, message, help)
+        .at(Location::file(uri.to_owned()))
+}
+
+/// Build typed intent, reporting everything wrong with the declaration.
+///
+/// Returns `None` only when the product has no usable identity -- no profiles,
+/// or a `default_profile` naming none of them. Anything else is reported and the
+/// entry skipped, so one bad binding does not hide the rest of the file.
+pub fn build(
+    identity: &FileIdentity,
+    decl: &ProductDecl,
+    diagnostics: &mut Diagnostics,
+) -> Option<ProductIntent> {
+    let uri = identity.uri.as_str();
+
+    // Profiles first: everything else is scoped to them, so a `profiles = [...]`
+    // naming an undeclared id can only be caught once these are known.
+    let profiles = build_profiles(uri, decl, diagnostics);
+    if profiles.is_empty() {
+        diagnostics.push(invalid(
+            uri,
+            "product declares no deployment profile",
+            "add at least one, e.g. `profiles = [embedded(id = \"dev\")]`",
+        ));
+        return None;
+    }
+
+    let default_profile = profile_id(uri, &decl.default_profile, diagnostics)?;
+    if !profiles.contains_key(&default_profile) {
+        diagnostics.push(invalid(
+            uri,
+            format!(
+                "`default_profile = \"{default_profile}\"` names no declared profile; \
+                 declared: {}",
+                joined(profiles.keys().map(ProfileId::as_str)),
+            ),
+            "point `default_profile` at one of the declared profile ids",
+        ));
+        return None;
+    }
+
+    let sources = build_sources(uri, decl, diagnostics);
+
+    Some(ProductIntent {
+        id: decl.id.clone(),
+        display_name: decl.display_name.clone(),
+        version: decl.version.clone(),
+        gdl_path: identity.gdl_path.clone(),
+        selected_gears: build_gears(uri, decl, &sources, diagnostics),
+        bindings: build_bindings(uri, decl, &profiles, diagnostics),
+        cluster_scopes: build_cluster_scopes(uri, decl, &profiles, diagnostics),
+        process_pins: build_process_pins(uri, decl, &profiles, diagnostics),
+        preferences: build_preferences(uri, decl, diagnostics),
+        sources,
+        profiles,
+        default_profile,
+    })
+}
+
+fn build_profiles(uri: &str, decl: &ProductDecl, diagnostics: &mut Diagnostics) -> Profiles {
+    let mut profiles = Profiles::new();
+    for record in &decl.profiles {
+        let Some(id) = profile_id(uri, &record.id, diagnostics) else {
+            continue;
+        };
+        let Some(profile) = deployment_profile(uri, record, &id, diagnostics) else {
+            continue;
+        };
+        if profiles.insert(id.clone(), profile).is_some() {
+            diagnostics.push(collision(
+                uri,
+                format!("deployment profile `{id}` is declared twice"),
+                "give each profile a distinct id; the id is what `--profile` selects",
+            ));
+        }
+    }
+    profiles
+}
+
+fn build_sources(
+    uri: &str,
+    decl: &ProductDecl,
+    diagnostics: &mut Diagnostics,
+) -> BTreeMap<SourceId, SourceDecl> {
+    let mut sources = BTreeMap::new();
+    for record in &decl.sources {
+        let id = match SourceId::new(record.id.clone()) {
+            Ok(id) => id,
+            Err(e) => {
+                diagnostics.push(invalid(
+                    uri,
+                    format!("source id `{}` is not valid: {e}", record.id),
+                    "source ids are kebab-case",
+                ));
+                continue;
+            }
+        };
+        let at = match record.at.kind.as_str() {
+            "path" => SourceDecl::Path {
+                at: record.at.at.clone().unwrap_or_default(),
+            },
+            "git" => SourceDecl::Git {
+                url: record.at.url.clone().unwrap_or_default(),
+                tag: record.at.tag.clone(),
+                rev: record.at.rev.clone(),
+                branch: record.at.branch.clone(),
+            },
+            // `registry(...)` is spelled in the vocabulary purely so this
+            // diagnostic can name it instead of reporting an unknown function,
+            // which would read as a typo.
+            _ => {
+                diagnostics.push(
+                    Diagnostic::error(
+                        DiagnosticCode::GapRegistrySource,
+                        format!("source `{id}` uses a registry, which is not supported"),
+                        "use `path(at = \"...\")` or `git(url = \"...\", tag = \"...\")`",
+                    )
+                    .at(Location::file(uri.to_owned()))
+                    .with_evidence(
+                        "no registry client exists in gears-rust; a gear is a Cargo path or git \
+                         dependency",
+                    ),
+                );
+                continue;
+            }
+        };
+        if sources.insert(id.clone(), at).is_some() {
+            diagnostics.push(invalid(
+                uri,
+                format!("source `{id}` is declared twice"),
+                "give each source a distinct id",
+            ));
+        }
+    }
+    sources
+}
+
+fn build_gears(
+    uri: &str,
+    decl: &ProductDecl,
+    sources: &BTreeMap<SourceId, SourceDecl>,
+    diagnostics: &mut Diagnostics,
+) -> Vec<GearSelection> {
+    let mut selected = Vec::new();
+    let mut seen = BTreeSet::new();
+    for record in &decl.gears {
+        let Some(gear) = gear_id(uri, &record.gear, "use_gear", diagnostics) else {
+            continue;
+        };
+        let source = match SourceId::new(record.source.clone()) {
+            Ok(id) => id,
+            Err(e) => {
+                diagnostics.push(invalid(
+                    uri,
+                    format!(
+                        "use_gear(\"{gear}\", source = \"{}\") is not a valid source id: {e}",
+                        record.source
+                    ),
+                    "source ids are kebab-case",
+                ));
+                continue;
+            }
+        };
+        if !sources.contains_key(&source) {
+            diagnostics.push(invalid(
+                uri,
+                format!("use_gear(\"{gear}\") names source `{source}`, which is not declared"),
+                format!(
+                    "declared sources: {}",
+                    joined(sources.keys().map(SourceId::as_str))
+                ),
+            ));
+            continue;
+        }
+        if !seen.insert(gear.clone()) {
+            diagnostics.push(invalid(
+                uri,
+                format!("gear `{gear}` is selected twice"),
+                "list each gear once; per-profile differences belong on `bind`/`process`",
+            ));
+            continue;
+        }
+        selected.push(GearSelection {
+            gear,
+            source,
+            features: record.features.clone(),
+            config: record.config.iter().cloned().collect(),
+        });
+    }
+    selected
+}
+
+fn build_bindings(
+    uri: &str,
+    decl: &ProductDecl,
+    profiles: &Profiles,
+    diagnostics: &mut Diagnostics,
+) -> Vec<BindingIntent> {
+    let mut bindings = Vec::new();
+    let mut claimed: BTreeSet<ScopeKey> = BTreeSet::new();
+
+    for record in &decl.bindings {
+        let Some(consumer) = gear_id(uri, &record.consumer, "bind", diagnostics) else {
+            continue;
+        };
+        let contract = match ContractId::new(record.contract.clone()) {
+            Ok(id) => id,
+            Err(e) => {
+                diagnostics.push(invalid(
+                    uri,
+                    format!(
+                        "bind names contract `{}`, which is not valid: {e}",
+                        record.contract
+                    ),
+                    "contract ids look like `gear-name/TraitName@v1`",
+                ));
+                continue;
+            }
+        };
+        let scoped = scoped_profiles(
+            uri,
+            &record.profiles,
+            &format!("bind(consumer = \"{consumer}\", contract = \"{contract}\")"),
+            profiles,
+            diagnostics,
+        );
+
+        if !claim(&mut claimed, consumer.as_str(), contract.as_str(), &scoped) {
+            diagnostics.push(collision(
+                uri,
+                format!(
+                    "two `bind` declarations cover consumer `{consumer}` and contract \
+                     `{contract}` in the same profile"
+                ),
+                "a single edge cannot be bound two ways at once; narrow one entry's \
+                 `profiles = [...]`",
+            ));
+            continue;
+        }
+
+        bindings.push(BindingIntent {
+            consumer,
+            contract,
+            mode: binding_mode(&record.mode),
+            transport: record.transport.as_deref().and_then(transport),
+            endpoint: record.endpoint.clone(),
+            profiles: scoped,
+        });
+    }
+    bindings
+}
+
+fn build_cluster_scopes(
+    uri: &str,
+    decl: &ProductDecl,
+    profiles: &Profiles,
+    diagnostics: &mut Diagnostics,
+) -> Vec<ClusterScopeIntent> {
+    let mut out = Vec::new();
+    let mut claimed: BTreeSet<ScopeKey> = BTreeSet::new();
+
+    for record in &decl.cluster_profiles {
+        let scoped = scoped_profiles(
+            uri,
+            &record.profiles,
+            &format!("cluster_profile(name = \"{}\")", record.scope),
+            profiles,
+            diagnostics,
+        );
+        if !claim(&mut claimed, "cluster", &record.scope, &scoped) {
+            diagnostics.push(collision(
+                uri,
+                format!(
+                    "cluster scope `{}` is bound twice in the same profile",
+                    record.scope
+                ),
+                "one scope resolves to one backend per profile; narrow one entry's \
+                 `profiles = [...]`",
+            ));
+            continue;
+        }
+        out.push(cluster_scope(record, scoped));
+    }
+    out
+}
+
+fn build_process_pins(
+    uri: &str,
+    decl: &ProductDecl,
+    profiles: &Profiles,
+    diagnostics: &mut Diagnostics,
+) -> Vec<ProcessPin> {
+    let mut pins = Vec::new();
+    for record in &decl.processes {
+        let name = match ProcessId::new(record.name.clone()) {
+            Ok(id) => id,
+            Err(e) => {
+                diagnostics.push(invalid(
+                    uri,
+                    format!("process name `{}` is not valid: {e}", record.name),
+                    "process names are kebab-case",
+                ));
+                continue;
+            }
+        };
+        let Some(anchor) = gear_id(uri, &record.anchor, "process", diagnostics) else {
+            continue;
+        };
+        let scoped = scoped_profiles(
+            uri,
+            &record.profiles,
+            &format!("process(\"{name}\")"),
+            profiles,
+            diagnostics,
+        );
+        pins.push(ProcessPin {
+            name,
+            anchor,
+            replicas: record.replicas,
+            profiles: scoped,
+        });
+    }
+    pins
+}
+
+fn build_preferences(
+    uri: &str,
+    decl: &ProductDecl,
+    diagnostics: &mut Diagnostics,
+) -> Vec<Preference> {
+    let mut preferences = Vec::new();
+    for record in &decl.preferences {
+        let preference = match record.kind.as_str() {
+            "existing-infrastructure" => Preference::ExistingInfrastructure,
+            "fewer-processes" => Preference::FewerProcesses,
+            "isolate" => {
+                let raw = record.gear.clone().unwrap_or_default();
+                match gear_id(uri, &raw, "prefer.isolate", diagnostics) {
+                    Some(gear) => Preference::Isolate { gear },
+                    None => continue,
+                }
+            }
+            other => {
+                diagnostics.push(invalid(
+                    uri,
+                    format!("unknown preference `{other}`"),
+                    "use `prefer.existing_infrastructure()`, `prefer.fewer_processes()` or \
+                     `prefer.isolate(gear = \"...\")`",
+                ));
+                continue;
+            }
+        };
+        // A repeated preference is a no-op, not an error: it orders candidates,
+        // and ordering twice by the same key changes nothing.
+        if !preferences.contains(&preference) {
+            preferences.push(preference);
+        }
+    }
+    preferences
+}
+
+/// Resolve a `profiles = [...]` list against the declared profiles.
+///
+/// An empty list means "every profile", which is why the caller distinguishes it
+/// from an explicit list rather than treating it as none.
+fn scoped_profiles(
+    uri: &str,
+    names: &[String],
+    what: &str,
+    profiles: &Profiles,
+    diagnostics: &mut Diagnostics,
+) -> BTreeSet<ProfileId> {
+    let mut out = BTreeSet::new();
+    for name in names {
+        match ProfileId::new(name.clone()) {
+            Ok(id) if profiles.contains_key(&id) => {
+                out.insert(id);
+            }
+            Ok(id) => diagnostics.push(invalid(
+                uri,
+                format!("{what} is scoped to profile `{id}`, which is not declared"),
+                format!(
+                    "declared profiles: {}",
+                    joined(profiles.keys().map(ProfileId::as_str))
+                ),
+            )),
+            Err(e) => diagnostics.push(invalid(
+                uri,
+                format!("{what} is scoped to `{name}`, which is not a valid profile id: {e}"),
+                "profile ids are kebab-case",
+            )),
+        }
+    }
+    out
+}
+
+/// Claim `(subject, key)` for each profile in `scoped`, or report a collision.
+///
+/// An unscoped declaration applies to every profile, so it collides with any
+/// other entry for the same subject -- which is why the profile slot is an
+/// `Option` rather than an empty set meaning "none".
+fn claim(
+    claimed: &mut BTreeSet<ScopeKey>,
+    subject: &str,
+    key: &str,
+    scoped: &BTreeSet<ProfileId>,
+) -> bool {
+    let unscoped = (subject.to_owned(), key.to_owned(), None);
+    if scoped.is_empty() {
+        return claimed.insert(unscoped);
+    }
+    // An earlier unscoped entry already claimed every profile.
+    let mut ok = !claimed.contains(&unscoped);
+    for profile in scoped {
+        if !claimed.insert((subject.to_owned(), key.to_owned(), Some(profile.clone()))) {
+            ok = false;
+        }
+    }
+    ok
+}
+
+fn cluster_scope(
+    record: &ClusterProfileRecord,
+    profiles: BTreeSet<ProfileId>,
+) -> ClusterScopeIntent {
+    ClusterScopeIntent {
+        scope: record.scope.clone(),
+        cache: provider_binding(&record.cache),
+        leader_election: record.leader_election.as_ref().map(provider_binding),
+        lock: record.lock.as_ref().map(provider_binding),
+        profiles,
+    }
+}
+
+fn provider_binding(record: &ProviderBindingRecord) -> ProviderBinding {
+    ProviderBinding {
+        provider: record.provider.clone(),
+        options: record.options.iter().cloned().collect(),
+        secret_ref: record.secret_ref.clone(),
+    }
+}
+
+/// Map a `transport.*` variant by comparing against the IR's own spelling, so
+/// the two cannot drift.
+fn transport(variant: &str) -> Option<Transport> {
+    Transport::ALL
+        .iter()
+        .copied()
+        .find(|t| t.as_str() == variant)
+}
+
+/// Map a `binding_mode.*` variant. Already validated at the call site, so an
+/// unknown value here would be an internal inconsistency, not user input.
+fn binding_mode(variant: &str) -> BindingMode {
+    match variant {
+        "local" => BindingMode::Local,
+        "remote" => BindingMode::Remote,
+        _ => BindingMode::Auto,
+    }
+}
+
+fn profile_id(uri: &str, raw: &str, diagnostics: &mut Diagnostics) -> Option<ProfileId> {
+    match ProfileId::new(raw.to_owned()) {
+        Ok(id) => Some(id),
+        Err(e) => {
+            diagnostics.push(invalid(
+                uri,
+                format!("profile id `{raw}` is not valid: {e}"),
+                "profile ids are kebab-case",
+            ));
+            None
+        }
+    }
+}
+
+fn gear_id(uri: &str, raw: &str, what: &str, diagnostics: &mut Diagnostics) -> Option<GearId> {
+    match GearId::new(raw.to_owned()) {
+        Ok(id) => Some(id),
+        Err(e) => {
+            diagnostics.push(invalid(
+                uri,
+                format!("{what} names gear `{raw}`, which is not a valid gear id: {e}"),
+                "gear ids are kebab-case, exactly as `#[toolkit::gear(name = \"...\")]` \
+                 spells them",
+            ));
+            None
+        }
+    }
+}
+
+fn deployment_profile(
+    uri: &str,
+    record: &ProfileRecord,
+    id: &ProfileId,
+    diagnostics: &mut Diagnostics,
+) -> Option<DeploymentProfileDecl> {
+    match record.kind.as_str() {
+        "embedded" => Some(DeploymentProfileDecl::Embedded { id: id.clone() }),
+        "host-workers" => {
+            let raw = record.host.clone().unwrap_or_default();
+            let host = match ProcessId::new(raw.clone()) {
+                Ok(host) => host,
+                Err(e) => {
+                    diagnostics.push(invalid(
+                        uri,
+                        format!("profile `{id}` names host `{raw}`, which is not valid: {e}"),
+                        "the host is a process name, kebab-case",
+                    ));
+                    return None;
+                }
+            };
+            Some(DeploymentProfileDecl::HostWorkers {
+                id: id.clone(),
+                host,
+                discovery: discovery(uri, id, record.discovery.as_deref(), diagnostics)?,
+                target_dir: record.target_dir.clone(),
+            })
+        }
+        "kubernetes" => Some(DeploymentProfileDecl::Kubernetes {
+            id: id.clone(),
+            discovery: discovery(uri, id, record.discovery.as_deref(), diagnostics)?,
+            namespace: record.namespace.clone(),
+            image_registry: record.image_registry.clone(),
+        }),
+        other => {
+            diagnostics.push(invalid(
+                uri,
+                format!("profile `{id}` has unknown kind `{other}`"),
+                "use `embedded(...)`, `host_workers(...)` or `kubernetes(...)`",
+            ));
+            None
+        }
+    }
+}
+
+fn discovery(
+    uri: &str,
+    id: &ProfileId,
+    raw: Option<&str>,
+    diagnostics: &mut Diagnostics,
+) -> Option<Discovery> {
+    match raw.unwrap_or("static") {
+        "static" => Some(Discovery::Static),
+        "directory" => Some(Discovery::Directory),
+        other => {
+            diagnostics.push(invalid(
+                uri,
+                format!("profile `{id}` asks for discovery `{other}`"),
+                "use `\"static\"` or `\"directory\"`",
+            ));
+            None
+        }
+    }
+}
+
+fn joined<'a>(items: impl Iterator<Item = &'a str>) -> String {
+    let mut v: Vec<&str> = items.collect();
+    v.sort_unstable();
+    v.join(", ")
+}

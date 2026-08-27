@@ -1,0 +1,424 @@
+//! The `product.gdl` vocabulary.
+//!
+//! A product description states operator intent. The shape that matters most is
+//! that **every deployment profile is declared as data**, and the one to resolve
+//! is chosen at resolve time (`gearbox resolve --profile <id>`). That is why
+//! `bind`, `cluster_profile` and `process` each carry a `profiles = [...]` list
+//! instead of the file carrying an `if`: GDL has no `if`, by design, and a
+//! description that could branch on the profile would be a program whose output
+//! depends on how it was invoked.
+//!
+//! One function here takes `**kwargs`, and only one: `provider(...)`. A cluster
+//! plugin's options are genuinely open -- the SDK hands a plugin a raw JSON map
+//! and keeps the option schema out of the framework -- so there is no arity to
+//! check. Everywhere else the parameters are spelled out, so starlark's own
+//! arity and type checking does the work and an unknown argument is GBX0106
+//! rather than a silently ignored key.
+
+// These fire on code `#[starlark_module]` generates, not on anything written
+// here. Same reasoning as `globals.rs`: `allow` rather than `expect`, because
+// which of them fires depends on the expansion and an unfulfilled `expect` is
+// itself an error.
+#![allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::unnecessary_wraps,
+    reason = "artifacts of #[starlark_module] expansion, not of hand-written code"
+)]
+
+use starlark::collections::SmallMap;
+use starlark::environment::GlobalsBuilder;
+use starlark::eval::Evaluator;
+use starlark::starlark_module;
+use starlark::values::Value;
+use starlark::values::list::UnpackList;
+use starlark::values::none::NoneType;
+
+use crate::records::{
+    BindRecord, ClusterProfileRecord, PreferenceRecord, ProcessRecord, ProfileRecord,
+    ProviderBindingRecord, SourceAtRecord, SourceRecord, UseGearRecord,
+};
+use crate::sink::{GdlSink, ProductDecl};
+use crate::vocabulary;
+
+/// Pull the sink out of the evaluator.
+fn sink<'a>(eval: &'a Evaluator<'_, '_, '_>) -> anyhow::Result<&'a GdlSink> {
+    eval.extra
+        .and_then(|e| e.downcast_ref::<GdlSink>())
+        .ok_or_else(|| anyhow::anyhow!("internal error: no GdlSink installed on the evaluator"))
+}
+
+/// Convert a Starlark value to JSON for a plugin's option map.
+///
+/// Deliberately narrow. A cluster option is a scalar, or a list or map of them;
+/// anything else -- a function, a record, a `None` -- is a mistake worth naming
+/// rather than encoding as `null` and letting the plugin reject it at startup.
+fn to_json(key: &str, value: Value<'_>) -> anyhow::Result<serde_json::Value> {
+    if let Some(s) = value.unpack_str() {
+        return Ok(serde_json::Value::String(s.to_owned()));
+    }
+    if let Some(b) = value.unpack_bool() {
+        return Ok(serde_json::Value::Bool(b));
+    }
+    if let Some(i) = value.unpack_i32() {
+        return Ok(serde_json::Value::Number(i.into()));
+    }
+    if let Some(list) = starlark::values::list::ListRef::from_value(value) {
+        let items = list
+            .iter()
+            .map(|item| to_json(key, item))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        return Ok(serde_json::Value::Array(items));
+    }
+    if let Some(dict) = starlark::values::dict::DictRef::from_value(value) {
+        let mut map = serde_json::Map::new();
+        for (k, v) in dict.iter() {
+            let name = k.unpack_str().ok_or_else(|| {
+                anyhow::anyhow!("option `{key}`: map keys must be strings, got `{k}`")
+            })?;
+            map.insert(name.to_owned(), to_json(name, v)?);
+        }
+        return Ok(serde_json::Value::Object(map));
+    }
+    Err(anyhow::anyhow!(
+        "option `{key}` has value `{value}`, which is not a string, integer, bool, \
+         list or map. Cluster options are passed to the plugin as JSON."
+    ))
+}
+
+/// Sort kwargs into a stable order.
+///
+/// `SmallMap` preserves insertion order, which is the order the author happened
+/// to type. The catalogue and the lock must not depend on that.
+fn options(
+    kwargs: SmallMap<String, Value<'_>>,
+) -> anyhow::Result<Vec<(String, serde_json::Value)>> {
+    let mut out = kwargs
+        .into_iter()
+        .map(|(k, v)| to_json(&k, v).map(|json| (k, json)))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
+}
+
+fn strings(list: Option<UnpackList<String>>) -> Vec<String> {
+    list.map(|l| l.items).unwrap_or_default()
+}
+
+#[starlark_module]
+fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
+    /// `path("...")` -- a local directory, relative to the description.
+    ///
+    /// Positional, like the other single-argument constructors (`provider`,
+    /// `use_gear`, `process`): `path(at = "...")` would name the obvious.
+    fn path(#[starlark(require = pos)] at: &str) -> anyhow::Result<SourceAtRecord> {
+        Ok(SourceAtRecord {
+            kind: "path".to_owned(),
+            at: Some(at.to_owned()),
+            url: None,
+            tag: None,
+            rev: None,
+            branch: None,
+        })
+    }
+
+    /// `git(url = ..., tag = ... | rev = ... | branch = ...)`
+    ///
+    ///
+    /// A branch does not pin an immutable point in history, so a lock built from
+    /// one is repeatable but not reproducible. Accepted, and recorded as such.
+    fn git(
+        #[starlark(require = named)] url: &str,
+        #[starlark(require = named)] tag: Option<&str>,
+        #[starlark(require = named)] rev: Option<&str>,
+        #[starlark(require = named)] branch: Option<&str>,
+    ) -> anyhow::Result<SourceAtRecord> {
+        if tag.is_none() && rev.is_none() && branch.is_none() {
+            return Err(anyhow::anyhow!(
+                "git(url = \"{url}\") pins nothing; give one of `tag`, `rev` or `branch`"
+            ));
+        }
+        Ok(SourceAtRecord {
+            kind: "git".to_owned(),
+            at: None,
+            url: Some(url.to_owned()),
+            tag: tag.map(str::to_owned),
+            rev: rev.map(str::to_owned),
+            branch: branch.map(str::to_owned),
+        })
+    }
+
+    /// `registry(package = ..., version = ...)` -- accepted only to be refused.
+    ///
+    /// Spelling it out means the diagnostic can say "registry sources are not
+    /// supported, use `path()` or `git()`" (GBX0605) instead of reporting an
+    /// unknown function, which reads as a typo.
+    fn registry(
+        #[starlark(require = named)] package: &str,
+        #[starlark(require = named)] version: Option<&str>,
+    ) -> anyhow::Result<SourceAtRecord> {
+        let _ = version;
+        Ok(SourceAtRecord {
+            kind: "registry".to_owned(),
+            at: Some(package.to_owned()),
+            url: None,
+            tag: None,
+            rev: None,
+            branch: None,
+        })
+    }
+
+    /// `source(id = ..., at = path(...) | git(...))`
+    fn source<'v>(
+        #[starlark(require = named)] id: &str,
+        #[starlark(require = named)] at: &'v SourceAtRecord,
+    ) -> anyhow::Result<SourceRecord> {
+        Ok(SourceRecord {
+            id: id.to_owned(),
+            at: at.clone(),
+        })
+    }
+
+    /// `embedded(id = ...)` -- one process; every binding is local by construction.
+    fn embedded(#[starlark(require = named)] id: &str) -> anyhow::Result<ProfileRecord> {
+        Ok(ProfileRecord {
+            kind: "embedded".to_owned(),
+            id: id.to_owned(),
+            host: None,
+            discovery: None,
+            target_dir: None,
+            namespace: None,
+            image_registry: None,
+        })
+    }
+
+    /// `host_workers(id = ..., host = ..., worker_discovery = ..., target_dir = ...)`
+    fn host_workers(
+        #[starlark(require = named)] id: &str,
+        #[starlark(require = named)] host: &str,
+        #[starlark(require = named)] worker_discovery: &str,
+        #[starlark(require = named)] target_dir: Option<&str>,
+    ) -> anyhow::Result<ProfileRecord> {
+        Ok(ProfileRecord {
+            kind: "host-workers".to_owned(),
+            id: id.to_owned(),
+            host: Some(host.to_owned()),
+            discovery: Some(worker_discovery.to_owned()),
+            target_dir: target_dir.map(str::to_owned),
+            namespace: None,
+            image_registry: None,
+        })
+    }
+
+    /// `kubernetes(id = ..., discovery = ..., namespace = ..., image_registry = ...)`
+    fn kubernetes(
+        #[starlark(require = named)] id: &str,
+        #[starlark(require = named)] discovery: &str,
+        #[starlark(require = named)] namespace: Option<&str>,
+        #[starlark(require = named)] image_registry: Option<&str>,
+    ) -> anyhow::Result<ProfileRecord> {
+        Ok(ProfileRecord {
+            kind: "kubernetes".to_owned(),
+            id: id.to_owned(),
+            host: None,
+            discovery: Some(discovery.to_owned()),
+            target_dir: None,
+            namespace: namespace.map(str::to_owned),
+            image_registry: image_registry.map(str::to_owned),
+        })
+    }
+
+    /// `use_gear("name", source = ..., features = [...], config = {...})`
+    fn use_gear<'v>(
+        #[starlark(require = pos)] gear: &str,
+        #[starlark(require = named)] source: &str,
+        #[starlark(require = named)] features: Option<UnpackList<String>>,
+        #[starlark(require = named)] config: Option<Value<'v>>,
+    ) -> anyhow::Result<UseGearRecord> {
+        let config = match config {
+            Some(value) => match to_json("config", value)? {
+                serde_json::Value::Object(map) => map.into_iter().collect(),
+                other => {
+                    return Err(anyhow::anyhow!("`config` must be a map, got `{other}`"));
+                }
+            },
+            None => Vec::new(),
+        };
+        Ok(UseGearRecord {
+            gear: gear.to_owned(),
+            source: source.to_owned(),
+            features: strings(features),
+            config,
+        })
+    }
+
+    /// `bind(consumer = ..., contract = ..., mode = ..., transport = ..., ...)`
+    fn bind<'v>(
+        #[starlark(require = named)] consumer: &str,
+        #[starlark(require = named)] contract: &str,
+        #[starlark(require = named)] mode: &'v crate::values::GdlEnum,
+        #[starlark(require = named)] transport: Option<&'v crate::values::GdlEnum>,
+        #[starlark(require = named)] endpoint: Option<&str>,
+        #[starlark(require = named)] profiles: Option<UnpackList<String>>,
+    ) -> anyhow::Result<BindRecord> {
+        // Validated here rather than in the engine so a member of the wrong
+        // namespace is reported at the call that wrote it. The variant name is
+        // what gets stored: the record holds owned, allocation-measurable data
+        // only, and re-parsing it in the engine goes through the IR's own parser,
+        // so the two cannot disagree.
+        vocabulary::binding_mode(mode).map_err(|e| anyhow::anyhow!(e))?;
+        if let Some(t) = transport {
+            vocabulary::transport(t).map_err(|e| anyhow::anyhow!(e))?;
+        }
+        Ok(BindRecord {
+            consumer: consumer.to_owned(),
+            contract: contract.to_owned(),
+            mode: mode.variant.to_owned(),
+            transport: transport.map(|t| t.variant.to_owned()),
+            endpoint: endpoint.map(str::to_owned),
+            profiles: strings(profiles),
+        })
+    }
+
+    /// `provider("name", secret_ref = ..., **options)`
+    ///
+    /// References a provider the catalogue already knows -- whether it exists is
+    /// checked against the projected catalogue (GBX0505), not here.
+    fn provider<'v>(
+        #[starlark(require = pos)] name: &str,
+        #[starlark(require = named)] secret_ref: Option<&str>,
+        #[starlark(kwargs)] options: SmallMap<String, Value<'v>>,
+    ) -> anyhow::Result<ProviderBindingRecord> {
+        Ok(ProviderBindingRecord {
+            provider: name.to_owned(),
+            options: self::options(options)?,
+            secret_ref: secret_ref.map(str::to_owned),
+        })
+    }
+
+    /// `cluster_profile(name = ..., cache = provider(...), ...)`
+    ///
+    /// `cache` is mandatory: it is the anchor the SDK's compare-and-swap defaults
+    /// for leader election and lock are layered over, so a scope without one has
+    /// nothing to fall back to.
+    fn cluster_profile<'v>(
+        #[starlark(require = named)] name: &str,
+        #[starlark(require = named)] cache: &'v ProviderBindingRecord,
+        #[starlark(require = named)] leader_election: Option<&'v ProviderBindingRecord>,
+        #[starlark(require = named)] lock: Option<&'v ProviderBindingRecord>,
+        #[starlark(require = named)] profiles: Option<UnpackList<String>>,
+    ) -> anyhow::Result<ClusterProfileRecord> {
+        Ok(ClusterProfileRecord {
+            scope: name.to_owned(),
+            cache: cache.clone(),
+            leader_election: leader_election.cloned(),
+            lock: lock.cloned(),
+            profiles: strings(profiles),
+        })
+    }
+
+    /// `process("name", anchor = ..., replicas = ..., profiles = [...])`
+    fn process(
+        #[starlark(require = pos)] name: &str,
+        #[starlark(require = named)] anchor: &str,
+        #[starlark(require = named, default = 1)] replicas: u32,
+        #[starlark(require = named)] profiles: Option<UnpackList<String>>,
+    ) -> anyhow::Result<ProcessRecord> {
+        if replicas == 0 {
+            return Err(anyhow::anyhow!(
+                "process(\"{name}\", replicas = 0) asks for a process that does not run"
+            ));
+        }
+        Ok(ProcessRecord {
+            name: name.to_owned(),
+            anchor: anchor.to_owned(),
+            replicas,
+            profiles: strings(profiles),
+        })
+    }
+
+    /// `product(...)` -- the single top-level declaration of a `product.gdl`.
+    fn product<'v>(
+        #[starlark(require = named)] id: &str,
+        #[starlark(require = named)] name: Option<&str>,
+        #[starlark(require = named)] version: &str,
+        #[starlark(require = named)] sources: UnpackList<&'v SourceRecord>,
+        #[starlark(require = named)] profiles: UnpackList<&'v ProfileRecord>,
+        #[starlark(require = named)] default_profile: &str,
+        #[starlark(require = named)] gears: UnpackList<&'v UseGearRecord>,
+        #[starlark(require = named)] bindings: Option<UnpackList<&'v BindRecord>>,
+        #[starlark(require = named)] cluster_profiles: Option<UnpackList<&'v ClusterProfileRecord>>,
+        #[starlark(require = named)] processes: Option<UnpackList<&'v ProcessRecord>>,
+        #[starlark(require = named)] preferences: Option<UnpackList<&'v PreferenceRecord>>,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<NoneType> {
+        sink(eval)?.set_product(ProductDecl {
+            id: id.to_owned(),
+            display_name: name.unwrap_or(id).to_owned(),
+            version: version.to_owned(),
+            default_profile: default_profile.to_owned(),
+            sources: sources.items.into_iter().cloned().collect(),
+            profiles: profiles.items.into_iter().cloned().collect(),
+            gears: gears.items.into_iter().cloned().collect(),
+            bindings: bindings
+                .map(|l| l.items.into_iter().cloned().collect())
+                .unwrap_or_default(),
+            cluster_profiles: cluster_profiles
+                .map(|l| l.items.into_iter().cloned().collect())
+                .unwrap_or_default(),
+            processes: processes
+                .map(|l| l.items.into_iter().cloned().collect())
+                .unwrap_or_default(),
+            preferences: preferences
+                .map(|l| l.items.into_iter().cloned().collect())
+                .unwrap_or_default(),
+        });
+        Ok(NoneType)
+    }
+}
+
+/// `prefer.*` -- tie-breakers among choices that are already valid.
+///
+/// A namespace of functions rather than of members, because `isolate` takes an
+/// argument. Kept distinct from a constraint on purpose: a preference may only
+/// order candidates that already satisfy every hard requirement, so no
+/// preference can make an invalid product valid.
+#[starlark_module]
+fn prefer_namespace(builder: &mut GlobalsBuilder) {
+    fn existing_infrastructure() -> anyhow::Result<PreferenceRecord> {
+        Ok(PreferenceRecord {
+            kind: "existing-infrastructure".to_owned(),
+            gear: None,
+        })
+    }
+
+    fn fewer_processes() -> anyhow::Result<PreferenceRecord> {
+        Ok(PreferenceRecord {
+            kind: "fewer-processes".to_owned(),
+            gear: None,
+        })
+    }
+
+    fn isolate(#[starlark(require = named)] gear: &str) -> anyhow::Result<PreferenceRecord> {
+        Ok(PreferenceRecord {
+            kind: "isolate".to_owned(),
+            gear: Some(gear.to_owned()),
+        })
+    }
+}
+
+/// Build the globals a `product.gdl` is evaluated against.
+///
+/// Deliberately a different set from `gear_globals()`: `gear()` is not callable
+/// here and `product()` is not callable there, so a file that mixes the two
+/// fails at the call rather than producing half of each.
+#[must_use]
+pub fn product_globals() -> starlark::environment::Globals {
+    let mut builder = GlobalsBuilder::standard().with(gdl_product_vocabulary);
+    for (name, namespace) in vocabulary::ALL_NAMESPACES {
+        builder.set(name, *namespace);
+    }
+    builder.namespace("prefer", prefer_namespace);
+    builder.build()
+}

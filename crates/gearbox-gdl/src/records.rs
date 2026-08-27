@@ -242,3 +242,123 @@ gdl_record! {
         pub instance_addressable: bool,
     }
 }
+
+// ---------------------------------------------------------------- product side
+//
+// A `product.gdl` states operator intent: which gears, which topology, which
+// backend behind each cluster scope. Every profile is declared as *data* and
+// selected at resolve time, which is why each of these carries a `profiles`
+// list rather than the file carrying an `if`.
+
+gdl_record! {
+    /// `source(id = ..., at = path(...) | git(...))`
+    SourceRecord as "gdl_source" {
+        pub id: String,
+        pub at: SourceAtRecord,
+    }
+}
+
+gdl_record! {
+    /// `path(...)`, `git(...)` or `registry(...)`.
+    ///
+    /// `registry` is accepted so the diagnostic can name it (GBX0605) rather than
+    /// reporting an unknown function, which would read as a typo.
+    SourceAtRecord as "gdl_source_at" {
+        /// `path`, `git` or `registry`.
+        pub kind: String,
+        pub at: Option<String>,
+        pub url: Option<String>,
+        pub tag: Option<String>,
+        pub rev: Option<String>,
+        pub branch: Option<String>,
+    }
+}
+
+gdl_record! {
+    /// `embedded(...)`, `host_workers(...)` or `kubernetes(...)`.
+    ProfileRecord as "gdl_profile" {
+        /// `embedded`, `host-workers` or `kubernetes`.
+        pub kind: String,
+        pub id: String,
+        pub host: Option<String>,
+        pub discovery: Option<String>,
+        pub target_dir: Option<String>,
+        pub namespace: Option<String>,
+        pub image_registry: Option<String>,
+    }
+}
+
+gdl_record! {
+    /// `use_gear("name", source = ..., features = [...], config = {...})`
+    UseGearRecord as "gdl_use_gear" {
+        pub gear: String,
+        pub source: String,
+        pub features: Vec<String>,
+        /// Opaque per-gear configuration, carried through to the generator.
+        pub config: Vec<(String, serde_json::Value)>,
+    }
+}
+
+gdl_record! {
+    /// `bind(consumer = ..., contract = ..., mode = ..., transport = ..., ...)`
+    BindRecord as "gdl_bind" {
+        pub consumer: String,
+        pub contract: String,
+        /// From `binding_mode.*`.
+        pub mode: String,
+        /// From `transport.*`, when the operator pinned one.
+        pub transport: Option<String>,
+        pub endpoint: Option<String>,
+        pub profiles: Vec<String>,
+    }
+}
+
+gdl_record! {
+    /// `provider("name", secret_ref = ..., **options)` -- a *reference* to a
+    /// provider the catalogue already knows, plus the operator's options for it.
+    ///
+    /// Not to be confused with the retired gear-side `provider(...)` record,
+    /// which described a provider. Providers are projected now; this names one.
+    ProviderBindingRecord as "gdl_provider_binding" {
+        pub provider: String,
+        /// Free-form, because each plugin defines its own option schema and the
+        /// SDK deliberately keeps that schema out of the framework: options
+        /// arrive at a plugin as a raw JSON map.
+        pub options: Vec<(String, serde_json::Value)>,
+        pub secret_ref: Option<String>,
+    }
+}
+
+gdl_record! {
+    /// `cluster_profile(name = ..., cache = provider(...), ...)`
+    ///
+    /// `name` is the operator side of the join key a gear declares as
+    /// `impl ClusterProfile { const NAME }`.
+    ClusterProfileRecord as "gdl_cluster_profile" {
+        pub scope: String,
+        pub cache: ProviderBindingRecord,
+        /// Omitted means the SDK compare-and-swap default over the cache.
+        pub leader_election: Option<ProviderBindingRecord>,
+        pub lock: Option<ProviderBindingRecord>,
+        pub profiles: Vec<String>,
+    }
+}
+
+gdl_record! {
+    /// `process("name", anchor = ..., replicas = ..., profiles = [...])`
+    ProcessRecord as "gdl_process" {
+        pub name: String,
+        pub anchor: String,
+        pub replicas: u32,
+        pub profiles: Vec<String>,
+    }
+}
+
+gdl_record! {
+    /// `prefer.existing_infrastructure()` and friends.
+    PreferenceRecord as "gdl_preference" {
+        /// `existing-infrastructure`, `fewer-processes` or `isolate`.
+        pub kind: String,
+        pub gear: Option<String>,
+    }
+}

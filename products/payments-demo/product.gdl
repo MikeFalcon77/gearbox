@@ -1,0 +1,85 @@
+# The Payments Demo product.
+#
+# All three deployment profiles are declared as DATA and selected at resolve
+# time (`gearbox resolve --profile <id>`). There is no `if` anywhere -- GDL has
+# none by design -- so profile-scoping is a `profiles = [...]` list field on
+# `bind`, `cluster_profile` and `process`. A description that could branch on
+# the profile would be a program whose output depends on how it was invoked.
+
+product(
+    id = "payments-demo",
+    name = "Payments Demo",
+    version = "0.1.0",
+
+    sources = [source(id = "gears-rust", at = path("../../../gears-rust"))],
+
+    profiles = [
+        embedded(id = "dev"),
+        host_workers(
+            id = "local",
+            host = "gateway",
+            worker_discovery = "directory",
+            target_dir = "../../../gears-rust/target",
+        ),
+        kubernetes(
+            id = "prod",
+            discovery = "static",
+            namespace = "payments",
+            image_registry = "registry.example.com/payments",
+        ),
+    ],
+    default_profile = "dev",
+
+    # Note what is NOT listed: grpc-hub, authn-resolver, types-registry and
+    # cluster. They arrive through the colocated_deps closure, which is a
+    # link-time fact the resolver may never sever.
+    gears = [
+        use_gear("api-gateway", source = "gears-rust"),
+        use_gear("gear-orchestrator", source = "gears-rust"),
+        use_gear("api-contracts", source = "gears-rust"),
+        use_gear("api-contracts-consumer", source = "gears-rust"),
+    ],
+
+    bindings = [
+        bind(
+            consumer = "api-contracts-consumer",
+            contract = "api-contracts/PaymentApi@v1",
+            mode = binding_mode.remote,
+            transport = transport.rest,
+            profiles = ["local", "prod"],
+        ),
+    ],
+
+    # `name` is the operator side of the join key a gear declares as
+    # `impl ClusterProfile { const NAME }`. `provider("...")` REFERENCES a
+    # provider the catalogue projected from Rust; it does not describe one.
+    #
+    # dev binds the standalone backend, which is process-local: every replica
+    # would get its own in-memory store and coordinate none of the others. That
+    # is correct for one process and wrong for any other, which is what the
+    # resolver reports as GBX0503 rather than letting it fail silently at run
+    # time.
+    cluster_profiles = [
+        cluster_profile(
+            name = "event-broker",
+            cache = provider("standalone"),
+            profiles = ["dev"],
+        ),
+        cluster_profile(
+            name = "event-broker",
+            profiles = ["local", "prod"],
+            cache = provider(
+                "postgres",
+                connection_string = "postgres://payments@${PG_HOST}:5432/payments?password=${PG_PASSWORD}",
+                schema = "cluster",
+                pool_max_size = 10,
+            ),
+        ),
+    ],
+
+    processes = [
+        process("audit", anchor = "api-contracts-consumer", replicas = 2, profiles = ["prod"]),
+    ],
+
+    preferences = [prefer.existing_infrastructure(), prefer.fewer_processes()],
+)
