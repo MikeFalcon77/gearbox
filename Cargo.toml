@@ -57,6 +57,15 @@ debug = true
 # Internal
 gearbox-ir = { path = "crates/gearbox-ir" }
 gearbox-lock = { path = "crates/gearbox-lock" }
+gearbox-gdl = { path = "crates/gearbox-gdl" }
+gearbox-engine = { path = "crates/gearbox-engine" }
+gearbox-project = { path = "crates/gearbox-project" }
+gearbox-cli = { path = "crates/gearbox-cli" }
+
+# GDL host. Exact pins: starlark is pre-1.0 and 0.14 broke hard from 0.13.
+starlark = "=0.14.2"
+starlark_syntax = "=0.14.2"
+allocative = "0.3.6"
 
 # Data
 serde = { version = "1", features = ["derive"] }
@@ -64,6 +73,17 @@ serde_json = "1"
 toml = "0.9"
 schemars = "1"
 ts-rs = "12"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1"
+
+# Rust source projection
+syn = { version = "2", features = ["full", "extra-traits", "visit", "parsing"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+
+# Filesystem
+walkdir = "2"
 
 # Errors / util
 thiserror = "2"
@@ -80,7 +100,15 @@ proptest = "1"
 [workspace.lints.rust]
 deprecated = "warn"
 non_ascii_idents = "forbid"
-unsafe_code = "forbid"
+# DEVIATION from gears-rust, which uses "forbid". starlark's
+# `ProvidesStaticType` is a `pub unsafe trait`, and its derive is required on
+# every GDL host value, so `gearbox-gdl` needs a local waiver. `forbid` cannot
+# be relaxed by `allow`/`expect` at all, which would force that one crate to
+# opt out of this whole table and restate 111 lints locally -- guaranteeing
+# drift. `deny` is the same bar (any unsafe is a hard error) while permitting
+# one documented, reviewable exception, confined to `gearbox-gdl::values`.
+# Every other crate remains unsafe-free; `make check` fails if that changes.
+unsafe_code = "deny"
 unused_mut = "warn"
 noop_method_call = "warn"
 unused_import_braces = "warn"
