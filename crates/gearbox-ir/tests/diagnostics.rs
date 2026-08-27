@@ -23,6 +23,26 @@ use gearbox_ir::{
 };
 
 #[test]
+fn retired_codes_are_not_reused() {
+    // GBX0201-GBX0205 were retired when the catalogue became macro-projected.
+    // Reusing a number would make a lock or a transcript that names GBX0203
+    // silently mean something else.
+    let live: Vec<&str> = DiagnosticCode::ALL.iter().map(|c| c.as_str()).collect();
+    for retired in ["GBX0201", "GBX0202", "GBX0203", "GBX0204", "GBX0205"] {
+        assert!(
+            !live.contains(&retired),
+            "{retired} was retired with the macro-projected catalogue and must not be reused"
+        );
+    }
+    // And their replacements are present.
+    for live_code in [
+        "GBX0206", "GBX0207", "GBX0208", "GBX0209", "GBX0210", "GBX0211",
+    ] {
+        assert!(live.contains(&live_code), "{live_code} should exist");
+    }
+}
+
+#[test]
 fn codes_are_unique() {
     let mut seen = BTreeSet::new();
     for code in DiagnosticCode::ALL {

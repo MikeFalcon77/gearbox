@@ -231,13 +231,19 @@ impl Requirement {
     }
 }
 
-/// A cluster provider, as declared by the cluster gear's description.
+/// A cluster provider, projected from the cluster gear's Rust.
 ///
-/// The runtime assembles its provider registry in hand-written Rust, so this
-/// declaration is mirrored from that source and cross-checked against it. A
-/// provider registered in Rust but missing here would silently narrow what the
-/// resolver believes is available; the reverse would let it bless a provider that
-/// does not exist.
+/// Assembled from three places, because no single one of them has the whole
+/// answer: `ClusterGear::provider_registry()` says which provider types are
+/// registered and for which primitive, the provider's own `fn provider()` says
+/// what it is called, and the *backend* impl says what it can do. That last hop
+/// is the surprising one -- the provider traits carry no capability at all, only
+/// a name and a factory.
+///
+/// Two fields are not projected, and deliberately so: `process_local` and
+/// `needs_credentials` have no representation anywhere in Rust, so they are
+/// declared. Every other field here is read out of source, which is what keeps a
+/// provider registered in code from silently missing from the catalogue.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ClusterProviderDecl {
     /// The name used in configuration, e.g. `postgres`.

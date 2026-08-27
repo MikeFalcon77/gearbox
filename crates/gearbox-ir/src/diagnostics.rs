@@ -220,26 +220,17 @@ diagnostic_codes! {
     GdlDuplicateProfileScoped = "GBX0110", Gdl, Error, false, "duplicate profile-scoped declaration";
 
     // ---------------------------------------------------------------- GBX02xx
-    /// `gear.gdl`'s `id` differs from `#[toolkit::gear(name = ...)]`.
-    ValidateNameMismatch = "GBX0201", Validate, Error, false, "gear id does not match the gear macro";
-
-    /// Declared co-location dependencies differ from `#[toolkit::gear(deps = ...)]`.
-    ValidateDepsMismatch = "GBX0202", Validate, Error, false, "co-location dependencies do not match the gear macro";
-
-    /// Declared runtime capabilities differ from
-    /// `#[toolkit::gear(capabilities = ...)]`.
-    ValidateCapsMismatch = "GBX0203", Validate, Error, false, "runtime capabilities do not match the gear macro";
-
-    /// Declared provided contracts, or the cluster gear's declared provider set,
-    /// differ from the Rust source.
-    ///
-    /// The cluster provider registry is assembled in hand-written Rust, so a new
-    /// provider registration that is not mirrored in `gear.gdl` would silently
-    /// widen what the resolver believes is available.
-    ValidateProvidesMismatch = "GBX0204", Validate, Error, false, "provided contracts or cluster providers do not match the Rust source";
-
-    /// Declared consumed contracts differ from `#[toolkit::consumes]`.
-    ValidateConsumesMismatch = "GBX0205", Validate, Error, false, "consumed contracts do not match the Rust source";
+    // GBX0201-GBX0205 are deliberately absent. They compared a `gear.gdl`
+    // restatement of the gear id, co-location dependencies, runtime
+    // capabilities, provided contracts and consumed contracts against the Rust
+    // attributes that also carried them. Under the macro-projected catalogue
+    // (ADR `cpt-gearbox-adr-macro-projected-catalogue`) those facts exist in
+    // exactly one place, so there is no second copy left to diverge and nothing
+    // for a comparison to report. Their replacement is GBX0210, which refuses
+    // the restatement outright rather than detecting it afterwards.
+    //
+    // The codes are not reused: a lock or a transcript naming GBX0203 should
+    // stay findable rather than silently meaning something else.
 
     /// The gear's name is not the kebab-case form of the annotated struct's
     /// identifier.
@@ -263,6 +254,24 @@ diagnostic_codes! {
     /// from the package name, which is why the identifier must be declared
     /// rather than derived.
     ValidateLibIdentMismatch = "GBX0209", Validate, Error, false, "declared library identifier does not match the crate";
+
+    /// A description restated a fact that is projected from the Rust attributes.
+    ///
+    /// Refusing rather than tolerating is what keeps the projection decision
+    /// alive: without an active rejection the mirrored surface returns by
+    /// accretion, one convenient field at a time, and the design decays back
+    /// into a cross-check (`cpt-gearbox-fr-gdl-no-restatement`).
+    ValidateRestatement = "GBX0210", Validate, Error, false, "description restates a projected fact";
+
+    /// A gear's `#[toolkit::gear]` attribute could not be located
+    /// unambiguously.
+    ///
+    /// Either the scanned tree held none, or it held several -- one crate may
+    /// legitimately declare more than one gear, and `gears/mini-chat/mini-chat`
+    /// declares three. Projection is meaningless until exactly one attribute is
+    /// identified, so this is an error rather than a guess
+    /// (`cpt-gearbox-fr-attribute-location`).
+    ValidateAttributeAmbiguous = "GBX0211", Validate, Error, false, "gear attribute could not be located unambiguously";
 
     // ---------------------------------------------------------------- GBX03xx
     /// A selected or depended-upon gear is not in the catalogue.
@@ -400,6 +409,35 @@ diagnostic_codes! {
     /// product, not about a missing capability.
     ClusterStatefulReplicasWithoutElection = "GBX0507", Cluster, Warning, false, "replicated stateful gear without leader election";
 
+    /// A cluster requirement names a profile the requiring gear does not
+    /// implement.
+    ///
+    /// The profile is the routing key: the SDK maps it to
+    /// `ClientScope::new("cluster:{name}")` and resolves whatever backend is
+    /// registered there. A name nothing implements cannot be bound, so the
+    /// requirement fails at startup with `ProfileNotBound` -- which is why this
+    /// is caught here instead. Filed as a user error rather than a runtime gap:
+    /// the runtime behaves correctly, the description is wrong.
+    ClusterProfileNotImplemented = "GBX0508", Cluster, Error, false, "cluster profile is not implemented by the gear";
+
+    /// A registered cluster provider's name or capabilities could not be read
+    /// out of Rust.
+    ///
+    /// Reported rather than skipped. A provider missing from the catalogue would
+    /// silently narrow what the resolver believes is available, turning a
+    /// readable failure into an unsatisfiable-capability error somewhere else.
+    ClusterProviderUnprojectable = "GBX0509", Cluster, Error, false, "cluster provider could not be projected";
+
+    /// A plugin crate holds more than one implementation of a backend trait, so
+    /// which one a provider builds cannot be determined by trait alone.
+    ///
+    /// Capabilities live on the backend, not the provider, and the value flow
+    /// from provider to backend runs through a builder and an `Arc<dyn _>` that
+    /// no source-level parse can follow. Uniqueness within the crate is what
+    /// makes the backend locatable; when it does not hold, the description must
+    /// narrow it explicitly.
+    ClusterBackendAmbiguous = "GBX0510", Cluster, Error, false, "cluster backend implementation is ambiguous";
+
     // ---------------------------------------------------------------- GBX06xx
     /// Roles were declared. The runtime has no role concept.
     ///
@@ -430,6 +468,19 @@ diagnostic_codes! {
     ///
     /// It is projected onto per-gear runtime kind and deployment topology.
     GapProfileNotRuntimeType = "GBX0606", RuntimeGap, Hint, true, "deployment profile is not a runtime type";
+
+    /// A cluster requirement was modelled as a co-location dependency because
+    /// the cluster gear has no remote surface.
+    ///
+    /// Cluster is an in-process library today: it registers backends into the
+    /// process-local `ClientHub`, and a consumer resolves them by a synchronous
+    /// scoped lookup with no remote path and no fallback. A consumer must
+    /// therefore be in the same process, which is what `deps = [cluster]`
+    /// expresses. The decided direction is a separately deployable cluster gear,
+    /// at which point the edge becomes severable -- but that design is not
+    /// implemented, so this hint records the constraint rather than anticipating
+    /// its removal.
+    GapClusterNotDeployable = "GBX0607", RuntimeGap, Hint, true, "cluster has no remote surface, so its consumers must be co-located";
 
     // ---------------------------------------------------------------- GBX07xx
     /// Generation would overwrite an operator-owned file whose edits cannot be
