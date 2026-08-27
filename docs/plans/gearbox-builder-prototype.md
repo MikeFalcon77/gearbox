@@ -32,8 +32,9 @@ the repo-grounded predecessor and its conclusions are folded in below.
 - **Layout:** engine lives in `gearbox-builder`; `gear.gdl` files are added to `gears-rust` next to
   the real gears (additive only).
 - **Build clean:** no dependency on `cargo-gears` crates; port templates by hand.
-- **`gear.gdl` is the single source of truth**, with `gearbox validate` cross-checking it against the
-  real Rust attributes via `syn`.
+- **The catalogue is a merge, not a mirror** (ADR 0002): every fact a Rust attribute already carries
+  is *projected* out of it via `syn`; `gear.gdl` *declares* only the facts that have no Rust home,
+  and a description restating a projected fact is rejected.
 - **CLI is a standalone `gearbox` binary**, not `cargo gears` (departs from vision §4/§97–99;
   matches the decision already recorded for the ConstructorFabric deck).
 - **Spec artefacts:** a short **PRD now** (before code), the prototype as the spike, then a
@@ -51,7 +52,8 @@ Verified against `gears-rust` (all claims spot-checked in source):
 
 | Fact | Evidence | Consequence for GDL |
 |---|---|---|
-| No gear manifest exists. Gear metadata lives **only** in `#[toolkit::gear(name, deps, capabilities, ctor, client, lifecycle)]` | `libs/toolkit-macros/src/lib.rs` | `gear.gdl` is genuinely new information, not a re-encoding |
+| No gear manifest exists. Gear metadata lives **only** in `#[toolkit::gear(name, deps, capabilities, ctor, client, lifecycle)]`, and no `gear.toml` exists anywhere (`find -name gear.toml` = 0) | `libs/toolkit-macros/src/lib.rs` | `gear.gdl` carries **only** genuinely new information — enforced, not merely intended, by `cpt-gearbox-fr-gdl-no-restatement` |
+| The gear attribute's location is not uniform: 34 of 44 at `src/gear.rs`, 8 at `src/module.rs`, 2 nested; and `gears/mini-chat/mini-chat` declares **three** gears in one crate | `grep -rln '#\[toolkit::gear('` over `gears/` + `examples/` | projection needs a locator: scan `src/` by default, optional `cargo(attr = …)` to narrow, exactly-one-match required (`cpt-gearbox-fr-attribute-location`) |
 | `capabilities` is a **closed set of 7**: `db, rest, rest_host, stateful, system, grpc_hub, grpc` | same, `Capability` enum | GDL exposes exactly these, nothing more |
 | **`deps` means link-time co-location** — the macro emits `pub use ::crate as _gear_dep_x` to keep `inventory::submit!` alive | same | must be named so it can't be confused with contract consumption |
 | **Missing deps are a hard error**, so co-location is a *downward closure, not a partition* — `types-registry` is linked into every process whose closure names it, and two anchors sharing a dep do **not** merge | `RegistryError::MissingDeps`, `libs/toolkit/src/registry.rs:589` | processes **overlap**; the resolver must model that, and `deps` edges are **never cuttable** |
@@ -94,7 +96,8 @@ gearbox-builder/
     gearbox-ir/           # canonical typed model + IDs + diagnostics. Pure data.
     gearbox-gdl/          # Starlark host → IR. The only crate naming `starlark::`.
     gearbox-lock/         # canonical product.lock read/write + lock_hash + diff
-    gearbox-verify/       # syn scan of gear crates, cross-check vs gear.gdl
+    gearbox-verify/       # syn scan of gear crates → the projected half of the
+                          # catalogue (ADR 0002; rename candidate: gearbox-scan)
     gearbox-resolve/      # deterministic resolver + explanation graph. Pure fn.
     gearbox-gen/          # artefact emission → FileSet. Never touches the FS.
     gearbox-engine/       # facade; the ONLY crate doing filesystem/process I/O
@@ -110,6 +113,12 @@ Dependency DAG is strictly layered: `ir` ← {`gdl`, `lock`, `verify`, `resolve`
 `engine` ← {`rpc`, `cli`}. **Boundary guarantee (vision §7):** a test in
 `gearbox-engine/tests/no_frontend_deps.rs` runs `cargo metadata --no-deps` and asserts the
 engine's dependency set names no CLI/RPC/UI crate.
+
+**ADR 0002 changes `gearbox-verify`'s position.** Under projection the `syn` scan is not a
+validate-time check but a *catalogue-load input*, so descriptor assembly consumes both it and
+`gearbox-gdl`; nothing can build a `GearDescriptor` from GDL alone. The name no longer fits either —
+it verifies nothing, it reads — so `gearbox-scan` is the rename candidate. Decide when the crate is
+actually written (M2), not now.
 
 Pinned deps: `starlark` + `starlark_syntax` (pin the exact minor — pre-1.0, the `Dialect` and
 `#[starlark_module]` surface moves), `minijinja` 2 (`custom_syntax`), `syn` 2 (`full`,
@@ -188,54 +197,127 @@ PAYMENT_SDK = cargo(crate = "cf-api-contracts-sdk", lib = "api_contracts_sdk",
                     features = ["rest-client"])
 
 gear(
-    id = "payments-audit",
+    # NOT DECLARED HERE, projected from Rust (ADR 0002). Writing any of these is
+    # GBX0210 `cpt-gearbox-fr-gdl-no-restatement`, which names the owning attribute:
+    #   id            <- #[toolkit::gear(name = "payments-audit")]
+    #   runtime_caps  <- capabilities = [rest, stateful]
+    #   colocated_deps<- deps = [cluster]   (link-time; see the note below)
+    #   lifecycle     <- lifecycle(entry = "serve", stop_timeout = "15s")
+    #   client_trait  <- client = ...
+    #   contract id / version / kind on every provide+consume below
+
     name = "Payments Audit",
     description = "Cluster-cached audit trail; the elected leader reconciles it periodically.",
     category = "example",
     visibility = "public",
 
     # lib is MANDATORY, never derived — cf-api-contracts has no [lib] section.
+    # attr is OPTIONAL: omitted means scan this crate's src/ tree and require
+    # exactly one #[toolkit::gear]. payments-audit puts it at the modal location.
     package = cargo(crate = "cf-gears-payments-audit", lib = "payments_audit",
-                    path = ".", link = ["payments_audit"]),
-
-    # 1:1 with #[toolkit::gear(capabilities = [...])]. Closed set of 7.
-    runtime_caps = [cap.rest, cap.stateful],
-
-    # 1:1 with #[toolkit::gear(deps = [...])]. LINK-TIME CO-LOCATION: the macro
-    # emits `pub use ::cluster as _gear_dep_0`, so the crate is physically in the
-    # binary and a missing dep is RegistryError::MissingDeps. NEVER cut.
-    colocated_deps = ["cluster"],
-
-    lifecycle = lifecycle(entry = "serve", stop_timeout = "15s"),
+                    path = ".", link = ["payments_audit"],
+                    attr = "src/gear.rs"),
 
     provides = [
-        provide(contract = "PaymentsAuditApi", version = "v1", kind = contract_kind.api,
+        provide(contract = "PaymentsAuditApi",
                 rust = "payments_audit_sdk::PaymentsAuditApi", sdk = AUDIT_SDK,
                 local = "Self::build_local",
                 transports = [transport.local, transport.rest],
                 rest = rest(base_path = "/api/v1/payments-audit")),
     ],
 
-    # Remote-capable + declared => the resolver MAY cut this edge.
+    # `from_` and `critical` are product-level; the contract identity and the fact
+    # that the edge exists at all come from #[toolkit::consumes]. Remote-capable +
+    # annotated in Rust => the resolver MAY cut this edge.
     consumes = [
-        consume(contract = "PaymentApi", version = "v1", kind = contract_kind.api,
+        consume(contract = "PaymentApi",
                 rust = "api_contracts_sdk::PaymentApi", sdk = PAYMENT_SDK,
                 from_ = "api-contracts", critical = False),
     ],
 
     requires = [
-        cluster.cache(profile = "default", capabilities = [cluster_cap.linearizable]),
-        cluster.leader_election(profile = "default"),
+        # `profile` is mandatory and is a join key: it must name a profile this
+        # crate implements as `impl ClusterProfile { const NAME }`. No default --
+        # a defaulted `"default"` would resolve to a scope nothing registered.
+        cluster.cache(profile = "payments-audit", capabilities = [cluster_cap.linearizable]),
+        cluster.leader_election(profile = "payments-audit"),
     ],
 
     serves = [endpoint(name = "rest", via = "rest_host")],
 )
 ```
 
-The `cluster` gear's `gear.gdl` additionally declares `cluster_providers = [provider("standalone",
-primitives=["cache"]), provider("postgres", primitives=["cache","lock"])]` — mirroring
-`ClusterGear::provider_registry()`. `gearbox validate` diffs the two; a new `with_*_provider` line
-in Rust that isn't listed is **GBX0204**, so the resolver's capability table cannot rot.
+Note what is *gone* versus the pre-ADR-0002 draft: `id`, `runtime_caps`, `colocated_deps`,
+`lifecycle`, and the `version`/`kind` arguments on `provide`/`consume`. `colocated_deps` in
+particular was never GDL's to own — the macro emits `pub use ::cluster as _gear_dep_cluster`, so the
+authority for that edge is the linker, and a missing dep is `RegistryError::MissingDeps`. It stays
+uncuttable for exactly that reason.
+
+The `cluster` gear's `cluster_providers` are likewise projected — so a new provider registered in
+Rust appears in the catalogue with no edit anywhere, and **GBX0204 disappears entirely**: there is no
+second list to rot. It takes three hops, because no single place has the whole answer:
+
+| hop | source | yields |
+|---|---|---|
+| 1 | `ClusterGear::provider_registry()` — the `with_*_provider` chain | which provider types, for which primitive |
+| 2 | the plugin crate's `impl Cluster*Provider::provider()` → its `PROVIDER_NAME` const | the operator-facing name |
+| 3 | the plugin crate's unique `impl ClusterCacheBackend`/`DistributedLockBackend`/`LeaderElectionBackend` | `consistency()` and `features()` |
+
+Hop 3 is the one that surprises: **the provider traits carry no capability at all**, only a name and
+a `build_*` factory. Capabilities live on the backend the factory returns behind an `Arc<dyn _>`, and
+no source-level parse can follow that value flow. It does not have to — within one plugin crate there
+is exactly one impl of each backend trait, so the impl is locatable by trait, and a crate that grows
+a second one is reported (GBX0510) and narrowed rather than guessed.
+
+Hop 2 needs one fact Rust cannot supply: the registry writes
+`standalone_cluster_plugin::StandaloneCacheProvider`, and nothing in that expression says which
+directory the crate is in. So the cluster description declares a locator — the same role `sdk` plays
+for a contract:
+
+```python
+cluster_plugins = [
+    cluster_plugin(
+        package = cargo(crate_name = "cf-gears-standalone-cluster-plugin",
+                        lib = "standalone_cluster_plugin",
+                        path = "../plugins/standalone-cluster-plugin"),
+        process_local = True,        # declared: no Rust construct states it
+        needs_credentials = False,
+    ),
+]
+```
+
+`process_local` and `needs_credentials` stay declared deliberately. The nearest signal in Rust is
+that one plugin's options carry a `connection_string` and the other's do not, and reading deployment
+semantics out of that would be an inference rather than a fact. `process_local` is also what GBX0503
+rests on, which is a reason to write it down rather than derive it almost-correctly.
+
+The SDK's fall-back backends are projected as a **rule**, not a value: `defaults/{lock,leader}.rs`
+compute `Features::new(self.cache.consistency() == Linearizable)`, so leader election and lock inherit
+whatever the profile's cache declares. Both real caches are linearizable today, so the rule always
+yields `true` — recording the rule rather than that answer is what keeps it correct when a third
+cache lands.
+
+### 3.4.1 Why `attr` exists — `mini-chat`
+
+One crate can declare several gears. `gears/mini-chat/mini-chat` declares three, so it needs three
+descriptions, each pinning its own attribute:
+
+```python
+# gears/mini-chat/mini-chat/gear.gdl                     -> "mini-chat"
+package = cargo(crate = "cf-gears-mini-chat", lib = "mini_chat", path = ".",
+                attr = "src/gear.rs",
+                link = ["mini_chat",
+                        "mini_chat::infra::plugins::static_audit",
+                        "mini_chat::infra::plugins::static_model_policy"])
+
+# .../src/infra/plugins/static_audit/gear.gdl  -> "static-mini-chat-audit-plugin"
+package = cargo(crate = "cf-gears-mini-chat", lib = "mini_chat", path = "../../../..",
+                attr = "src/infra/plugins/static_audit/gear.rs")
+```
+
+Omitting `attr` here is `GBX0211`: three candidates, and the diagnostic lists all three paths plus
+the literal `attr = "…"` line to add. This is also why a description cannot be required to sit at
+the crate root — `gdl_path` is already a `RelPath`, so the IR needs nothing new.
 
 ### 3.5 `product.gdl`
 
@@ -265,9 +347,13 @@ product(
              mode = binding_mode.remote, transport = transport.rest,
              profiles = ["local", "prod"]),
     ],
+    # `name` must match a profile some gear implements as `impl ClusterProfile`;
+    # this is the operator side of the same join key the gear declares.
+    # `provider("...")` here *references* a catalogue provider by name — it is
+    # not the retired gear-side `provider(...)` record, which described one.
     cluster_profiles = [
-        cluster_profile(name = "default", cache = provider("standalone"), profiles = ["dev"]),
-        cluster_profile(name = "default", profiles = ["local", "prod"],
+        cluster_profile(name = "payments-audit", cache = provider("standalone"), profiles = ["dev"]),
+        cluster_profile(name = "payments-audit", profiles = ["local", "prod"],
             cache = provider("postgres",
                 connection_string = "postgres://payments@${PG_HOST}:5432/payments?password=${PG_PASSWORD}",
                 schema = "cluster", pool_max_size = 10)),
@@ -302,9 +388,21 @@ Core shapes (full definitions in implementation):
 - `Catalogue { gears: BTreeMap<GearId, GearDescriptor>, contracts, sources, diagnostics }`
 - `GearDescriptor { id, display_name, visibility, source, gdl_path, package: CargoRef,
   runtime_caps: BTreeSet<RuntimeCap>, colocated_deps: BTreeSet<GearId>, lifecycle, provides,
-  consumes, requires, serves, client_trait, cluster_providers, declared_roles, config_schema }`
-- `CargoRef { crate_name, lib_ident /* MANDATORY */, path, features, default_features, link }`
-  — `link` is the `use X as _;` idents, allowing nested plugin module paths.
+  consumes, requires, serves, client_trait, cluster_providers, declared_roles, config_schema }` —
+  the **merge** of two disjoint origins (ADR 0002), which the IR does not distinguish because by the
+  time a descriptor exists the distinction is spent:
+
+  | Origin | Fields |
+  |---|---|
+  | **projected** from Rust | `id`, `runtime_caps`, `colocated_deps`, `lifecycle`, `client_trait`, `cluster_providers` (primitives, names, capabilities), cluster profile names, and the contract identity/version/kind inside `provides`/`consumes`. From *Rust*, not only from an *attribute*: provider names come from a `PROVIDER_NAME` const and capabilities from a backend trait impl |
+  | **declared** in `gear.gdl` | `display_name`, `visibility`, `package`, `requires`, `serves`, `cluster_plugins` (crate locator plus `process_local`/`needs_credentials`), `declared_roles`, `config_schema`, and the product-level parts of `provides`/`consumes` (transports, rest base path, sdk, local ctor, `from_`, `critical`) |
+  | assigned by the loader | `source`, `gdl_path` |
+
+- `CargoRef { crate_name, lib_ident /* MANDATORY */, path, features, default_features, link, attr }`
+  — `link` is the `use X as _;` idents, allowing nested plugin module paths; `attr:
+  Option<RelPath>` narrows the attribute scan and is required only when a crate declares more than
+  one gear (`mini-chat` does — see §3.4.1). `RelPath` already rejects absolute paths, `..` and
+  backslashes, so it needs no extra confinement check.
 - `RuntimeCap { Db, Rest, RestHost, Stateful, System, GrpcHub, Grpc }` — closed.
 - `ContractKind { Api, Embedded, Backend, Extension }` with `provides()`, `requires()`,
   `remote_capable()` (= `Api | Backend`); `remote_capable == false` is the placement constraint.
@@ -364,7 +462,9 @@ its ID tuple; ties break lexicographically.
    Mechanism `ConsumesStatic` or `ConsumesDirectory` per profile discovery. Env-only wiring request
    → GBX0409 (`remap_gear_env_key` cannot express it).
 7. **Cluster matching** over exactly `{standalone, postgres}` + SDK CAS defaults. Table-driven from
-   `ClusterProviderDecl.capabilities`, cross-checked against Rust by `gearbox-verify`. Auto ranking:
+   `ClusterProviderDecl.capabilities`, which is itself projected from the `with_*_provider` calls by
+   `gearbox-verify` rather than declared and diffed (ADR 0002), so a provider added in Rust cannot
+   go missing from the table. Auto ranking:
    (a) `prefer.existing_infrastructure` favours a provider already bound for another primitive,
    (b) multi-process-capable first when >1 process or any replicas>1, (c) lexicographic. No
    candidate + cache bound ⇒ `SdkCasDefault` (GBX0504) — which is *always* the leader-election
@@ -380,8 +480,24 @@ its ID tuple; ties break lexicographically.
 render a partial graph. `gearbox-engine` refuses to *write* the lock or generate when any `Error`
 is present, unless `--allow-errors`.
 
-Diagnostic ranges: `GBX01xx` GDL, `GBX02xx` validate cross-check, `GBX03xx` topology,
+Diagnostic ranges: `GBX01xx` GDL, `GBX02xx` catalogue assembly, `GBX03xx` topology,
 `GBX04xx` binding, `GBX05xx` cluster, `GBX06xx` runtime gaps, `GBX07xx` generators.
+
+**ADR 0002 retires five of the nine `GBX02xx` codes** already declared in
+`crates/gearbox-ir/src/diagnostics.rs`, because the divergence they detect becomes unrepresentable:
+
+| Code | Fate |
+|---|---|
+| `GBX0201` name, `GBX0202` deps, `GBX0203` caps, `GBX0204` provides/cluster-providers, `GBX0205` consumes | **retired** — one authority each, so there is no second value to differ from |
+| `GBX0508` profile not implemented, `GBX0509` provider unprojectable, `GBX0510` backend ambiguous, `GBX0607` cluster not deployable | **added** — the cluster projection's own failure modes; see §3.4 |
+| `GBX0206` gear name is not kebab of its struct ident | **survives, and matters more** — a Rust-internal inconsistency the runtime only `warn!`s about, which silently breaks the `consumer_wiring` override key |
+| `GBX0207` contract suffix or trailing major disagrees | **survives, reframed** — now a Rust-internal check, trait-name suffix against `#[toolkit::contract(version)]` |
+| `GBX0208` gear crate has no `gear.gdl` | **survives unchanged** |
+| `GBX0209` declared lib ident does not match the crate | **survives** — `lib` is a declared fact, checked against `Cargo.toml`, not against an attribute |
+
+Two are added: `GBX0210` a description restates a projected fact, `GBX0211` the attribute scan found
+zero or several candidates. Retiring and adding codes is an M2 code change, not part of this
+documentation pass.
 
 ---
 
@@ -440,7 +556,7 @@ endpoint_source = "directory:gear-orchestrator/api-contracts"
 critical = false; selected = "explicit:remote/rest"
 
 [[cluster]]
-profile = "default"; primitive = "leader_election"
+profile = "payments-audit"; primitive = "leader_election"
 requesters = ["payments-audit"]; selected = "auto"
 resolved = { via = "sdk-cas-default", over_cache = "postgres" }
 diagnostics = ["GBX0504"]
@@ -643,9 +759,13 @@ filenames `gear.gdl`/`product.gdl`) + `grammars`. The TextMate grammar derives f
 with the GDL vocabulary as `support.function.gdl` and namespaces as `support.constant.gdl`; the
 **forbidden** keywords (`if`, `for`, `def`, `lambda`, `while`) are scoped `invalid.illegal.gdl` so
 they render red before the engine even reports GBX0103. `extension.ts` starts a `LanguageClient`
-against `gearbox rpc --stdio`. Completion is context-sensitive from the engine: inside
-`runtime_caps = [` the 7 caps; inside `provider(` only `standalone`/`postgres`; inside `from_ = "`
-catalogue gear ids; inside `colocated_deps = [` gear ids annotated with the closure size each pulls in.
+against `gearbox rpc --stdio`. Completion is context-sensitive from the engine, and only for fields
+GDL still owns — `runtime_caps`, `colocated_deps` and `cluster_providers` are projected now, so
+offering completions for them would invite the restatement the surface rejects. Inside `from_ = "`
+catalogue gear ids; inside `profile = "` the profiles the gear's crate actually implements (which is
+the join key, so completing it prevents a GBX0508 rather than reporting one); inside
+`capabilities = [` the capabilities the requirement's primitive admits; inside
+`cluster_plugin(backend = "` the backend impls found in that plugin crate.
 
 ---
 
@@ -698,7 +818,7 @@ workspace-member entries. Nothing else in that repo changes.
 | **M0** | **PRD** (§14) — short, `docs/PRD.md` | reviewed against `gears-rust/docs/checklists/PRD.md`; every FR/NFR has an ID and a p-tier; every acceptance criterion maps to a §12 step | — |
 | **M1** | Workspace + IR + lock | `cargo test -p gearbox-ir -p gearbox-lock` incl. a proptest asserting byte-stability over 1000 shuffled input orderings; `make ts && git diff --exit-code` | — |
 | **M2** | GDL evaluator | `gearbox catalogue --root ../gears-rust --format json \| jq '.gears \| length'` == 9; a fixture per GBX01xx code; dialect + blacklist + `load()` sandbox tests | M3 |
-| **M3** | `gearbox validate` | `gearbox validate --root ../gears-rust` → 0 errors; a negative fixture per GBX02xx (esp. 0206 kebab-struct-vs-name, 0204 cluster registry drift) | M2, M8a |
+| **M3** | `gearbox validate` | `gearbox validate --root ../gears-rust` → 0 errors; a negative fixture per surviving GBX02xx (esp. 0206 kebab-struct-vs-name, 0209 lib ident) plus the two new ones (0210 restatement, 0211 ambiguous attribute — `mini-chat` is the positive case) | M2, M8a |
 | **M4** | Resolver + explain + lock | all three profiles diff clean against `fixtures/*/product.lock`; every GBX03xx–06xx code reachable; determinism loop | M8a |
 | **M5** | Crate + config generators; **embedded runs** | acceptance §12 step 2 in full | — |
 | **M6** | Host-workers | new gear lands and passes its own test *by hand first*; then generated worker crate; host spawns worker; remote REST binding resolves via directory | M7 |
@@ -729,7 +849,27 @@ Prerequisites: `rustup toolchain install 1.97.0`; `brew install kubeconform kind
 `config/oop-example-master+follower.yaml` and curl the calculator route) before trusting any
 generated output.
 
-**Step 1 — validate.** `gearbox validate --root ../gears-rust` → 0 errors.
+**Step 1 — validate.** `gearbox validate --root ../gears-rust` → 0 errors. Then the projection
+checks ADR 0002 needs (all cheap, all offline):
+
+```bash
+# every projected field really came from Rust: strip the attributes' values from a
+# copy of the tree, re-run, and assert the catalogue changes rather than not noticing
+gearbox catalogue --root ../gears-rust --format json > /tmp/base.json
+
+# restatement is refused, once per projected field
+for f in id runtime_caps colocated_deps lifecycle client_trait; do
+  gearbox validate --root fixtures/negative/restate-$f 2>&1 | grep -q GBX0210 || echo "MISS $f"
+done
+
+# the attribute locator: mini-chat is the positive case (3 gears, 1 crate)
+gearbox catalogue --root ../gears-rust --format json   | jq -r '.gears | keys[] | select(startswith("static-mini-chat") or . == "mini-chat")' | sort   | diff - <(printf 'mini-chat\nstatic-mini-chat-audit-plugin\nstatic-mini-chat-model-policy-plugin\n')
+gearbox validate --root fixtures/negative/attr-ambiguous 2>&1 | grep -q GBX0211
+gearbox validate --root fixtures/negative/attr-missing   2>&1 | grep -q GBX0211
+```
+
+The load-bearing one is the `mini-chat` diff: it is the only case in the repository that proves the
+locator does real work rather than defaulting its way to a right answer.
 
 **Step 2 — embedded.** Resolve + generate + `cargo build --bin gbx-api-gateway`, then the oracles:
 ```bash
@@ -876,12 +1016,14 @@ Topology ← §7 generators and the three profiles. `product.lock`'s schema is t
 §6 of this plan graduates into DESIGN §3.1 rather than being restated.
 
 ADRs only where the rationale genuinely needs recording (the template warns against "everything is
-a decision"). The set worth writing, as `docs/ADR/NNNN-cpt-gearbox-adr-<slug>.md`:
+a decision"). The set worth writing, as `docs/ADR/NNNN-cpt-gearbox-adr-<slug>.md`. **0002 is the
+exception to "after the prototype runs"** — it decides what M2 builds, so it is written first and
+the numbering below is kept as reserved slots:
 
 | # | Slug | The dilemma |
 |---|---|---|
 | 0001 | `gdl-starlark-over-toml` | vision says Starlark; the repo-grounded predecessor says TOML + syn and calls Starlark "a language subsystem with no consumer". Record why the prototype chose Starlark *and* what would justify reverting. |
-| 0002 | `gear-gdl-single-source-of-truth` | GDL authoritative + `validate` cross-check, vs catalogue-parsed-from-Rust with GDL as overlay. Includes the three-confidence-level model that was rejected. |
+| 0002 | `macro-projected-catalogue` | **Written already**, ahead of M2 rather than at M9, because it constrains the GDL surface and the scanner before either exists — see `docs/ADR/0002-cpt-gearbox-adr-macro-projected-catalogue.md`. Records why the macro keeps every fact it already expresses, why GDL declares only the disjoint remainder, and the three rejected alternatives (GDL-authoritative-with-cross-check, GDL-generates-the-annotations, macro-only). Includes the three-confidence-level model that was rejected. |
 | 0003 | `colocation-is-a-closure-not-a-partition` | the `MissingDeps` finding, why `deps` edges are uncuttable, and why processes overlap. The most consequential correction to the vision. |
 | 0004 | `product-lock-canonical-serialization` | TOML + `blake3` over the body, `lock_hash` elided; why arrays-of-tables and BTreeMap iteration are load-bearing, not cosmetic. |
 | 0005 | `rpc-jsonrpc-stdio-lsp-framing` | stdio LSP framing vs local HTTP vs WASM; why one server backs both the Studio and the `.gdl` language client. |

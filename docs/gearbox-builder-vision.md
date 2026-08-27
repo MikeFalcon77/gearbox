@@ -48,7 +48,8 @@ The central product principle is:
 
 The central architecture principle is:
 
-> **`gear.gdl` is the single source of truth for Gear product metadata.  
+> **Rust attributes stay authoritative for every fact they already carry.  
+> `gear.gdl` declares the product metadata they cannot express, and restates nothing.  
 > Starlark is the authoring runtime.  
 > Rust IR is the model.  
 > The Rust resolver is the authority.  
@@ -274,9 +275,7 @@ The core engine does not depend on CLI, GUI, TUI, or AI.
 A major decision is to avoid spreading product metadata across:
 
 ```text
-gear.toml
 Cargo.toml metadata
-Rust macros
 YAML
 Starlark
 Helm values
@@ -284,17 +283,25 @@ Helm values
 
 That creates inevitable drift.
 
+Rust attribute macros are deliberately **not** in that list. `#[toolkit::gear]` is not a metadata
+format competing with the others: it is the mechanism that emits the gear's registration, its
+link-time dependency re-exports, and its compile-time capability assertions. It stays authoritative
+for every fact it already expresses, and Gearbox Builder *reads* those facts rather than restating
+them. See ADR `cpt-gearbox-adr-macro-projected-catalogue`.
+
 Instead:
 
-> **Every Gear has one authoritative `gear.gdl`.**
+> **Every Gear has one authoritative `gear.gdl`, and it does not restate what the attributes
+> already declare.**
 
-`gear.gdl` describes all Gear-level metadata relevant to product composition.
+`gear.gdl` describes the Gear-level metadata that has no home in Rust.
 
 Example:
 
 ```python
 gear(
-    id = "contracts-agreements",
+    # The stable id, runtime capabilities, co-location deps and lifecycle are
+    # read from #[toolkit::gear]. Restating any of them here is an error.
 
     name = "Contracts & Agreements",
 
@@ -311,21 +318,14 @@ gear(
 
     package = cargo(
         crate = "contracts-agreements",
+        lib = "contracts_agreements",
     ),
 )
 ```
 
-This replaces descriptive metadata currently represented in forms such as:
-
-```toml
-[gear]
-name = "Contracts & Agreements"
-description = "System of Record for signed commercial terms, negotiated prices, and commitments."
-category = "bss"
-is_plugin = false
-has_plugins = false
-has_extension_point = true
-```
+There is no `gear.toml` to migrate away from: `find . -name gear.toml` over `gears-rust` returns
+nothing. Descriptive metadata of that shape exists nowhere today, which is exactly what makes
+`gear.gdl` genuinely new information rather than a re-encoding of something already written down.
 
 ---
 
@@ -333,11 +333,16 @@ has_extension_point = true
 
 A Gear should have a stable machine identity distinct from its display name.
 
-Prefer:
+The stable identity already exists in Rust and is projected from there:
+
+```rust
+#[toolkit::gear(name = "contracts-agreements", ...)]
+```
+
+The display name is what `gear.gdl` adds:
 
 ```python
 gear(
-    id = "contracts-agreements",
     name = "Contracts & Agreements",
 )
 ```
@@ -347,6 +352,9 @@ not:
 ```text
 id = "Contracts & Agreements"
 ```
+
+Note the deliberate collision of vocabulary: the macro's `name` is the stable machine identity,
+while GDL's `name` is display text. GDL therefore never spells `id` at all — see §8.
 
 The stable ID is used by:
 
@@ -659,7 +667,7 @@ The exact GDL syntax is intentionally illustrative.
 
 # 16. Rust Still Defines Contract Contents
 
-Making `gear.gdl` authoritative for product metadata does **not** mean redefining Rust interfaces in GDL.
+Adding `gear.gdl` for product metadata does **not** mean redefining Rust interfaces in GDL.
 
 Rust remains the source of truth for the contract itself:
 
@@ -692,9 +700,9 @@ The GDL compiler/tooling should validate that referenced Rust contracts exist an
 
 ---
 
-# 17. GDL Can Replace Duplicate Rust Composition Annotations Over Time
+# 17. Composition Annotations Are Read, Not Duplicated
 
-If the same information is represented in both:
+If the same information were represented in both:
 
 ```rust
 #[toolkit::consumes(...)]
@@ -706,29 +714,33 @@ and:
 consumes = [...]
 ```
 
-then drift is inevitable.
-
-The preferred long-term direction is:
+then drift would be inevitable. The resolution is not to move the fact to GDL, but to keep it where
+it already is and read it:
 
 ```text
+#[toolkit::consumes(...)]
+   |
+   +--> projected into the product catalogue
+   +--> already emits the resolving client
+
 gear.gdl
    |
-   +--> product catalogue
-   +--> generated registration glue
-   +--> compile-time validation
+   +--> the product-level facts the annotation does not carry
+        (transport choice, criticality, cluster requirements)
 ```
 
-Rather than manually repeating the same product relationship in Rust.
+The annotation is not a duplicate of a GDL field; it is the thing that makes the remote path exist
+at all. `#[toolkit::consumes]` emits the resolving client, and `#[toolkit::gear(deps = ...)]` emits
+the re-exports that keep a co-located dependency linked. Neither can be replaced by a description
+file evaluated before `rustc` runs.
 
-Possible generated Rust glue:
+A useful consequence: the edit that makes a contract edge severable is the same edit that makes it
+work. Adding `#[toolkit::consumes]` to a gear both declares the edge to the resolver and generates
+the client it will need once the edge is cut.
 
-```rust
-register_consumer::<billing_sdk::BillingApiV1>("billing");
-```
-
-or a generated descriptor/registration table.
-
-Migration from current macros should be incremental and validated against the real repository before detailed design is finalized.
+**No Rust is generated into a gear crate.** Generated glue exists only in the composition crates
+Gearbox Builder owns end to end — a generated process crate's `main.rs` and `registered_gears.rs`.
+See ADR `cpt-gearbox-adr-macro-projected-catalogue`.
 
 ---
 
@@ -1010,7 +1022,7 @@ A production preset could potentially be used with multiple deployment profiles.
 
 # 26. Cluster Profile Is Also Different
 
-The cluster subsystem currently uses `ClusterProfile` to identify a logical scope such as:
+The cluster subsystem uses `ClusterProfile` to identify a logical scope such as:
 
 ```text
 event-broker
@@ -1028,6 +1040,45 @@ ClusterScope
 ```
 
 even if the runtime API keeps the existing name.
+
+## 26.1 It is a projected join key, not free text
+
+Per ADR `cpt-gearbox-adr-macro-projected-catalogue`, the profile name is **projected** from the
+consumer's own Rust:
+
+```rust
+struct EventBrokerProfile;                        // private
+impl ClusterProfile for EventBrokerProfile {
+    const NAME: &'static str = "event-broker";    // read literally
+}
+```
+
+Three properties of that shape drive the implementation, and all three are taken from the platform's
+only production instance rather than assumed:
+
+- **The name is read from `const NAME`, never derived from the marker's identifier.** Kebab-casing
+  `EventBrokerProfile` would give `event-broker-profile`, which is wrong.
+- **Visibility is irrelevant.** The marker is private, and it lives in a domain module rather than
+  beside the gear struct, so the whole crate `src/` is scanned.
+- **A `gear.gdl` requirement must name a profile the crate implements**, and `profile` has no
+  default. The SDK maps the name to `ClientScope::new("cluster:{name}")` and resolves whatever
+  backend is registered there, so a name nothing supplies is not a typo that degrades — it is a scope
+  nothing registered, failing at startup with `ProfileNotBound`. Mismatch is `GBX0508`.
+
+## 26.2 Requiring a cluster primitive pins the consumer's process
+
+Worth stating because nothing in `cluster.cache(...)` hints at it. The cluster gear registers its
+backends in the **process-local** `ClientHub` and exposes no remote surface — no `provides`, no
+rest/grpc contract, no binary target — and a consumer resolves them by a synchronous scoped lookup
+with no remote path and no fallback. A consumer must therefore be in the same process, which is
+exactly what `deps = [cluster]` expresses, and that edge is never severable by the resolver.
+
+`gears/system/cluster/docs/DESIGN-DEPLOYABLE-GEAR.md` proposes a separately deployable cluster gear,
+which would make the edge severable and move capability matching to runtime. It is explicitly
+`Status: Proposed — design only, no implementation`, it describes cluster as scaling by
+interchangeable replicas rather than as a singleton, and it leaves the "one cluster process per
+deployment" question undecided. Gearbox therefore models today's constraint and emits `GBX0607` as a
+hint pointing at that document, rather than anticipating a topology the runtime cannot yet serve.
 
 ---
 
@@ -2360,63 +2411,70 @@ GDL remains a thin frontend over typed Rust IR.
 
 ---
 
-# 75. Migration From Existing Metadata
+# 75. Adoption Alongside Existing Metadata
 
-Current repository metadata may exist in:
+Current repository metadata exists in:
 
 ```text
-gear.toml
 Rust macros
-#[gear(deps = ...)]
+#[toolkit::gear(name, deps, capabilities, client, ctor, lifecycle)]
 #[toolkit::consumes]
-#[toolkit::provides]
+#[toolkit::contract]
 Cargo features
 handwritten registration code
 ```
 
-The long-term goal is not to preserve all of those as equal metadata authorities.
+There is no `gear.toml`; that file does not exist in the repository.
 
-The migration target is:
+Adopting Gearbox Builder is **additive**. No attribute is migrated away from, rewritten, or
+deleted. The attributes keep every fact they already carry, and `gear.gdl` is added beside the crate
+carrying only the facts they do not:
 
 ```text
-gear.gdl
+#[toolkit::*]  --> projected  --+
+                                +--> one GearDescriptor
+gear.gdl       --> declared   --+
 ```
 
-for product metadata.
+What genuinely does get replaced is *handwritten registration code* — `registered_gears.rs` and the
+per-process `main.rs`, which are Gearbox-owned composition artefacts, not gear source. See ADR
+`cpt-gearbox-adr-macro-projected-catalogue`.
 
 ---
 
-# 76. Existing Rust Metadata Is Still Valuable for Migration
+# 76. Parsing Rust Source Is a Permanent Catalogue Input
 
-Earlier work explored parsing Rust source with `syn`.
+Earlier work explored parsing Rust source with `syn`, and an earlier draft of this document demoted
+that to a one-shot migration aid. **That is inverted.** Scanning the attributes is how the catalogue
+is built, on every load, not a bootstrap step:
 
-That idea remains useful, but its role changes.
+```text
+scan the gear crate's src/ tree
+read #[toolkit::gear], #[toolkit::contract], #[toolkit::consumes]
+project id, capabilities, co-location deps, lifecycle, contract identity
+merge with the declared fields from gear.gdl
+```
 
-Instead of becoming the permanent catalogue implementation, it can power:
+The consequences are accepted deliberately: catalogue assembly depends on parsing Rust
+successfully, and a parse failure is a hard error rather than a warning.
+
+What remains of migration tooling is much smaller — drafting the *declared* fields only:
 
 ```text
 cargo gears migrate-gdl
+   |
+   +--> propose name, description, category, package(lib=...)
+   +--> leave everything projectable alone
 ```
 
-Example:
-
-```text
-scan Rust source
-scan existing macros
-scan current gear.toml
-infer existing hard dependencies
-generate draft gear.gdl
-```
-
-The generated GDL is then reviewed and becomes authoritative.
-
-This reuses repository knowledge without locking the future architecture to source-code inference.
+The generated draft is then reviewed. It never contains a projected field, because a `gear.gdl`
+restating one is rejected.
 
 ---
 
-# 77. Compatibility During Migration
+# 77. Compatibility During Adoption
 
-A transitional system may classify components as:
+A transitional system might classify components by how much is known about them:
 
 ```text
 Native GDL
@@ -2424,50 +2482,61 @@ Legacy inspected
 Unknown legacy
 ```
 
-But these confidence levels should not become permanent product semantics.
+These confidence levels are **rejected**: they would become permanent product semantics, and a
+resolver that reasons over "how sure are we" is not explainable.
 
-The end state is:
+The end state is binary:
 
 ```text
 Gear participating in Gearbox Builder
     =>
-gear.gdl exists
+#[toolkit::gear] present (it always is -- that is what makes it a gear)
+    AND
+gear.gdl present
 ```
+
+A gear with attributes and no `gear.gdl` is simply not in the catalogue. That is a missing file with
+an obvious fix, not a degraded confidence tier.
 
 ---
 
-# 78. Existing `deps` Relationships Are Important Migration Data
+# 78. `deps` Relationships Are the Co-location Model
 
-Earlier repository analysis found extensive use of:
+Repository analysis found extensive use of:
 
 ```rust
-#[gear(deps = [...])]
+#[toolkit::gear(deps = [...])]
 ```
 
-These encode important co-location relationships.
-
-They should not simply be discarded.
-
-Migration tooling should translate or validate them against the new GDL hard-dependency model.
+These encode co-location relationships, and they are not migration input to be translated — they
+**are** the hard-dependency model, read directly. The attribute emits the hidden re-export that puts
+the dependency crate physically in the binary, and the registry treats a declared dependency that is
+absent as a hard failure, so these edges are never severable. Restating them in GDL would add a
+second copy of a fact whose authority is the linker.
 
 ---
 
-# 79. Existing `consumes` / `provides` Contracts Are Also Valuable
+# 79. `consumes` / `provides` Contracts Are Read the Same Way
 
-The repository already has contract macros and working examples.
-
-Those give the migration tooling and implementation prototypes real examples for:
+The repository already has contract macros and working examples. Contract identity, version,
+`provides` and `consumes` are projected from them:
 
 ```text
-contract identity
-contract version
-provides
-consumes
-transport projections
-local/remote runtime wiring
+contract identity      <-- #[toolkit::contract(gear, version)] + trait-name suffix
+contract version       <-- same
+provides / consumes    <-- #[toolkit::provides] / #[toolkit::consumes]
 ```
 
-The new GDL model should preserve the semantics already established in those ADRs and runtime mechanisms.
+What GDL adds on top are the product-level choices the annotations do not carry:
+
+```text
+transport projections      <-- which transports an edge may use
+local/remote runtime wiring <-- derived by the resolver from placement, never declared
+criticality
+```
+
+GDL preserves the semantics established in those ADRs and runtime mechanisms because it does not
+re-encode them.
 
 ---
 
@@ -2963,7 +3032,7 @@ kind
 
 ---
 
-# 107. Phase 6 — Migration Tooling
+# 107. Phase 6 — Adoption Tooling
 
 Add:
 
@@ -2971,16 +3040,16 @@ Add:
 cargo gears migrate-gdl
 ```
 
-to consume existing:
+to draft the **declared** half of a `gear.gdl` for a crate that has none:
 
 ```text
-gear.toml
-Rust macros
-deps
-contract annotations
+propose name, description, category
+propose package(crate, lib, path)
+leave every projected field out -- including it would be rejected
 ```
 
-and produce draft GDL.
+It reads the attributes only to find the gear and confirm the crate resolves, not to copy facts out
+of them. See §76.
 
 ---
 
@@ -3124,11 +3193,19 @@ product.lock pins exact product resolution
 
 # 118. Open Design Questions
 
-The detailed repository-aware design should answer:
+Questions 1-3 are **answered**, in ADR `cpt-gearbox-adr-macro-projected-catalogue`:
 
-1. What exact data belongs in `gear.gdl`?
-2. Which current Rust macros can be generated from GDL?
-3. Which must remain because they are compile-time language semantics?
+1. *What exact data belongs in `gear.gdl`?* — exactly the facts no Rust attribute carries: display
+   name, description, category, visibility, `package` (including the `lib` ident, which is
+   undeclared in Rust), cluster requirements, transport choices, endpoints, criticality.
+2. *Which current Rust macros can be generated from GDL?* — **none.** Gearbox Builder generates Rust
+   only into the composition crates it owns.
+3. *Which must remain because they are compile-time language semantics?* — **all of them.**
+   `#[toolkit::gear]` alone emits capability assertions, link-time dependency re-exports, the
+   registrator and `inventory::submit!`, the client trait code, and `impl Runnable`.
+
+The detailed repository-aware design should still answer:
+
 4. How should GDL validate Rust contract references?
 5. How should GDL modules/imports work?
 6. Should provider definitions live beside provider crates or in shared `providers.gdl`?
@@ -3309,7 +3386,8 @@ The proposed direction can be summarized as:
 
 > **Gearbox Builder is the product composition and resolution layer for Gears.**
 >
-> **`gear.gdl` is the single source of truth for Gear product metadata and composition semantics.**
+> **Rust attributes remain authoritative for what they already declare; `gear.gdl` adds the product
+> metadata and composition semantics they cannot express.**
 >
 > **`product.gdl` expresses product intent.**
 >
@@ -3372,7 +3450,9 @@ This vision intentionally combines:
 - existing build/run/generator work;
 - known-good mini-chat and OoP examples identified during earlier repository review;
 - the earlier `product.lock`, generated-process, Helm, and external-integrator ideas;
-- the newer decision to replace fragmented metadata with one authoritative `gear.gdl`;
+- the newer decision to give product metadata one home in `gear.gdl` while leaving every Rust
+  attribute authoritative for what it already declares
+  (ADR `cpt-gearbox-adr-macro-projected-catalogue`);
 - the newer decision to use Starlark as the GDL runtime;
 - the newer decision to expose MCP rather than embed an LLM chat.
 

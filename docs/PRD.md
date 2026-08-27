@@ -68,8 +68,10 @@ is a code-generation problem, and it is the one this system removes.
 | ResolvedProduct | The derived implementation: actual topology, bindings, transports, providers. Serialized as `product.lock`. |
 | DeploymentProfile | One of exactly `embedded`, `host-workers`, `kubernetes`. A Gearbox concept, not a runtime type. |
 | Preset | A preference overlay such as `dev` or `production`. Orthogonal to DeploymentProfile. Out of scope for this release. |
-| ClusterScope | A named cluster coordination scope (`ClusterProfile` in the runtime API). Neither a DeploymentProfile nor a preset. |
-| Co-location dependency | `#[toolkit::gear(deps = [...])]`. Link-time: the macro emits a hidden re-export, so the crate is physically in the binary. Never severable by the resolver. |
+| ClusterScope | A named cluster coordination scope (`ClusterProfile` in the runtime API). Neither a DeploymentProfile nor a preset. A join key, not free text: it must name a profile the requiring gear's own crate implements, because the runtime resolves it as `ClientScope::new("cluster:{name}")` and a name nothing registered fails only at startup. |
+| Projected fact | A catalogue fact read out of Rust rather than declared: gear id, runtime capabilities, co-location dependencies, lifecycle, client trait, contract identity/version/kind, provided and consumed contracts, registered cluster providers (their primitives, names and capabilities), and cluster profile names. A `gear.gdl` restating one is rejected. Read out of *Rust*, not only out of an *attribute*: a provider's name comes from a `PROVIDER_NAME` const and its capabilities from a backend trait impl. |
+| Declared fact | A catalogue fact with no Rust home, so it is written in `gear.gdl`: display name, description, category, visibility, `package` (including the `lib` ident), cluster requirements, transport choices, endpoints, criticality, where each cluster plugin crate lives, and whether a cluster backend is process-local or needs credentials. |
+| Co-location dependency | `#[toolkit::gear(deps = [...])]`. Link-time: the macro emits a hidden re-export, so the crate is physically in the binary. Never severable by the resolver. A projected fact. |
 | Contract consumption | `#[toolkit::consumes(...)]`. A named contract edge whose provider may be local or remote, and which may therefore cross a process boundary. |
 | Contract kind | `Api`, `Embedded`, `Backend`, or `Extension`, encoded in the trait-name suffix. `Api` and `Backend` are remote-capable; the others are in-process only. |
 | Cut edge | A contract consumption the resolver chose to place across a process boundary, making the binding remote. |
@@ -167,7 +169,9 @@ and [`gears-rust/docs/GEARS.md`](../../gears-rust/docs/GEARS.md). Gearbox Builde
 
 - GDL evaluation of `gear.gdl` and `product.gdl` into a typed Rust IR, restricted to constructs the
   `gears-rust` runtime actually implements.
-- Cross-checking each `gear.gdl` against the real Rust attributes of its crate.
+- Assembling each gear's descriptor by merging the facts projected from its crate's Rust attributes
+  with the facts declared in its `gear.gdl`, and rejecting a `gear.gdl` that restates a projected
+  fact (ADR `cpt-gearbox-adr-macro-projected-catalogue`).
 - A deterministic resolver covering dependency closure, process partitioning, local/remote binding
   derivation, transport selection, contract version and kind compatibility, cluster capability
   matching, and per-profile structural constraints.
@@ -187,7 +191,9 @@ and [`gears-rust/docs/GEARS.md`](../../gears-rust/docs/GEARS.md). Gearbox Builde
   (`cpt-gearbox-fr-diagnose-unsupported`).
 - Cluster providers beyond those registered in the runtime today.
 - SAT/SMT solving and preference scoring beyond deterministic ranking.
-- Migration tooling that generates draft GDL from existing Rust attributes.
+- Generating, modifying, or removing any attribute macro in any gear crate. Generated Rust exists
+  only in the composition crates Gearbox Builder owns end to end.
+- Migration tooling that drafts the declared half of a `gear.gdl`.
 - Mass migration of existing gears to declared contract edges.
 - Generated Ingress/Gateway resources, bundled database subcharts, ArgoCD ApplicationSets.
 - Continuous integration configuration.
@@ -236,19 +242,52 @@ clock, or deployment profile.
 - **Rationale**: Hermeticity is what makes repeated evaluation reproducible; it is also what makes
   it impossible for a description file to branch on resolution inputs.
 
-#### Gear metadata is authoritative and cross-checked
+#### Catalogue facts are projected from Rust attributes
 
-- [ ] `p1` - **ID**: `cpt-gearbox-fr-validate-crosscheck`
+- [ ] `p1` - **ID**: `cpt-gearbox-fr-catalogue-projection`
 
-The system **MUST** parse the Rust source of each declared gear crate and report a diagnostic when
-`gear.gdl` diverges from the real attributes, covering at minimum: gear name, co-location
-dependencies, runtime capabilities, provided and consumed contracts, contract kind and version,
-the registered cluster provider set, and the crate's library identifier.
+The system **MUST** derive the following from the Rust attributes of each gear crate, and **MUST
+NOT** accept any of them as GDL input: the gear id, its runtime capabilities, its co-location
+dependencies, its lifecycle, its client trait, the identity, version and kind of every contract it
+provides or consumes, and the cluster providers it registers.
 
-- **Rationale**: `gear.gdl` is the single source of truth for product metadata only if divergence
-  from the code is detected rather than tolerated.
+- **Rationale**: A fact copied into a second surface drifts whether or not a checker exists. These
+  facts are already load-bearing in Rust — the capability list drives compile-time assertions, the
+  dependency list emits the re-exports that keep a co-located gear linked — so the attribute is the
+  only authority that can be correct by construction.
 - **Actors**: `cpt-gearbox-actor-gear-author`, `cpt-gearbox-actor-platform-engineer`
-- **Verification Method**: A negative fixture per diagnostic code, plus a clean run over the slice.
+- **Verification Method**: The `--list-gears` and `--list-registered-gears` oracles on the example
+  server, compared against the projected catalogue for the slice.
+
+#### A description never restates a projected fact
+
+- [ ] `p1` - **ID**: `cpt-gearbox-fr-gdl-no-restatement`
+
+The system **MUST** reject a `gear.gdl` that declares any fact listed in
+`cpt-gearbox-fr-catalogue-projection`, naming both the offending field and the attribute that owns
+it.
+
+- **Rationale**: Without an active refusal the mirrored surface returns by accretion, one convenient
+  field at a time, and the projection decision decays back into a cross-check.
+- **Actors**: `cpt-gearbox-actor-gear-author`
+- **Verification Method**: One negative fixture per projected field.
+
+#### The gear attribute is located unambiguously
+
+- [ ] `p1` - **ID**: `cpt-gearbox-fr-attribute-location`
+
+The system **MUST** locate a gear's `#[toolkit::gear]` attribute by scanning its crate's `src/` tree,
+**MUST** accept an optional narrowing path on the description's `package` declaration that is
+confined to the crate root, and **MUST** report a diagnostic when the scanned path yields zero or
+more than one attribute, listing the candidates found.
+
+- **Rationale**: The attribute's location is not uniform — 34 of the 44 in `gears-rust` are at
+  `src/gear.rs`, 8 at `src/module.rs`, 2 nested deeper — so a fixed filename would be wrong for ten
+  crates. More importantly, one crate may declare several gears: `gears/mini-chat/mini-chat`
+  declares three. Projection is meaningless until exactly one attribute is identified.
+- **Actors**: `cpt-gearbox-actor-gear-author`
+- **Verification Method**: `mini-chat`'s three-gear crate as the positive fixture, plus a zero-match
+  and an ambiguous-match negative fixture.
 
 ### 5.2 Resolution (p1)
 
@@ -335,6 +374,25 @@ for a topology with more than one process or more than one replica.
 - **Rationale**: A process-local coordination backend in a multi-process product is a silent
   correctness failure — the runtime starts successfully and elects one leader per replica.
 - **Verification Method**: A negative fixture asserting both diagnostics fire together.
+
+#### A cluster requirement names a profile the gear implements
+
+- [ ] `p1` - **ID**: `cpt-gearbox-fr-cluster-profile-join`
+
+The system **MUST** treat a cluster requirement's `profile` as a join key against the requiring
+gear's own `impl ClusterProfile { const NAME }`, **MUST** read that name from the constant rather
+than deriving it from the marker type's identifier, **MUST NOT** supply a default profile, and
+**MUST** report an error naming the profiles the gear does implement when the requirement names one
+it does not.
+
+- **Rationale**: The runtime resolves the profile as `ClientScope::new("cluster:{name}")` and a name
+  nothing registered fails only at startup, with `ProfileNotBound`. A default would be silently
+  wrong for the platform's only production consumer, which binds `"event-broker"`; and deriving the
+  name from the marker's identifier would yield `event-broker-profile`, which is wrong for that same
+  consumer.
+- **Verification Method**: Fixtures reproducing that consumer's real shape — a private marker whose
+  `NAME` is not the kebab-case of its identifier — asserting the join succeeds, that renaming `NAME`
+  breaks it, and that omitting `profile` is refused rather than defaulted.
 
 #### Per-profile structural constraints are enforced
 
@@ -684,9 +742,12 @@ concrete remedy.
 - [ ] `p1` - **ID**: `cpt-gearbox-contract-gear-gdl`
 
 - **Direction**: required from the gear author
-- **Protocol/Format**: `gear.gdl` at the gear crate root
-- **Compatibility**: A gear participates in product composition if and only if this file exists and
-  agrees with the crate's Rust attributes.
+- **Protocol/Format**: `gear.gdl` beside the gear's `#[toolkit::gear]` attribute — at the crate root
+  for a single-gear crate, in the attribute's own directory for a gear nested inside one
+- **Compatibility**: A gear participates in product composition if and only if this file exists,
+  resolves to exactly one `#[toolkit::gear]`, and declares no projected fact. Agreement with the
+  attributes is not a criterion: the overlapping facts are read from the attributes, so there is
+  nothing left to agree about.
 
 #### Runtime configuration contract
 
@@ -716,7 +777,7 @@ concrete remedy.
 
 **Preconditions**:
 - A product description selects a custom gear and several platform gears.
-- Each selected gear has a valid, cross-checked description.
+- Each selected gear has a valid description that resolves to exactly one `#[toolkit::gear]`.
 
 **Main Flow**:
 1. The integrator resolves the product for `embedded` and generates artifacts.
@@ -818,9 +879,13 @@ Each criterion corresponds to a step of the acceptance procedure in
   first.*
 - A newly generated gear is born with declared contract edges, so the conservative default is needed
   only for pre-existing gears.
-- Contract version compatibility can be determined from source attributes alone, without package
-  metadata, and therefore keeps working for pinned-revision sources.
-- Parsing gear source from a fetched revision yields the same catalogue as parsing a working tree.
+- With projection, two former assumptions become hard dependencies of catalogue loading rather than
+  things that would merely be convenient:
+  - Contract version compatibility is determined from source attributes alone, without package
+    metadata, and therefore keeps working for pinned-revision sources.
+  - Parsing gear source from a fetched revision yields the same catalogue as parsing a working tree.
+
+  A `syn` parse failure is consequently a hard catalogue error, not a warning.
 - With only two cluster providers, validity checking is worth more than preference scoring.
   *Validate by counting how many real decisions have more than one valid candidate; fewer than three
   means scoring is not yet warranted.*
@@ -834,7 +899,8 @@ Each criterion corresponds to a step of the acceptance procedure in
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | Co-location closure swallows the product, so per-gear placement collapses to one process | The resolver is correct but useless; the central promise is undemonstrable | Choose a slice with at least one genuinely severable declared edge; report severable-if-declared pairs as an actionable list (`cpt-gearbox-fr-report-cuttable-if-declared`) |
-| The description language duplicates facts already in code and drifts from them | `gear.gdl` stops being trustworthy | Mandatory cross-check (`cpt-gearbox-fr-validate-crosscheck`); generate glue from the description over time rather than restating it |
+| The description language duplicates facts already in code and drifts from them | `gear.gdl` stops being trustworthy | Structurally prevented: overlapping facts are projected from the attributes, and a description restating one is rejected (`cpt-gearbox-fr-catalogue-projection`, `cpt-gearbox-fr-gdl-no-restatement`) |
+| Catalogue loading now depends on parsing Rust successfully, so a `syn` failure or an unlocatable attribute blocks resolution entirely | No catalogue, no product; the failure is total rather than degraded | Accepted deliberately (ADR `cpt-gearbox-adr-macro-projected-catalogue`); the attribute locator reports candidates and the exact narrowing line to add (`cpt-gearbox-fr-attribute-location`) |
 | Runtime semantics are narrower than the vision assumes | Generated products that cannot run | Ground every resolver rule in a cited runtime capability; refuse the rest with evidence (`cpt-gearbox-fr-diagnose-unsupported`) |
 | The cluster subsystem is not composed into any running product today | Integration friction concentrated in one milestone | The custom gear in the slice is deliberately its first consumer; budget a milestone-sized slip there |
 | GDL grows into a general-purpose language | Determinism and explainability lost | Small frozen host API, dialect lockdown, and a construct blacklist (`cpt-gearbox-fr-gdl-declarative`) |
