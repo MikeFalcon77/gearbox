@@ -98,7 +98,7 @@ dev-test: test
 # Bindings are generated from the Rust model so the client cannot drift from it
 # (cpt-gearbox-nfr-no-type-drift).
 ts:
-	$(CARGO) test -p gearbox-ir --test export_bindings
+	$(CARGO) test -p gearbox-rpc --test export_bindings
 
 # The anti-drift guard: regenerating must change nothing.
 ts-check: ts

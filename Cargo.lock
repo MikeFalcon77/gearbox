@@ -390,6 +390,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
+name = "crossbeam-channel"
+version = "0.5.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d85363c37faeca707aef026efa9f3b34d077bce547e48f770770625c6013679e"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-deque"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -703,6 +712,7 @@ dependencies = [
  "clap",
  "gearbox-engine",
  "gearbox-ir",
+ "gearbox-rpc",
  "serde_json",
 ]
 
@@ -771,6 +781,20 @@ dependencies = [
  "syn 2.0.119",
  "thiserror",
  "walkdir",
+]
+
+[[package]]
+name = "gearbox-rpc"
+version = "0.1.0"
+dependencies = [
+ "gearbox-engine",
+ "gearbox-ir",
+ "gearbox-rpc",
+ "lsp-server",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "ts-rs",
 ]
 
 [[package]]
@@ -1006,6 +1030,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "605d9697bcd5ef3a42d38efc51541aa3d6a4a25f7ab6d1ed0da5ac632a26b470"
 dependencies = [
  "logos-codegen",
+]
+
+[[package]]
+name = "lsp-server"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ee25a31f2e571e426eef2896179450cafc7e2f5be00d8a93b1c2d21c0ff7656"
+dependencies = [
+ "crossbeam-channel",
+ "log",
+ "serde",
+ "serde_derive",
+ "serde_json",
 ]
 
 [[package]]

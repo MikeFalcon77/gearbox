@@ -1,7 +1,12 @@
 //! Generates the TypeScript bindings the editor client consumes.
 //!
-//! Run by `cargo test --package gearbox-ir --test export_bindings`, which is what
-//! `make ts` invokes. The client must never hand-maintain a mirror of these
+//! Lives in `gearbox-rpc` rather than `gearbox-ir` because the bindings are the
+//! *client's view of the wire*, and the wire carries both: the model types and
+//! the RPC envelopes around them. `gearbox-rpc` sits above `gearbox-ir` and can
+//! see both, while the reverse would invert the layering.
+//!
+//! Run by `cargo test --package gearbox-rpc --test export_bindings`, which is
+//! what `make ts` invokes. The client must never hand-maintain a mirror of these
 //! types: a wire format transcribed by hand diverges, and diverges silently
 //! (`cpt-gearbox-nfr-no-type-drift`).
 //!
@@ -20,6 +25,10 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use gearbox_ir::{Catalogue, ExplanationGraph, PendingGear, ProductIntent, ResolvedProduct};
+use gearbox_rpc::protocol::{
+    CatalogueChanged, CatalogueLoadResult, InitializeParams, InitializeResult, LogParams,
+    ProgressParams,
+};
 use ts_rs::{Config, TS};
 
 /// Where the editor client expects to find them.
@@ -39,6 +48,15 @@ fn export_roots(cfg: &Config) {
     // `cpt-gearbox-adr-staged-catalogue-loading`), so the type has to be named
     // here or the client would receive `pending` with nothing to type it as.
     PendingGear::export_all(cfg).expect("export PendingGear");
+
+    // The RPC envelopes. A client that hand-wrote these would drift from the
+    // server exactly as silently as one that hand-wrote the model types.
+    InitializeParams::export_all(cfg).expect("export InitializeParams");
+    InitializeResult::export_all(cfg).expect("export InitializeResult");
+    CatalogueLoadResult::export_all(cfg).expect("export CatalogueLoadResult");
+    CatalogueChanged::export_all(cfg).expect("export CatalogueChanged");
+    ProgressParams::export_all(cfg).expect("export ProgressParams");
+    LogParams::export_all(cfg).expect("export LogParams");
 }
 
 fn generated_files(dir: &Path) -> Vec<PathBuf> {

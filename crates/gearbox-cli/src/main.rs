@@ -44,6 +44,21 @@ enum Command {
         format: Format,
     },
 
+    /// Serve JSON-RPC over stdio, for the Studio and the `.gdl` language client.
+    ///
+    /// **Nothing but JSON-RPC goes to stdout while this runs.** Logs go to
+    /// stderr and to `gearbox/log` notifications.
+    Rpc {
+        /// Required for symmetry with LSP servers, which are all started this
+        /// way; there is no other transport, so it carries no choice.
+        #[arg(long)]
+        stdio: bool,
+
+        /// A source root to scan, used when `initialize` names none. Repeatable.
+        #[arg(long, value_name = "DIR")]
+        root: Vec<PathBuf>,
+    },
+
     /// Show plugin extension points and the implementations available for them.
     ///
     /// Without `--product`, lists what a gear *could* use. With `--product`,
@@ -105,6 +120,13 @@ fn run() -> anyhow::Result<ExitCode> {
             format,
         } => catalogue(&root, source_id.as_deref(), format),
         Command::Product { file, format } => product(&file, format),
+        Command::Rpc { stdio, root } => {
+            if !stdio {
+                anyhow::bail!("only `--stdio` is supported");
+            }
+            gearbox_rpc::serve_stdio(&root)?;
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Plugins {
             root,
             gear,

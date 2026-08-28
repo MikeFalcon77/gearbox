@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "name": "gearbox-ide",
+  "engines": { "node": ">=20 <21" },
+  "devDependencies": {
+    "vscode-jsonrpc": "8.2.0"
+  },
+  "scripts": {
+    "smoke": "node scripts/rpc-smoke.mjs"
+  }
+}

@@ -64,6 +64,15 @@ pub enum LoadEvent<'a> {
     /// One description was evaluated. Its declared facts are now known.
     Declared(&'a PendingGear),
 
+    /// Every description has been evaluated; parsing is about to begin.
+    ///
+    /// The boundary between the two passes, and a real one rather than a
+    /// convenience: it is the moment a registry view has its whole shape and
+    /// none of its badges. A consumer that needs to answer "the tree is ready"
+    /// would otherwise have to infer it from the first `Projected`, which does
+    /// not arrive at all when every gear fails to project.
+    DeclarationComplete { declared: usize },
+
     /// One gear finished projection and entered the catalogue.
     Projected(&'a GearDescriptor),
 }
@@ -190,6 +199,14 @@ pub fn load_catalogue_staged(
         if stopped {
             break;
         }
+    }
+
+    if !stopped
+        && on_event(LoadEvent::DeclarationComplete {
+            declared: declared.len(),
+        }) == Continue::Stop
+    {
+        stopped = true;
     }
 
     // ---- S2..S4: project and merge -----------------------------------------

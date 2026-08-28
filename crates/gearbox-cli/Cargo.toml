@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 gearbox-engine.workspace = true
+gearbox-rpc.workspace = true
 gearbox-ir.workspace = true
 anyhow.workspace = true
 clap.workspace = true

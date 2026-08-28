@@ -45,6 +45,7 @@ macro_rules! require {
 enum Seen {
     Discovered(usize),
     Declared(String),
+    DeclarationComplete(usize),
     Projected(String),
 }
 
@@ -54,6 +55,7 @@ fn record(root: &SourceRoot) -> (Vec<Seen>, gearbox_engine::CatalogueScan) {
         seen.push(match event {
             LoadEvent::Discovered { total } => Seen::Discovered(total),
             LoadEvent::Declared(p) => Seen::Declared(p.gdl_path.as_str().to_owned()),
+            LoadEvent::DeclarationComplete { declared } => Seen::DeclarationComplete(declared),
             LoadEvent::Projected(g) => Seen::Projected(g.id.as_str().to_owned()),
         });
         Continue::Yes
@@ -106,6 +108,37 @@ fn every_description_is_declared_before_any_crate_is_parsed() {
         seen.iter()
             .filter(|e| matches!(e, Seen::Declared(_)))
             .count()
+    );
+}
+
+#[test]
+fn the_boundary_between_the_passes_is_announced_exactly_once() {
+    // What the RPC layer responds on: the moment the tree has its whole shape
+    // and none of its badges. Inferring it from the first `Projected` would fail
+    // when nothing projects at all.
+    let (seen, _) = record(&require!());
+
+    let boundary = seen
+        .iter()
+        .position(|e| matches!(e, Seen::DeclarationComplete(_)))
+        .expect("the boundary is announced");
+    assert_eq!(
+        seen.iter()
+            .filter(|e| matches!(e, Seen::DeclarationComplete(_)))
+            .count(),
+        1
+    );
+
+    let declared = seen[..boundary]
+        .iter()
+        .filter(|e| matches!(e, Seen::Declared(_)))
+        .count();
+    assert!(matches!(seen[boundary], Seen::DeclarationComplete(n) if n == declared));
+    assert!(
+        seen[boundary + 1..]
+            .iter()
+            .all(|e| matches!(e, Seen::Projected(_))),
+        "only projections follow the boundary"
     );
 }
 

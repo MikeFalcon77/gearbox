@@ -61,6 +61,7 @@ gearbox-gdl = { path = "crates/gearbox-gdl" }
 gearbox-engine = { path = "crates/gearbox-engine" }
 gearbox-project = { path = "crates/gearbox-project" }
 gearbox-cli = { path = "crates/gearbox-cli" }
+gearbox-rpc = { path = "crates/gearbox-rpc" }
 
 # GDL host. Exact pins: starlark is pre-1.0 and 0.14 broke hard from 0.13.
 starlark = "=0.14.2"
