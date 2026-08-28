@@ -227,17 +227,18 @@ try {
     keyboardSelected ?? "the focused row never became selected",
   );
 
-  // What is *not* built yet has to be visible. The notice is driven by the
-  // engine's own `capabilities.resolve`, so it disappears on its own when M4
-  // lands rather than needing this text to be remembered and deleted.
+  // The notice is driven by the engine's own `capabilities.resolve`, which is
+  // why it needed no edit when M4 landed -- it disappeared on its own. That is
+  // the property worth asserting: not that the text is right, but that it is
+  // gone, and gone for the right reason.
   const gap = await page.evaluate(() => {
     const el = document.querySelector(".gbx-gap");
     return el ? el.textContent.replace(/\s+/g, " ").trim() : null;
   });
   check(
-    "the missing resolver is stated, not hidden",
-    gap !== null && /resolver/i.test(gap) && /resolve: false/.test(gap),
-    gap ?? "no .gbx-gap notice",
+    "the resolver notice is gone now that the engine can resolve",
+    gap === null,
+    gap ?? "absent",
   );
 
   // --- the graph ----------------------------------------------------------

@@ -8,6 +8,9 @@
 import type { CatalogueChanged } from "./generated/CatalogueChanged";
 import type { CatalogueDiagnostics } from "./generated/CatalogueDiagnostics";
 import type { CatalogueLoadResult } from "./generated/CatalogueLoadResult";
+import type { ProductLoadResult } from "./generated/ProductLoadResult";
+import type { ResolveResult } from "./generated/ResolveResult";
+import type { ValidateResult } from "./generated/ValidateResult";
 import type { Diagnostic } from "./generated/Diagnostic";
 import type { FailedRoot } from "./generated/FailedRoot";
 import type { GearDescriptor } from "./generated/GearDescriptor";
@@ -47,6 +50,22 @@ export interface GearboxService {
    * callback.
    */
   loadCatalogue(): Promise<CatalogueLoadResult>;
+
+  /** Evaluate a `product.gdl`. Evaluation only; nothing is joined against the
+   * catalogue. */
+  loadProduct(path: string): Promise<ProductLoadResult>;
+
+  /**
+   * Resolve a product for one profile.
+   *
+   * `profile` omitted uses the product's own default, so the answer still comes
+   * from the description rather than from a guess made in the client.
+   */
+  resolve(path: string, profile?: string): Promise<ResolveResult>;
+
+  /** Everything checkable without resolving. `product` omitted checks only the
+   * catalogue. */
+  validate(product?: string): Promise<ValidateResult>;
 
   dispose(): void;
   setClient(client: GearboxClient | undefined): void;

@@ -27,7 +27,8 @@ use std::path::{Path, PathBuf};
 use gearbox_ir::{Catalogue, ExplanationGraph, PendingGear, ProductIntent, ResolvedProduct};
 use gearbox_rpc::protocol::{
     CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, InitializeParams,
-    InitializeResult, LogParams, ProgressParams,
+    InitializeResult, LogParams, ProductLoadParams, ProductLoadResult, ProgressParams,
+    ResolveParams, ResolveResult, ValidateParams, ValidateResult,
 };
 use ts_rs::{Config, TS};
 
@@ -58,6 +59,12 @@ fn export_roots(cfg: &Config) {
     CatalogueChanged::export_all(cfg).expect("export CatalogueChanged");
     ProgressParams::export_all(cfg).expect("export ProgressParams");
     LogParams::export_all(cfg).expect("export LogParams");
+    ProductLoadParams::export_all(cfg).expect("export ProductLoadParams");
+    ProductLoadResult::export_all(cfg).expect("export ProductLoadResult");
+    ResolveParams::export_all(cfg).expect("export ResolveParams");
+    ResolveResult::export_all(cfg).expect("export ResolveResult");
+    ValidateParams::export_all(cfg).expect("export ValidateParams");
+    ValidateResult::export_all(cfg).expect("export ValidateResult");
 }
 
 fn generated_files(dir: &Path) -> Vec<PathBuf> {

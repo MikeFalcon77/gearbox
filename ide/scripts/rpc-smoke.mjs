@@ -71,8 +71,12 @@ try {
   check(init.server_info?.name === "gearbox", "initialize returns serverInfo");
   check(init.capabilities?.staged_catalogue === true, "staged loading is advertised");
   check(
-    init.capabilities?.resolve === false,
-    "resolve is advertised as absent rather than pretended",
+    init.capabilities?.resolve === true,
+    "resolve is advertised now that M4 landed",
+  );
+  check(
+    init.capabilities?.generate === false,
+    "generate is still advertised as absent rather than pretended",
   );
   connection.sendNotification("initialized", {});
 
@@ -131,6 +135,43 @@ try {
     "every replaced key is a pending key",
   );
   check(logs.length > 0, "the engine logged its scan cost over gearbox/log");
+
+  // --- what M4 computes, over the wire ---------------------------------------
+  // The CLI already proves the engine resolves. What this proves is that the
+  // envelopes carry it: a client reading these types gets three distinct
+  // topologies from one description without knowing anything about profiles.
+  const product = resolve(repo, "products/payments-demo/product.gdl");
+
+  const loadedProduct = await connection.sendRequest("gearbox/product/load", { path: product });
+  check(loadedProduct.intent.id === "payments-demo", "product/load returns the intent");
+
+  const hashes = new Set();
+  for (const profile of [null, "local", "prod"]) {
+    const resolved = await connection.sendRequest("gearbox/product/resolve", {
+      path: product,
+      profile,
+    });
+    hashes.add(resolved.product.product.lock_hash);
+    check(
+      resolved.explanation.edges.length > 0,
+      `resolve ${profile ?? "(default)"} carries its explanation`,
+    );
+  }
+  check(hashes.size === 3, "one description, three profiles, three distinct locks");
+
+  const validated = await connection.sendRequest("gearbox/validate", { product });
+  check(validated.errors === 0, "the real product validates clean over the wire");
+
+  // A refusal has to say *why*. The engine had these diagnostics and was
+  // dropping them with the failed result, which left a client with "could not be
+  // evaluated" and nothing to act on.
+  let refusedWithReason = false;
+  try {
+    await connection.sendRequest("gearbox/product/load", { path: "/definitely/absent.gdl" });
+  } catch (e) {
+    refusedWithReason = e.code === -32053 && (e.data?.diagnostics ?? []).length > 0;
+  }
+  check(refusedWithReason, "a refused product load carries its diagnostics in `data`");
 
   await connection.sendRequest("shutdown");
   connection.sendNotification("exit");

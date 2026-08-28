@@ -18,13 +18,15 @@ pub mod protocol;
 use std::path::PathBuf;
 
 use gearbox_engine::{Continue, LoadEvent, SourceRoot, load_catalogue_staged};
+use gearbox_ir::ProfileId;
 use gearbox_ir::SourceId;
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
 
 use crate::protocol::{
     Capabilities, CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, FailedRoot,
-    InitializeParams, InitializeResult, LogParams, ProgressParams, ResolvedRoot, ServerInfo,
-    error_code, method,
+    InitializeParams, InitializeResult, LogParams, ProductLoadParams, ProductLoadResult,
+    ProgressParams, ResolveParams, ResolveResult, ResolvedRoot, ServerInfo, ValidateParams,
+    ValidateResult, error_code, method,
 };
 
 /// Why the server could not run.
@@ -39,6 +41,15 @@ pub enum ServeError {
 /// Everything the server knows between requests.
 struct State {
     roots: Vec<SourceRoot>,
+    /// The catalogue from the last load.
+    ///
+    /// Cached because resolving re-reads nothing else: a load parses every gear
+    /// crate in the tree, and doing that again per resolve would make the
+    /// Resolve button cost a second on a slice and ten on a real registry.
+    /// Invalidated only by an explicit `gearbox/catalogue/load`, which is the
+    /// same contract the CLI has -- there is no file watch yet, and pretending
+    /// otherwise would be worse than saying so.
+    catalogue: Option<gearbox_ir::Catalogue>,
     /// The roots that could not be opened, kept so the client can be told which
     /// and why rather than being handed a shorter list.
     failed_roots: Vec<FailedRoot>,
@@ -58,6 +69,7 @@ pub fn serve_stdio(default_roots: &[PathBuf]) -> Result<(), ServeError> {
     let (roots, failed_roots) = open_roots(default_roots);
     let mut state = State {
         roots,
+        catalogue: None,
         failed_roots,
         initialized: false,
     };
@@ -176,6 +188,27 @@ fn dispatch(connection: &Connection, state: &mut State, request: Request) -> Opt
             }
             catalogue_load(connection, state, id)
         }
+        method::PRODUCT_LOAD => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<ProductLoadParams>(request) {
+                Ok((id, params)) => product_load(id, &params),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
+        method::PRODUCT_RESOLVE => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<ResolveParams>(request) {
+                Ok((id, params)) => resolve(state, id, &params),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
+        method::VALIDATE => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<ValidateParams>(request) {
+                Ok((id, params)) => validate(state, id, &params),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
         other => Some(error(
             id,
             lsp_server::ErrorCode::MethodNotFound as i32,
@@ -203,9 +236,10 @@ fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Re
             capabilities: Capabilities {
                 catalogue: true,
                 staged_catalogue: true,
-                // Honest rather than aspirational: the client disables these
-                // panels instead of rendering an empty one that looks broken.
-                resolve: false,
+                // M4 landed, so this is now true and the client's "needs the
+                // resolver" notice disappears on its own -- which is what the
+                // capability was for. `generate` stays false until M5.
+                resolve: true,
                 generate: false,
             },
             // `SourceRoot::root` is already canonicalized, which is what makes
@@ -221,6 +255,158 @@ fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Re
             failed_roots: state.failed_roots.clone(),
         },
     )
+}
+
+/// Refuse a request that cannot be served yet, or `None` to go ahead.
+///
+/// Factored out because all three of the new methods need the same two guards
+/// and a copy each would be three places for them to drift apart.
+fn require_ready(state: &State, id: &RequestId) -> Option<Response> {
+    if !state.initialized {
+        return Some(error(
+            id.clone(),
+            error_code::NOT_INITIALIZED,
+            "`initialize` must come first",
+        ));
+    }
+    if state.roots.is_empty() {
+        return Some(error(
+            id.clone(),
+            error_code::WORKSPACE_NOT_OPEN,
+            "no source root is open; pass `roots` to `initialize` or `--root` to the CLI",
+        ));
+    }
+    None
+}
+
+/// Evaluate a `product.gdl`.
+fn product_load(id: RequestId, params: &ProductLoadParams) -> Response {
+    let path = PathBuf::from(&params.path);
+    let scan = gearbox_engine::product::load_product(&path, None);
+    match scan.intent {
+        Some(intent) => ok(
+            id,
+            &ProductLoadResult {
+                intent,
+                diagnostics: scan.diagnostics.as_slice().to_vec(),
+            },
+        ),
+        // No intent means the file is not a product at all, so there is nothing
+        // partial to hand back -- unlike a resolution, which is useful even when
+        // it reports errors.
+        None => error_with_diagnostics(
+            id,
+            error_code::PRODUCT_LOAD_FAILED,
+            &format!("`{}` could not be evaluated", params.path),
+            scan.diagnostics.as_slice(),
+        ),
+    }
+}
+
+/// Resolve a product for one profile.
+fn resolve(state: &mut State, id: RequestId, params: &ResolveParams) -> Response {
+    let path = PathBuf::from(&params.path);
+    let scan = gearbox_engine::product::load_product(&path, None);
+    let mut diagnostics = scan.diagnostics.as_slice().to_vec();
+    let Some(intent) = scan.intent else {
+        return error_with_diagnostics(
+            id,
+            error_code::PRODUCT_LOAD_FAILED,
+            &format!("`{}` could not be evaluated", params.path),
+            &diagnostics,
+        );
+    };
+
+    let profile = match params.profile.as_deref() {
+        Some(named) => match ProfileId::new(named) {
+            Ok(profile) => profile,
+            Err(e) => {
+                return error(
+                    id,
+                    error_code::RESOLVE_FAILED,
+                    &format!("`{named}` is not a valid profile id: {e}"),
+                );
+            }
+        },
+        None => intent.default_profile.clone(),
+    };
+
+    // Built before the catalogue borrow, not after: `catalogue_for` needs
+    // `&mut state` to fill the cache, and the sources read `state.roots`.
+    let sources = state
+        .roots
+        .iter()
+        .map(|root| (root.id.clone(), root.to_resolved()))
+        .collect();
+    let catalogue = catalogue_for(state);
+    let resolution = gearbox_engine::resolve::resolve_at(catalogue, &intent, &profile, Some(&path));
+    let product =
+        gearbox_engine::resolve::product::assemble(catalogue, &intent, &resolution, sources);
+    let explanation = gearbox_engine::resolve::product::explain(&resolution);
+
+    // The product's own diagnostics are already inside it; the ones added here
+    // are the description's, which resolution never sees.
+    diagnostics.extend(resolution.diagnostics.as_slice().iter().cloned());
+    ok(
+        id,
+        &ResolveResult {
+            product: Some(product),
+            explanation: Some(explanation),
+            diagnostics,
+        },
+    )
+}
+
+/// Everything checkable without resolving.
+fn validate(state: &mut State, id: RequestId, params: &ValidateParams) -> Response {
+    let mut diagnostics = Vec::new();
+    let intent = params.product.as_deref().and_then(|path| {
+        let scan = gearbox_engine::product::load_product(&PathBuf::from(path), None);
+        diagnostics.extend(scan.diagnostics.as_slice().iter().cloned());
+        scan.intent
+    });
+
+    let product_path = params.product.as_deref().map(PathBuf::from);
+    let report = gearbox_engine::validate::validate_at(
+        &state.roots,
+        intent.as_ref(),
+        product_path.as_deref(),
+    );
+    diagnostics.extend(report.diagnostics.as_slice().iter().cloned());
+
+    let count = |error: bool| {
+        u32::try_from(
+            diagnostics
+                .iter()
+                .filter(|d| d.severity.is_error() == error)
+                .count(),
+        )
+        .unwrap_or(u32::MAX)
+    };
+    // Counted before the move, so the struct can be built in declaration order.
+    let errors = count(true);
+    let warnings = u32::try_from(
+        diagnostics
+            .iter()
+            .filter(|d| d.severity == gearbox_ir::Severity::Warning)
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
+    ok(
+        id,
+        &ValidateResult {
+            diagnostics,
+            errors,
+            warnings,
+        },
+    )
+}
+
+/// The catalogue, loaded once and reused.
+fn catalogue_for(state: &mut State) -> &gearbox_ir::Catalogue {
+    state
+        .catalogue
+        .get_or_insert_with(|| gearbox_engine::load_catalogue(&state.roots).catalogue)
 }
 
 /// Run a staged load, answering at the boundary and streaming the rest.
@@ -417,6 +603,30 @@ fn error(id: RequestId, code: i32, message: &str) -> Response {
             code,
             message: message.to_owned(),
             data: None,
+        }),
+    }
+}
+
+/// An error that carries the diagnostics explaining it.
+///
+/// A refusal whose message is "could not be evaluated" tells a client that
+/// something is wrong and nothing about what. The diagnostics are the answer,
+/// and they exist -- they were just being dropped on the floor with the failed
+/// result. Serialization failure falls back to the plain error rather than
+/// losing the refusal itself.
+fn error_with_diagnostics(
+    id: RequestId,
+    code: i32,
+    message: &str,
+    diagnostics: &[gearbox_ir::Diagnostic],
+) -> Response {
+    let data = serde_json::json!({ "diagnostics": diagnostics });
+    Response {
+        id,
+        response_result: Err(lsp_server::ResponseError {
+            code,
+            message: message.to_owned(),
+            data: Some(data),
         }),
     }
 }

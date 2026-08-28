@@ -9,7 +9,9 @@
 //! here is resolved *relative to it*, which silently doubles the path. The IR
 //! types carry no such attribute for the same reason.
 
-use gearbox_ir::{Diagnostic, GearDescriptor, PendingGear};
+use gearbox_ir::{
+    Diagnostic, ExplanationGraph, GearDescriptor, PendingGear, ProductIntent, ResolvedProduct,
+};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -18,6 +20,9 @@ pub mod method {
     pub const INITIALIZE: &str = "initialize";
     pub const SHUTDOWN: &str = "shutdown";
     pub const CATALOGUE_LOAD: &str = "gearbox/catalogue/load";
+    pub const PRODUCT_LOAD: &str = "gearbox/product/load";
+    pub const PRODUCT_RESOLVE: &str = "gearbox/product/resolve";
+    pub const VALIDATE: &str = "gearbox/validate";
 
     pub const INITIALIZED: &str = "initialized";
     pub const EXIT: &str = "exit";
@@ -39,6 +44,19 @@ pub mod error_code {
     pub const NOT_INITIALIZED: i32 = -32050;
     pub const WORKSPACE_NOT_OPEN: i32 = -32051;
     pub const LOAD_FAILED: i32 = -32052;
+    /// The product description could not be evaluated.
+    ///
+    /// Distinct from [`RESOLVE_FAILED`]: this one means the file is not a
+    /// product at all, so there is nothing to resolve and no partial answer to
+    /// return.
+    pub const PRODUCT_LOAD_FAILED: i32 = -32053;
+    /// Resolution ran and could not produce a lock.
+    ///
+    /// Reserved for the case where no `ResolvedProduct` exists at all. A product
+    /// that resolves *with errors* is not this: it comes back normally, with its
+    /// diagnostics, because a partial graph plus three errors is more useful
+    /// than one error and nothing to look at.
+    pub const RESOLVE_FAILED: i32 = -32054;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -122,6 +140,71 @@ pub struct Capabilities {
     pub staged_catalogue: bool,
     pub resolve: bool,
     pub generate: bool,
+}
+
+/// `gearbox/product/load` -- evaluate a `product.gdl` and return what it says.
+///
+/// Evaluation only. Whether the gears it names exist is
+/// `gearbox/validate`'s question, and what topology they produce is
+/// `gearbox/product/resolve`'s.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ProductLoadParams {
+    /// Absolute path to the description. Absolute because the server's working
+    /// directory is not the client's, and a relative path here has produced a
+    /// `file://` URI that renders as a link and opens nothing.
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ProductLoadResult {
+    pub intent: ProductIntent,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// `gearbox/product/resolve` -- one profile's topology.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ResolveParams {
+    pub path: String,
+    /// Which deployment profile. `None` uses the product's own default, so the
+    /// common call is short and the answer still comes from the description
+    /// rather than from a guess made here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+}
+
+/// The resolved product, plus everything said while producing it.
+///
+/// `product` is `None` only when the description did not evaluate. A product
+/// that resolved *with errors* is present: the UI renders a partial graph and
+/// the diagnostics beside it, which is the whole reason errors do not abort
+/// resolution.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ResolveResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub product: Option<ResolvedProduct>,
+    /// The explanation graph for this resolution, so "why" needs no second call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explanation: Option<ExplanationGraph>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// `gearbox/validate` -- everything checkable without resolving.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ValidateParams {
+    /// Also check a product's gear selections. Without it, only the catalogue
+    /// is validated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub product: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ValidateResult {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<Diagnostic>,
+    pub errors: u32,
+    pub warnings: u32,
 }
 
 /// The response to `gearbox/catalogue/load`.

@@ -17,6 +17,9 @@ import type { CatalogueDiagnostics } from "../common/generated/CatalogueDiagnost
 import type { CatalogueLoadResult } from "../common/generated/CatalogueLoadResult";
 import type { InitializeResult } from "../common/generated/InitializeResult";
 import type { LogParams } from "../common/generated/LogParams";
+import type { ProductLoadResult } from "../common/generated/ProductLoadResult";
+import type { ResolveResult } from "../common/generated/ResolveResult";
+import type { ValidateResult } from "../common/generated/ValidateResult";
 import type { ProgressParams } from "../common/generated/ProgressParams";
 import { GearboxClient, GearboxService, method } from "../common/protocol";
 import { EngineHandle, spawnEngine } from "./gearbox-engine-process";
@@ -137,6 +140,32 @@ export class GearboxServiceImpl implements GearboxService {
       throw new Error("the engine is not running; reload the catalogue to start it");
     }
     return engine.request<CatalogueLoadResult>(method.CATALOGUE_LOAD, {}, LOAD_TIMEOUT_MS);
+  }
+
+  async loadProduct(path: string): Promise<ProductLoadResult> {
+    return this.request("gearbox/product/load", { path });
+  }
+
+  async resolve(path: string, profile?: string): Promise<ResolveResult> {
+    return this.request("gearbox/product/resolve", { path, profile });
+  }
+
+  async validate(product?: string): Promise<ValidateResult> {
+    return this.request("gearbox/validate", { product });
+  }
+
+  /**
+   * One place that refuses when the engine is not up.
+   *
+   * Without it each method would either repeat the guard or let
+   * `this.engine!` throw a `TypeError` the client cannot act on.
+   */
+  private async request<T>(method: string, params: unknown): Promise<T> {
+    const engine = this.engine;
+    if (!engine) {
+      throw new Error(`cannot call ${method}: the engine is not initialized`);
+    }
+    return engine.connection.sendRequest<T>(method, params);
   }
 
   dispose(): void {
