@@ -327,3 +327,110 @@ pub fn pin(intent: &mut ProductIntent, name: &str, anchor: &str, replicas: u32) 
         profiles: BTreeSet::new(),
     });
 }
+
+// ---------------------------------------------------------- cluster fixtures
+//
+// The provider table below is the **real** one, projected from the cluster
+// gear's `with_*_provider` calls in `gears-rust`. Copied verbatim rather than
+// invented, because a fixture that agrees with itself proves nothing about the
+// platform — and the awkward parts of it (standalone is process-local, neither
+// provider registers leader election) are exactly what the rules are for.
+
+use gearbox_ir::{CapabilityId, ClusterPrimitive, ClusterProviderDecl};
+
+pub fn cap(id: &str) -> CapabilityId {
+    CapabilityId::new(id).unwrap()
+}
+
+/// `postgres`: cache and lock, linearizable, not process-local, needs credentials.
+pub fn postgres() -> ClusterProviderDecl {
+    ClusterProviderDecl {
+        name: "postgres".to_owned(),
+        primitives: [ClusterPrimitive::Cache, ClusterPrimitive::Lock]
+            .into_iter()
+            .collect(),
+        capabilities: [
+            (
+                ClusterPrimitive::Cache,
+                [cap("cluster.cache.linearizable")].into_iter().collect(),
+            ),
+            (
+                ClusterPrimitive::Lock,
+                [cap("cluster.lock.linearizable")].into_iter().collect(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+        process_local: false,
+        needs_credentials: true,
+    }
+}
+
+/// `standalone`: cache only, adds prefix-watch, process-local, no credentials.
+pub fn standalone() -> ClusterProviderDecl {
+    ClusterProviderDecl {
+        name: "standalone".to_owned(),
+        primitives: [ClusterPrimitive::Cache].into_iter().collect(),
+        capabilities: [(
+            ClusterPrimitive::Cache,
+            [
+                cap("cluster.cache.linearizable"),
+                cap("cluster.cache.prefix-watch"),
+            ]
+            .into_iter()
+            .collect(),
+        )]
+        .into_iter()
+        .collect(),
+        process_local: true,
+        needs_credentials: false,
+    }
+}
+
+/// A catalogue with the cluster gear and one gear requiring primitives.
+pub fn cluster_catalogue(requires: Vec<(ClusterPrimitive, &str, &[&str])>) -> Catalogue {
+    let mut catalogue = Catalogue::default();
+
+    let mut cluster = descriptor("cluster");
+    cluster.cluster_providers = vec![postgres(), standalone()];
+    catalogue.gears.insert(gid("cluster"), cluster);
+
+    let mut app = descriptor("app");
+    app.colocated_deps = [gid("cluster")].into_iter().collect();
+    app.requires = requires
+        .into_iter()
+        .enumerate()
+        .map(|(n, (primitive, scope, caps))| Requirement {
+            id: RequirementId::new(format!("app#cluster.{}[{n}]", primitive.slug())).unwrap(),
+            requester: gid("app"),
+            kind: RequirementKind::Cluster {
+                primitive,
+                scope: scope.to_owned(),
+            },
+            capabilities: caps.iter().map(|c| cap(c)).collect(),
+            critical: true,
+        })
+        .collect();
+    catalogue.gears.insert(gid("app"), app);
+    catalogue
+}
+
+/// Bind a provider for one primitive of a scope.
+pub fn bind_cluster(
+    intent: &mut ProductIntent,
+    scope: &str,
+    cache: &str,
+    secret_ref: Option<&str>,
+) {
+    intent.cluster_scopes.push(gearbox_ir::ClusterScopeIntent {
+        scope: scope.to_owned(),
+        cache: gearbox_ir::ProviderBinding {
+            provider: cache.to_owned(),
+            options: BTreeMap::new(),
+            secret_ref: secret_ref.map(ToOwned::to_owned),
+        },
+        leader_election: None,
+        lock: None,
+        profiles: BTreeSet::new(),
+    });
+}

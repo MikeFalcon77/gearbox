@@ -12,6 +12,7 @@
 
 pub mod bindings;
 pub mod closure;
+pub mod cluster;
 pub mod cuts;
 pub mod partition;
 pub mod profile;
@@ -52,6 +53,8 @@ pub struct Resolution {
     pub partition: partition::Partition,
     /// How each severable edge is actually established.
     pub bindings: Vec<gearbox_ir::ResolvedBinding>,
+    /// Which backend answers each cluster primitive.
+    pub cluster: Vec<gearbox_ir::ResolvedClusterBinding>,
     pub diagnostics: Diagnostics,
 }
 
@@ -121,6 +124,18 @@ pub fn resolve(catalogue: &Catalogue, intent: &ProductIntent, profile: &ProfileI
         derived
     });
 
+    // Steps 7 and 8 -- cluster primitives, and the replication they imply.
+    let cluster = cluster::resolve(
+        catalogue,
+        &closure,
+        &partition,
+        &scoped,
+        &intent.preferences,
+        &uri,
+        &mut diagnostics,
+    );
+    cluster::report_stateful_replicas(catalogue, &partition, &cluster, &uri, &mut diagnostics);
+
     diagnostics.finish();
     Resolution {
         profile: profile.clone(),
@@ -128,6 +143,7 @@ pub fn resolve(catalogue: &Catalogue, intent: &ProductIntent, profile: &ProfileI
         cuts,
         partition,
         bindings,
+        cluster,
         diagnostics,
     }
 }
