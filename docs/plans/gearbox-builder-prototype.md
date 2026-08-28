@@ -657,7 +657,16 @@ Every generator returns a `FileSet` of `FileEntry { path, bytes, kind, ownership
 `gearbox-engine::apply_generate` is the only writer: `Generated` → overwrite; `GeneratedOnce` →
 write if absent; `OperatorOwned` → 3-way merge against a base cached in `.gearbox/<product>/.base/`
 using `similar`, conflict → GBX0701 and leave the file untouched. Output root
-`.gearbox/<product>/<profile>/`. **Nothing is ever written into `gears-rust`.**
+`.gearbox/<product>/<profile>/`. **Composition output is never written into `gears-rust`.**
+
+**Scaffolding a new gear or plugin reuses this writer and adds no vocabulary.** A new crate consists
+entirely of absent files, so every file it writes is `GeneratedOnce` — which is why it can write into
+a gear source root without violating ADR `cpt-gearbox-adr-macro-projected-catalogue`: the attribute
+is written once, at creation, and the tool never returns to it. The single exception is one appended
+`[workspace] members` entry, idempotent by content, which is the only case in the whole surface where
+Gearbox modifies a file it did not create. ADR `cpt-gearbox-adr-authoring-ownership-tiers` records
+the boundary and the survey behind it; PRD `cpt-gearbox-fr-scaffold-ownership` states it as a
+requirement.
 
 | Output | Mechanism | Golden reference |
 |---|---|---|
@@ -777,17 +786,26 @@ ide/
   theia-version.txt       # ONE pinned exact @theia/* version
   gearbox-studio/         # native Theia extension: views + engine supervision
     src/common/{protocol.ts, generated/}      # ts-rs output, checked in
-    src/browser/{gearbox-studio-frontend-module.ts, gearbox-service.ts,
-                 catalogue/, product/, graph/, explain/, lock/, generate/,
+    src/browser/{gearbox-studio-frontend-module.ts, catalogue-store.ts, reveal-service.ts,
+                 catalogue/, detail/, product/, graph/, explain/, lock/, generate/,
+                 gdl/                         # .gdl language, contributed natively
+                 theia/                       # one file per overridden Theia class
                  diagnostics/gearbox-marker-contribution.ts,
-                 commands.ts, menus.ts, keybindings.ts, preferences.ts}
+                 contribution.ts, commands.ts, menus.ts, keybindings.ts, preferences.ts}
     src/node/{gearbox-studio-backend-module.ts, gearbox-engine-process.ts,
               gearbox-service-impl.ts}
-  gdl-language/           # VS Code extension for the .gdl language
-    {src/extension.ts, syntaxes/gdl.tmLanguage.json, language-configuration.json}
   browser-app/            # @theia/cli: theia build / theia start
   electron-app/           # + @theia/electron, electron-builder
+  scripts/{rpc-smoke.mjs, ui-smoke.mjs}
 ```
+
+Two departures from the original sketch, both recorded in ADR
+`cpt-gearbox-adr-domain-specific-ide-shell`. There is **no `gdl-language/` VS Code extension**: the
+grammar is contributed natively from `src/browser/gdl/`, because the VSIX route needs
+`@theia/plugin-ext` and the whole plugin host to colour one file type. And there is a
+**`src/browser/theia/`** directory that mirrors Theia's own package layout, one file per overridden
+class — the arrangement Arduino IDE uses, which puts an override at the path of the thing it
+overrides.
 
 **Package manager: npm workspaces.** No yarn is installed, and pnpm's non-hoisted `node_modules`
 breaks Theia's plugin host and `@theia/cli` asset copying. `save-exact=true`.
@@ -814,11 +832,16 @@ per frontend connection, one engine per workspace root) and `BackendApplicationC
 | Widget | Shows |
 |---|---|
 | Catalogue | tree by `category` → gear; badges for `runtime_caps`, chips for `colocated_deps`, provides/consumes counts. Click reveals the `gear.gdl` at its declaring range. Checkbox produces a *proposed* `use_gear(...)` diff, never an auto-edit. **Renders incrementally** (§2.3): the grouping is available at S1 because `category` is declared, while the badges arrive at S2 because `runtime_caps` and `colocated_deps` are projected — so the tree's shape settles first and fills in. Rows are keyed by `gdl_path`, not `id`, because the id does not exist until S2. A `pending` row renders dimmed, and **clicking it still reveals its `gear.gdl`** — that path is known from S0, so a pending row is never inert. |
+| Gear detail | everything projected for the selected gear: capabilities, co-location, extension points with the vendor the host selects on, what the gear fills and under which vendor, contracts with the transports **this provider wires up**, GTS types, and clickable PRD/DESIGN/ADR links. In the bottom area, not the side panel — the side panel clipped exactly the facts it exists to show. Keyed by `gdl_path` like the tree, so a selection made while a row is pending survives projection. |
 | Product | profile dropdown; selected gears + a "pulled in by co-location" sublist; bindings table (`consumer → contract → provider` with mode/transport/mechanism chips); cluster table showing `selected` vs `resolved`; diagnostics summary bar. |
 | Graph | four views. **deps** (solid = co-location), **contracts** (dashed = cuttable, solid = forced local, red = undeclared-hub-edge), **processes** (boxes with gear chips, overlapping gears drawn in *every* box — this is what makes closure-not-partition visible), **cluster** (requirement → capability → provider, unsatisfied in red). Layout: `elkjs` `layered` with a fixed seed → deterministic, so screenshots and "why did this move" are stable. Rendered as hand-written React SVG. |
 | Explain | `gearbox/product/explain` for the current selection: `narrative: string[]` as an ordered list, each step linking to its `origin`, plus the subgraph inline. Every `DowngradedBy` edge renders "you asked X → you got Y → because GBXnnnn" with a link to the evidence `file:line`. |
 | Lock | read-only Monaco view of canonical `product.lock`, diff toggle vs disk, `lock_hash` badge that goes stale-yellow when resolve ≠ disk. |
 | Generate | `FilePlan[]` as a directory tree with create/update/unchanged/conflict icons, per-file Monaco diff preview, ownership badge, Apply disabled unless `allowWrites` and no Errors and no conflicts. |
+
+The Catalogue and Gear-detail widgets belong to the **Catalogue** perspective; Product, Explain, Lock
+and Generate to the **Product** perspective. Graph belongs to both — the `deps` and `contracts` views
+answer a catalogue question, `processes` and `cluster` a product one.
 
 **Engine supervision** (`src/node/gearbox-engine-process.ts`): one engine per workspace root;
 `child_process.spawn(enginePath, ['rpc','--stdio','--root',root,…])`;
@@ -839,14 +862,49 @@ anchor to `product.gdl` at 0:0 with the evidence in `relatedInformation`. `data.
 quick-fix-shaped code action where the remedy is mechanical (add a `#[toolkit::consumes]` line, add
 a gear to `colocated_deps`, switch a cluster provider).
 
-**`.gdl` language** ships as the bundled VS Code extension (the officially supported path),
-declared in `browser-app/package.json` via `theiaPlugins`. Contributes `languages` (`.gdl`,
-filenames `gear.gdl`/`product.gdl`) + `grammars`. The TextMate grammar derives from Starlark/Python
-with the GDL vocabulary as `support.function.gdl` and namespaces as `support.constant.gdl`; the
-**forbidden** keywords (`if`, `for`, `def`, `lambda`, `while`) are scoped `invalid.illegal.gdl` so
-they render red before the engine even reports GBX0103. `extension.ts` starts a `LanguageClient`
-against `gearbox rpc --stdio`. Completion is context-sensitive from the engine, and only for fields
-GDL still owns — `runtime_caps`, `colocated_deps` and `cluster_providers` are projected now, so
+**Narrowing the shell** (ADR `cpt-gearbox-adr-domain-specific-ide-shell`). Two levers, in order.
+First the dependency set: a menu that no package contributes cannot appear, which is why `Selection`
+and `Go` are removable by dropping nothing more than the packages that own them — except that both
+are owned by packages the editor needs, which is exactly why the second lever exists. Second,
+override what remains: `super.registerMenus()` then `unregisterMenuAction(id, path)` for an entry,
+removal by node id for a whole top-level menu, `initializeLayout(): NOOP` to hide a view without
+losing the command that opens it, and `rebind(TheiaX).to(MyX)` — **every one carrying a comment
+saying why**, because a suppression without a reason is indistinguishable from an accident later.
+`FilterContribution` exists in 1.75 and is held in reserve: it removes a contribution class
+wholesale and cannot strip a single menu item.
+
+Two things come first, before any individual view. A `Contribution` base class implementing the five
+contribution interfaces with the common services pre-injected, plus a one-line `configure` binder, so
+a feature costs a file rather than six lines of shared boilerplate. And a toolbar: a plain widget in
+the shell's `top` area, populated from `TabBarToolbarRegistry` with `isVisible` scoping each item to
+its widget, which requires overriding the method that hides the top panel.
+
+**Kept visible on purpose**, diverging from Arduino IDE, which hides more: the editor, Explorer,
+Terminal and Git. The workflow ends in generated crates a person will want to build, inspect and
+diff, and `.gearbox/<product>/` is a directory like any other.
+
+**Two perspectives**, Catalogue and Product, switched from the toolbar. Arduino has one object of
+work and offers no guidance; here neither the gear registry nor the product subordinates the other.
+
+**`.gdl` language** is contributed **natively** — `LanguageGrammarDefinitionContribution` plus
+`TextmateRegistry` from `@theia/monaco`, in `src/browser/gdl/` — not as a bundled VS Code extension.
+The VSIX route would require `@theia/plugin-ext` and the whole plugin host to colour one file type in
+an application whose users do not install extensions. Note that `--plugins=local-dir:../plugins`,
+which `browser-app` still passes, currently does nothing: the package is absent and the backend's
+argument parser is not strict, so the flag is accepted and ignored.
+
+The grammar's regex craft is hand-written; its vocabulary is **generated from the same globals the
+interpreter evaluates against** (`crates/gearbox-gdl/tests/export_grammar.rs` →
+`src/browser/gdl/generated/vocabulary.ts`), with `make grammar-check` failing the build on drift
+exactly as `make ts-check` does for the wire types. A grammar is a second place where the language is
+written down, and this is what stops the two disagreeing. Two traps worth stating: a grammar needs
+both `monaco.languages.register({ id })` and `mapLanguageIdToTextmateGrammar`, and with only the
+second there is no highlighting and no error; and the forbidden-keyword set is **14 tokens**
+(`crates/gearbox-gdl/src/declarative.rs`), not the five this plan once named — `while` is not among
+them, because it is refused at parse as `GdlParse` rather than as GBX0103.
+
+Completion is deferred with the rest of the LSP surface, and its rule is already fixed: only for
+fields GDL still owns. `runtime_caps`, `colocated_deps` and `cluster_providers` are projected, so
 offering completions for them would invite the restatement the surface rejects. Inside `from_ = "`
 catalogue gear ids; inside `profile = "` the profiles the gear's crate actually implements (which is
 the join key, so completing it prevents a GBX0508 rather than reporting one); inside
@@ -1190,9 +1248,11 @@ Topology ← §7 generators and the three profiles. `product.lock`'s schema is t
 §6 of this plan graduates into DESIGN §3.1 rather than being restated.
 
 ADRs only where the rationale genuinely needs recording (the template warns against "everything is
-a decision"). The set worth writing, as `docs/ADR/NNNN-cpt-gearbox-adr-<slug>.md`. **0002 and 0009 are the
-exceptions to "after the prototype runs"** — 0002 decides what M2 builds and 0009 what M8 builds, so
-both are written first; the rest of the numbering below is kept as reserved slots:
+a decision"). The set worth writing, as `docs/ADR/NNNN-cpt-gearbox-adr-<slug>.md`.
+**0002, 0009, 0010 and 0011 are the exceptions to "after the prototype runs"** — each decides what a
+later milestone builds, so each is
+written before it: 0002 what M2 builds, 0009 what M8 builds, 0010 what M5's writer is allowed to
+touch, and 0011 what the Studio becomes. The remaining numbering below is kept as reserved slots:
 
 | # | Slug | The dilemma |
 |---|---|---|
@@ -1205,6 +1265,8 @@ both are written first; the rest of the numbering below is kept as reserved slot
 | 0007 | `k8s-static-endpoint-resolution` | no K8s-DNS `EndpointResolver` exists; ConfigMap-pinned `consumer_wiring` + GBX0603 vs waiting for a runtime feature vs faking it. |
 | 0008 | `unsupported-is-a-diagnostic-not-an-omission` | roles/shards/providers/profiles are parsed and then explicitly refused with cited evidence, rather than being absent from the grammar. |
 | 0009 | `staged-catalogue-loading` | **Written already**, because it constrains the RPC surface and the Catalogue widget before either exists. Five stages with measured costs; why "not yet computed" is a separate `pending` list rather than tri-state fields or a `stage` on the gear; and why the projected `GearId` makes staging a requirement rather than an improvement — see `docs/ADR/0009-cpt-gearbox-adr-staged-catalogue-loading.md`. |
+| 0010 | `authoring-ownership-tiers` | **Written already**, because it decides what M5's writer is permitted to do and what PRD §4.2 says, both of which precede the code. Six ownership tiers surveyed across Cargo, Kubebuilder, Angular, Rails, dotnet, Yeoman, Copier, Gazelle and Arduino IDE; why creating a new crate leaves the single-authorship invariant intact while editing an existing attribute would destroy it; and why marker-based injection is not needed here — see `docs/ADR/0010-cpt-gearbox-adr-authoring-ownership-tiers.md`. |
+| 0011 | `domain-specific-ide-shell` | **Written already**, because it constrains the Studio's shape before the reshaping starts. Why Theia is narrowed by dependency set *and* by rebinding rather than by either alone; the mechanism table against 1.75, where Arduino IDE's is 1.57; why `.gdl` highlighting is contributed natively rather than as a VSIX; and the two perspectives — see `docs/ADR/0011-cpt-gearbox-adr-domain-specific-ide-shell.md`. |
 
 Each ADR's Traceability section links back to the `cpt-gearbox-fr-*`/`-nfr-*` IDs from M0 and the
 `-design-*` elements from M9, and each Confirmation section names the test that enforces it (e.g.

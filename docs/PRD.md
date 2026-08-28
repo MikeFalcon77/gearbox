@@ -93,9 +93,13 @@ is a code-generation problem, and it is the one this system removes.
 **ID**: `cpt-gearbox-actor-gear-author`
 
 - **Role**: Writes and maintains a gear crate and its `gear.gdl`. Owns the facts about what the gear
-  provides, consumes, requires, and can be co-located with.
+  provides, consumes, requires, and can be co-located with. Also writes plugin crates that fill
+  another gear's extension point.
 - **Needs**: To declare those facts once, in one place, and be told immediately when the declaration
-  and the code disagree.
+  and the code disagree. To start a new gear or plugin from a working skeleton rather than by
+  copying a neighbour and editing it, since the two fields that cannot be derived by eye — the
+  package name and the library identifier — are exactly the ones a copy gets wrong. To do this in
+  whichever repository the gear belongs in, without a fork of the platform monorepo.
 
 #### Integrator
 
@@ -184,6 +188,9 @@ and [`gears-rust/docs/GEARS.md`](../../gears-rust/docs/GEARS.md). Gearbox Builde
 - An explanation graph and a diagnostic set with actionable remediation text and cited evidence.
 - A JSON-RPC engine API over stdio, and a `gearbox` CLI.
 - An Eclipse Theia application (Gearbox Studio) as a client of that API.
+- Scaffolding a **new** gear or plugin crate from a template, into a directory that does not yet
+  exist, together with the one workspace-manifest entry that makes it a member
+  (ADR `cpt-gearbox-adr-authoring-ownership-tiers`).
 - All three deployment profiles for a defined vertical slice of real gears plus one new custom gear.
 
 ### 4.2 Out of Scope
@@ -194,9 +201,14 @@ and [`gears-rust/docs/GEARS.md`](../../gears-rust/docs/GEARS.md). Gearbox Builde
   (`cpt-gearbox-fr-diagnose-unsupported`).
 - Cluster providers beyond those registered in the runtime today.
 - SAT/SMT solving and preference scoring beyond deterministic ranking.
-- Generating, modifying, or removing any attribute macro in any gear crate. Generated Rust exists
-  only in the composition crates Gearbox Builder owns end to end.
-- Migration tooling that drafts the declared half of a `gear.gdl`.
+- Modifying or removing any attribute macro in a gear crate that already exists, and editing any
+  Rust a human wrote. The boundary is creation versus modification, not file type: a new crate may
+  be written in full, an existing `.rs` file may not be touched at all
+  (ADR `cpt-gearbox-adr-authoring-ownership-tiers`).
+- Injecting generated content at markers inside human-owned files. Not needed here, because a gear
+  is discovered by walking for its `gear.gdl` rather than by being listed in a registry, so there is
+  no file to inject into.
+- Migration tooling that drafts the declared half of a `gear.gdl` for a gear that already exists.
 - Mass migration of existing gears to declared contract edges.
 - Generated Ingress/Gateway resources, bundled database subcharts, ArgoCD ApplicationSets.
 - Continuous integration configuration.
@@ -636,6 +648,52 @@ the file left untouched.
 - **Rationale**: Regeneration that destroys environment-specific values is regeneration nobody runs
   twice.
 
+#### A new gear or plugin is scaffolded from a template
+
+- [ ] `p2` - **ID**: `cpt-gearbox-fr-scaffold-gear`
+
+The system **MUST** create a new gear or plugin crate — its `Cargo.toml`, its `gear.gdl`, and the
+Rust skeleton carrying the `#[toolkit::gear]` attribute — into a directory that does not exist, and
+**MUST** refuse rather than overwrite when any target file is already present. For a plugin the
+skeleton **MUST** additionally carry the host's plugin trait implementation and a configuration type
+declaring the `vendor` the host selects on.
+
+- **Rationale**: The two fields the description cannot derive — the package name and the library
+  identifier — are exactly the ones a hand-copied neighbour gets wrong; `cf-api-contracts` links as
+  `cf_api_contracts`, not as `api_contracts`. A template does not make that mistake.
+- **Actors**: `cpt-gearbox-actor-gear-author`
+- **Verification Method**: The generated crate resolves to exactly one `#[toolkit::gear]` and passes
+  `gearbox validate` with zero diagnostics, including `cpt-gearbox-fr-catalogue-projection`'s own
+  manifest check.
+
+#### Scaffolding writes only what it owns, and does so atomically
+
+- [ ] `p2` - **ID**: `cpt-gearbox-fr-scaffold-ownership`
+
+The system **MUST NOT** modify any file a human authored. The single permitted edit to an existing
+file is appending one member entry to the workspace manifest, which **MUST** be idempotent by
+content. All writes for one scaffold **MUST** be committed together or not at all, and the plan of
+files to be written **MUST** be available for review before any write occurs.
+
+- **Rationale**: A half-written crate that is registered in the workspace but does not compile is
+  worse than a refusal. The single-authorship invariant survives because the tool writes each fact
+  once, at creation, and never returns to it
+  (ADR `cpt-gearbox-adr-authoring-ownership-tiers`).
+- **Actors**: `cpt-gearbox-actor-gear-author`
+- **Verification Method**: A failure injected at each write leaves no trace; running the same
+  scaffold twice produces no second manifest entry and no diff.
+
+#### The lock is presented as owned by the tool
+
+- [ ] `p2` - **ID**: `cpt-gearbox-fr-lock-read-only`
+
+The system **MUST** present `product.lock` as read-only in the editor, in addition to the generated
+header it already carries.
+
+- **Rationale**: A header asks; a read-only editor tells. An edit to the lock is silently discarded
+  by the next resolve, which is the failure mode worth preventing rather than detecting.
+- **Actors**: `cpt-gearbox-actor-integrator`, `cpt-gearbox-actor-theia-studio`
+
 ### 5.4 Interfaces and clients (p2)
 
 #### The engine is reachable over a typed RPC API
@@ -970,6 +1028,61 @@ process-local coordination backend with several replicas, or a required capabili
 
 **Postconditions**: The invalid product never reaches a cluster.
 
+#### Start a new gear from a skeleton that already validates
+
+- [ ] `p2` - **ID**: `cpt-gearbox-usecase-author-gear`
+
+**Actor**: `cpt-gearbox-actor-gear-author`
+
+**Preconditions**:
+- A source root is open, and the target directory does not exist.
+- The author knows the gear's name and which category it belongs to.
+
+**Main Flow**:
+1. The author asks for a new gear, naming it and choosing where it lives — the platform repository
+   or another source the product already declares.
+2. The system shows the files it will write and the one workspace-manifest line it will append.
+3. The author accepts, and the crate appears: a manifest whose package name and library identifier
+   agree with each other, a description that declares only what the attribute cannot, and a Rust
+   skeleton carrying the attribute.
+4. The author runs validation and sees zero diagnostics before writing any domain logic.
+5. The gear appears in the catalogue on the next load, with its capabilities and dependencies read
+   from the attribute the skeleton wrote.
+
+**Postconditions**:
+- A gear exists that compiles, validates and is visible to the catalogue.
+- No file the author previously wrote was modified.
+
+**Alternative Flows**:
+- **The directory already exists**: nothing is written and the system says which path is occupied.
+- **Writing fails partway**: nothing is written at all, including the manifest entry.
+
+#### Start a plugin for an existing extension point
+
+- [ ] `p2` - **ID**: `cpt-gearbox-usecase-author-plugin`
+
+**Actor**: `cpt-gearbox-actor-gear-author`
+
+**Preconditions**: A host gear in the catalogue declares an extension point, and its SDK crate is
+locatable from the host's description.
+
+**Main Flow**:
+1. The author picks the extension point to fill from the host gear shown in the catalogue.
+2. The system scaffolds a plugin crate whose skeleton implements that point's trait, depends on the
+   host's SDK, co-locates with the host, and declares a `vendor` in its configuration type.
+3. The author accepts, validates, and sees the new plugin listed under the host's extension point
+   alongside the existing implementations.
+4. The author compares the plugin's default `vendor` against the host's selector before writing any
+   logic, because the two are read from different crates and a mismatch is silent at runtime.
+
+**Postconditions**:
+- A plugin exists that the host can select, and the catalogue shows which point it fills.
+- The host gear's own source was not modified.
+
+**Alternative Flows**:
+- **The extension point cannot be located**: the host's SDK is named but declares no plugin trait;
+  nothing is written and the system reports which crate it looked in.
+
 ## 9. Acceptance Criteria
 
 Each criterion corresponds to a step of the acceptance procedure in
@@ -1063,13 +1176,20 @@ Each criterion corresponds to a step of the acceptance procedure in
   whose behaviour they model?
 - Does the deployment profile eventually become a runtime type, or does it stay a
   composition-time-only concept?
-- Which gear templates does an integrator need, given that a template is the only place declared
-  contract edges appear without manual work?
+- Which gear templates does an integrator need, beyond the gear and plugin skeletons of
+  `cpt-gearbox-fr-scaffold-gear`? Whether the tool *may* write them is decided
+  (ADR `cpt-gearbox-adr-authoring-ownership-tiers`); what a useful template *contains* is not, and a
+  template carrying declared contract edges is the only place those appear without manual work.
 
 ## 14. Traceability
 
 - **Design**: [DESIGN.md](./DESIGN.md) — written after the prototype, per
   [plans/gearbox-builder-prototype.md](./plans/gearbox-builder-prototype.md) §14
-- **ADRs**: [ADR/](./ADR/)
+- **ADRs**: [ADR/](./ADR/) — in particular
+  [0010 authoring ownership tiers](./ADR/0010-cpt-gearbox-adr-authoring-ownership-tiers.md), which
+  decides the §4.1/§4.2 boundary and unblocks `cpt-gearbox-usecase-author-gear` and
+  `cpt-gearbox-usecase-author-plugin`, and
+  [0011 domain-specific IDE shell](./ADR/0011-cpt-gearbox-adr-domain-specific-ide-shell.md), which
+  decides how Gearbox Studio narrows Theia without losing the editor `cpt-gearbox-fr-studio` needs.
 - **Plan**: [plans/gearbox-builder-prototype.md](./plans/gearbox-builder-prototype.md)
 - **Vision**: [gearbox-builder-vision.md](./gearbox-builder-vision.md)
