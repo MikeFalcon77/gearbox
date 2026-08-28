@@ -136,6 +136,38 @@ with — round-trip fidelity for free), `schemars` 1.2, `ts-rs` 11, `blake3`, `p
 - **Provenance is built during resolution**, never reconstructed. Node ids are content-derived
   (`decision:cut:{consumer}->{provider}`), never counters, so the graph is byte-stable.
 
+### 2.3 Catalogue loading is staged, because the data costs differ by orders of magnitude
+
+An engine property, not an RPC detail: the same stages back the single-shot CLI path and the
+incremental one the Studio needs. ADR `cpt-gearbox-adr-staged-catalogue-loading` is the authority.
+
+| stage | work | what it yields | cost on the slice |
+|---|---|---|---|
+| **S0** discover | one walk per source root for `gear.gdl` | paths only | one walk |
+| **S1** declare | evaluate each description (Starlark, tiny); locate documents (`stat` only) | `display_name`, `description`, `category`, `visibility`, `package`/`sdk` locators, `requires`, `serves`, `cluster_plugins`, `docs` | ms per file |
+| **S2** project gear | `syn` over the gear crate's `src/` | `id`, `runtime_caps`, `colocated_deps`, `lifecycle`, `client_trait`, `fills`, provider transports | **165 files** |
+| **S3** project sdk | `syn` over the SDK crates | contracts, extension points, GTS types, vendor defaults | 90 files, **crates shared** |
+| **S4** join | contract merge, plugin resolution | GBX0206, GBX0511–GBX0517 | cheap, needs S2+S3 of the participants |
+
+Measured: 255 `.rs` files for the 14-gear slice at ~0.7 s; **2658** `.rs` files under `gears/`, so a
+full registry is roughly ten times that.
+
+**The consequence that shapes the UI: `GearId` is projected, so it does not exist until S2.** At S1
+there is a name to show and no identifier to key by, so a tree must key rows by `gdl_path` and join
+the `id` later. An implementation that keys by `id` has no choice but to block on every crate — which
+is why this is a requirement and not an optimisation.
+
+**"Not yet computed" is a separate list, never a third state on a field.** `CatalogueScan` carries
+`pending: Vec<PendingGear>` beside `catalogue.gears`; a gear in `gears` is complete and readable
+without qualification. `Option::None` and an empty `Vec` keep exactly one meaning — *absent* — which
+is what stops a consumer rendering "no GTS types" for a gear nobody has looked at yet.
+
+**Parsing each crate once per load is a precondition of all this**, and is done: a staged loader that
+re-parses shared crates cannot be cheap however it is scheduled. Before the cache,
+`tenant-resolver-sdk` was read four times on the slice (host plus three plugins) and
+`authn-resolver-sdk` three; now the same load parses **19 crates for 25 requests**, which
+`gearbox catalogue --format text` reports.
+
 ---
 
 ## 3. GDL surface
@@ -433,8 +465,9 @@ Core shapes (full definitions in implementation):
 
   | Origin | Fields |
   |---|---|
-  | **projected** from Rust | `id`, `runtime_caps`, `colocated_deps`, `lifecycle`, `client_trait`, `cluster_providers` (primitives, names, capabilities), cluster profile names, the contract identity/version/kind inside `provides`/`consumes`, the **transports** each provider wires up (from its own `#[toolkit::provides]`, checked against the projection traits the sdk declares), and `extension_points` / `fills` / `vendor_selector`. From *Rust*, not only from an *attribute*: provider names come from a `PROVIDER_NAME` const, capabilities from a backend trait impl, transports from which projection traits exist, and vendor defaults from either `impl Default` or `#[serde(default = "…")]` |
-  | **declared** in `gear.gdl` | `display_name`, `visibility`, `package`, `sdk` (crate locator for the plugin-API traits), `requires`, `serves`, `cluster_plugins` (crate locator plus `process_local`/`needs_credentials`), `declared_roles`, `config_schema`, and the product-level parts of `provides`/`consumes` (rest base path, sdk, local ctor, `from_`, `critical`) |
+  | **projected** from Rust | `id`, `runtime_caps`, `colocated_deps`, `lifecycle`, `client_trait`, `cluster_providers` (primitives, names, capabilities), cluster profile names, the contract identity/version/kind inside `provides`/`consumes`, the **transports** each provider wires up (from its own `#[toolkit::provides]`, checked against the projection traits the sdk declares), the **GTS types** its sdk declares, and `extension_points` / `fills` / `vendor_selector`. From *Rust*, not only from an *attribute*: provider names come from a `PROVIDER_NAME` const, capabilities from a backend trait impl, transports from which projection traits exist, and vendor defaults from either `impl Default` or `#[serde(default = "…")]` |
+  | **declared** in `gear.gdl` | `display_name`, `visibility`, `package`, `sdk` (crate locator for the plugin-API traits), `requires`, `serves`, `cluster_plugins` (crate locator plus `process_local`/`needs_credentials`), `declared_roles`, `config_schema`, `category`, and the product-level parts of `provides`/`consumes` (rest base path, sdk, local ctor, `from_`, `critical`) |
+| **discovered** on the filesystem | `docs` — PRD, DESIGN, ADRs and a checked-in `OpenAPI` document, found under `docs/` beside the gear and in its parent. Neither projected nor declared; `docs(...)` overrides only when a gear is laid out differently |
   | assigned by the loader | `source`, `gdl_path` |
 
 - `CargoRef { crate_name, lib_ident /* MANDATORY */, path, features, default_features, link, attr }`
@@ -693,6 +726,15 @@ serves both the Studio and the `.gdl` language client. `initialize` result adver
 `{ textDocumentSync, diagnosticProvider, completionProvider, hoverProvider, documentSymbolProvider,
 definitionProvider, gearbox: { catalogue, resolve, generate, explain } }`.
 
+**Catalogue loading is staged over the wire, per §2.3.** `gearbox/catalogue/load` returns as soon as
+S0/S1 are done — paths plus declared facts, with everything still unprojected listed under `pending`
+— and the engine then sends `gearbox/catalogueChanged` as gears complete, carrying the gears that
+moved from `pending` into the catalogue rather than the whole thing again. `$/progress` reports
+completed against discovered. `$/cancelRequest` already applies to the scan; **cancelling leaves what
+is already projected valid** rather than discarding it, so a cancelled load degrades to a smaller
+catalogue and not to none. A response whose `pending` is non-empty is therefore normal, and a client
+must not read absence of a field on a pending entry as absence of the fact.
+
 **Methods:** `gearbox/catalogue/{load,get}`, `gearbox/product/{load,resolve,explain}`,
 `gearbox/lock/{read,write,diff}`, `gearbox/generate/{plan,preview,apply}`, `gearbox/validate`,
 `gearbox/graph`, `gearbox/watch/{start,stop}`.
@@ -766,7 +808,7 @@ per frontend connection, one engine per workspace root) and `BackendApplicationC
 
 | Widget | Shows |
 |---|---|
-| Catalogue | tree by `category` → gear; badges for `runtime_caps`, chips for `colocated_deps`, provides/consumes counts. Click reveals the `gear.gdl` at its declaring range. Checkbox produces a *proposed* `use_gear(...)` diff, never an auto-edit. |
+| Catalogue | tree by `category` → gear; badges for `runtime_caps`, chips for `colocated_deps`, provides/consumes counts. Click reveals the `gear.gdl` at its declaring range. Checkbox produces a *proposed* `use_gear(...)` diff, never an auto-edit. **Renders incrementally** (§2.3): the grouping is available at S1 because `category` is declared, while the badges arrive at S2 because `runtime_caps` and `colocated_deps` are projected — so the tree's shape settles first and fills in. Rows are keyed by `gdl_path`, not `id`, because the id does not exist until S2. A `pending` row renders dimmed, and **clicking it still reveals its `gear.gdl`** — that path is known from S0, so a pending row is never inert. |
 | Product | profile dropdown; selected gears + a "pulled in by co-location" sublist; bindings table (`consumer → contract → provider` with mode/transport/mechanism chips); cluster table showing `selected` vs `resolved`; diagnostics summary bar. |
 | Graph | four views. **deps** (solid = co-location), **contracts** (dashed = cuttable, solid = forced local, red = undeclared-hub-edge), **processes** (boxes with gear chips, overlapping gears drawn in *every* box — this is what makes closure-not-partition visible), **cluster** (requirement → capability → provider, unsatisfied in red). Layout: `elkjs` `layered` with a fixed seed → deterministic, so screenshots and "why did this move" are stable. Rendered as hand-written React SVG. |
 | Explain | `gearbox/product/explain` for the current selection: `narrative: string[]` as an ordered list, each step linking to its `origin`, plus the subgraph inline. Every `DowngradedBy` edge renders "you asked X → you got Y → because GBXnnnn" with a link to the evidence `file:line`. |
@@ -1055,9 +1097,9 @@ Topology ← §7 generators and the three profiles. `product.lock`'s schema is t
 §6 of this plan graduates into DESIGN §3.1 rather than being restated.
 
 ADRs only where the rationale genuinely needs recording (the template warns against "everything is
-a decision"). The set worth writing, as `docs/ADR/NNNN-cpt-gearbox-adr-<slug>.md`. **0002 is the
-exception to "after the prototype runs"** — it decides what M2 builds, so it is written first and
-the numbering below is kept as reserved slots:
+a decision"). The set worth writing, as `docs/ADR/NNNN-cpt-gearbox-adr-<slug>.md`. **0002 and 0009 are the
+exceptions to "after the prototype runs"** — 0002 decides what M2 builds and 0009 what M8 builds, so
+both are written first; the rest of the numbering below is kept as reserved slots:
 
 | # | Slug | The dilemma |
 |---|---|---|
@@ -1069,6 +1111,7 @@ the numbering below is kept as reserved slots:
 | 0006 | `template-text-serialize-data` | minijinja for text, serde for data, `<< >>` for Helm sources; the YAML-indentation failure mode being avoided. |
 | 0007 | `k8s-static-endpoint-resolution` | no K8s-DNS `EndpointResolver` exists; ConfigMap-pinned `consumer_wiring` + GBX0603 vs waiting for a runtime feature vs faking it. |
 | 0008 | `unsupported-is-a-diagnostic-not-an-omission` | roles/shards/providers/profiles are parsed and then explicitly refused with cited evidence, rather than being absent from the grammar. |
+| 0009 | `staged-catalogue-loading` | **Written already**, because it constrains the RPC surface and the Catalogue widget before either exists. Five stages with measured costs; why "not yet computed" is a separate `pending` list rather than tri-state fields or a `stage` on the gear; and why the projected `GearId` makes staging a requirement rather than an improvement — see `docs/ADR/0009-cpt-gearbox-adr-staged-catalogue-loading.md`. |
 
 Each ADR's Traceability section links back to the `cpt-gearbox-fr-*`/`-nfr-*` IDs from M0 and the
 `-design-*` elements from M9, and each Confirmation section names the test that enforces it (e.g.

@@ -2515,6 +2515,34 @@ cargo gears migrate-gdl
 The generated draft is then reviewed. It never contains a projected field, because a `gear.gdl`
 restating one is rejected.
 
+## 76.1 Which means the registry must open before the parsing finishes
+
+Parsing on every load has a cost, and it is not small. `gears/` in `gears-rust` holds **2658** Rust
+files; a 14-gear slice already parses 255. So a registry or project tree that waits for projection
+waits seconds, growing with the tree — and that is not a registry.
+
+The load is therefore **staged**, and what arrives when is decided by where the fact lives:
+
+```text
+walk for gear.gdl                 -> paths                    (instant)
+evaluate each description         -> name, category, docs      (milliseconds)
+parse the gear crate              -> id, capabilities, deps    (the expensive part)
+parse the SDK crates              -> contracts, GTS types      (shared between gears)
+join                              -> plugin and contract checks
+```
+
+The awkward part is a direct consequence of §75-76: **the `id` is projected, so it does not exist
+until the crate is parsed.** A tree has a name to show long before it has an identifier to key by, so
+rows are keyed by the description's path and the id joins in later. An implementation that keys by id
+has no choice but to block on everything.
+
+And a partially loaded gear must not be readable as a complete one. An empty list has to keep meaning
+"none", not "nobody has looked yet" — otherwise the editor states, confidently, that a gear exposes
+no GTS types when the truth is that its SDK has not been opened. Unprojected gears therefore sit in a
+separate pending list rather than appearing in the catalogue with holes in them.
+
+See ADR `cpt-gearbox-adr-staged-catalogue-loading`.
+
 ---
 
 # 77. Compatibility During Adoption

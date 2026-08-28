@@ -69,8 +69,11 @@ is a code-generation problem, and it is the one this system removes.
 | DeploymentProfile | One of exactly `embedded`, `host-workers`, `kubernetes`. A Gearbox concept, not a runtime type. |
 | Preset | A preference overlay such as `dev` or `production`. Orthogonal to DeploymentProfile. Out of scope for this release. |
 | ClusterScope | A named cluster coordination scope (`ClusterProfile` in the runtime API). Neither a DeploymentProfile nor a preset. A join key, not free text: it must name a profile the requiring gear's own crate implements, because the runtime resolves it as `ClientScope::new("cluster:{name}")` and a name nothing registered fails only at startup. |
-| Projected fact | A catalogue fact read out of Rust rather than declared: gear id, runtime capabilities, co-location dependencies, lifecycle, client trait, contract identity/version/kind, provided and consumed contracts, registered cluster providers (their primitives, names and capabilities), cluster profile names, the transports a contract can be bound over, and plugin extension points with their implementations and vendor defaults. A `gear.gdl` restating one is rejected. Read out of *Rust*, not only out of an *attribute*: a provider's name comes from a `PROVIDER_NAME` const and its capabilities from a backend trait impl. |
+| Projected fact | A catalogue fact read out of Rust rather than declared: gear id, runtime capabilities, co-location dependencies, lifecycle, client trait, contract identity/version/kind, provided and consumed contracts, registered cluster providers (their primitives, names and capabilities), cluster profile names, the transports a contract can be bound over, plugin extension points with their implementations and vendor defaults, and the GTS types a gear's SDK declares. A `gear.gdl` restating one is rejected. Read out of *Rust*, not only out of an *attribute*: a provider's name comes from a `PROVIDER_NAME` const and its capabilities from a backend trait impl. |
 | Declared fact | A catalogue fact with no Rust home, so it is written in `gear.gdl`: display name, description, category, visibility, `package` (including the `lib` ident), `sdk` (where the gear's SDK crate lives), cluster requirements, endpoints, criticality, where each cluster plugin crate lives, and whether a cluster backend is process-local or needs credentials. |
+| LoadStage | How far a gear has got through the staged catalogue load: `Discovered` (its `gear.gdl` was found), `Declared` (the description was evaluated), then fully projected — at which point it leaves `pending` and enters the catalogue. |
+| PendingGear | A gear discovered or declared but not yet projected, keyed by `gdl_path` because `GearId` is projected and does not exist yet. Carried in `CatalogueScan.pending` so that `Option::None` and an empty `Vec` keep the single meaning *absent* everywhere in the catalogue. |
+| Discovered fact | A catalogue fact found on the filesystem by convention rather than read from Rust or written in `gear.gdl`: a gear's PRD, DESIGN, ADRs and checked-in `OpenAPI` document. A `docs(...)` record overrides the search for a gear laid out differently; a declared path that points nowhere is an error, while a file merely absent is not reported. |
 | Co-location dependency | `#[toolkit::gear(deps = [...])]`. Link-time: the macro emits a hidden re-export, so the crate is physically in the binary. Never severable by the resolver. A projected fact. |
 | Contract consumption | `#[toolkit::consumes(...)]`. A named contract edge whose provider may be local or remote, and which may therefore cross a process boundary. |
 | Contract kind | `Api`, `Embedded`, `Backend`, or `Extension`, encoded in the trait-name suffix. `Api` and `Backend` are remote-capable; the others are in-process only. |
@@ -448,6 +451,75 @@ naming a winner.
   is refused while overriding both is accepted; two plugins tied on priority report "undefined" while
   distinct priorities name the winner.
 
+- [ ] `p2` - **ID**: `cpt-gearbox-fr-gear-documents`
+
+The system **MUST** locate a gear's PRD, DESIGN, ADRs and checked-in `OpenAPI` document by searching
+`docs/` beside the description and then in its parent directory, **MUST** search the parent only when
+no sibling directory also holds a `gear.gdl`, **MUST** accept a `docs(...)` override, **MUST** report
+an error for a declared path that does not exist, and **MUST NOT** report a file that is simply
+absent.
+
+- **Rationale**: The platform keeps documents at `gears/<name>/docs/` in 35 of 35 cases while a
+  `gear.gdl` sits in a crate directory below, so the climb is what makes the convention work at all —
+  and the sibling test is what keeps `gears/system/api-gateway/gear.gdl` from claiming a
+  `gears/system/docs/` belonging to nobody. Absence is ordinary: a gear may have no PRD, and warning
+  about that would put noise on forty gears to catch nothing. A hand-written path pointing nowhere is
+  a different thing: a typo.
+- **Verification Method**: `cluster` resolves its PRD one level above its crate; a gear keeping its
+  own `docs/` uses that one in preference; moving the file makes the convention stop finding it while
+  a declared override keeps working; a trap tree with two gears under one parent has neither claim the
+  parent's documents.
+
+- [ ] `p2` - **ID**: `cpt-gearbox-fr-gts-types`
+
+The system **MUST** derive the GTS types a gear exposes from the schema declarations in its SDK
+crate — the `#[gts_type_schema]` attribute and `*.schema.json` files whose `$id` is a GTS identifier
+— **MUST NOT** treat a `gts_id!` reference as a declaration, **MUST** attribute a type only to the
+gear whose own SDK declares it, and **MUST** report a declaration shape it cannot read rather than
+omitting the type.
+
+- **Rationale**: The rules are `tools/gts-analyze`'s, reused rather than reinvented: two tools
+  disagreeing about what counts as a GTS type would be worse than either. The reference/declaration
+  distinction carries the weight — `gts_id!` appears over a thousand times in the tree, mostly in
+  tests. And a plugin names its host's SDK as its locator, so projecting from "the SDK this gear
+  names" attributed one type declared once to the host and to all five of its plugins.
+- **Verification Method**: `cluster-sdk`'s plugin-spec type projects from the real tree; a crate full
+  of `gts_id!` references yields nothing; the type declared in `authn-resolver-sdk` is owned by
+  `authn-resolver` alone; `struct_to_gts_schema!` — which no crate in `gears-rust` uses — is reported
+  as unsupported rather than skipped.
+
+- [ ] `p2` - **ID**: `cpt-gearbox-fr-gear-category`
+
+The system **MUST** check a gear's `category` against the values the platform uses and **MUST** warn,
+not fail, when it is something else.
+
+- **Rationale**: The seven values come from the `gear.toml` files the platform team committed;
+  `example` is Gearbox's addition, since no `gear.toml` exists under `examples/`. Warning rather than
+  refusing because the taxonomy is visibly still settling — `cluster` is filed under `serverless`,
+  `account-management` under `oss` — so treating the set as closed would claim more than the evidence
+  supports. What it catches is a value nothing else uses, which puts a gear in a bucket of one.
+- **Verification Method**: The slice carries the categories the platform assigned each gear, taken
+  from `gear.toml` rather than guessed, and produces no `GBX0108`. Before this, all twelve
+  non-example descriptions said `platform`, which no gear in the platform uses.
+
+- [ ] `p1` - **ID**: `cpt-gearbox-fr-incremental-catalogue`
+
+The system **MUST** make discovered and declared gears available before projection finishes, **MUST**
+distinguish "not yet computed" from "absent" without adding a third state to any catalogue field,
+**MUST NOT** require a `GearId` to present a gear that has not been projected, and **MUST** parse each
+crate at most once per load.
+
+- **Rationale**: The data costs differ by orders of magnitude — a description is a few hundred bytes
+  of Starlark, a gear crate is a syn parse of every file under `src/`. Measured: 255 `.rs` files for
+  the 14-gear slice, **2658** under `gears/`. And because `GearId` is projected, a registry view has
+  no identifier to key rows by until the crate is parsed, so an implementation that keys by `id` must
+  block on all of it. The prohibition on a third field state is what keeps a consumer from rendering
+  "no GTS types" for a gear nobody has looked at: three facts in this project have already been
+  quietly wrong because something looked complete and was not.
+- **Verification Method**: A completed load leaves `pending` empty. Crate sharing is measured rather
+  than asserted — `scan_requests` exceeds `crates_scanned`, and the catalogue's JSON is byte-identical
+  with the cache and without it. See ADR `cpt-gearbox-adr-staged-catalogue-loading`.
+
 #### Per-profile structural constraints are enforced
 
 - [ ] `p1` - **ID**: `cpt-gearbox-fr-profile-constraints`
@@ -700,6 +772,19 @@ on live cluster state or on non-deterministic generation.
 - **Threshold**: Rendering succeeds offline; no cluster-lookup or random-generation construct
   appears in any generated template.
 - **Rationale**: Preserves GitOps diffing, offline validation, and reproducibility.
+
+#### First paint independent of tree size
+
+- [ ] `p1` - **ID**: `cpt-gearbox-nfr-first-paint`
+
+Time to the first rendered catalogue row **MUST NOT** scale with the number of gears or the size of
+their crates.
+
+- **Threshold**: The first row is available after S0+S1 (a directory walk plus Starlark evaluation of
+  files a few hundred bytes each) and never waits on S2+S3 (syn over 255 files on the 14-gear slice,
+  2658 under `gears/`).
+- **Rationale**: A registry that blocks for seconds before showing anything is not a registry. The
+  stages are defined in ADR `cpt-gearbox-adr-staged-catalogue-loading`.
 
 #### Engine independent of its clients
 
@@ -955,6 +1040,8 @@ Each criterion corresponds to a step of the acceptance procedure in
 | Co-location closure swallows the product, so per-gear placement collapses to one process | The resolver is correct but useless; the central promise is undemonstrable | Choose a slice with at least one genuinely severable declared edge; report severable-if-declared pairs as an actionable list (`cpt-gearbox-fr-report-cuttable-if-declared`) |
 | The description language duplicates facts already in code and drifts from them | `gear.gdl` stops being trustworthy | Structurally prevented: overlapping facts are projected from the attributes, and a description restating one is rejected (`cpt-gearbox-fr-catalogue-projection`, `cpt-gearbox-fr-gdl-no-restatement`) |
 | Catalogue loading now depends on parsing Rust successfully, so a `syn` failure or an unlocatable attribute blocks resolution entirely | No catalogue, no product; the failure is total rather than degraded | Accepted deliberately (ADR `cpt-gearbox-adr-macro-projected-catalogue`); the attribute locator reports candidates and the exact narrowing line to add (`cpt-gearbox-fr-attribute-location`) |
+| An editor reads an empty field on a partially loaded gear as "this gear has none" | Confidently wrong information — the failure mode this project has already hit three times (`has_extension_point`, provider transports, plugin GTS types) | Structurally prevented: unprojected gears live in `CatalogueScan.pending` and never appear in the catalogue at all, so `Option::None` and an empty `Vec` keep the single meaning *absent* (`cpt-gearbox-fr-incremental-catalogue`, ADR `cpt-gearbox-adr-staged-catalogue-loading`) |
+| A registry view blocks for seconds before showing anything, because `GearId` is projected and it keys rows by id | The Catalogue widget is unusable on a real tree — 2658 `.rs` files under `gears/` | Rows are keyed by `gdl_path` until projection catches up (`cpt-gearbox-nfr-first-paint`) |
 | Runtime semantics are narrower than the vision assumes | Generated products that cannot run | Ground every resolver rule in a cited runtime capability; refuse the rest with evidence (`cpt-gearbox-fr-diagnose-unsupported`) |
 | The cluster subsystem is not composed into any running product today | Integration friction concentrated in one milestone | The custom gear in the slice is deliberately its first consumer; budget a milestone-sized slip there |
 | GDL grows into a general-purpose language | Determinism and explainability lost | Small frozen host API, dialect lockdown, and a construct blacklist (`cpt-gearbox-fr-gdl-declarative`) |

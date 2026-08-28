@@ -76,11 +76,12 @@ The authority split:
 | `cluster_providers[].name` | each plugin crate's `impl Cluster*Provider::provider()`, resolved through its `PROVIDER_NAME` const |
 | `cluster_providers[].capabilities` | the unique `impl ClusterCacheBackend` / `DistributedLockBackend` / `LeaderElectionBackend` in the plugin crate — `consistency()` and `features()` |
 | cluster profile names | `impl ClusterProfile for X { const NAME }`, read literally |
-| `provides[].transports` | `#[toolkit::provides(transports = [...])]` on the providing gear -- what this provider actually wires up |
+| `provides[].transports` | `#[toolkit::provides(transports = [...])]` on the providing gear — what this provider actually wires up |
 | a contract's *possible* transports | which `<Base>Rest` / `<Base>Grpc` projection traits exist beside the base in the sdk crate, checked by supertrait. A superset of any one provider's offer, and the bound a provider is checked against |
 | `extension_points[]` | the `pub trait *Plugin*` declarations in the gear's declared `sdk` crate |
 | `fills` (which extension point a plugin closes) | the unique `impl <point> for T` in the plugin's own crate |
-| `fills.default_vendor`, `.default_priority`, `vendor_selector` | the config type's `impl Default`, **or** `#[serde(default = "f")]` plus the function -- both spellings exist in the tree |
+| `fills.default_vendor`, `.default_priority`, `vendor_selector` | the config type's `impl Default`, **or** `#[serde(default = "f")]` plus the function — both spellings exist in the tree |
+| `gts_types[]` | `#[gts_type_schema(type_id = gts_id!("…"))]` in the gear's **sdk** crate, plus `*.schema.json` with a GTS `$id`. Rules taken from `tools/gts-analyze`, not invented here |
 
 | `GearDescriptor` field | Declared in `gear.gdl` because no Rust home exists |
 |---|---|
@@ -96,6 +97,21 @@ The authority split:
 
 `ctor` is deliberately absent from both columns: it is an arbitrary Rust expression, it is
 unprojectable, and Gearbox never needs it.
+
+**A third origin exists, and calling it either of the first two would be wrong.** `docs` and the
+`OpenAPI` pointer are **discovered on the filesystem by convention** — not read from Rust, and not
+declared in the ordinary case. The platform keeps documents at `gears/<name>/docs/` in 35 of 35
+cases, so requiring 35 descriptions to repeat that path would be a worse surface than looking. A
+`docs(...)` record exists only as an override for a gear laid out differently, and a declared path
+that points nowhere is an error (`GBX0109`) while a file merely not found is not reported at all --
+a gear may genuinely have no PRD.
+
+The climb from the crate directory to its parent is what makes the convention work
+(`gears/system/cluster/cluster/gear.gdl` needs `gears/system/cluster/docs/`), and it is guarded:
+the parent is only searched when no *sibling* directory also holds a `gear.gdl`. Without that,
+`gears/system/api-gateway/gear.gdl` would treat `gears/system/` as its family and claim a
+`gears/system/docs/` belonging to nobody. No such directory exists today; the guard keeps its
+appearance from becoming a silent mis-attribution.
 
 ### Consequences
 
@@ -131,9 +147,9 @@ unprojectable, and Gearbox never needs it.
   two parts.** Transports are not a product choice: they are stated in Rust, so declaring them is
   now `GBX0210`. But there are *two* transport facts and conflating them is easy:
   * **What a contract could support** comes from which projection traits sit beside the base.
-    `toolkit-contract-binding/DESIGN.md` calls this a compile-time guarantee -- "the absence of a
+    `toolkit-contract-binding/DESIGN.md` calls this a compile-time guarantee — "the absence of a
     transport projection is a compile-time guarantee that the contract is local-only [...] An
-    Extension with no projection is provably local -- no runtime check, no configuration flag, no
+    Extension with no projection is provably local — no runtime check, no configuration flag, no
     lint."
   * **What a given provider wires up** comes from `#[toolkit::provides(transports = [...])]` on the
     providing gear, and it is legitimately a subset. `api-contracts` is the live case:
@@ -148,16 +164,43 @@ unprojectable, and Gearbox never needs it.
 * **A plugin extension point is a Rust trait, so Gearbox adds no parallel mechanism for it.**
   `toolkit-contract-binding/DESIGN.md` already makes the contract kinds the plugin taxonomy --
   Backend is "a plugin that operates across a boundary", Extension is "a plugin that operates
-  in-process" -- and states that the binding mode is "determined by which traits exist, not by an
+  in-process" — and states that the binding mode is "determined by which traits exist, not by an
   annotation". The older vendor/GTS pattern in `TOOLKIT_PLUGINS.md` is what the 13 plugin gears
   still use, and contract-binding's own PRD describes itself as the generalisation of it. So the
   extension point, its implementations, and both sides' vendor defaults are all read; the single
   declared addition is `sdk`, a locator of the same kind as `cluster_plugins[].package`. When those
   gears migrate to `#[toolkit::provides]`, this branch collapses into the existing contract model,
   and that collapse should be a deletion rather than a rewrite.
+* **The `gear.toml` files the platform committed are absorbed selectively, and three of their six
+  fields are refused.** `name`, `description` and `category` are genuine declared facts and come
+  across. `is_plugin` and `has_extension_point` are coarse restatements of what Gearbox now reads --
+  not a boolean but a trait name and a list of implementations — and **one of them is already
+  wrong**: `system/tenant-resolver/gear.toml` says `has_extension_point = false` while
+  `tenant-resolver-sdk` declares `TenantResolverPluginClient` and three plugins implement it. That is
+  the argument for projecting rather than importing, made by the artefact itself. `has_plugins`
+  follows from `Catalogue::implementations_of`, so it needs no field.
+* **`category` gains a known set, checked with a warning rather than a refusal.** The seven values
+  come from those same `gear.toml` files; `example` is Gearbox's own addition, because no `gear.toml`
+  exists anywhere under `examples/`. A warning, not an error, because the taxonomy is visibly still
+  settling — `cluster` is filed under `serverless` and `account-management` under `oss` — so
+  treating the set as closed would claim more than the evidence supports. It did catch something
+  real: all twelve non-example descriptions in the slice said `platform`, a value no gear in the
+  platform uses, and they now carry the categories the platform itself assigned.
+* **A GTS type belongs to the crate that declares it, which is not always the gear that points at
+  it.** A plugin declares its host's `sdk` as its own locator, so projecting types from "the sdk this
+  gear names" attributed one type declared once in `authn-resolver-sdk` to the host *and* to all five
+  of its plugins. A type is attributed only when the sdk is not the host's, which is decidable from
+  the plugin projection already in hand.
+* **Projecting the `id` means a gear list cannot be keyed before the crate is parsed, which makes
+  staged catalogue loading a requirement rather than an improvement.** Every other field a tree needs
+  early is declared and available as soon as the description is evaluated — `display_name`,
+  `category`, `description`. The `id` is not, so a registry view must key its rows by `gdl_path` until
+  projection catches up. An implementation that keys by `id` has no choice but to block on parsing
+  every crate: 255 files for the 14-gear slice, 2658 across `gears/`. Recorded in ADR
+  `cpt-gearbox-adr-staged-catalogue-loading`.
 * **A plugin must share a process with its host, and neither side says so.** A plugin registers
   itself with `register_scoped` into the process-local `ClientHub`, and `get_scoped`
-  (`libs/toolkit/src/client_hub.rs`) is a plain map lookup with no remote path -- `remote_proxies`
+  (`libs/toolkit/src/client_hub.rs`) is a plain map lookup with no remote path — `remote_proxies`
   covers only the unscoped map used by `#[toolkit::consumes]`. Yet plugin gears declare
   `deps = [types_registry]`, never their host. The constraint is real, unexpressed, and becomes
   `GBX0514` once the resolver has a process partition.
