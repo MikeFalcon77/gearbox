@@ -222,7 +222,10 @@ gear(
         provide(contract = "PaymentsAuditApi",
                 rust = "payments_audit_sdk::PaymentsAuditApi", sdk = AUDIT_SDK,
                 local = "Self::build_local",
-                transports = [transport.local, transport.rest],
+                # No `transports`: the set comes from this gear's own
+                # #[toolkit::provides(transports = [...])], checked against
+                # whether `PaymentsAuditApiRest` / `...Grpc` exist beside the
+                # base trait in the sdk. Declaring it here is GBX0210.
                 rest = rest(base_path = "/api/v1/payments-audit")),
     ],
 
@@ -430,8 +433,8 @@ Core shapes (full definitions in implementation):
 
   | Origin | Fields |
   |---|---|
-  | **projected** from Rust | `id`, `runtime_caps`, `colocated_deps`, `lifecycle`, `client_trait`, `cluster_providers` (primitives, names, capabilities), cluster profile names, and the contract identity/version/kind inside `provides`/`consumes`. From *Rust*, not only from an *attribute*: provider names come from a `PROVIDER_NAME` const and capabilities from a backend trait impl |
-  | **declared** in `gear.gdl` | `display_name`, `visibility`, `package`, `requires`, `serves`, `cluster_plugins` (crate locator plus `process_local`/`needs_credentials`), `declared_roles`, `config_schema`, and the product-level parts of `provides`/`consumes` (transports, rest base path, sdk, local ctor, `from_`, `critical`) |
+  | **projected** from Rust | `id`, `runtime_caps`, `colocated_deps`, `lifecycle`, `client_trait`, `cluster_providers` (primitives, names, capabilities), cluster profile names, the contract identity/version/kind inside `provides`/`consumes`, the **transports** each provider wires up (from its own `#[toolkit::provides]`, checked against the projection traits the sdk declares), and `extension_points` / `fills` / `vendor_selector`. From *Rust*, not only from an *attribute*: provider names come from a `PROVIDER_NAME` const, capabilities from a backend trait impl, transports from which projection traits exist, and vendor defaults from either `impl Default` or `#[serde(default = "…")]` |
+  | **declared** in `gear.gdl` | `display_name`, `visibility`, `package`, `sdk` (crate locator for the plugin-API traits), `requires`, `serves`, `cluster_plugins` (crate locator plus `process_local`/`needs_credentials`), `declared_roles`, `config_schema`, and the product-level parts of `provides`/`consumes` (rest base path, sdk, local ctor, `from_`, `critical`) |
   | assigned by the loader | `source`, `gdl_path` |
 
 - `CargoRef { crate_name, lib_ident /* MANDATORY */, path, features, default_features, link, attr }`

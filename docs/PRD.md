@@ -69,8 +69,8 @@ is a code-generation problem, and it is the one this system removes.
 | DeploymentProfile | One of exactly `embedded`, `host-workers`, `kubernetes`. A Gearbox concept, not a runtime type. |
 | Preset | A preference overlay such as `dev` or `production`. Orthogonal to DeploymentProfile. Out of scope for this release. |
 | ClusterScope | A named cluster coordination scope (`ClusterProfile` in the runtime API). Neither a DeploymentProfile nor a preset. A join key, not free text: it must name a profile the requiring gear's own crate implements, because the runtime resolves it as `ClientScope::new("cluster:{name}")` and a name nothing registered fails only at startup. |
-| Projected fact | A catalogue fact read out of Rust rather than declared: gear id, runtime capabilities, co-location dependencies, lifecycle, client trait, contract identity/version/kind, provided and consumed contracts, registered cluster providers (their primitives, names and capabilities), and cluster profile names. A `gear.gdl` restating one is rejected. Read out of *Rust*, not only out of an *attribute*: a provider's name comes from a `PROVIDER_NAME` const and its capabilities from a backend trait impl. |
-| Declared fact | A catalogue fact with no Rust home, so it is written in `gear.gdl`: display name, description, category, visibility, `package` (including the `lib` ident), cluster requirements, transport choices, endpoints, criticality, where each cluster plugin crate lives, and whether a cluster backend is process-local or needs credentials. |
+| Projected fact | A catalogue fact read out of Rust rather than declared: gear id, runtime capabilities, co-location dependencies, lifecycle, client trait, contract identity/version/kind, provided and consumed contracts, registered cluster providers (their primitives, names and capabilities), cluster profile names, the transports a contract can be bound over, and plugin extension points with their implementations and vendor defaults. A `gear.gdl` restating one is rejected. Read out of *Rust*, not only out of an *attribute*: a provider's name comes from a `PROVIDER_NAME` const and its capabilities from a backend trait impl. |
+| Declared fact | A catalogue fact with no Rust home, so it is written in `gear.gdl`: display name, description, category, visibility, `package` (including the `lib` ident), `sdk` (where the gear's SDK crate lives), cluster requirements, endpoints, criticality, where each cluster plugin crate lives, and whether a cluster backend is process-local or needs credentials. |
 | Co-location dependency | `#[toolkit::gear(deps = [...])]`. Link-time: the macro emits a hidden re-export, so the crate is physically in the binary. Never severable by the resolver. A projected fact. |
 | Contract consumption | `#[toolkit::consumes(...)]`. A named contract edge whose provider may be local or remote, and which may therefore cross a process boundary. |
 | Contract kind | `Api`, `Embedded`, `Backend`, or `Extension`, encoded in the trait-name suffix. `Api` and `Backend` are remote-capable; the others are in-process only. |
@@ -393,6 +393,60 @@ it does not.
 - **Verification Method**: Fixtures reproducing that consumer's real shape — a private marker whose
   `NAME` is not the kebab-case of its identifier — asserting the join succeeds, that renaming `NAME`
   breaks it, and that omitting `profile` is refused rather than defaulted.
+
+- [ ] `p1` - **ID**: `cpt-gearbox-fr-transport-projection`
+
+The system **MUST** derive a provider's transports from `#[toolkit::provides(transports = [...])]`
+on the providing gear, **MUST** derive the transports a contract *could* support from which
+`<Base>Rest` / `<Base>Grpc` projection traits exist beside the base trait in its SDK crate
+(confirming each names the base as a supertrait), **MUST** report a provider offering a transport the
+contract has no projection for, and **MUST NOT** accept a declared transport list.
+
+- **Rationale**: Two distinct facts. The contract-binding design makes the absence of a projection a
+  compile-time guarantee that the contract is local-only; separately, a provider may legitimately
+  wire up fewer transports than the contract allows. `api-contracts` does exactly that —
+  `PaymentApiGrpc` exists, so gRPC is possible for v1, but the gear declares `[local, rest]` because
+  the gRPC client is behind an opt-in Cargo feature. Recording the contract's possibilities as the
+  provider's offer would put a binding in the catalogue that the build does not produce.
+- **Verification Method**: Against the real tree, the contract `PaymentApi@v1` allows
+  `local, rest, grpc` while the `api-contracts` provider offers `local, rest`. A trait named
+  `<Base>Rest` that does not extend the base adds no transport. A `#[toolkit::provides]` that cannot
+  be parsed is an error rather than a silent local-only provider. Declaring `transports` in
+  `gear.gdl` is `GBX0210`.
+
+- [ ] `p1` - **ID**: `cpt-gearbox-fr-plugin-extension-points`
+
+The system **MUST** read a gear's plugin extension points from the `pub trait *Plugin*` declarations
+in its declared `sdk` crate, **MUST** read which point a gear fills from the unique `impl <point>`
+in its own crate, **MUST** read each side's `vendor` and `priority` defaults from both the
+`impl Default` and the `#[serde(default = "…")]` spellings, and **MUST** report rather than guess
+when a crate implements more than one point.
+
+- **Rationale**: Both spellings occur in `gears-rust` — `oidc-authn-plugin` and
+  `keycloak-idp-plugin` use only the second — and a missing default is what the vendor-match check
+  keys on, so reading one spelling would produce a wrong answer rather than a gap.
+- **Verification Method**: Against the real tree, `authn-resolver` yields one extension point and
+  both of its plugins fill it; renaming the trait in the SDK detaches both; removing an `impl`
+  removes that gear from the implementations.
+
+- [ ] `p1` - **ID**: `cpt-gearbox-fr-plugin-selection`
+
+The system **MUST** let a product choose plugin implementations per host gear and **per deployment
+profile**, **MUST** report an error when a selected host has an extension point with no
+implementation in some profile, **MUST** report an error when the host's effective vendor matches no
+selected implementation's, and **MUST** report a shared lowest priority as undefined rather than
+naming a winner.
+
+- **Rationale**: The canonical product runs a static plugin in dev and a real one in prod, so the
+  choice is only answerable once a profile is fixed. The vendor is a join key both sides read from
+  their own config: `gears-rust` keeps one such pair correct today with a hand-written comment
+  warning that a mismatch yields "the silent `NoopIdpProvider` fallback that returns 501". Where
+  priorities tie, the host takes whichever the registry returns first, so naming a winner would claim
+  more than the runtime guarantees.
+- **Verification Method**: Different plugins scoped to different profiles do not collide; a plugin
+  scoped to one profile leaves the others reported as unfilled; overriding `vendor` on one side only
+  is refused while overriding both is accepted; two plugins tied on priority report "undefined" while
+  distinct priorities name the winner.
 
 #### Per-profile structural constraints are enforced
 

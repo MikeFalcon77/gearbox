@@ -76,13 +76,18 @@ The authority split:
 | `cluster_providers[].name` | each plugin crate's `impl Cluster*Provider::provider()`, resolved through its `PROVIDER_NAME` const |
 | `cluster_providers[].capabilities` | the unique `impl ClusterCacheBackend` / `DistributedLockBackend` / `LeaderElectionBackend` in the plugin crate — `consistency()` and `features()` |
 | cluster profile names | `impl ClusterProfile for X { const NAME }`, read literally |
+| `provides[].transports` | `#[toolkit::provides(transports = [...])]` on the providing gear -- what this provider actually wires up |
+| a contract's *possible* transports | which `<Base>Rest` / `<Base>Grpc` projection traits exist beside the base in the sdk crate, checked by supertrait. A superset of any one provider's offer, and the bound a provider is checked against |
+| `extension_points[]` | the `pub trait *Plugin*` declarations in the gear's declared `sdk` crate |
+| `fills` (which extension point a plugin closes) | the unique `impl <point> for T` in the plugin's own crate |
+| `fills.default_vendor`, `.default_priority`, `vendor_selector` | the config type's `impl Default`, **or** `#[serde(default = "f")]` plus the function -- both spellings exist in the tree |
 
 | `GearDescriptor` field | Declared in `gear.gdl` because no Rust home exists |
 |---|---|
 | `display_name`, `description`, `category`, `visibility` | catalogue presentation; nothing in Rust carries it |
 | `package` (`CargoRef`) | `lib` is undeclared in Rust; this block is the anchor naming which crate to scan and where |
 | `requires` | cluster capability needs are runtime SDK calls, not static declarations |
-| `provides[].transports`, `.rest(base_path)`, `.sdk`, `.local` | transport set is a product choice; the rest are generator inputs |
+| `provides[].rest(base_path)`, `.sdk`, `.local` | generator inputs |
 | `serves` | `config_key` and `default_port` are runtime-configuration facts |
 | `cluster_plugins[].package` | the registry names a library identifier (`standalone_cluster_plugin`); nothing in that expression says which directory the crate is in |
 | `cluster_plugins[].process_local`, `.needs_credentials` | deployment semantics with no Rust representation at all — see below |
@@ -121,6 +126,41 @@ unprojectable, and Gearbox never needs it.
   when the surface lands.
 * Gearbox generates Rust only into composition crates it owns — a generated process crate's
   `main.rs` and `registered_gears.rs`. It writes nothing into a gear crate, ever.
+* **This ADR previously placed `provides[].transports` in the declared column, on the grounds that
+  "the transport set is a product choice". That was wrong, and the correction turned out to have
+  two parts.** Transports are not a product choice: they are stated in Rust, so declaring them is
+  now `GBX0210`. But there are *two* transport facts and conflating them is easy:
+  * **What a contract could support** comes from which projection traits sit beside the base.
+    `toolkit-contract-binding/DESIGN.md` calls this a compile-time guarantee -- "the absence of a
+    transport projection is a compile-time guarantee that the contract is local-only [...] An
+    Extension with no projection is provably local -- no runtime check, no configuration flag, no
+    lint."
+  * **What a given provider wires up** comes from `#[toolkit::provides(transports = [...])]` on the
+    providing gear, and it is legitimately a subset. `api-contracts` is the live case:
+    `PaymentApiGrpc` exists, so gRPC is possible for `PaymentApi@v1`, yet the gear declares
+    `[local, rest]` because the gRPC client sits behind an opt-in Cargo feature.
+
+  The catalogue records the provider's offer, and checks it against the contract's possibilities --
+  offering a transport with no projection trait is a Rust-internal inconsistency of the same class
+  as `GBX0207`. The original declared list was already self-contradictory:
+  `api-contracts/gear.gdl` declared `[local, rest]` for v1 while eight lines below declaring a
+  `grpc(...)` block, in a file written and hand-checked for this very ADR.
+* **A plugin extension point is a Rust trait, so Gearbox adds no parallel mechanism for it.**
+  `toolkit-contract-binding/DESIGN.md` already makes the contract kinds the plugin taxonomy --
+  Backend is "a plugin that operates across a boundary", Extension is "a plugin that operates
+  in-process" -- and states that the binding mode is "determined by which traits exist, not by an
+  annotation". The older vendor/GTS pattern in `TOOLKIT_PLUGINS.md` is what the 13 plugin gears
+  still use, and contract-binding's own PRD describes itself as the generalisation of it. So the
+  extension point, its implementations, and both sides' vendor defaults are all read; the single
+  declared addition is `sdk`, a locator of the same kind as `cluster_plugins[].package`. When those
+  gears migrate to `#[toolkit::provides]`, this branch collapses into the existing contract model,
+  and that collapse should be a deletion rather than a rewrite.
+* **A plugin must share a process with its host, and neither side says so.** A plugin registers
+  itself with `register_scoped` into the process-local `ClientHub`, and `get_scoped`
+  (`libs/toolkit/src/client_hub.rs`) is a plain map lookup with no remote path -- `remote_proxies`
+  covers only the unscoped map used by `#[toolkit::consumes]`. Yet plugin gears declare
+  `deps = [types_registry]`, never their host. The constraint is real, unexpressed, and becomes
+  `GBX0514` once the resolver has a process partition.
 * **Cluster capabilities are declared on the *backend*, not the provider, so projecting them needs a
   locate-by-trait rule.** The three provider traits in `cluster-sdk/src/provider.rs` expose only
   `provider()` and a `build_*` factory; `consistency()` and `features()` live on
