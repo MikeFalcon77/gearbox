@@ -11,6 +11,7 @@
 //! separate decision, made by the caller.
 
 pub mod closure;
+pub mod cuts;
 pub mod profile;
 
 use gearbox_ir::{Catalogue, Diagnostics, ProductIntent, ProfileId};
@@ -21,6 +22,8 @@ pub struct Resolution {
     pub profile: ProfileId,
     /// The closure of gears, with why each is present.
     pub closure: closure::Closure,
+    /// Which edges a process boundary may run through, and which may not.
+    pub cuts: cuts::Cuts,
     pub diagnostics: Diagnostics,
 }
 
@@ -47,10 +50,15 @@ pub fn resolve(catalogue: &Catalogue, intent: &ProductIntent, profile: &ProfileI
     // Step 2 -- the co-location closure.
     let closure = closure::expand(catalogue, intent, &mut diagnostics);
 
+    // Step 3 -- which edges could carry a boundary.
+    let uri = format!("file://{}", intent.gdl_path.as_str());
+    let cuts = cuts::classify(catalogue, &closure, &uri, &mut diagnostics);
+
     diagnostics.finish();
     Resolution {
         profile: profile.clone(),
         closure,
+        cuts,
         diagnostics,
     }
 }

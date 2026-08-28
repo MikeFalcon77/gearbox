@@ -101,3 +101,138 @@ pub fn intent(gears: &[&str]) -> ProductIntent {
         preferences: Vec::new(),
     }
 }
+
+// -------------------------------------------------------------- cut fixtures
+//
+// Six catalogues for step 3. Each is the smallest shape that exercises one
+// branch, because the real slice can demonstrate only two of them: it holds
+// exactly one provider and exactly one declared edge.
+
+use std::collections::BTreeSet;
+
+use gearbox_ir::{
+    Catalogue, ContractDescriptor, ContractId, ContractKind, ContractVersion, ProviderDescriptor,
+    Requirement, RequirementId, RequirementKind, Transport,
+};
+
+fn cid(id: &str) -> ContractId {
+    ContractId::new(id).unwrap()
+}
+
+/// A contract owned by `provider`, remote-capable unless told otherwise.
+fn contract(base: &str, major: u32, kind: ContractKind) -> ContractDescriptor {
+    let version = ContractVersion::from_major(major);
+    ContractDescriptor {
+        id: cid(&format!("provider/{base}@{}", version.declared)),
+        owner: gid("provider"),
+        base_name: base.to_owned(),
+        version,
+        kind,
+        rust_path: format!("provider_sdk::{base}"),
+        sdk: CargoRef {
+            crate_name: "cf-provider-sdk".to_owned(),
+            lib_ident: "provider_sdk".to_owned(),
+            path: RelPath::new("provider-sdk").unwrap(),
+            features: Vec::new(),
+            default_features: true,
+            link: Vec::new(),
+        },
+        rest: None,
+        grpc: None,
+    }
+}
+
+fn provides(contract: &ContractDescriptor, transports: &[Transport]) -> ProviderDescriptor {
+    ProviderDescriptor {
+        contract: contract.id.clone(),
+        provider_gear: gid("provider"),
+        local_factory: Some("Self::build_local".to_owned()),
+        transports: transports.iter().copied().collect::<BTreeSet<_>>(),
+        policies: Vec::new(),
+    }
+}
+
+fn consumes(contract: &ContractId) -> Requirement {
+    Requirement {
+        id: RequirementId::new("host#contract.consumes[0]").unwrap(),
+        requester: gid("host"),
+        kind: RequirementKind::Contract {
+            contract: contract.clone(),
+            from: gid("provider"),
+            resolving_client: None,
+        },
+        capabilities: BTreeSet::new(),
+        critical: true,
+    }
+}
+
+/// Assemble a two-gear catalogue from parts.
+fn two_gears(
+    contracts: Vec<ContractDescriptor>,
+    provider_provides: Vec<ProviderDescriptor>,
+    host_consumes: Vec<Requirement>,
+    host_deps: &[&str],
+) -> Catalogue {
+    let mut catalogue = Catalogue::default();
+
+    let mut host = descriptor("host");
+    host.consumes = host_consumes;
+    host.colocated_deps = host_deps.iter().map(|d| gid(d)).collect();
+    catalogue.gears.insert(gid("host"), host);
+
+    let mut provider = descriptor("provider");
+    provider.provides = provider_provides;
+    catalogue.gears.insert(gid("provider"), provider);
+
+    for c in contracts {
+        catalogue.contracts.insert(c.id.clone(), c);
+    }
+    catalogue
+}
+
+/// `host` pulls `provider` in with `deps` and declares nothing.
+pub fn catalogue_with_provider_as_dep() -> Catalogue {
+    let c = contract("Thing", 1, ContractKind::Api);
+    let p = provides(&c, &[Transport::Local, Transport::Rest]);
+    two_gears(vec![c], vec![p], Vec::new(), &["provider"])
+}
+
+/// The same pair with the edge declared and no `deps`.
+pub fn catalogue_with_declared_edge() -> Catalogue {
+    let c = contract("Thing", 1, ContractKind::Api);
+    let p = provides(&c, &[Transport::Local, Transport::Rest]);
+    let r = consumes(&c.id);
+    two_gears(vec![c], vec![p], vec![r], &[])
+}
+
+/// Declared *and* co-located: the local lookup wins whatever the config says.
+pub fn catalogue_with_declared_edge_and_dep() -> Catalogue {
+    let c = contract("Thing", 1, ContractKind::Api);
+    let p = provides(&c, &[Transport::Local, Transport::Rest]);
+    let r = consumes(&c.id);
+    two_gears(vec![c], vec![p], vec![r], &["provider"])
+}
+
+/// `host` consumes a contract nobody provides.
+pub fn catalogue_missing_provider() -> Catalogue {
+    let c = contract("Thing", 1, ContractKind::Api);
+    let r = consumes(&c.id);
+    two_gears(vec![c], Vec::new(), vec![r], &[])
+}
+
+/// `host` wants v1; `provider` offers v2 of the same family.
+pub fn catalogue_wrong_major() -> Catalogue {
+    let wanted = contract("Thing", 1, ContractKind::Api);
+    let offered = contract("Thing", 2, ContractKind::Api);
+    let p = provides(&offered, &[Transport::Local, Transport::Rest]);
+    let r = consumes(&wanted.id);
+    two_gears(vec![wanted, offered], vec![p], vec![r], &[])
+}
+
+/// Declared and remote-capable by kind, but the provider wires up no REST.
+pub fn catalogue_local_only_provider() -> Catalogue {
+    let c = contract("Thing", 1, ContractKind::Api);
+    let p = provides(&c, &[Transport::Local]);
+    let r = consumes(&c.id);
+    two_gears(vec![c], vec![p], vec![r], &[])
+}
