@@ -16,5 +16,9 @@ gear: GearDescriptor,
 /**
  * Its `gdl_path`, so the client can drop the matching pending row without
  * having to know that `gdl_path` was its key.
+ *
+ * The key is `(gear.source, replaces)`, not `replaces` alone: a `gdl_path`
+ * is relative to one source root and the server accepts several, so two
+ * roots of the same shape both hold `gears/x/gear.gdl`.
  */
 replaces: string, };

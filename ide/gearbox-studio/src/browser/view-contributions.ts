@@ -1,23 +1,58 @@
 // Where the two views live in the shell, and the commands that open them.
 
 import { AbstractViewContribution, FrontendApplicationContribution } from "@theia/core/lib/browser";
-import { injectable } from "@theia/core/shared/inversify";
+import { Command, CommandRegistry } from "@theia/core/lib/common";
+import { inject, injectable } from "@theia/core/shared/inversify";
 
+import { CatalogueStore } from "./catalogue-store";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import { GearDetailWidget } from "./detail/gear-detail-widget";
 import { DepsGraphWidget } from "./graph/deps-graph-widget";
+
+export const RELOAD_CATALOGUE: Command = {
+  id: "gearbox.catalogue.reload",
+  label: "Gearbox: Reload Catalogue",
+};
 
 @injectable()
 export class CatalogueViewContribution
   extends AbstractViewContribution<CatalogueWidget>
   implements FrontendApplicationContribution
 {
+  @inject(CatalogueStore) protected readonly store!: CatalogueStore;
+
   constructor() {
     super({
       widgetId: CatalogueWidget.ID,
       widgetName: CatalogueWidget.LABEL,
       defaultWidgetOptions: { area: "left", rank: 100 },
       toggleCommandId: "gearbox.catalogue.toggle",
+    });
+  }
+
+  /**
+   * Start the one load, here rather than in the widget.
+   *
+   * The widget is closable and transient, so a load in its `postConstruct` ran
+   * again every time the panel was reopened -- including in the middle of a
+   * projection, where the first load's pending set would land on top of the
+   * second's already-projected rows. The application starts exactly one; the
+   * reload command starts the rest.
+   *
+   * `onStart` and not `initializeLayout`: the latter is skipped entirely when
+   * there is a saved layout, which would leave a returning user with a panel
+   * that never loads.
+   */
+  onStart(): void {
+    // `load()` does not reject -- a failure becomes the store's error state,
+    // which the panel renders.
+    void this.store.load();
+  }
+
+  override registerCommands(commands: CommandRegistry): void {
+    super.registerCommands(commands);
+    commands.registerCommand(RELOAD_CATALOGUE, {
+      execute: () => this.store.load(),
     });
   }
 

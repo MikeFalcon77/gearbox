@@ -18,7 +18,7 @@ use gearbox_engine::resolve::resolve;
 use gearbox_engine::{SourceRoot, load_catalogue};
 use gearbox_ir::{
     BindingMechanism, BindingMode, Catalogue, DiagnosticCode, Discovery, GearId, ProductIntent,
-    ProfileId, SourceId, Transport,
+    ProfileId, ResolvedBindingMode, SourceId, Transport,
 };
 
 fn gears_rust() -> Option<PathBuf> {
@@ -73,7 +73,7 @@ fn one_description_gives_three_different_bindings() {
         .iter()
         .find(|b| b.contract.as_str().ends_with("@v1"))
         .expect("the v1 edge");
-    assert_eq!(v1.mode, BindingMode::Local);
+    assert_eq!(v1.mode, ResolvedBindingMode::Local);
     assert_eq!(v1.transport, Transport::Local);
     assert_eq!(v1.mechanism, BindingMechanism::ColocatedLocal);
 
@@ -83,7 +83,7 @@ fn one_description_gives_three_different_bindings() {
         .iter()
         .find(|b| b.contract.as_str().ends_with("@v1"))
         .expect("the v1 edge");
-    assert_eq!(v1.mode, BindingMode::Remote);
+    assert_eq!(v1.mode, ResolvedBindingMode::Remote);
     assert_eq!(v1.mechanism, BindingMechanism::ConsumesDirectory);
 
     let prod_ = resolve(&cat, &prod, &pid("prod"));
@@ -92,7 +92,7 @@ fn one_description_gives_three_different_bindings() {
         .iter()
         .find(|b| b.contract.as_str().ends_with("@v1"))
         .expect("the v1 edge");
-    assert_eq!(v1.mode, BindingMode::Remote);
+    assert_eq!(v1.mode, ResolvedBindingMode::Remote);
     assert_eq!(v1.mechanism, BindingMechanism::ConsumesStatic);
 }
 
@@ -104,7 +104,7 @@ fn a_local_binding_carries_no_endpoint() {
     require!(cat, prod);
     let dev = resolve(&cat, &prod, &pid("dev"));
     for binding in &dev.bindings {
-        assert_eq!(binding.mode, BindingMode::Local);
+        assert_eq!(binding.mode, ResolvedBindingMode::Local);
         assert!(binding.endpoint_source.is_none(), "{binding:?}");
         assert!(binding.endpoint.is_none(), "{binding:?}");
         assert!(
@@ -225,7 +225,11 @@ fn asking_for_remote_in_a_single_process_profile_is_recorded_as_a_downgrade() {
 
     let r = resolve(&cat, &intent, &pid("dev"));
     let binding = r.bindings.first().expect("one binding");
-    assert_eq!(binding.mode, BindingMode::Local, "one process, so local");
+    assert_eq!(
+        binding.mode,
+        ResolvedBindingMode::Local,
+        "one process, so local"
+    );
     assert_eq!(
         binding.selected.downgraded_by,
         Some(DiagnosticCode::BindingForcedLocal)
@@ -261,7 +265,7 @@ fn asking_for_grpc_across_a_boundary_is_downgraded_to_rest() {
 
     let r = resolve(&cat, &intent, &pid("local"));
     let binding = r.bindings.first().expect("one binding");
-    assert_eq!(binding.mode, BindingMode::Remote);
+    assert_eq!(binding.mode, ResolvedBindingMode::Remote);
     assert_eq!(binding.transport, Transport::Rest, "downgraded");
     assert_eq!(
         binding.selected.downgraded_by,

@@ -100,12 +100,8 @@ fn gears(catalogue: &Catalogue, resolution: &Resolution) -> BTreeMap<GearId, Res
                     source: descriptor.source.clone(),
                     gdl_path: descriptor.gdl_path.clone(),
                     package: descriptor.package.clone(),
-                    // Resolved once here so no generator has to redo it.
-                    crate_dir: descriptor
-                        .gdl_path
-                        .parent()
-                        .resolve(descriptor.package.path.as_str())
-                        .unwrap_or_else(|_| descriptor.gdl_path.parent()),
+                    // Resolved at merge time so no generator has to redo it.
+                    crate_dir: descriptor.crate_dir(),
                     runtime_caps: descriptor.runtime_caps.clone(),
                     colocated_deps: descriptor.colocated_deps.clone(),
                     selected_by: reasons.clone(),

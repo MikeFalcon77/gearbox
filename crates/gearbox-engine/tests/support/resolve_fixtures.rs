@@ -123,7 +123,7 @@ fn cid(id: &str) -> ContractId {
 fn contract(base: &str, major: u32, kind: ContractKind) -> ContractDescriptor {
     let version = ContractVersion::from_major(major);
     ContractDescriptor {
-        id: cid(&format!("provider/{base}@{}", version.declared)),
+        id: cid(&format!("provider/{base}@{}", version.declared())),
         owner: gid("provider"),
         base_name: base.to_owned(),
         version,

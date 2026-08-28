@@ -12,7 +12,15 @@ pub enum ScanError {
     Read(PathBuf, #[source] std::io::Error),
 
     #[error("cannot parse `{}`", .0.display())]
-    Parse(PathBuf, syn::Error),
+    Parse(PathBuf, #[source] syn::Error),
+
+    /// A `src/` that is a symlink, or a directory under it that could not be
+    /// walked.
+    ///
+    /// Separate from [`ScanError::Read`] because the remedy is different: a read
+    /// failure is about one file, this is about the shape of the tree.
+    #[error("cannot walk `{}`", .0.display())]
+    Walk(PathBuf, String),
 }
 
 /// One parsed Rust file, with the path to blame in a diagnostic.
@@ -36,21 +44,44 @@ pub struct RustFile {
 /// still scanned; in practice such a file is dead code.
 ///
 /// # Errors
-/// Returns [`ScanError`] when `src/` is absent, a file cannot be read, or a
-/// file is not valid Rust.
+/// Returns [`ScanError`] when `src/` is absent or a symlink, a directory under
+/// it cannot be walked, a file cannot be read, or a file is not valid Rust.
 pub fn scan_crate(crate_dir: &Path) -> Result<Vec<RustFile>, ScanError> {
     let src = crate_dir.join("src");
-    if !src.is_dir() {
-        return Err(ScanError::NoSrc(crate_dir.to_path_buf()));
+    // `symlink_metadata` rather than `is_dir`, which follows the link: a
+    // symlinked `src/` would let a description reach a tree outside its own
+    // source root, and `follow_links(false)` does not cover the *root* of the
+    // walk (walkdir's `follow_root_links` defaults to true).
+    match std::fs::symlink_metadata(&src) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err(ScanError::Walk(
+                src,
+                "src/ is a symlink; a crate may only be read through a real directory inside \
+                 its source root"
+                    .to_owned(),
+            ));
+        }
+        Ok(meta) if meta.is_dir() => {}
+        _ => return Err(ScanError::NoSrc(crate_dir.to_path_buf())),
     }
 
-    let mut paths: Vec<PathBuf> = walkdir::WalkDir::new(&src)
+    // Walk errors are *not* dropped. An unreadable subdirectory would otherwise
+    // yield `Ok` with a short file list, and the projection would then report
+    // the contracts and gears in it as absent -- a permission problem wearing
+    // the costume of a description mistake.
+    let mut paths: Vec<PathBuf> = Vec::new();
+    for entry in walkdir::WalkDir::new(&src)
         .follow_links(false)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file() && e.path().extension().is_some_and(|x| x == "rs"))
-        .map(walkdir::DirEntry::into_path)
-        .collect();
+        .follow_root_links(false)
+    {
+        let entry = entry.map_err(|e| {
+            let at = e.path().unwrap_or(&src).to_path_buf();
+            ScanError::Walk(at, e.to_string())
+        })?;
+        if entry.file_type().is_file() && entry.path().extension().is_some_and(|x| x == "rs") {
+            paths.push(entry.into_path());
+        }
+    }
     // Sorted so the candidate list in an ambiguity diagnostic is stable.
     paths.sort();
 

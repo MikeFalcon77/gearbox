@@ -191,7 +191,7 @@ fn contract_identity_is_projected_from_the_contract_attribute() {
     let v2 = catalogue
         .contracts
         .values()
-        .find(|c| c.version.major == 2)
+        .find(|c| c.version.major() == 2)
         .expect("v2");
     assert_eq!(v2.base_name, "PaymentApi", "the trailing major is stripped");
     assert_eq!(

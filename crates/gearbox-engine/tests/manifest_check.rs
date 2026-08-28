@@ -217,10 +217,10 @@ fn a_correct_declaration_is_silent() {
 }
 
 #[test]
-fn an_unreadable_manifest_is_not_reported_twice() {
-    // The crate scan already complains about a path that leads nowhere, with the
-    // advice about `path` that belongs to it. Adding GBX0209 on top would make
-    // one mistake look like two.
+fn a_readable_crate_with_no_manifest_is_reported() {
+    // The identity check silently did not run here: `src/` reads fine, so the
+    // crate scan has nothing to say, and skipping the manifest failure left a
+    // crate with no `Cargo.toml` passing validation.
     let tree = Tree::new("no-manifest");
     std::fs::write(
         tree.0.join("thing/src/lib.rs"),
@@ -229,5 +229,23 @@ fn an_unreadable_manifest_is_not_reported_twice() {
     .unwrap();
     tree.described_as("cf-thing", "cf_thing");
     let diagnostics = tree.diagnostics();
-    assert!(only_0209(&diagnostics).is_empty());
+    let reported = only_0209(&diagnostics);
+    assert_eq!(reported.len(), 1, "got {diagnostics:?}");
+    assert!(
+        reported[0].contains("Cargo.toml"),
+        "the message must name what could not be read: {}",
+        reported[0]
+    );
+}
+
+#[test]
+fn an_unreadable_crate_is_not_reported_twice() {
+    // A `path` that leads nowhere: the crate scan already complains, with the
+    // advice about `path` that belongs to it. Adding GBX0209 on top would make
+    // one mistake look like two.
+    let tree = Tree::new("no-crate");
+    std::fs::remove_dir_all(tree.0.join("thing/src")).unwrap();
+    tree.described_as("cf-thing", "cf_thing");
+    let diagnostics = tree.diagnostics();
+    assert!(only_0209(&diagnostics).is_empty(), "got {diagnostics:?}");
 }

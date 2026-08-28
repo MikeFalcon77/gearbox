@@ -119,10 +119,16 @@ try {
     changed.every((c) => typeof c.replaces === "string" && c.gear?.id),
     "each notification names what it replaces and carries a projected gear",
   );
+  // Compared as sets, not as counts: two roots of the same shape hold the same
+  // `gdl_path` twice, so equal cardinality proves nothing about which row each
+  // notification retires. The key is `(source, gdl_path)`.
+  const key = (source, gdlPath) => `${source}:${gdlPath}`;
+  const pendingKeys = new Set(loaded.pending.map((p) => key(p.source, p.gdl_path)));
+  const replacedKeys = new Set(changed.map((c) => key(c.gear.source, c.replaces)));
   check(
-    new Set(loaded.pending.map((p) => p.gdl_path)).size ===
-      new Set(changed.map((c) => c.replaces)).size,
-    "the replaced keys match the pending keys",
+    pendingKeys.size === replacedKeys.size &&
+      [...replacedKeys].every((k) => pendingKeys.has(k)),
+    "every replaced key is a pending key",
   );
   check(logs.length > 0, "the engine logged its scan cost over gearbox/log");
 

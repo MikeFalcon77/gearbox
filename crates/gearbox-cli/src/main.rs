@@ -221,19 +221,22 @@ fn plugins(
     gear: Option<&str>,
     product_file: Option<&std::path::Path>,
 ) -> anyhow::Result<ExitCode> {
-    let mut opened = Vec::with_capacity(roots.len());
-    for path in roots {
-        opened.push(SourceRoot::open(
-            SourceId::new(default_source_id(path))?,
-            path,
-        )?);
+    let opened = open_roots(roots, None)?;
+    let scan = load_catalogue(&opened);
+
+    // The catalogue's own diagnostics used to be dropped on the floor here, so
+    // `plugins` listed extension points out of a half-loaded catalogue and
+    // exited 0. `catalogue` and `validate` both report them; there is no reason
+    // this command should not.
+    report(scan.catalogue.diagnostics.as_slice());
+    if scan.catalogue.diagnostics.has_errors() {
+        return Ok(ExitCode::FAILURE);
     }
-    let catalogue = load_catalogue(&opened).catalogue;
 
     if let Some(file) = product_file {
-        return Ok(resolve_plugins(&catalogue, file));
+        return Ok(resolve_plugins(&scan.catalogue, file));
     }
-    list_plugins(&catalogue, gear);
+    list_plugins(&scan.catalogue, gear);
     Ok(ExitCode::SUCCESS)
 }
 
@@ -295,8 +298,13 @@ fn list_plugins(catalogue: &gearbox_ir::Catalogue, only: Option<&str>) {
 /// What each host *will* use, per profile.
 fn resolve_plugins(catalogue: &gearbox_ir::Catalogue, file: &std::path::Path) -> ExitCode {
     let scan = load_product(file, None);
+    // Reported whether or not the product evaluated. A warning that arrives
+    // *with* a usable intent used to be dropped, so plugin resolution could exit
+    // 0 on a product description the same file's `product` subcommand complains
+    // about.
+    report(scan.diagnostics.as_slice());
+    let product_failed = scan.diagnostics.has_errors();
     let Some(intent) = scan.intent else {
-        report(scan.diagnostics.as_slice());
         return ExitCode::FAILURE;
     };
 
@@ -327,7 +335,7 @@ fn resolve_plugins(catalogue: &gearbox_ir::Catalogue, file: &std::path::Path) ->
     }
 
     report(diagnostics.as_slice());
-    if diagnostics.has_errors() {
+    if product_failed || diagnostics.has_errors() {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
@@ -681,6 +689,20 @@ fn validate(
             if let Some(path) = product_file {
                 let selected = intent.as_ref().map_or(0, |i| i.selected_gears.len());
                 println!("  product {}: {selected} selected gear(s)", path.display());
+                // Per profile, because "is this point filled" only has an
+                // answer once a profile is fixed.
+                let filled = checked
+                    .plugins
+                    .iter()
+                    .filter(|r| r.winner.is_some())
+                    .count();
+                if !checked.plugins.is_empty() {
+                    println!(
+                        "  plugins: {filled} of {} extension point/profile pair(s) resolve to an \
+                         implementation",
+                        checked.plugins.len()
+                    );
+                }
             }
         }
     }

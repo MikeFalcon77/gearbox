@@ -77,9 +77,14 @@ fn declared_crates(decl: &GearDecl) -> Vec<DeclaredCrate<'_>> {
 
 /// Report GBX0209 for every declared crate whose manifest disagrees.
 ///
-/// A crate whose manifest cannot be read is *not* reported here. That failure is
+/// A crate whose *source* cannot be read is not reported here: that failure is
 /// already reported where the crate is scanned, with the advice about `path`
 /// that belongs to it, and saying it twice would make one mistake look like two.
+///
+/// A crate whose source reads fine and whose `Cargo.toml` does not is a
+/// different case, and it used to be skipped in silence -- so a crate with a
+/// missing or malformed manifest passed validation with its identity check
+/// quietly not run. Nobody else reports that one, so it is reported here.
 pub fn check(
     root: &SourceRoot,
     identity: &FileIdentity,
@@ -88,9 +93,42 @@ pub fn check(
     diagnostics: &mut Diagnostics,
 ) {
     for declared in declared_crates(decl) {
-        let dir = crate::merge::crate_dir(&root.root, &identity.gdl_path, &declared.record.path);
-        let Ok(manifest) = scans.manifest(&dir) else {
-            continue;
+        let dir =
+            match crate::merge::crate_dir(&root.root, &identity.gdl_path, &declared.record.path) {
+                Ok(dir) => dir,
+                Err(e) => {
+                    diagnostics.push(crate::merge::bad_crate_path(
+                        &identity.uri,
+                        &declared.field,
+                        &declared.record.path,
+                        &e,
+                    ));
+                    continue;
+                }
+            };
+
+        let manifest = match scans.manifest(&dir) {
+            Ok(manifest) => manifest,
+            Err(e) => {
+                if scans.get(&dir).is_ok() {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            DiagnosticCode::ValidateLibIdentMismatch,
+                            format!(
+                                "`{}` points at a crate whose `Cargo.toml` cannot be read, so \
+                                 its declared identity could not be checked: {e}",
+                                declared.field
+                            ),
+                            "cargo reads the same manifest; a crate whose source is present \
+                             and whose manifest is not will fail the build rather than the \
+                             description",
+                        )
+                        .at(Location::file(identity.uri.clone()))
+                        .with_evidence(evidence(&dir)),
+                    );
+                }
+                continue;
+            }
         };
 
         if declared.record.crate_name != manifest.package_name {

@@ -50,6 +50,8 @@ export default new ContainerModule((bind) => {
       // asked for the service and started a load.
       const forwarder: GearboxClient = {
         onCatalogueChanged: (event) => container.get(CatalogueStore).onCatalogueChanged(event),
+        onCatalogueDiagnostics: (event) =>
+          container.get(CatalogueStore).onCatalogueDiagnostics(event),
         onProgress: (event) => container.get(CatalogueStore).onProgress(event),
         onLog: (message) => container.get(CatalogueStore).onLog(message),
       };

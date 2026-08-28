@@ -49,12 +49,31 @@ fn sink<'a>(eval: &'a Evaluator<'_, '_, '_>) -> anyhow::Result<&'a GdlSink> {
         .ok_or_else(|| anyhow::anyhow!("internal error: no GdlSink installed on the evaluator"))
 }
 
+/// How deep a plugin option may nest before it is refused.
+///
+/// A guard against recursion, not a modelling decision: `x = []; x.append(x)`
+/// builds a cyclic value the host will happily hand us, and a bare recursive
+/// walk over one overflows the native stack -- which aborts the process instead
+/// of producing a diagnostic. Real option maps are two or three deep, so the
+/// limit costs nothing.
+const MAX_OPTION_DEPTH: usize = 32;
+
 /// Convert a Starlark value to JSON for a plugin's option map.
 ///
 /// Deliberately narrow. A cluster option is a scalar, or a list or map of them;
 /// anything else -- a function, a record, a `None` -- is a mistake worth naming
 /// rather than encoding as `null` and letting the plugin reject it at startup.
 fn to_json(key: &str, value: Value<'_>) -> anyhow::Result<serde_json::Value> {
+    to_json_at(key, value, 0)
+}
+
+fn to_json_at(key: &str, value: Value<'_>, depth: usize) -> anyhow::Result<serde_json::Value> {
+    if depth > MAX_OPTION_DEPTH {
+        return Err(anyhow::anyhow!(
+            "option `{key}` nests more than {MAX_OPTION_DEPTH} levels deep, or contains itself. \
+             Cluster options are passed to the plugin as JSON, which has neither."
+        ));
+    }
     if let Some(s) = value.unpack_str() {
         return Ok(serde_json::Value::String(s.to_owned()));
     }
@@ -67,7 +86,7 @@ fn to_json(key: &str, value: Value<'_>) -> anyhow::Result<serde_json::Value> {
     if let Some(list) = starlark::values::list::ListRef::from_value(value) {
         let items = list
             .iter()
-            .map(|item| to_json(key, item))
+            .map(|item| to_json_at(key, item, depth + 1))
             .collect::<anyhow::Result<Vec<_>>>()?;
         return Ok(serde_json::Value::Array(items));
     }
@@ -77,7 +96,7 @@ fn to_json(key: &str, value: Value<'_>) -> anyhow::Result<serde_json::Value> {
             let name = k.unpack_str().ok_or_else(|| {
                 anyhow::anyhow!("option `{key}`: map keys must be strings, got `{k}`")
             })?;
-            map.insert(name.to_owned(), to_json(name, v)?);
+            map.insert(name.to_owned(), to_json_at(name, v, depth + 1)?);
         }
         return Ok(serde_json::Value::Object(map));
     }
@@ -454,7 +473,7 @@ fn product_additions(builder: &mut GlobalsBuilder) {
 /// here and `product()` is not callable there, so a file that mixes the two
 /// fails at the call rather than producing half of each.
 #[must_use]
-pub fn product_globals() -> starlark::environment::Globals {
+pub(crate) fn product_globals() -> starlark::environment::Globals {
     GlobalsBuilder::standard().with(product_additions).build()
 }
 

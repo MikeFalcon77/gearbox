@@ -25,6 +25,14 @@ pub struct ValidateReport {
     pub scan: CatalogueScan,
     /// Everything found, the catalogue's own diagnostics included.
     pub diagnostics: Diagnostics,
+    /// What each selected host's extension points resolve to, per profile.
+    ///
+    /// Empty when no product was given. Included because "does every extension
+    /// point have an implementation" is checkable without resolving -- it needs
+    /// the catalogue and the product, and nothing else -- and leaving it to the
+    /// `plugins` subcommand made it the one check a passing `validate` did not
+    /// cover.
+    pub plugins: Vec<crate::plugin_select::PointResolution>,
 }
 
 impl ValidateReport {
@@ -77,12 +85,35 @@ pub fn validate_at(
         diagnostics.push(diagnostic.clone());
     }
 
-    if let Some(intent) = product {
-        check_selections(roots, &scan, intent, product_path, &mut diagnostics);
-    }
+    let plugins = match product {
+        None => Vec::new(),
+        Some(intent) => {
+            let uri = product_uri(intent, product_path);
+            check_selections(roots, &scan, intent, &uri, &mut diagnostics);
+            // An unfilled extension point is a product that builds and then
+            // finds nothing at runtime. It needs the catalogue and the product
+            // and no resolution at all, so validate is where it belongs.
+            crate::plugin_select::check(&scan.catalogue, intent, &uri, &mut diagnostics)
+        }
+    };
 
     diagnostics.finish();
-    ValidateReport { scan, diagnostics }
+    ValidateReport {
+        scan,
+        diagnostics,
+        plugins,
+    }
+}
+
+/// The `file://` URI diagnostics about the product should point at.
+///
+/// A `ProductIntent` carries `gdl_path` relative to its own root, so building a
+/// URI out of it alone yields `file://product.gdl` -- a link no editor can open.
+fn product_uri(intent: &ProductIntent, product_path: Option<&std::path::Path>) -> String {
+    match product_path.map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf())) {
+        Some(path) => format!("file://{}", path.display()),
+        None => format!("file://{}", intent.gdl_path.as_str()),
+    }
 }
 
 /// Every selected gear must be in the catalogue.
@@ -90,14 +121,9 @@ fn check_selections(
     roots: &[SourceRoot],
     scan: &CatalogueScan,
     intent: &ProductIntent,
-    product_path: Option<&std::path::Path>,
+    uri: &str,
     diagnostics: &mut Diagnostics,
 ) {
-    let uri = match product_path.map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf())) {
-        Some(path) => format!("file://{}", path.display()),
-        None => format!("file://{}", intent.gdl_path.as_str()),
-    };
-
     for selection in &intent.selected_gears {
         if scan.catalogue.gears.contains_key(&selection.gear) {
             continue;
@@ -115,7 +141,7 @@ fn check_selections(
                     ),
                     skeleton(&found),
                 )
-                .at(Location::file(uri.clone()))
+                .at(Location::file(uri.to_owned()))
                 // `src/` is put back: `RustFile::relative` is keyed relative to
                 // the crate's `src/`, so joining it straight onto the crate
                 // directory yields a path that does not exist -- and evidence
@@ -136,7 +162,7 @@ fn check_selections(
                     ),
                     nearest_hint(scan, selection.gear.as_str()),
                 )
-                .at(Location::file(uri.clone())),
+                .at(Location::file(uri.to_owned())),
             ),
         }
     }

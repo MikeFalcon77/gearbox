@@ -104,14 +104,28 @@ try {
 
   // --- the staged claim ---------------------------------------------------
   // The decisive one: a sample where rows are on screen and still pending.
+  //
+  // Bounded rather than asserted outright. On a fast machine with a small
+  // corpus the whole projection can land between two samples, and failing then
+  // would be the harness reporting its own sampling rate as a product defect.
+  // The escape hatch is narrow on purpose: it applies only when the load was
+  // too short to have been observed at all, which is itself reported.
   const staged = timeline.filter((s) => s.rows > 0 && s.pending > 0);
-  check(
-    "rows are on screen while still pending",
-    staged.length > 0,
-    staged.length > 0
-      ? `${staged.length} samples, first with ${staged[0].rows} rows / ${staged[0].pending} pending`
-      : "no sample caught a partial tree -- staging is invisible to a user",
-  );
+  const observable = timeline.filter((s) => s.rows > 0).length;
+  if (staged.length === 0 && observable <= 1) {
+    console.log(
+      `skip rows are on screen while still pending -- the load finished within ` +
+        `${observable} sample(s) of ${SAMPLE_MS}ms; too fast to observe`,
+    );
+  } else {
+    check(
+      "rows are on screen while still pending",
+      staged.length > 0,
+      staged.length > 0
+        ? `${staged.length} samples, first with ${staged[0].rows} rows / ${staged[0].pending} pending`
+        : "no sample caught a partial tree -- staging is invisible to a user",
+    );
+  }
 
   // Names and categories are present in that partial state, badges are not.
   const firstStaged = staged[0];
@@ -178,6 +192,35 @@ try {
       detail.text.slice(0, 120).replace(/\s+/g, " "),
     );
   }
+
+  // --- operable without a mouse -------------------------------------------
+  // A panel in an IDE that only answers clicks is unusable for anyone who does
+  // not use a mouse, and every interaction here was a bare `onClick` on a div.
+  // Real key events through the browser, not synthesized ones: React attaches
+  // its own listeners, and a dispatched event with the wrong shape would pass
+  // while a keyboard would not.
+  await page.focus(".gbx-row");
+  const focused = await page.evaluate(
+    () => document.activeElement?.classList.contains("gbx-row") === true,
+  );
+  check("a catalogue row can take focus", focused);
+
+  await page.keyboard.press("Enter");
+  const keyboardSelected = await page.evaluate(async () => {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const active = document.activeElement;
+      if (active?.classList.contains("gbx-selected")) {
+        return active.querySelector(".gbx-row-name")?.textContent?.trim() ?? "";
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return null;
+  });
+  check(
+    "Enter selects the focused row",
+    typeof keyboardSelected === "string",
+    keyboardSelected ?? "the focused row never became selected",
+  );
 
   // What is *not* built yet has to be visible. The notice is driven by the
   // engine's own `capabilities.resolve`, so it disappears on its own when M4

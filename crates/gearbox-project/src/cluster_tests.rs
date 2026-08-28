@@ -69,7 +69,7 @@ impl ClusterGear {
 
 #[test]
 fn registry_projects_in_source_order() {
-    let got = project_provider_registry(&[file(REGISTRY)]);
+    let got = project_provider_registry(&[file(REGISTRY)]).expect("project");
     let shape: Vec<(ClusterPrimitive, &str, &str)> = got
         .iter()
         .map(|p| (p.primitive, p.plugin_lib.as_str(), p.provider_type.as_str()))
@@ -101,7 +101,7 @@ fn registry_projects_in_source_order() {
 
 #[test]
 fn registry_registers_no_leader_election_provider() {
-    let got = project_provider_registry(&[file(REGISTRY)]);
+    let got = project_provider_registry(&[file(REGISTRY)]).expect("project");
     assert!(
         !got.iter()
             .any(|p| p.primitive == ClusterPrimitive::LeaderElection),
@@ -113,10 +113,10 @@ fn registry_registers_no_leader_election_provider() {
 #[test]
 fn registry_projects_from_the_real_tree() {
     let files = require!(cluster_crate());
-    let got = project_provider_registry(&files);
+    let got = project_provider_registry(&files).expect("project");
     assert_eq!(
         got,
-        project_provider_registry(&[file(REGISTRY)]),
+        project_provider_registry(&[file(REGISTRY)]).expect("project"),
         "the fixture has drifted from the real provider_registry()"
     );
 }

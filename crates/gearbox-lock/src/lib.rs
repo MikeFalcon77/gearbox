@@ -15,6 +15,6 @@ mod error;
 mod read;
 
 pub use canonical::{canonicalize_order, compute_hash, write_canonical};
-pub use diff::{BindingKey, ClusterKey, LockDiff, diff};
+pub use diff::{BindingKey, ClusterKey, CutKey, FieldChange, LockDiff, ProvenanceKey, diff};
 pub use error::LockError;
 pub use read::read;

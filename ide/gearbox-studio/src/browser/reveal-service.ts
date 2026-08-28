@@ -31,6 +31,18 @@ export class RevealService {
    * nothing is worse than one that says why: the first looks like the file is
    * uninteresting, the second looks like a bug -- and it is one.
    */
+  /**
+   * The `file://` URI for a catalogue path, when there is one.
+   *
+   * Exposed so a link can carry a real `href`. An `<a>` with only an `onClick`
+   * is a div wearing a hat: no keyboard activation, no focus ring, nothing for
+   * a screen reader to announce, and no target in the status bar.
+   */
+  uriFor(source: string, relative: string): string | undefined {
+    const absolute = this.store.absolutePath(source, relative);
+    return absolute === undefined ? undefined : URI.fromFilePath(absolute).toString();
+  }
+
   async reveal(source: string, relative: string): Promise<void> {
     const absolute = this.store.absolutePath(source, relative);
     if (absolute === undefined) {

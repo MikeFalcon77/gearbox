@@ -350,7 +350,7 @@ fn provider_and_family_lookups() {
     let family: Vec<&str> = cat
         .contract_family(&v1)
         .iter()
-        .map(|c| c.version.declared.as_str())
+        .map(|c| c.version.declared())
         .collect();
     assert_eq!(family, ["v1", "v2"]);
 
@@ -361,18 +361,21 @@ fn provider_and_family_lookups() {
 }
 
 #[test]
-fn crate_dir_resolves_against_the_description_location() {
+fn crate_dir_is_already_relative_to_the_source_root() {
+    // `CargoRef::path` is resolved once, at merge time, so a consumer neither
+    // repeats nor re-fails that resolution. What `gear.gdl` spelled relative to
+    // its own directory is not what the catalogue stores.
     let mut g = gear("payments-audit", &[], &[]);
     g.gdl_path = RelPath::new("gears/payments-audit/payments-audit/gear.gdl").unwrap();
+    g.package.path = RelPath::new("gears/payments-audit/payments-audit").unwrap();
 
-    // `path = "."` -- the common case.
     assert_eq!(
-        g.crate_dir().unwrap().as_str(),
+        g.crate_dir().as_str(),
         "gears/payments-audit/payments-audit"
     );
 
-    // A sibling crate.
-    g.package.path = RelPath::new("dummy").unwrap();
+    // A sibling crate: `path = "../payments-audit-sdk"` in the description
+    // resolves to this, which is the shape `RelPath` can actually hold.
     assert_eq!(
         g.gdl_dir()
             .resolve("../payments-audit-sdk")

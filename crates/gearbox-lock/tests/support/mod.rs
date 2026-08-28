@@ -180,7 +180,7 @@ fn binding() -> ResolvedBinding {
         contract: payment_api_v1(),
         provider: gid("api-contracts"),
         provider_process: pid("gateway"),
-        mode: BindingMode::Remote,
+        mode: ResolvedBindingMode::Remote,
         transport: Transport::Rest,
         mechanism: BindingMechanism::ConsumesDirectory,
         endpoint_source: Some("directory:gear-orchestrator/api-contracts".to_owned()),

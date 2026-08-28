@@ -207,11 +207,7 @@ export class GearDetailWidget extends ReactWidget {
     return (
       <div className="gbx-kv">
         <span>description file</span>
-        <span className="gbx-links">
-          <a onClick={() => void this.reveals.reveal(source, gdlPath)} title={gdlPath}>
-            {gdlPath}
-          </a>
-        </span>
+        <span className="gbx-links">{this.renderLink(source, gdlPath, gdlPath)}</span>
       </div>
     );
   }
@@ -224,13 +220,33 @@ export class GearDetailWidget extends ReactWidget {
     if (target === null || target === undefined) {
       return undefined;
     }
+    return this.renderLink(source, target, label);
+  }
+
+  /**
+   * One link, opened through the opener rather than by the browser.
+   *
+   * `href` is real so the anchor is focusable, activates on Enter and announces
+   * as a link; `preventDefault` keeps the navigation ours, because a `file://`
+   * href followed by the browser would leave Theia rather than open a tab in
+   * it. Without the href these were divs that only answered a mouse.
+   */
+  protected renderLink(source: string, target: string, label: string): React.ReactNode {
+    const href = this.reveals.uriFor(source, target);
     return (
-      <a key={target} onClick={() => void this.reveals.reveal(source, target)} title={target}>
+      <a
+        key={target}
+        href={href ?? "#"}
+        title={target}
+        onClick={(event) => {
+          event.preventDefault();
+          void this.reveals.reveal(source, target);
+        }}
+      >
         {label}
       </a>
     );
   }
-
 }
 
 /**

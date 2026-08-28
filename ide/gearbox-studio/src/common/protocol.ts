@@ -6,14 +6,35 @@
 // (cpt-gearbox-nfr-no-type-drift).
 
 import type { CatalogueChanged } from "./generated/CatalogueChanged";
+import type { CatalogueDiagnostics } from "./generated/CatalogueDiagnostics";
 import type { CatalogueLoadResult } from "./generated/CatalogueLoadResult";
 import type { Diagnostic } from "./generated/Diagnostic";
+import type { FailedRoot } from "./generated/FailedRoot";
 import type { GearDescriptor } from "./generated/GearDescriptor";
 import type { InitializeResult } from "./generated/InitializeResult";
 import type { PendingGear } from "./generated/PendingGear";
 import type { ProgressParams } from "./generated/ProgressParams";
 
 export const GEARBOX_SERVICE_PATH = "/services/gearbox";
+
+/**
+ * The engine's JSON-RPC method names, in one place.
+ *
+ * ts-rs exports types, not constants, so these cannot be generated from
+ * `gearbox_rpc::protocol::method` the way the payloads are. One table is the
+ * next best thing: a rename then breaks in one place rather than in whichever
+ * `sendRequest("...")` string was missed, which compiles and fails at runtime.
+ * **Keep in sync with `crates/gearbox-rpc/src/protocol.rs`.**
+ */
+export const method = {
+  INITIALIZE: "initialize",
+  INITIALIZED: "initialized",
+  CATALOGUE_LOAD: "gearbox/catalogue/load",
+  CATALOGUE_CHANGED: "gearbox/catalogueChanged",
+  CATALOGUE_DIAGNOSTICS: "gearbox/catalogueDiagnostics",
+  PROGRESS: "$/progress",
+  LOG: "gearbox/log",
+} as const;
 
 export const GearboxService = Symbol("GearboxService");
 export interface GearboxService {
@@ -34,6 +55,8 @@ export interface GearboxService {
 export const GearboxClient = Symbol("GearboxClient");
 export interface GearboxClient {
   onCatalogueChanged(event: CatalogueChanged): void;
+  /** Diagnostics the second pass produced, after the load response went out. */
+  onCatalogueDiagnostics(event: CatalogueDiagnostics): void;
   onProgress(event: ProgressParams): void;
   onLog(message: string): void;
 }
@@ -54,12 +77,22 @@ export type Row =
 /**
  * What a row is keyed by, and it is never the id.
  *
- * Both variants carry `gdl_path` precisely so this function does not have to
- * branch: the key has to survive the pending-to-projected transition, and an id
- * cannot, because it does not exist until S2 has run.
+ * Both variants carry `source` and `gdl_path` precisely so this function does
+ * not have to branch: the key has to survive the pending-to-projected
+ * transition, and an id cannot, because it does not exist until S2 has run.
+ *
+ * `source` is part of the key because `gdl_path` alone is not unique. It is
+ * relative to *one* source root, and the engine accepts several -- two roots
+ * with the same layout both hold `foo/gear.gdl`, and keying on the path alone
+ * collapses them into one row that the second projection then overwrites.
  */
 export function rowKey(row: Row): string {
-  return row.gear.gdl_path;
+  return keyFor(row.gear.source, row.gear.gdl_path);
+}
+
+/** The row key for a `(source, gdl_path)` pair, as the notification sends it. */
+export function keyFor(source: string, gdlPath: string): string {
+  return `${source}:${gdlPath}`;
 }
 
 export function rowName(row: Row): string {
@@ -69,14 +102,27 @@ export function rowName(row: Row): string {
 }
 
 export function rowCategory(row: Row): string {
-  const category = row.kind === "pending" ? row.gear.category : row.gear.category;
-  return category ?? "uncategorised";
+  return row.gear.category ?? "uncategorised";
 }
 
+/**
+ * Where a load has got to.
+ *
+ * A discriminant rather than a `loading: boolean`, because the boolean could
+ * not say "the load failed": a rejected `load()` left it stuck at `true`, and
+ * the empty state is gated on it, so a missing engine rendered as an eternal
+ * `0 gear(s) projecting 0/0` with no error anywhere.
+ */
+export type CatalogueStatus = "idle" | "loading" | "ready" | "error";
+
 export interface CatalogueState {
+  readonly status: CatalogueStatus;
   readonly rows: readonly Row[];
   readonly diagnostics: readonly Diagnostic[];
+  /** Roots `initialize` was asked for and could not open. */
+  readonly failedRoots: readonly FailedRoot[];
+  /** Set only when `status === "error"`. */
+  readonly error: string | undefined;
   readonly total: number;
   readonly completed: number;
-  readonly loading: boolean;
 }

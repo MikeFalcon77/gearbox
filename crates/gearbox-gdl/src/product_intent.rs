@@ -30,9 +30,33 @@ use crate::sink::ProductDecl;
 /// The declared profiles, which everything else is scoped against.
 type Profiles = BTreeMap<ProfileId, DeploymentProfileDecl>;
 
-/// A `(subject, key, profile)` claim, used to detect two declarations covering
-/// the same thing in the same profile.
-type ScopeKey = (String, String, Option<ProfileId>);
+/// What has already been claimed for one `(subject, key)` pair.
+///
+/// An unscoped declaration applies to *every* profile, so it cannot be modelled
+/// as one more entry beside the scoped ones: the two orders would then disagree.
+/// `all` records it as the distinct thing it is, which is what makes
+/// scoped-then-unscoped collide exactly as unscoped-then-scoped does.
+#[derive(Default)]
+struct Claimed {
+    /// An unscoped declaration has been seen.
+    all: bool,
+    /// The profiles scoped declarations have taken.
+    profiles: BTreeSet<ProfileId>,
+}
+
+/// Claims so far, keyed by `(subject, key)`.
+type Claims = BTreeMap<(String, String), Claimed>;
+
+/// A declared string, or `None` when it is absent or blank.
+///
+/// Blank and absent mean the same thing for a location, and neither is a value
+/// worth putting in a lock.
+fn non_empty(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+}
 
 fn invalid(uri: &str, message: impl Into<String>, help: impl Into<String>) -> Diagnostic {
     Diagnostic::error(DiagnosticCode::GdlEval, message, help).at(Location::file(uri.to_owned()))
@@ -138,15 +162,37 @@ fn build_sources(
             }
         };
         let at = match record.at.kind.as_str() {
-            "path" => SourceDecl::Path {
-                at: record.at.at.clone().unwrap_or_default(),
-            },
-            "git" => SourceDecl::Git {
-                url: record.at.url.clone().unwrap_or_default(),
-                tag: record.at.tag.clone(),
-                rev: record.at.rev.clone(),
-                branch: record.at.branch.clone(),
-            },
+            // `unwrap_or_default()` used to stand here, which turned a missing
+            // or blank location into `at = ""` -- a source pointing at nothing,
+            // recorded in the lock as if it were a real answer.
+            "path" => {
+                let Some(at) = non_empty(record.at.at.as_deref()) else {
+                    diagnostics.push(invalid(
+                        uri,
+                        format!("source `{id}` declares `path()` with no directory"),
+                        "write `path(\"../some-repo\")`; the path is relative to the product \
+                         description",
+                    ));
+                    continue;
+                };
+                SourceDecl::Path { at }
+            }
+            "git" => {
+                let Some(url) = non_empty(record.at.url.as_deref()) else {
+                    diagnostics.push(invalid(
+                        uri,
+                        format!("source `{id}` declares `git()` with no url"),
+                        "write `git(url = \"...\", tag = \"...\")`",
+                    ));
+                    continue;
+                };
+                SourceDecl::Git {
+                    url,
+                    tag: record.at.tag.clone(),
+                    rev: record.at.rev.clone(),
+                    branch: record.at.branch.clone(),
+                }
+            }
             // `registry(...)` is spelled in the vocabulary purely so this
             // diagnostic can name it instead of reporting an unknown function,
             // which would read as a typo.
@@ -249,7 +295,7 @@ fn build_plugins(
     diagnostics: &mut Diagnostics,
 ) -> Vec<PluginSelection> {
     let mut out = Vec::new();
-    let mut claimed: BTreeSet<ScopeKey> = BTreeSet::new();
+    let mut claimed = Claims::new();
 
     for entry in &record.plugins {
         let Some(gear) = gear_id(uri, &entry.gear, "plugin", diagnostics) else {
@@ -287,7 +333,7 @@ fn build_bindings(
     diagnostics: &mut Diagnostics,
 ) -> Vec<BindingIntent> {
     let mut bindings = Vec::new();
-    let mut claimed: BTreeSet<ScopeKey> = BTreeSet::new();
+    let mut claimed = Claims::new();
 
     for record in &decl.bindings {
         let Some(consumer) = gear_id(uri, &record.consumer, "bind", diagnostics) else {
@@ -347,7 +393,7 @@ fn build_cluster_scopes(
     diagnostics: &mut Diagnostics,
 ) -> Vec<ClusterScopeIntent> {
     let mut out = Vec::new();
-    let mut claimed: BTreeSet<ScopeKey> = BTreeSet::new();
+    let mut claimed = Claims::new();
 
     for record in &decl.cluster_profiles {
         let scoped = scoped_profiles(
@@ -487,22 +533,24 @@ fn scoped_profiles(
 /// Claim `(subject, key)` for each profile in `scoped`, or report a collision.
 ///
 /// An unscoped declaration applies to every profile, so it collides with any
-/// other entry for the same subject -- which is why the profile slot is an
-/// `Option` rather than an empty set meaning "none".
-fn claim(
-    claimed: &mut BTreeSet<ScopeKey>,
-    subject: &str,
-    key: &str,
-    scoped: &BTreeSet<ProfileId>,
-) -> bool {
-    let unscoped = (subject.to_owned(), key.to_owned(), None);
+/// other declaration for the same subject regardless of which came first --
+/// including one scoped to a single profile.
+fn claim(claimed: &mut Claims, subject: &str, key: &str, scoped: &BTreeSet<ProfileId>) -> bool {
+    let entry = claimed
+        .entry((subject.to_owned(), key.to_owned()))
+        .or_default();
+
     if scoped.is_empty() {
-        return claimed.insert(unscoped);
+        // Claims every profile, so anything already claimed collides.
+        let ok = !entry.all && entry.profiles.is_empty();
+        entry.all = true;
+        return ok;
     }
+
     // An earlier unscoped entry already claimed every profile.
-    let mut ok = !claimed.contains(&unscoped);
+    let mut ok = !entry.all;
     for profile in scoped {
-        if !claimed.insert((subject.to_owned(), key.to_owned(), Some(profile.clone()))) {
+        if !entry.profiles.insert(profile.clone()) {
             ok = false;
         }
     }

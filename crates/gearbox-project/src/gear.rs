@@ -205,21 +205,10 @@ pub fn project_gear(site: &crate::attribute::AttributeSite<'_>) -> syn::Result<P
     let mut projected: ProjectedGear = site.attr.parse_args::<GearArgs>()?.0;
     projected.struct_ident.clone_from(&site.struct_ident);
     projected.provides = crate::contract::project_provides(site.item_attrs)?;
-    // The cfg check looks at the item's other attributes, which the site does
-    // not carry; callers that need it set it. Kept here for shape.
-    projected.conditional = false;
-    Ok(projected)
-}
-
-/// Project, additionally recording whether the item is `cfg`-gated.
-///
-/// # Errors
-/// Returns a [`syn::Error`] when the attribute's arguments do not parse.
-pub fn project_gear_with_attrs(
-    site: &crate::attribute::AttributeSite<'_>,
-    item_attrs: &[syn::Attribute],
-) -> syn::Result<ProjectedGear> {
-    let mut projected = project_gear(site)?;
-    projected.conditional = has_cfg(item_attrs);
+    // `AttributeSite` carries the item's whole attribute list -- the same list
+    // `provides` is read from -- so the cfg is here to be read. It used to be
+    // left `false` for a caller to fill in, which made the primary projection
+    // claim every cfg-gated gear was unconditional.
+    projected.conditional = has_cfg(site.item_attrs);
     Ok(projected)
 }

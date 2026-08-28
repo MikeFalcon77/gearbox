@@ -141,7 +141,7 @@ fn classify_declared(
     diagnostics: &mut Diagnostics,
 ) {
     let candidates = providers.get(contract);
-    let Some(provider) = candidates.and_then(|set| set.iter().next()).cloned() else {
+    let Some(candidates) = candidates.filter(|set| !set.is_empty()) else {
         // Nothing provides this exact contract. Distinguish "no provider at all"
         // from "a provider of a different major", because the remedies differ:
         // one is a missing gear, the other is an upgrade.
@@ -150,6 +150,21 @@ fn classify_declared(
         } else {
             diagnostics.push(no_provider(consumer, contract, declared_from, uri));
         }
+        return;
+    };
+
+    // `#[toolkit::consumes(from = "...")]` names the provider. Taking the first
+    // member of a `BTreeSet` instead would classify the edge against whichever
+    // gear happens to sort first -- a different gear, a different co-location
+    // closure, and therefore a different cut verdict.
+    let Some(provider) = select_provider(
+        candidates,
+        declared_from,
+        consumer,
+        contract,
+        uri,
+        diagnostics,
+    ) else {
         return;
     };
 
@@ -220,6 +235,77 @@ fn classify_declared(
     });
 }
 
+/// The gear that will actually provide this edge.
+///
+/// The declared `from` when it is in the closure and offers the contract, which
+/// is the case every well-formed description produces. Anything else is
+/// reported: a single other provider is used with a warning, because refusing
+/// would turn a rename into an unresolvable product, while several are
+/// ambiguous and the resolver must not pick.
+fn select_provider(
+    candidates: &BTreeSet<GearId>,
+    declared_from: &GearId,
+    consumer: &GearId,
+    contract: &ContractId,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) -> Option<GearId> {
+    if candidates.contains(declared_from) {
+        return Some(declared_from.clone());
+    }
+
+    let mut iter = candidates.iter();
+    let first = iter.next()?;
+    if iter.next().is_some() {
+        diagnostics.push(
+            Diagnostic::error(
+                DiagnosticCode::BindingNoProvider,
+                format!(
+                    "`{consumer}` consumes `{contract}` from `{declared_from}`, which does not \
+                     provide it; {} gears in the product do",
+                    candidates.len()
+                ),
+                format!(
+                    "point `from = \"...\"` at one of them ({}), or select `{declared_from}` \
+                     with `use_gear`",
+                    joined(candidates)
+                ),
+            )
+            .at(Location::file(uri.to_owned())),
+        );
+        return None;
+    }
+
+    diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::BindingNoProvider,
+            format!(
+                "`{consumer}` consumes `{contract}` from `{declared_from}`, which does not \
+                 provide it; `{first}` does, and is used"
+            ),
+        )
+        // A warning, not an error: the generated client resolves by contract, so
+        // the single other provider really does satisfy the edge. Refusing would
+        // turn a gear rename into an unresolvable product.
+        .with_severity(gearbox_ir::Severity::Warning)
+        .with_help(format!(
+            "update `#[toolkit::consumes(..., from = \"{first}\")]`, or select \
+             `{declared_from}` with `use_gear`"
+        ))
+        .at(Location::file(uri.to_owned())),
+    );
+    Some(first.clone())
+}
+
+/// A comma-separated list of gear ids, for a diagnostic.
+fn joined(gears: &BTreeSet<GearId>) -> String {
+    gears
+        .iter()
+        .map(GearId::as_str)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// A provider of the same contract family at a different major, if there is one.
 ///
 /// Compatibility is exact major equality: parallel majors are a design feature of
@@ -238,7 +324,7 @@ fn other_major(
             catalogue.contracts.get(*id).is_some_and(|other| {
                 other.owner == target.owner
                     && other.base_name == target.base_name
-                    && other.version.major != target.version.major
+                    && other.version.major() != target.version.major()
             })
         })
         .cloned()

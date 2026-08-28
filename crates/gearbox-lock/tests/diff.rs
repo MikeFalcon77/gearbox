@@ -170,3 +170,101 @@ fn summary_lines_are_sorted_and_readable() {
             .any(|l| l.starts_with("~ binding payments-audit -> "))
     );
 }
+
+#[test]
+fn detects_a_changed_source_pin() {
+    // The pin is what makes a lock reproducible. A diff that reported "no
+    // change" across a re-pinned source would hide the one thing an operator
+    // reviews a lock for.
+    let before = support::fixture();
+    let mut after = support::fixture();
+    let id = gearbox_ir::SourceId::new("gears-rust").unwrap();
+    after.sources.get_mut(&id).unwrap().digest = "git:0000000000000000".to_owned();
+
+    let d = gearbox_lock::diff(&before, &after);
+    assert_eq!(d.sources_changed, vec![id]);
+    assert!(d.sources_added.is_empty());
+    assert!(!d.is_empty());
+    assert!(d.summary().iter().any(|l| l == "~ source gears-rust"));
+}
+
+#[test]
+fn detects_a_changed_lock_hash() {
+    let before = support::fixture();
+    let mut after = support::fixture();
+    after.product.lock_hash = "blake3:deadbeef".to_owned();
+
+    let d = gearbox_lock::diff(&before, &after);
+    assert!(!d.is_empty(), "{d:?}");
+    assert_eq!(
+        d.fields_changed
+            .iter()
+            .map(|c| c.field.as_str())
+            .collect::<Vec<_>>(),
+        vec!["product.lock_hash"]
+    );
+}
+
+#[test]
+fn detects_changed_kubernetes_settings() {
+    let before = support::fixture();
+    let mut after = support::fixture();
+    after.kubernetes = Some(gearbox_ir::KubernetesSettings {
+        namespace: Some("payments".to_owned()),
+        image_registry: None,
+        discovery: gearbox_ir::Discovery::Static,
+    });
+
+    let d = gearbox_lock::diff(&before, &after);
+    assert!(!d.is_empty(), "{d:?}");
+    assert!(
+        d.fields_changed
+            .iter()
+            .any(|c| c.field == "kubernetes.namespace" && c.after == "payments"),
+        "{:?}",
+        d.fields_changed
+    );
+}
+
+#[test]
+fn detects_a_removed_cut_candidate() {
+    let before = support::fixture();
+    let mut after = support::fixture();
+    let dropped = after.cuttable_if_declared.remove(0);
+
+    let d = gearbox_lock::diff(&before, &after);
+    assert_eq!(
+        d.cuts_removed,
+        vec![gearbox_lock::CutKey {
+            consumer: dropped.consumer,
+            provider: dropped.provider,
+            contract: dropped.contract,
+        }]
+    );
+    assert!(!d.is_empty());
+}
+
+#[test]
+fn detects_a_changed_provenance_reason() {
+    // The edge is the same edge; only the recorded "why" moved. That is still a
+    // lock mutation, and a widget claiming otherwise would be wrong.
+    let before = support::fixture();
+    let mut after = support::fixture();
+    after.provenance[0].because = "a different reason entirely".to_owned();
+
+    let d = gearbox_lock::diff(&before, &after);
+    assert_eq!(d.provenance_changed.len(), 1, "{d:?}");
+    assert!(d.provenance_added.is_empty());
+    assert!(!d.is_empty());
+}
+
+#[test]
+fn detects_changed_diagnostics() {
+    let before = support::fixture();
+    let mut after = support::fixture();
+    after.diagnostics = before.diagnostics.iter().take(1).cloned().collect();
+
+    let d = gearbox_lock::diff(&before, &after);
+    assert!(d.diagnostics_changed.is_some(), "{d:?}");
+    assert!(!d.is_empty());
+}

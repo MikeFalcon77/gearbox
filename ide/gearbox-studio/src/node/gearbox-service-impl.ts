@@ -3,6 +3,9 @@
 // Notifications are relayed rather than accumulated here. The frontend holds the
 // catalogue state, because it is the frontend that renders it and a second copy
 // on the backend would be a second thing to keep correct.
+//
+// One instance per frontend connection (see `gearbox-studio-backend-module.ts`),
+// so a second window gets its own engine rather than stealing the first's.
 
 import { ILogger } from "@theia/core/lib/common/logger";
 import { inject, injectable } from "@theia/core/shared/inversify";
@@ -10,12 +13,25 @@ import * as fs from "fs";
 import * as path from "path";
 
 import type { CatalogueChanged } from "../common/generated/CatalogueChanged";
+import type { CatalogueDiagnostics } from "../common/generated/CatalogueDiagnostics";
 import type { CatalogueLoadResult } from "../common/generated/CatalogueLoadResult";
 import type { InitializeResult } from "../common/generated/InitializeResult";
 import type { LogParams } from "../common/generated/LogParams";
 import type { ProgressParams } from "../common/generated/ProgressParams";
-import { GearboxClient, GearboxService } from "../common/protocol";
+import { GearboxClient, GearboxService, method } from "../common/protocol";
 import { EngineHandle, spawnEngine } from "./gearbox-engine-process";
+
+/**
+ * How long the engine gets to answer before the request is abandoned.
+ *
+ * A cap, not an expectation: the measured staged load of the 14-gear slice is
+ * ~1.3s. The point is that a wedged engine -- a pathological parse, a hung
+ * network filesystem -- becomes an error the panel can show and retry from,
+ * rather than a spinner with no end. The load is generous because it is the one
+ * call whose cost grows with the tree.
+ */
+const INITIALIZE_TIMEOUT_MS = 20_000;
+const LOAD_TIMEOUT_MS = 120_000;
 
 /**
  * The repository root, found by looking for the Cargo workspace manifest.
@@ -77,38 +93,60 @@ export class GearboxServiceImpl implements GearboxService {
   }
 
   async initialize(): Promise<InitializeResult> {
-    this.engine?.dispose();
+    this.disposeEngine();
     const roots_ = roots();
     const engine = spawnEngine(enginePath(), roots_, this.logger);
     this.engine = engine;
 
-    engine.connection.onNotification("gearbox/catalogueChanged", (event: CatalogueChanged) =>
+    engine.connection.onNotification(method.CATALOGUE_CHANGED, (event: CatalogueChanged) =>
       this.client?.onCatalogueChanged(event),
     );
-    engine.connection.onNotification("$/progress", (event: ProgressParams) =>
+    engine.connection.onNotification(
+      method.CATALOGUE_DIAGNOSTICS,
+      (event: CatalogueDiagnostics) => this.client?.onCatalogueDiagnostics(event),
+    );
+    engine.connection.onNotification(method.PROGRESS, (event: ProgressParams) =>
       this.client?.onProgress(event),
     );
-    engine.connection.onNotification("gearbox/log", (event: LogParams) =>
+    engine.connection.onNotification(method.LOG, (event: LogParams) =>
       this.client?.onLog(event.message),
     );
 
-    const result: InitializeResult = await engine.connection.sendRequest("initialize", {
-      roots: roots_,
+    // A child that dies on its own has to stop being this service's engine, or
+    // the next `loadCatalogue` sends a request into a disposed connection and
+    // reports "engine not initialized" for something that was.
+    void engine.exited.then((reason) => {
+      if (this.engine === engine) {
+        this.engine = undefined;
+      }
+      this.client?.onLog(`engine ${reason}`);
     });
-    engine.connection.sendNotification("initialized", {});
+
+    const result = await engine.request<InitializeResult>(
+      method.INITIALIZE,
+      { roots: roots_ },
+      INITIALIZE_TIMEOUT_MS,
+    );
+    engine.connection.sendNotification(method.INITIALIZED, {});
     return result;
   }
 
   async loadCatalogue(): Promise<CatalogueLoadResult> {
     const engine = this.engine;
-    if (!engine) {
-      throw new Error("engine not initialized");
+    if (!engine || engine.dead) {
+      throw new Error("the engine is not running; reload the catalogue to start it");
     }
-    return engine.connection.sendRequest("gearbox/catalogue/load", {});
+    return engine.request<CatalogueLoadResult>(method.CATALOGUE_LOAD, {}, LOAD_TIMEOUT_MS);
   }
 
   dispose(): void {
-    this.engine?.dispose();
+    this.client = undefined;
+    this.disposeEngine();
+  }
+
+  protected disposeEngine(): void {
+    const engine = this.engine;
     this.engine = undefined;
+    engine?.dispose();
   }
 }

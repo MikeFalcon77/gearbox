@@ -363,6 +363,38 @@ pub struct BindingRequest {
     pub transport: Option<Transport>,
 }
 
+/// What a binding resolved *to*.
+///
+/// Two variants where [`BindingMode`] has three, and the missing one is the
+/// point: `Auto` is a request to decide, so a resolved binding carrying it would
+/// be a lock recording that nothing was decided. Keeping the request enum out of
+/// the resolved model makes that state unrepresentable rather than merely
+/// unexpected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum ResolvedBindingMode {
+    /// Consumer and provider are in the same process.
+    Local,
+    /// They are in different processes, so the edge crosses a transport.
+    Remote,
+}
+
+impl ResolvedBindingMode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Remote => "remote",
+        }
+    }
+}
+
+impl std::fmt::Display for ResolvedBindingMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// One resolved contract binding.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ResolvedBinding {
@@ -374,7 +406,7 @@ pub struct ResolvedBinding {
 
     /// What the runtime will actually produce. Derived from placement, never
     /// configured (`cpt-gearbox-fr-derive-binding-from-placement`).
-    pub mode: BindingMode,
+    pub mode: ResolvedBindingMode,
 
     pub transport: Transport,
     pub mechanism: BindingMechanism,
@@ -397,7 +429,7 @@ pub struct ResolvedBinding {
 impl ResolvedBinding {
     #[must_use]
     pub const fn is_remote(&self) -> bool {
-        matches!(self.mode, BindingMode::Remote)
+        matches!(self.mode, ResolvedBindingMode::Remote)
     }
 
     /// Whether this binding keeps the consumer out of rotation until it resolves.

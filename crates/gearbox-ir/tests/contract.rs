@@ -115,9 +115,9 @@ fn kind_determines_direction_and_reach() {
 fn versions_parse_and_compare_on_the_major_only() {
     let v1 = ContractVersion::parse("v1").unwrap();
     let v2 = ContractVersion::parse("v2").unwrap();
-    assert_eq!(v1.major, 1);
-    assert_eq!(v1.declared, "v1");
-    assert_eq!(ContractVersion::parse("v10").unwrap().major, 10);
+    assert_eq!(v1.major(), 1);
+    assert_eq!(v1.declared(), "v1");
+    assert_eq!(ContractVersion::parse("v10").unwrap().major(), 10);
 
     // Compatibility is exact major equality: parallel majors coexist by design
     // and there is no adapter between them.
@@ -126,7 +126,7 @@ fn versions_parse_and_compare_on_the_major_only() {
     assert!(!v2.satisfied_by(&v1));
 
     // The declared spelling is preserved, because it appears in a REST path.
-    assert_eq!(ContractVersion::from_major(3).declared, "v3");
+    assert_eq!(ContractVersion::from_major(3).declared(), "v3");
     assert_eq!(v2.to_string(), "v2");
 }
 

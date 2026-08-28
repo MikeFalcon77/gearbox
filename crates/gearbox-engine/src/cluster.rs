@@ -94,7 +94,18 @@ fn providers(
     // is what the registry names it by.
     let mut plugins: BTreeMap<String, Plugin> = BTreeMap::new();
     for record in &decl.cluster_plugins {
-        let dir = crate::merge::crate_dir(root, &identity.gdl_path, &record.package.path);
+        let dir = match crate::merge::crate_dir(root, &identity.gdl_path, &record.package.path) {
+            Ok(dir) => dir,
+            Err(e) => {
+                diagnostics.push(crate::merge::bad_crate_path(
+                    uri,
+                    "cluster_plugin.package",
+                    &record.package.path,
+                    &e,
+                ));
+                continue;
+            }
+        };
         match scans.get(&dir) {
             Ok(files) => {
                 plugins.insert(
@@ -123,7 +134,22 @@ fn providers(
         }
     }
 
-    let registrations = gearbox_project::project_provider_registry(files);
+    let registrations = match gearbox_project::project_provider_registry(files) {
+        Ok(registrations) => registrations,
+        Err(e) => {
+            diagnostics.push(
+                Diagnostic::error(
+                    DiagnosticCode::ClusterProviderUnprojectable,
+                    format!("`provider_registry()` cannot be read: {e}"),
+                    "each `with_*_provider` takes a provider path, optionally wrapped in \
+                     `Arc::new`/`Box::new`; anything else leaves the catalogue with a partial \
+                     registry, which reads as a provider nobody registered",
+                )
+                .at(Location::file(uri.to_owned())),
+            );
+            return Vec::new();
+        }
+    };
     if registrations.is_empty() {
         diagnostics.push(
             Diagnostic::error(

@@ -20,7 +20,13 @@ crate_name: string,
  */
 lib_ident: string, 
 /**
- * Where the crate lives, relative to the declaring description file.
+ * Where the crate lives, relative to its **source root**.
+ *
+ * Resolved once, when the description is merged, rather than kept as the
+ * author spelled it. `gear.gdl` writes it relative to its own directory and
+ * may write `../payments-audit-sdk`; a `RelPath` cannot hold that, and
+ * storing the raw spelling would leave every consumer to redo -- and
+ * re-fail -- the same resolution.
  */
 path: RelPath, features?: Array<string>, default_features: boolean, 
 /**

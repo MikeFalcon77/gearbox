@@ -16,7 +16,7 @@
 use gearbox_ir::{
     BindingMechanism, BindingMode, BindingRequest, Catalogue, ContractDescriptor, ContractId,
     DeploymentProfileDecl, Diagnostic, DiagnosticCode, Diagnostics, Discovery, GearId, Location,
-    ProcessId, ResolvedBinding, Selected, Transport,
+    ProcessId, ResolvedBinding, ResolvedBindingMode, Selected, Transport,
 };
 
 use super::cuts::Cuts;
@@ -137,7 +137,7 @@ fn local(
         contract: contract.id.clone(),
         provider: edge.provider.clone(),
         provider_process: process,
-        mode: BindingMode::Local,
+        mode: ResolvedBindingMode::Local,
         transport: Transport::Local,
         mechanism: BindingMechanism::colocated(),
         // Deliberately absent, not empty: there is no endpoint, and writing one
@@ -212,7 +212,7 @@ fn remote(
         contract: contract.id.clone(),
         provider: edge.provider.clone(),
         provider_process,
-        mode: BindingMode::Remote,
+        mode: ResolvedBindingMode::Remote,
         transport: Transport::Rest,
         mechanism,
         endpoint_source: Some(endpoint_source),

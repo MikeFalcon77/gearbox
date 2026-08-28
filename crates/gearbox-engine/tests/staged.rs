@@ -55,7 +55,7 @@ fn record(root: &SourceRoot) -> (Vec<Seen>, gearbox_engine::CatalogueScan) {
         seen.push(match event {
             LoadEvent::Discovered { total } => Seen::Discovered(total),
             LoadEvent::Declared(p) => Seen::Declared(p.gdl_path.as_str().to_owned()),
-            LoadEvent::DeclarationComplete { declared } => Seen::DeclarationComplete(declared),
+            LoadEvent::DeclarationComplete { declared, .. } => Seen::DeclarationComplete(declared),
             LoadEvent::Projected(g) => Seen::Projected(g.id.as_str().to_owned()),
         });
         Continue::Yes

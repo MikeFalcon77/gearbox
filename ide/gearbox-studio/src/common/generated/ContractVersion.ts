@@ -7,6 +7,13 @@
  * original spelling alongside the parsed major, because the major is what
  * compatibility is decided on while the spelling is what appears in a REST base
  * path and must be reproduced exactly.
+ * The two fields are private and there is no public constructor but [`parse`]
+ * and [`from_major`], so a `ContractVersion` in hand is one those two would
+ * produce: `declared` really does spell `major`. [`Deserialize`] runs the same
+ * parse, because a `product.lock` is an input like any other.
+ *
+ * [`parse`]: ContractVersion::parse
+ * [`from_major`]: ContractVersion::from_major
  */
 export type ContractVersion = { 
 /**

@@ -497,10 +497,12 @@ impl GearDescriptor {
 
     /// The gear's crate directory, relative to its source root.
     ///
-    /// # Errors
-    /// Returns [`crate::IdError`] if the declared crate path escapes the source root.
-    pub fn crate_dir(&self) -> Result<RelPath, crate::IdError> {
-        self.gdl_dir().resolve(self.package.path.as_str())
+    /// Already resolved: [`CargoRef::path`] is stored root-relative, because the
+    /// merge that produced it is the one place that knows both the description's
+    /// location and how to report a path that does not resolve.
+    #[must_use]
+    pub fn crate_dir(&self) -> RelPath {
+        self.package.path.clone()
     }
 
     /// Whether this gear declared anything the runtime cannot realize.

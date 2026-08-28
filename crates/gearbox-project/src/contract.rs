@@ -243,8 +243,17 @@ fn project_transports(files: &[RustFile], base: &str) -> BTreeSet<Transport> {
 /// A trait whose name matches no known suffix is skipped rather than guessed
 /// at: the macro rejects it at compile time, so its presence would mean the
 /// crate does not build and the catalogue has bigger problems.
-#[must_use]
-pub fn project_contracts(files: &[RustFile]) -> Vec<ProjectedContract> {
+///
+/// An attribute that does not *parse*, though, is propagated rather than
+/// skipped -- for the same reason [`project_provides`] propagates one. Skipping
+/// it would drop a contract the SDK really declares, and every `provide` and
+/// `consume` naming that trait would then be reported as pointing at a trait
+/// nobody wrote.
+///
+/// # Errors
+/// Returns the [`syn::Error`] from the first `#[toolkit::contract]` whose
+/// arguments do not parse.
+pub fn project_contracts(files: &[RustFile]) -> syn::Result<Vec<ProjectedContract>> {
     let mut out = Vec::new();
     for file in files {
         for item in &file.ast.items {
@@ -255,9 +264,7 @@ pub fn project_contracts(files: &[RustFile]) -> Vec<ProjectedContract> {
                 if !is_contract_attribute(attr) {
                     continue;
                 }
-                let Ok(args) = attr.parse_args::<ContractArgs>() else {
-                    continue;
-                };
+                let args = attr.parse_args::<ContractArgs>()?;
                 let trait_ident = item_trait.ident.to_string();
                 let Some(kind) = ContractKind::from_trait_name(&trait_ident) else {
                     continue;
@@ -280,7 +287,7 @@ pub fn project_contracts(files: &[RustFile]) -> Vec<ProjectedContract> {
     }
     // Sorted so a catalogue built from the same tree is byte-identical.
     out.sort_by(|a, b| a.trait_ident.cmp(&b.trait_ident));
-    out
+    Ok(out)
 }
 
 #[cfg(test)]

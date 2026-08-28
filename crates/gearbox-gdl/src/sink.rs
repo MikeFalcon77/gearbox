@@ -20,7 +20,7 @@
 
 use std::cell::RefCell;
 
-use gearbox_ir::{Diagnostic, Diagnostics};
+use gearbox_ir::Diagnostics;
 use starlark::any::ProvidesStaticType;
 
 use crate::records::{ConsumeRecord, ProvideRecord, RoleRecord};
@@ -122,10 +122,6 @@ impl GdlSink {
         } else {
             *slot = Some(intent);
         }
-    }
-
-    pub fn push_diagnostic(&self, diagnostic: Diagnostic) {
-        self.diagnostics.borrow_mut().push(diagnostic);
     }
 
     #[must_use]

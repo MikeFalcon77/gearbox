@@ -8,7 +8,10 @@
 
 use std::collections::BTreeMap;
 
-use gearbox_ir::{ClusterPrimitive, ContractId, GearId, ProcessId, ResolvedProduct};
+use gearbox_ir::{
+    ClusterPrimitive, ContractId, GearId, NodeId, ProcessId, ProvenanceKind, ResolvedProduct,
+    SourceId,
+};
 use serde::Serialize;
 
 /// The `(consumer, contract)` pair that identifies one binding.
@@ -25,6 +28,35 @@ pub struct ClusterKey {
     pub primitive: ClusterPrimitive,
 }
 
+/// The `(consumer, provider, contract)` triple that identifies one blocked cut.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct CutKey {
+    pub consumer: GearId,
+    pub provider: GearId,
+    pub contract: Option<ContractId>,
+}
+
+/// The `(from, kind, to)` triple that identifies one provenance edge.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct ProvenanceKey {
+    pub from: NodeId,
+    pub kind: ProvenanceKind,
+    pub to: NodeId,
+}
+
+/// One scalar field of the lock that differs -- `(before, after)`.
+///
+/// A list rather than one `Option` per field: the header alone has six, and six
+/// nearly-identical `Option<(String, String)>` members would be six chances to
+/// forget one in [`LockDiff::is_empty`].
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct FieldChange {
+    /// Dotted path, e.g. `product.lock_hash`.
+    pub field: String,
+    pub before: String,
+    pub after: String,
+}
+
 /// What changed between two resolved products.
 ///
 /// Every list is sorted, so the diff itself is deterministic. A key appears
@@ -33,6 +65,18 @@ pub struct ClusterKey {
 pub struct LockDiff {
     /// Set when the profile itself differs -- `(before, after)`.
     pub profile_changed: Option<(String, String)>,
+
+    /// Every other scalar that differs: the rest of the header, and the
+    /// Kubernetes block. Sorted by field name.
+    ///
+    /// These used to be compared by nothing at all, so `is_empty` answered
+    /// "nothing changed" for a lock with a different `lock_hash`, a different
+    /// namespace, or a different image registry.
+    pub fields_changed: Vec<FieldChange>,
+
+    pub sources_added: Vec<SourceId>,
+    pub sources_removed: Vec<SourceId>,
+    pub sources_changed: Vec<SourceId>,
 
     pub gears_added: Vec<GearId>,
     pub gears_removed: Vec<GearId>,
@@ -49,12 +93,39 @@ pub struct LockDiff {
     pub cluster_added: Vec<ClusterKey>,
     pub cluster_removed: Vec<ClusterKey>,
     pub cluster_changed: Vec<ClusterKey>,
+
+    pub cuts_added: Vec<CutKey>,
+    pub cuts_removed: Vec<CutKey>,
+    pub cuts_changed: Vec<CutKey>,
+
+    pub provenance_added: Vec<ProvenanceKey>,
+    pub provenance_removed: Vec<ProvenanceKey>,
+    pub provenance_changed: Vec<ProvenanceKey>,
+
+    /// Set when the two locks carry different diagnostics -- `(before, after)`
+    /// counts.
+    ///
+    /// Counts rather than the diagnostics themselves: the widget's job is to
+    /// say that the advice changed, and reproducing it here would duplicate a
+    /// list the caller already has.
+    pub diagnostics_changed: Option<(usize, usize)>,
 }
 
 impl LockDiff {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.profile_changed.is_none()
+            && self.fields_changed.is_empty()
+            && self.diagnostics_changed.is_none()
+            && self.sources_added.is_empty()
+            && self.sources_removed.is_empty()
+            && self.sources_changed.is_empty()
+            && self.cuts_added.is_empty()
+            && self.cuts_removed.is_empty()
+            && self.cuts_changed.is_empty()
+            && self.provenance_added.is_empty()
+            && self.provenance_removed.is_empty()
+            && self.provenance_changed.is_empty()
             && self.gears_added.is_empty()
             && self.gears_removed.is_empty()
             && self.gears_changed.is_empty()
@@ -78,48 +149,182 @@ impl LockDiff {
         if let Some((before, after)) = &self.profile_changed {
             lines.push(format!("~ profile: {before} -> {after}"));
         }
-
-        for id in &self.gears_added {
-            lines.push(format!("+ gear {id}"));
+        for change in &self.fields_changed {
+            lines.push(format!(
+                "~ {}: {} -> {}",
+                change.field, change.before, change.after
+            ));
         }
-        for id in &self.gears_removed {
-            lines.push(format!("- gear {id}"));
-        }
-        for id in &self.gears_changed {
-            lines.push(format!("~ gear {id}"));
-        }
-
-        for id in &self.processes_added {
-            lines.push(format!("+ process {id}"));
-        }
-        for id in &self.processes_removed {
-            lines.push(format!("- process {id}"));
-        }
-        for id in &self.processes_changed {
-            lines.push(format!("~ process {id}"));
+        if let Some((before, after)) = self.diagnostics_changed {
+            lines.push(format!("~ diagnostics: {before} -> {after}"));
         }
 
-        for key in &self.bindings_added {
-            lines.push(format!("+ binding {} -> {}", key.consumer, key.contract));
-        }
-        for key in &self.bindings_removed {
-            lines.push(format!("- binding {} -> {}", key.consumer, key.contract));
-        }
-        for key in &self.bindings_changed {
-            lines.push(format!("~ binding {} -> {}", key.consumer, key.contract));
-        }
-
-        for key in &self.cluster_added {
-            lines.push(format!("+ cluster {}.{}", key.scope, key.primitive));
-        }
-        for key in &self.cluster_removed {
-            lines.push(format!("- cluster {}.{}", key.scope, key.primitive));
-        }
-        for key in &self.cluster_changed {
-            lines.push(format!("~ cluster {}.{}", key.scope, key.primitive));
-        }
+        marked(
+            &mut lines,
+            "source",
+            [
+                &self.sources_added,
+                &self.sources_removed,
+                &self.sources_changed,
+            ],
+            ToString::to_string,
+        );
+        marked(
+            &mut lines,
+            "gear",
+            [&self.gears_added, &self.gears_removed, &self.gears_changed],
+            ToString::to_string,
+        );
+        marked(
+            &mut lines,
+            "process",
+            [
+                &self.processes_added,
+                &self.processes_removed,
+                &self.processes_changed,
+            ],
+            ToString::to_string,
+        );
+        marked(
+            &mut lines,
+            "binding",
+            [
+                &self.bindings_added,
+                &self.bindings_removed,
+                &self.bindings_changed,
+            ],
+            |key| format!("{} -> {}", key.consumer, key.contract),
+        );
+        marked(
+            &mut lines,
+            "cluster",
+            [
+                &self.cluster_added,
+                &self.cluster_removed,
+                &self.cluster_changed,
+            ],
+            |key| format!("{}.{}", key.scope, key.primitive),
+        );
+        marked(
+            &mut lines,
+            "cuttable",
+            [&self.cuts_added, &self.cuts_removed, &self.cuts_changed],
+            |key| {
+                let contract = key
+                    .contract
+                    .as_ref()
+                    .map_or_else(String::new, |c| format!(" : {c}"));
+                format!("{} -> {}{contract}", key.consumer, key.provider)
+            },
+        );
+        marked(
+            &mut lines,
+            "provenance",
+            [
+                &self.provenance_added,
+                &self.provenance_removed,
+                &self.provenance_changed,
+            ],
+            |key| {
+                format!(
+                    "{} {} {}",
+                    key.to.as_str(),
+                    key.kind.phrase(),
+                    key.from.as_str()
+                )
+            },
+        );
 
         lines
+    }
+}
+
+/// Every scalar in the lock that is not a collection and not the profile.
+///
+/// Spelled out one pair at a time rather than diffed from serialized JSON: a
+/// structural diff that reached for `serde_json::Value` would report a changed
+/// *collection* here as well, and each category already has its own list.
+fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<FieldChange> {
+    let mut out = Vec::new();
+    let mut compare = |field: &str, a: String, b: String| {
+        if a != b {
+            out.push(FieldChange {
+                field: field.to_owned(),
+                before: a,
+                after: b,
+            });
+        }
+    };
+
+    compare(
+        "schema_version",
+        before.schema_version.to_string(),
+        after.schema_version.to_string(),
+    );
+    compare(
+        "product.id",
+        before.product.id.clone(),
+        after.product.id.clone(),
+    );
+    compare(
+        "product.version",
+        before.product.version.clone(),
+        after.product.version.clone(),
+    );
+    compare(
+        "product.profile_kind",
+        before.product.profile_kind.clone(),
+        after.product.profile_kind.clone(),
+    );
+    compare(
+        "product.gearbox_version",
+        before.product.gearbox_version.clone(),
+        after.product.gearbox_version.clone(),
+    );
+    compare(
+        "product.lock_hash",
+        before.product.lock_hash.clone(),
+        after.product.lock_hash.clone(),
+    );
+
+    let kubernetes = |p: &ResolvedProduct, f: fn(&gearbox_ir::KubernetesSettings) -> String| {
+        p.kubernetes.as_ref().map_or_else(String::new, f)
+    };
+    compare(
+        "kubernetes.namespace",
+        kubernetes(before, |k| k.namespace.clone().unwrap_or_default()),
+        kubernetes(after, |k| k.namespace.clone().unwrap_or_default()),
+    );
+    compare(
+        "kubernetes.image_registry",
+        kubernetes(before, |k| k.image_registry.clone().unwrap_or_default()),
+        kubernetes(after, |k| k.image_registry.clone().unwrap_or_default()),
+    );
+    compare(
+        "kubernetes.discovery",
+        kubernetes(before, |k| k.discovery.as_str().to_owned()),
+        kubernetes(after, |k| k.discovery.as_str().to_owned()),
+    );
+
+    out.sort();
+    out
+}
+
+/// Append `+`/`-`/`~` lines for one category, in that order.
+///
+/// One helper rather than three loops per category: with seven categories the
+/// loops were twenty-one near-identical blocks, and the only thing distinguishing
+/// them -- the label and how a key reads -- is exactly what is passed in.
+fn marked<K>(
+    lines: &mut Vec<String>,
+    label: &str,
+    keys: [&Vec<K>; 3],
+    render: impl Fn(&K) -> String,
+) {
+    for (mark, list) in ["+", "-", "~"].into_iter().zip(keys) {
+        for key in list {
+            lines.push(format!("{mark} {label} {}", render(key)));
+        }
     }
 }
 
@@ -164,6 +369,11 @@ pub fn diff(before: &ResolvedProduct, after: &ResolvedProduct) -> LockDiff {
             after.product.profile.to_string(),
         )
     });
+
+    let fields_changed = scalar_fields(before, after);
+
+    let (sources_added, sources_removed, sources_changed) =
+        diff_keyed(&before.sources, &after.sources);
 
     let (gears_added, gears_removed, gears_changed) = diff_keyed(&before.gears, &after.gears);
 
@@ -213,8 +423,53 @@ pub fn diff(before: &ResolvedProduct, after: &ResolvedProduct) -> LockDiff {
     let (cluster_added, cluster_removed, cluster_changed) =
         diff_keyed(&by_cluster_key(before), &by_cluster_key(after));
 
+    let by_cut_key = |product: &ResolvedProduct| {
+        product
+            .cuttable_if_declared
+            .iter()
+            .map(|c| {
+                (
+                    CutKey {
+                        consumer: c.consumer.clone(),
+                        provider: c.provider.clone(),
+                        contract: c.contract.clone(),
+                    },
+                    c.clone(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
+    let (cuts_added, cuts_removed, cuts_changed) =
+        diff_keyed(&by_cut_key(before), &by_cut_key(after));
+
+    let by_provenance_key = |product: &ResolvedProduct| {
+        product
+            .provenance
+            .iter()
+            .map(|e| {
+                (
+                    ProvenanceKey {
+                        from: e.from.clone(),
+                        kind: e.kind,
+                        to: e.to.clone(),
+                    },
+                    e.clone(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
+    let (provenance_added, provenance_removed, provenance_changed) =
+        diff_keyed(&by_provenance_key(before), &by_provenance_key(after));
+
+    let diagnostics_changed = (before.diagnostics != after.diagnostics)
+        .then(|| (before.diagnostics.len(), after.diagnostics.len()));
+
     LockDiff {
         profile_changed,
+        fields_changed,
+        sources_added,
+        sources_removed,
+        sources_changed,
         gears_added,
         gears_removed,
         gears_changed,
@@ -227,5 +482,12 @@ pub fn diff(before: &ResolvedProduct, after: &ResolvedProduct) -> LockDiff {
         cluster_added,
         cluster_removed,
         cluster_changed,
+        cuts_added,
+        cuts_removed,
+        cuts_changed,
+        provenance_added,
+        provenance_removed,
+        provenance_changed,
+        diagnostics_changed,
     }
 }

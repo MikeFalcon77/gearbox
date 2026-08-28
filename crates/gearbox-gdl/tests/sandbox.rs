@@ -209,3 +209,137 @@ fn the_secret_never_becomes_reachable() {
         "sanity: the target exists"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_inside_the_root_pointing_out_of_it_is_refused() {
+    // The hole a purely lexical check leaves: `link.gdl` spells a path that
+    // stays inside the root, and the filesystem then hands back a file that
+    // does not. Nothing about the request looks like an escape.
+    let fx = Fixture::new("symlink");
+    std::os::unix::fs::symlink(fx.dir.join("outside.gdl"), fx.root().join("link.gdl"))
+        .expect("create symlink");
+
+    let codes = fx.eval(
+        r#"
+load("//link.gdl", "SECRET")
+gear(package = cargo(crate_name = "c", lib = "c"))
+"#,
+    );
+    assert_eq!(
+        codes,
+        [DiagnosticCode::GdlLoadEscape],
+        "a symlink out of the root is a sandbox violation, not a missing file"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_to_a_directory_outside_the_root_is_refused() {
+    // The same hole one level up: the fragment is a real file, but the
+    // directory it sits in is the link.
+    let fx = Fixture::new("symlink-dir");
+    fs::create_dir_all(fx.dir.join("elsewhere")).expect("create elsewhere");
+    fs::write(fx.dir.join("elsewhere/frag.gdl"), "SECRET = \"leaked\"\n").expect("write frag");
+    std::os::unix::fs::symlink(fx.dir.join("elsewhere"), fx.root().join("linked"))
+        .expect("symlink");
+
+    let codes = fx.eval(
+        r#"
+load("//linked/frag.gdl", "SECRET")
+gear(package = cargo(crate_name = "c", lib = "c"))
+"#,
+    );
+    assert_eq!(codes, [DiagnosticCode::GdlLoadEscape]);
+}
+
+#[test]
+fn a_fragment_may_load_another_fragment() {
+    // Nested `load()` is the case the cache and the cycle check are shared
+    // across, so it needs to work before either can be trusted.
+    let fx = Fixture::new("nested");
+    fs::write(
+        fx.root().join("outer.gdl"),
+        "load(\"//shared.gdl\", \"SHARED\")\nOUTER = SHARED\n",
+    )
+    .expect("write outer");
+
+    let codes = fx.eval(
+        r#"
+load("//outer.gdl", "OUTER")
+gear(package = OUTER, name = "Demo")
+"#,
+    );
+    assert!(codes.is_empty(), "a nested fragment should load: {codes:?}");
+}
+
+#[test]
+fn a_fragment_may_not_climb_out_of_the_root_either() {
+    // A nested loader resolves against the *fragment's* directory. If it also
+    // reset the root, a fragment one directory down would be able to reach a
+    // file the description that loaded it could not.
+    let fx = Fixture::new("nested-escape");
+    fs::write(
+        fx.root().join("gears/demo/climber.gdl"),
+        "load(\"../../../outside.gdl\", \"SECRET\")\nSTOLEN = SECRET\n",
+    )
+    .expect("write climber");
+
+    let codes = fx.eval(
+        r#"
+load("climber.gdl", "STOLEN")
+gear(package = cargo(crate_name = "c", lib = "c"))
+"#,
+    );
+    assert!(
+        codes.contains(&DiagnosticCode::GdlLoadEscape),
+        "a fragment's own load() is confined to the same root: {codes:?}"
+    );
+}
+
+#[test]
+fn a_load_cycle_is_a_diagnostic_rather_than_a_stack_overflow() {
+    // Two fragments loading each other. Without a shared in-flight set this
+    // recurses until the native stack runs out, which aborts the process --
+    // there is no diagnostic to report from a crashed evaluator.
+    let fx = Fixture::new("cycle");
+    fs::write(fx.root().join("a.gdl"), "load(\"//b.gdl\", \"B\")\nA = B\n").expect("write a");
+    fs::write(fx.root().join("b.gdl"), "load(\"//a.gdl\", \"A\")\nB = A\n").expect("write b");
+
+    let codes = fx.eval(
+        r#"
+load("//a.gdl", "A")
+gear(package = cargo(crate_name = "c", lib = "c"))
+"#,
+    );
+    assert!(
+        codes.contains(&DiagnosticCode::GdlEval),
+        "a cycle is an ordinary evaluation failure: {codes:?}"
+    );
+}
+
+#[test]
+fn one_fragment_loaded_twice_is_evaluated_once() {
+    // The cache is shared across nested loaders, so a diamond -- two fragments
+    // both loading a third -- must not evaluate the third twice.
+    let fx = Fixture::new("diamond");
+    fs::write(
+        fx.root().join("left.gdl"),
+        "load(\"//shared.gdl\", \"SHARED\")\nLEFT = SHARED\n",
+    )
+    .expect("write left");
+    fs::write(
+        fx.root().join("right.gdl"),
+        "load(\"//shared.gdl\", \"SHARED\")\nRIGHT = SHARED\n",
+    )
+    .expect("write right");
+
+    let codes = fx.eval(
+        r#"
+load("//left.gdl", "LEFT")
+load("//right.gdl", "RIGHT")
+gear(package = LEFT, name = "Demo")
+"#,
+    );
+    assert!(codes.is_empty(), "a diamond should load cleanly: {codes:?}");
+}

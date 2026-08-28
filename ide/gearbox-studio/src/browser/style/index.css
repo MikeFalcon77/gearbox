@@ -25,6 +25,13 @@
 }
 .gbx-row:hover { background: var(--theia-list-hoverBackground); }
 .gbx-selected { background: var(--theia-list-activeSelectionBackground); }
+/* Keyboard focus is drawn separately from selection: with only the selection
+   background, tabbing through the list moved nothing visible. */
+.gbx-row:focus-visible {
+  outline: 1px solid var(--theia-focusBorder);
+  outline-offset: -1px;
+  background: var(--theia-list-focusBackground);
+}
 .gbx-row-name { flex: 0 1 auto; }
 
 /* A pending row is dimmed but not disabled: its gear.gdl is already known. */
@@ -62,6 +69,34 @@
   opacity: 0.9;
 }
 
+/* A load that finished with rows still pending, a root that would not open, a
+   load that failed outright. All three used to be invisible. */
+.gbx-error {
+  padding: 6px 8px; margin: 4px 0; border-radius: 3px;
+  background: var(--theia-inputValidation-errorBackground);
+  border-left: 3px solid var(--theia-editorError-foreground);
+  color: var(--theia-editor-foreground);
+}
+.gbx-stalled .gbx-waiting { color: var(--theia-editorError-foreground); opacity: 0.85; }
+
+.gbx-diagnostics { margin-top: 12px; }
+.gbx-diagnostics-label {
+  text-transform: uppercase;
+  font-size: 0.85em;
+  letter-spacing: 0.05em;
+  opacity: 0.65;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--theia-editorGroup-border);
+}
+.gbx-diagnostic {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline;
+  padding: 3px 4px; border-bottom: 1px solid var(--theia-editorGroup-border);
+}
+.gbx-diagnostic-message { flex: 1 1 240px; word-break: break-word; }
+.gbx-diagnostic-help { flex: 1 0 100%; opacity: 0.65; font-size: 0.9em; }
+.gbx-diagnostic-error .gbx-id { color: var(--theia-editorError-foreground); opacity: 1; }
+.gbx-diagnostic-warning .gbx-id { color: var(--theia-editorWarning-foreground); opacity: 1; }
+
 .gbx-svg { display: block; }
 .gbx-node { fill: var(--theia-editorWidget-background); stroke: var(--theia-editorGroup-border); }
 .gbx-node-label { fill: var(--theia-editor-foreground); font-family: var(--theia-code-font-family); font-size: 11px; }
@@ -78,6 +113,8 @@
 .gbx-node-dim { opacity: 0.3; }
 .gbx-node-lit .gbx-node { stroke: var(--theia-successBackground, #4caf50); stroke-width: 2; }
 .gbx-node-focus .gbx-node { stroke: var(--theia-focusBorder); stroke-width: 2.5; }
+.gbx-node-g:focus-visible { outline: none; }
+.gbx-node-g:focus-visible .gbx-node { stroke: var(--theia-focusBorder); stroke-width: 2.5; }
 
 /* The rule under which unconnected gears sit. */
 .gbx-band-rule { stroke: var(--theia-editorGroup-border); stroke-width: 1; stroke-dasharray: 4 4; }

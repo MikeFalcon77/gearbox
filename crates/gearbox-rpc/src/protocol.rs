@@ -22,6 +22,7 @@ pub mod method {
     pub const INITIALIZED: &str = "initialized";
     pub const EXIT: &str = "exit";
     pub const CATALOGUE_CHANGED: &str = "gearbox/catalogueChanged";
+    pub const CATALOGUE_DIAGNOSTICS: &str = "gearbox/catalogueDiagnostics";
     pub const PROGRESS: &str = "$/progress";
     pub const LOG: &str = "gearbox/log";
 }
@@ -70,6 +71,19 @@ pub struct ResolvedRoot {
     pub path: String,
 }
 
+/// A root the server was asked for and could not open.
+///
+/// Reported rather than dropped. A shorter `roots` list says nothing about
+/// *which* root is missing or why, and the alternative -- waiting for the load
+/// to fail with `WORKSPACE_NOT_OPEN` -- loses the cause entirely.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct FailedRoot {
+    /// The path as the client (or `--root`) spelled it.
+    pub path: String,
+    /// Why it could not be opened.
+    pub error: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct InitializeResult {
     pub server_info: ServerInfo,
@@ -84,6 +98,10 @@ pub struct InitializeResult {
     /// root is the one thing only the server knows.
     #[serde(default)]
     pub roots: Vec<ResolvedRoot>,
+
+    /// The roots that could not be opened, with the reason for each.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed_roots: Vec<FailedRoot>,
 }
 
 /// Deliberately honest about what is not built.
@@ -124,6 +142,18 @@ pub struct CatalogueLoadResult {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// Diagnostics raised after the load already answered.
+///
+/// Everything the second pass produces -- projection failures, manifest
+/// mismatches, merge errors -- arrives after the `catalogue/load` response has
+/// gone out, so there is no response left to carry it. Without this the client
+/// sees a tree that silently omits the gears that failed.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct CatalogueDiagnostics {
+    /// Only the ones not already sent in the load response.
+    pub diagnostics: Vec<Diagnostic>,
+}
+
 /// One gear finished projecting.
 ///
 /// Carries the gear alone rather than the catalogue again: a registry of a
@@ -135,6 +165,10 @@ pub struct CatalogueChanged {
     pub gear: GearDescriptor,
     /// Its `gdl_path`, so the client can drop the matching pending row without
     /// having to know that `gdl_path` was its key.
+    ///
+    /// The key is `(gear.source, replaces)`, not `replaces` alone: a `gdl_path`
+    /// is relative to one source root and the server accepts several, so two
+    /// roots of the same shape both hold `gears/x/gear.gdl`.
     pub replaces: String,
 }
 

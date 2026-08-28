@@ -52,7 +52,7 @@ fn a_contract_with_no_projection_is_local_only() {
         #[toolkit::contract(gear = "g", version = "v1")]
         pub trait ThingExtension: Send + Sync {}
     "#;
-    let contracts = project_contracts(&[file(src)]);
+    let contracts = project_contracts(&[file(src)]).expect("parse");
     assert_eq!(
         transports_of(&contracts, "ThingExtension"),
         vec!["local"],
@@ -68,7 +68,7 @@ fn a_rest_projection_adds_rest() {
         pub trait ThingApi: Send + Sync {}
         pub trait ThingApiRest: ThingApi {}
     "#;
-    let contracts = project_contracts(&[file(src)]);
+    let contracts = project_contracts(&[file(src)]).expect("parse");
     assert_eq!(transports_of(&contracts, "ThingApi"), vec!["local", "rest"]);
 }
 
@@ -82,7 +82,7 @@ fn a_projection_must_actually_extend_the_base() {
         pub trait ThingApi: Send + Sync {}
         pub trait ThingApiRest: Send + Sync {}
     "#;
-    let contracts = project_contracts(&[file(src)]);
+    let contracts = project_contracts(&[file(src)]).expect("parse");
     assert_eq!(transports_of(&contracts, "ThingApi"), vec!["local"]);
 }
 
@@ -97,7 +97,7 @@ fn versioned_projections_attach_to_their_own_major() {
         pub trait ThingApiV2: Send + Sync {}
         pub trait ThingApiV2Rest: ThingApiV2 {}
     "#;
-    let contracts = project_contracts(&[file(src)]);
+    let contracts = project_contracts(&[file(src)]).expect("parse");
     assert_eq!(transports_of(&contracts, "ThingApi"), vec!["local"]);
     assert_eq!(
         transports_of(&contracts, "ThingApiV2"),
@@ -114,7 +114,7 @@ fn real_tree_v1_has_grpc_and_v2_does_not() {
         eprintln!("skipping: ../gears-rust not present");
         return;
     };
-    let contracts = project_contracts(&files);
+    let contracts = project_contracts(&files).expect("parse");
 
     assert_eq!(
         transports_of(&contracts, "PaymentApi"),
@@ -145,11 +145,11 @@ fn transport_order_is_stable() {
         pub trait ThingApiGrpc: ThingApi {}
     "#;
     assert_eq!(
-        transports_of(&project_contracts(&[file(a)]), "ThingApi"),
-        transports_of(&project_contracts(&[file(b)]), "ThingApi"),
+        transports_of(&project_contracts(&[file(a)]).expect("parse"), "ThingApi"),
+        transports_of(&project_contracts(&[file(b)]).expect("parse"), "ThingApi"),
     );
     assert_eq!(
-        transports_of(&project_contracts(&[file(a)]), "ThingApi"),
+        transports_of(&project_contracts(&[file(a)]).expect("parse"), "ThingApi"),
         vec![
             Transport::Local.as_str(),
             Transport::Rest.as_str(),
@@ -251,7 +251,7 @@ fn the_real_provider_offers_less_than_the_contract_allows() {
         eprintln!("skipping: ../gears-rust not present");
         return;
     };
-    let contracts = project_contracts(&files);
+    let contracts = project_contracts(&files).expect("parse");
     assert!(
         transports_of(&contracts, "PaymentApi").contains(&"grpc"),
         "the contract can support gRPC"

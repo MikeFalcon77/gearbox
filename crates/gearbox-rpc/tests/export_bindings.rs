@@ -26,8 +26,8 @@ use std::path::{Path, PathBuf};
 
 use gearbox_ir::{Catalogue, ExplanationGraph, PendingGear, ProductIntent, ResolvedProduct};
 use gearbox_rpc::protocol::{
-    CatalogueChanged, CatalogueLoadResult, InitializeParams, InitializeResult, LogParams,
-    ProgressParams,
+    CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, InitializeParams,
+    InitializeResult, LogParams, ProgressParams,
 };
 use ts_rs::{Config, TS};
 
@@ -54,6 +54,7 @@ fn export_roots(cfg: &Config) {
     InitializeParams::export_all(cfg).expect("export InitializeParams");
     InitializeResult::export_all(cfg).expect("export InitializeResult");
     CatalogueLoadResult::export_all(cfg).expect("export CatalogueLoadResult");
+    CatalogueDiagnostics::export_all(cfg).expect("export CatalogueDiagnostics");
     CatalogueChanged::export_all(cfg).expect("export CatalogueChanged");
     ProgressParams::export_all(cfg).expect("export ProgressParams");
     LogParams::export_all(cfg).expect("export LogParams");

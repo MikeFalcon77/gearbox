@@ -128,7 +128,8 @@ pub fn merge(
         // eval_gear already reported this; defensive.
         return None;
     };
-    let package = cargo_ref(package_record);
+    let gdl_dir = identity.gdl_path.parent();
+    let package = cargo_ref(package_record, &gdl_dir, "package", uri, diagnostics);
 
     // Projected: the closed set of seven, parsed through the IR's own parser so
     // the spellings cannot drift from the macro's.
@@ -179,9 +180,15 @@ pub fn merge(
             .provides
             .iter()
             .find(|p| p.contract_ident == projected_contract.trait_ident);
-        if let Some((provider, contract)) =
-            build_provider(uri, &id, record, projected_contract, offered, diagnostics)
-        {
+        if let Some((provider, contract)) = build_provider(
+            uri,
+            &id,
+            record,
+            projected_contract,
+            offered,
+            &gdl_dir,
+            diagnostics,
+        ) {
             provides.push(provider);
             contracts.push(contract);
         }
@@ -194,9 +201,15 @@ pub fn merge(
         else {
             continue;
         };
-        if let Some((requirement, contract)) =
-            build_consumer(uri, &id, record, projected_contract, ordinal, diagnostics)
-        {
+        if let Some((requirement, contract)) = build_consumer(
+            uri,
+            &id,
+            record,
+            projected_contract,
+            ordinal,
+            &gdl_dir,
+            diagnostics,
+        ) {
             consumes.push(requirement);
             contracts.push(contract);
         }
@@ -281,10 +294,7 @@ pub fn merge(
         fills: plugin.fills.clone(),
         vendor_selector: plugin.vendor_selector.clone(),
         declared_roles,
-        config_schema: decl
-            .config_schema
-            .as_deref()
-            .and_then(|p| RelPath::new(p).ok()),
+        config_schema: config_schema(decl.config_schema.as_deref(), uri, diagnostics),
         // Found by convention beside the gear and one level up; see `docs.rs`.
         docs,
         gts_types,
@@ -321,11 +331,56 @@ fn lookup<'a>(
     found
 }
 
-fn cargo_ref(record: &gearbox_gdl::records::CargoRecord) -> CargoRef {
+/// The declared `config_schema` path, or `None` with the reason reported.
+///
+/// A path that fails validation used to be dropped with `.ok()`, which left the
+/// gear merged as though the author had never written one -- a catalogue hole
+/// with nothing pointing at it.
+fn config_schema(
+    declared: Option<&str>,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) -> Option<RelPath> {
+    let declared = declared?;
+    match RelPath::new(declared) {
+        Ok(path) => Some(path),
+        Err(e) => {
+            diagnostics.push(invalid(
+                uri,
+                format!("`config_schema = \"{declared}\"` is not a usable path: {e}"),
+                "it is relative to the description's own directory and must stay inside the \
+                 source root",
+            ));
+            None
+        }
+    }
+}
+
+/// Convert a declared `cargo(...)` into a catalogue reference.
+///
+/// The path is resolved against the description's own directory, exactly as
+/// [`crate_dir`] resolves it for scanning, so the catalogue records the crate
+/// the engine actually read. `RelPath::new` used to stand here, which rejects
+/// `..` -- so a legitimate `path = "../payments-audit-sdk"` was stored as `.`,
+/// pointing the catalogue at the description's directory instead of the SDK's.
+fn cargo_ref(
+    record: &gearbox_gdl::records::CargoRecord,
+    gdl_dir: &RelPath,
+    field: &str,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) -> CargoRef {
+    let path = match gdl_dir.resolve(&record.path) {
+        Ok(path) => path,
+        Err(e) => {
+            diagnostics.push(bad_crate_path(uri, field, &record.path, &e));
+            gdl_dir.clone()
+        }
+    };
     CargoRef {
         crate_name: record.crate_name.clone(),
         lib_ident: record.lib_ident.clone(),
-        path: RelPath::new(&record.path).unwrap_or_else(|_| RelPath::here()),
+        path,
         features: record.features.clone(),
         default_features: record.default_features,
         link: if record.link.is_empty() {
@@ -347,7 +402,9 @@ fn contract_id(projected: &ProjectedContract) -> Result<(ContractId, ContractVer
     })?;
     let id = ContractId::new(format!(
         "{}/{}@{}",
-        projected.gear, projected.base_name, version.declared
+        projected.gear,
+        projected.base_name,
+        version.declared()
     ))
     .map_err(|e| {
         format!(
@@ -364,6 +421,7 @@ fn build_provider(
     record: &gearbox_gdl::records::ProvideRecord,
     projected: &ProjectedContract,
     offered: Option<&gearbox_project::ProjectedProvide>,
+    gdl_dir: &RelPath,
     diagnostics: &mut Diagnostics,
 ) -> Option<(ProviderDescriptor, ContractDescriptor)> {
     let (id, version) = match contract_id(projected) {
@@ -431,7 +489,13 @@ fn build_provider(
         version,
         kind: projected.kind,
         rust_path: record.rust.clone(),
-        sdk: cargo_ref(&record.sdk),
+        sdk: cargo_ref(
+            &record.sdk,
+            gdl_dir,
+            &format!("provide(contract = \"{}\").sdk", record.contract),
+            uri,
+            diagnostics,
+        ),
         rest: record.rest.as_ref().map(|r| RestProjection {
             base_path: r.base_path.clone(),
             visibility: match r.visibility.as_deref() {
@@ -456,6 +520,7 @@ fn build_consumer(
     record: &gearbox_gdl::records::ConsumeRecord,
     projected: &ProjectedContract,
     ordinal: usize,
+    gdl_dir: &RelPath,
     diagnostics: &mut Diagnostics,
 ) -> Option<(Requirement, ContractDescriptor)> {
     let (id, version) = match contract_id(projected) {
@@ -529,7 +594,13 @@ fn build_consumer(
         version,
         kind: projected.kind,
         rust_path: record.rust.clone(),
-        sdk: cargo_ref(&record.sdk),
+        sdk: cargo_ref(
+            &record.sdk,
+            gdl_dir,
+            &format!("consume(contract = \"{}\").sdk", record.contract),
+            uri,
+            diagnostics,
+        ),
         rest: None,
         grpc: None,
     };
@@ -689,15 +760,49 @@ fn report_cluster_colocation(
 const CLUSTER_GEAR_NAME: &str = "cluster";
 
 /// Resolve the crate directory a description's `package` points at.
-#[must_use]
-pub fn crate_dir(source_root: &Path, gdl_path: &RelPath, package_path: &str) -> std::path::PathBuf {
-    let gdl_dir = gdl_path.parent();
-    let joined = gdl_dir
-        .resolve(package_path)
-        .unwrap_or_else(|_| gdl_dir.clone());
-    if joined.is_here() {
+///
+/// `..` is legal here and only here. `RelPath` forbids it in a *stored* path,
+/// while [`RelPath::resolve`] supports it at the point of resolution, because a
+/// description legitimately points at a sibling crate (`../payments-audit-sdk`).
+///
+/// What is not legal is an absolute path, a backslash, or a walk above the
+/// source root. Those used to fall back to the description's own directory,
+/// which projected a plausible but entirely different `src/` tree and reported
+/// nothing.
+///
+/// # Errors
+/// Returns the [`gearbox_ir::IdError`] from [`RelPath::resolve`].
+pub fn crate_dir(
+    source_root: &Path,
+    gdl_path: &RelPath,
+    package_path: &str,
+) -> Result<std::path::PathBuf, gearbox_ir::IdError> {
+    let joined = gdl_path.parent().resolve(package_path)?;
+    Ok(if joined.is_here() {
         source_root.to_path_buf()
     } else {
         source_root.join(joined.as_str())
-    }
+    })
+}
+
+/// The diagnostic for a declared crate path that cannot be resolved.
+///
+/// One function rather than one message per call site: every caller of
+/// [`crate_dir`] has the same mistake to explain, and five spellings of it would
+/// drift.
+#[must_use]
+pub fn bad_crate_path(
+    uri: &str,
+    field: &str,
+    package_path: &str,
+    error: &gearbox_ir::IdError,
+) -> Diagnostic {
+    invalid(
+        uri,
+        format!(
+            "`{field}` declares `path = \"{package_path}\"`, which cannot be resolved: {error}"
+        ),
+        "the path is relative to the description's own directory; `..` may reach a sibling \
+         crate, but not climb above the source root, and it must not be absolute",
+    )
 }

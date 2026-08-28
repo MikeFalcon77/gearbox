@@ -31,7 +31,7 @@ pub use cluster::{
     project_provider_name, project_provider_registry, project_sdk_defaults,
 };
 pub use contract::{ProjectedContract, ProjectedProvide, project_contracts, project_provides};
-pub use gear::{ProjectedGear, ProjectedLifecycle, project_gear, project_gear_with_attrs};
+pub use gear::{ProjectedGear, ProjectedLifecycle, project_gear};
 pub use gts::{GtsError, GtsType, gts_type_from_schema, project_gts_types};
 pub use manifest::{CrateManifest, ManifestError, project_manifest};
 pub use plugin::{

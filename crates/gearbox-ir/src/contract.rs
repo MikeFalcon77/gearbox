@@ -129,12 +129,44 @@ pub fn version_marker(name: &str) -> Option<String> {
 /// original spelling alongside the parsed major, because the major is what
 /// compatibility is decided on while the spelling is what appears in a REST base
 /// path and must be reproduced exactly.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+/// The two fields are private and there is no public constructor but [`parse`]
+/// and [`from_major`], so a `ContractVersion` in hand is one those two would
+/// produce: `declared` really does spell `major`. [`Deserialize`] runs the same
+/// parse, because a `product.lock` is an input like any other.
+///
+/// [`parse`]: ContractVersion::parse
+/// [`from_major`]: ContractVersion::from_major
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, TS)]
 pub struct ContractVersion {
     /// Exactly as declared, e.g. `v1`.
-    pub declared: String,
+    declared: String,
     /// The major number compatibility is decided on.
-    pub major: u32,
+    major: u32,
+}
+
+/// The wire shape, deserialized and then re-parsed.
+///
+/// Named separately rather than deserialized through `parse` on a string,
+/// because the serialized form is a two-field table and changing that would
+/// break every `product.lock` already written.
+#[derive(Deserialize)]
+struct ContractVersionWire {
+    declared: String,
+    major: u32,
+}
+
+impl<'de> Deserialize<'de> for ContractVersion {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = ContractVersionWire::deserialize(deserializer)?;
+        let parsed = Self::parse(&wire.declared).map_err(serde::de::Error::custom)?;
+        if parsed.major != wire.major {
+            return Err(serde::de::Error::custom(format!(
+                "contract version `{}` spells major {}, but the payload says {}",
+                wire.declared, parsed.major, wire.major
+            )));
+        }
+        Ok(parsed)
+    }
 }
 
 impl ContractVersion {
@@ -172,6 +204,21 @@ impl ContractVersion {
             declared: format!("v{major}"),
             major,
         }
+    }
+
+    /// The version exactly as declared, e.g. `v1`.
+    ///
+    /// What a REST base path and a contract id must reproduce; use
+    /// [`major`](Self::major) for any comparison.
+    #[must_use]
+    pub fn declared(&self) -> &str {
+        &self.declared
+    }
+
+    /// The major number compatibility is decided on.
+    #[must_use]
+    pub const fn major(&self) -> u32 {
+        self.major
     }
 
     /// Whether a consumer wanting `self` is satisfied by a provider offering
@@ -290,7 +337,13 @@ pub struct CargoRef {
     /// The library identifier used in Rust paths, e.g. `payments_audit`.
     pub lib_ident: String,
 
-    /// Where the crate lives, relative to the declaring description file.
+    /// Where the crate lives, relative to its **source root**.
+    ///
+    /// Resolved once, when the description is merged, rather than kept as the
+    /// author spelled it. `gear.gdl` writes it relative to its own directory and
+    /// may write `../payments-audit-sdk`; a `RelPath` cannot hold that, and
+    /// storing the raw spelling would leave every consumer to redo -- and
+    /// re-fail -- the same resolution.
     pub path: RelPath,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

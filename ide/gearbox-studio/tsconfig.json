@@ -3,6 +3,7 @@
     "strict": true,
     "noUnusedLocals": true,
     "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
     "target": "ES2019",
     "module": "commonjs",
     "moduleResolution": "node",

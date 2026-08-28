@@ -71,7 +71,14 @@ pub enum LoadEvent<'a> {
     /// none of its badges. A consumer that needs to answer "the tree is ready"
     /// would otherwise have to infer it from the first `Projected`, which does
     /// not arrive at all when every gear fails to project.
-    DeclarationComplete { declared: usize },
+    ///
+    /// Carries the diagnostics raised so far, because a consumer that answers a
+    /// request at this boundary has no other chance to report them: the scan
+    /// they end up in is only returned when the whole load finishes.
+    DeclarationComplete {
+        declared: usize,
+        diagnostics: &'a [Diagnostic],
+    },
 
     /// One gear finished projection and entered the catalogue.
     Projected(&'a GearDescriptor),
@@ -111,9 +118,9 @@ pub fn load_catalogue(roots: &[SourceRoot]) -> CatalogueScan {
 /// time. See ADR `cpt-gearbox-adr-staged-catalogue-loading` for the measured
 /// costs; the second pass is roughly ten times the first on a real tree.
 ///
-/// Synchronous, with a callback. Threads belong to whoever wants them: the RPC
-/// server runs this on a worker and forwards events as notifications, and the
-/// engine keeps no dependency on parallelism.
+/// Synchronous, with a callback. Threads belong to whoever wants them -- the RPC
+/// server currently runs it on its request thread and forwards each event as a
+/// notification -- and the engine keeps no dependency on parallelism.
 #[must_use]
 pub fn load_catalogue_staged(
     roots: &[SourceRoot],
@@ -132,10 +139,22 @@ pub fn load_catalogue_staged(
     }
 
     // ---- S0: discover -------------------------------------------------------
-    let discovered: Vec<(&SourceRoot, PathBuf)> = roots
-        .iter()
-        .flat_map(|root| discover(&root.root).into_iter().map(move |p| (root, p)))
-        .collect();
+    let mut discovered: Vec<(&SourceRoot, PathBuf)> = Vec::new();
+    for root in roots {
+        let (found, failures) = discover(&root.root);
+        discovered.extend(found.into_iter().map(|p| (root, p)));
+        for failure in failures {
+            diagnostics.push(
+                Diagnostic::error(
+                    DiagnosticCode::GdlEval,
+                    format!("cannot search `{}` for descriptions: {failure}", root.id),
+                    "a directory the process cannot read is indistinguishable from one with no \
+                     gears in it; check its permissions",
+                )
+                .at(Location::file(format!("file://{}", root.root.display()))),
+            );
+        }
+    }
 
     let files: Vec<PathBuf> = discovered.iter().map(|(_, p)| p.clone()).collect();
     if on_event(LoadEvent::Discovered {
@@ -204,6 +223,7 @@ pub fn load_catalogue_staged(
     if !stopped
         && on_event(LoadEvent::DeclarationComplete {
             declared: declared.len(),
+            diagnostics: diagnostics.as_slice(),
         }) == Continue::Stop
     {
         stopped = true;
@@ -221,7 +241,12 @@ pub fn load_catalogue_staged(
 
             // Whether it projected or not, it is no longer in flight: a failure
             // is represented by its diagnostics, not by staying pending forever.
-            pending.retain(|p| p.gdl_path != identity.gdl_path);
+            //
+            // Matched on `(source, gdl_path)`, not on the path alone: the path
+            // is relative to one source root, so with two roots of the same
+            // shape `gears/x/gear.gdl` names an entry in each and the path
+            // alone retires the wrong one.
+            pending.retain(|p| !(p.source == identity.source && p.gdl_path == identity.gdl_path));
 
             let Some(merged) = merged else { continue };
 
@@ -283,7 +308,18 @@ fn project_and_merge(
     // at `cargo build` on a crate the reader did not write (GBX0209).
     crate::manifest_check::check(root, identity, decl, scans, diagnostics);
 
-    let crate_dir = crate::merge::crate_dir(&root.root, &identity.gdl_path, &package.path);
+    let crate_dir = match crate::merge::crate_dir(&root.root, &identity.gdl_path, &package.path) {
+        Ok(dir) => dir,
+        Err(e) => {
+            diagnostics.push(crate::merge::bad_crate_path(
+                &identity.uri,
+                "package",
+                &package.path,
+                &e,
+            ));
+            return None;
+        }
+    };
     let label = format!("{} ({})", package.crate_name, crate_dir.display());
 
     let files = match scans.get(&crate_dir) {
@@ -341,18 +377,47 @@ fn project_and_merge(
         .iter()
         .map(|p| &p.sdk)
         .chain(decl.consumes.iter().map(|c| &c.sdk))
-        .map(|sdk| crate::merge::crate_dir(&root.root, &identity.gdl_path, &sdk.path))
+        .filter_map(|sdk| {
+            crate::merge::crate_dir(&root.root, &identity.gdl_path, &sdk.path)
+                .map_err(|e| {
+                    diagnostics.push(crate::merge::bad_crate_path(
+                        &identity.uri,
+                        "sdk",
+                        &sdk.path,
+                        &e,
+                    ));
+                })
+                .ok()
+        })
         .collect();
     sdk_dirs.sort();
     sdk_dirs.dedup();
 
     for sdk_dir in sdk_dirs {
         match scans.get(&sdk_dir) {
-            Ok(sdk_files) => {
-                for contract in gearbox_project::project_contracts(&sdk_files) {
-                    contracts_by_trait.insert(contract.trait_ident.clone(), contract);
+            Ok(sdk_files) => match gearbox_project::project_contracts(&sdk_files) {
+                Ok(contracts) => {
+                    for contract in contracts {
+                        contracts_by_trait.insert(contract.trait_ident.clone(), contract);
+                    }
                 }
-            }
+                // A `#[toolkit::contract]` whose arguments do not parse means
+                // the SDK crate does not compile. Reporting it is the whole
+                // point: silently omitting the trait would resurface as every
+                // `provide`/`consume` naming it being "a trait nobody wrote".
+                Err(e) => diagnostics.push(
+                    Diagnostic::error(
+                        DiagnosticCode::GdlEval,
+                        format!(
+                            "the sdk crate `{}` has a `#[toolkit::contract]` whose arguments \
+                             do not parse: {e}",
+                            sdk_dir.display()
+                        ),
+                        "fix the attribute; the macro would reject it at compile time too",
+                    )
+                    .at(Location::file(identity.uri.clone())),
+                ),
+            },
             Err(e) => diagnostics.push(
                 Diagnostic::error(
                     DiagnosticCode::GdlEval,
@@ -373,7 +438,11 @@ fn project_and_merge(
     let sdk_files = match decl.sdk.as_ref() {
         None => std::sync::Arc::from(Vec::new()),
         Some(sdk) => {
-            let sdk_dir = crate::merge::crate_dir(&root.root, &identity.gdl_path, &sdk.path);
+            let Ok(sdk_dir) = crate::merge::crate_dir(&root.root, &identity.gdl_path, &sdk.path)
+            else {
+                // Already reported where the sdk dirs were collected above.
+                return None;
+            };
             match scans.get(&sdk_dir) {
                 Ok(files) => files,
                 Err(e) => {
@@ -434,7 +503,9 @@ fn project_and_merge(
     };
 
     // Documents: pure filesystem lookup, no parsing, so it costs a few stats.
-    let gdl_dir = crate::merge::crate_dir(&root.root, &identity.gdl_path, ".");
+    // `.` cannot fail to resolve, so the description's own directory is the one
+    // path here with no error to report.
+    let gdl_dir = root.root.join(identity.gdl_path.parent().as_str());
     let docs = crate::docs::project(&root.root, &gdl_dir, identity, decl, diagnostics);
 
     crate::merge::merge(
@@ -524,9 +595,18 @@ fn identity_for(
     })
 }
 
-/// Every `gear.gdl` under `root`, sorted.
-fn discover(root: &Path) -> Vec<PathBuf> {
-    let mut found: Vec<PathBuf> = walkdir::WalkDir::new(root)
+/// Every `gear.gdl` under `root`, sorted, plus the directories that could not
+/// be walked.
+///
+/// The failures are returned rather than dropped. A directory the process
+/// cannot read looks exactly like a directory with no gears in it, and "this
+/// tree declares nothing" is not a conclusion a permission error should be
+/// allowed to reach.
+fn discover(root: &Path) -> (Vec<PathBuf>, Vec<String>) {
+    let mut found: Vec<PathBuf> = Vec::new();
+    let mut failures: Vec<String> = Vec::new();
+
+    for entry in walkdir::WalkDir::new(root)
         .follow_links(false)
         .into_iter()
         .filter_entry(|entry| {
@@ -537,11 +617,21 @@ fn discover(root: &Path) -> Vec<PathBuf> {
                     .to_str()
                     .is_none_or(|name| !SKIP_DIRS.contains(&name))
         })
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_file() && entry.file_name() == GEAR_FILE)
-        .map(walkdir::DirEntry::into_path)
-        .collect();
+    {
+        match entry {
+            Ok(entry) => {
+                if entry.file_type().is_file() && entry.file_name() == GEAR_FILE {
+                    found.push(entry.into_path());
+                }
+            }
+            Err(e) => {
+                let at = e.path().unwrap_or(root).display().to_string();
+                failures.push(format!("{at}: {e}"));
+            }
+        }
+    }
 
     found.sort();
-    found
+    failures.sort();
+    (found, failures)
 }

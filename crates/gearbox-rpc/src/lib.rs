@@ -22,8 +22,9 @@ use gearbox_ir::SourceId;
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
 
 use crate::protocol::{
-    Capabilities, CatalogueChanged, CatalogueLoadResult, InitializeParams, InitializeResult,
-    LogParams, ProgressParams, ResolvedRoot, ServerInfo, error_code, method,
+    Capabilities, CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, FailedRoot,
+    InitializeParams, InitializeResult, LogParams, ProgressParams, ResolvedRoot, ServerInfo,
+    error_code, method,
 };
 
 /// Why the server could not run.
@@ -38,6 +39,9 @@ pub enum ServeError {
 /// Everything the server knows between requests.
 struct State {
     roots: Vec<SourceRoot>,
+    /// The roots that could not be opened, kept so the client can be told which
+    /// and why rather than being handed a shorter list.
+    failed_roots: Vec<FailedRoot>,
     initialized: bool,
 }
 
@@ -51,8 +55,10 @@ struct State {
 /// the framing cannot parse.
 pub fn serve_stdio(default_roots: &[PathBuf]) -> Result<(), ServeError> {
     let (connection, io_threads) = Connection::stdio();
+    let (roots, failed_roots) = open_roots(default_roots);
     let mut state = State {
-        roots: open_roots(default_roots),
+        roots,
+        failed_roots,
         initialized: false,
     };
 
@@ -93,19 +99,33 @@ pub fn serve_stdio(default_roots: &[PathBuf]) -> Result<(), ServeError> {
         .map_err(|e| ServeError::Transport(e.to_string()))
 }
 
-/// Open every root, dropping those that cannot be opened.
+/// Open every root, keeping the failures beside the successes.
 ///
-/// A bad root is reported when a load is asked for rather than at startup: the
-/// client may correct it in `initialize`, and refusing to start would leave no
-/// channel to say why.
-fn open_roots(paths: &[PathBuf]) -> Vec<SourceRoot> {
-    paths
-        .iter()
-        .filter_map(|path| {
-            let id = SourceId::new(default_source_id(path)).ok()?;
-            SourceRoot::open(id, path).ok()
-        })
-        .collect()
+/// A bad root is not fatal -- the client may correct it in `initialize`, and
+/// refusing to start would leave no channel to say why -- but it is not silent
+/// either. `.ok()` used to stand here, which turned a missing directory or an
+/// unusable source id into a root that simply was not in the list, with the
+/// cause discarded before anything could report it.
+fn open_roots(paths: &[PathBuf]) -> (Vec<SourceRoot>, Vec<FailedRoot>) {
+    let mut opened = Vec::with_capacity(paths.len());
+    let mut failed = Vec::new();
+    for path in paths {
+        let spelling = path.display().to_string();
+        match SourceId::new(default_source_id(path)) {
+            Err(e) => failed.push(FailedRoot {
+                path: spelling,
+                error: e.to_string(),
+            }),
+            Ok(id) => match SourceRoot::open(id, path) {
+                Ok(root) => opened.push(root),
+                Err(e) => failed.push(FailedRoot {
+                    path: spelling,
+                    error: e.to_string(),
+                }),
+            },
+        }
+    }
+    (opened, failed)
 }
 
 /// A source id from the root's directory name, matching the CLI's rule.
@@ -135,11 +155,24 @@ fn dispatch(connection: &Connection, state: &mut State, request: Request) -> Opt
                 ));
             }
             if state.roots.is_empty() {
-                return Some(error(
-                    id,
-                    error_code::WORKSPACE_NOT_OPEN,
-                    "no source root is open; pass `roots` to `initialize` or `--root` to the CLI",
-                ));
+                // Naming the failures here as well as on `initialize`: a client
+                // that ignored the `initialize` result would otherwise get
+                // "no source root is open" for a root it did pass.
+                let why = if state.failed_roots.is_empty() {
+                    "no source root is open; pass `roots` to `initialize` or `--root` to the CLI"
+                        .to_owned()
+                } else {
+                    format!(
+                        "no source root is open; every root given failed to open: {}",
+                        state
+                            .failed_roots
+                            .iter()
+                            .map(|r| format!("{}: {}", r.path, r.error))
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    )
+                };
+                return Some(error(id, error_code::WORKSPACE_NOT_OPEN, &why));
             }
             catalogue_load(connection, state, id)
         }
@@ -153,7 +186,10 @@ fn dispatch(connection: &Connection, state: &mut State, request: Request) -> Opt
 
 fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Response {
     if !params.roots.is_empty() {
-        state.roots = open_roots(&params.roots.iter().map(PathBuf::from).collect::<Vec<_>>());
+        let (roots, failed) =
+            open_roots(&params.roots.iter().map(PathBuf::from).collect::<Vec<_>>());
+        state.roots = roots;
+        state.failed_roots = failed;
     }
     state.initialized = true;
 
@@ -182,6 +218,7 @@ fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Re
                     path: root.root.display().to_string(),
                 })
                 .collect(),
+            failed_roots: state.failed_roots.clone(),
         },
     )
 }
@@ -202,7 +239,10 @@ fn catalogue_load(connection: &Connection, state: &State, id: RequestId) -> Opti
     let mut total = 0_u32;
     let mut completed = 0_u32;
     let mut answered = false;
-    let mut declaration_diagnostics = Vec::new();
+    // How many diagnostics went out with the response, so the follow-up sends
+    // the rest and not all of them again.
+    let mut already_sent = 0_usize;
+    let mut disconnected = false;
 
     let scan = load_catalogue_staged(&state.roots, &mut |event| {
         match event {
@@ -210,23 +250,34 @@ fn catalogue_load(connection: &Connection, state: &State, id: RequestId) -> Opti
                 total = u32::try_from(n).unwrap_or(u32::MAX);
             }
             LoadEvent::Declared(entry) => pending.push(entry.clone()),
-            LoadEvent::DeclarationComplete { .. } => {
+            LoadEvent::DeclarationComplete { diagnostics, .. } => {
                 // The tree has its whole shape and none of its badges: answer.
+                // The declaration diagnostics go with it -- an evaluation
+                // failure is exactly what a client rendering the tree needs to
+                // show, and there is no later response to carry it.
+                already_sent = diagnostics.len();
                 let result = CatalogueLoadResult {
                     total,
                     pending: std::mem::take(&mut pending),
-                    diagnostics: std::mem::take(&mut declaration_diagnostics),
+                    diagnostics: diagnostics.to_vec(),
                 };
-                drop(
-                    connection
-                        .sender
-                        .send(Message::Response(ok(id.clone(), &result))),
-                );
-                answered = true;
+                // `answered` only when the send succeeded. Setting it
+                // unconditionally left a disconnected client unanswered *and*
+                // suppressed the fallback response below.
+                match connection
+                    .sender
+                    .send(Message::Response(ok(id.clone(), &result)))
+                {
+                    Ok(()) => answered = true,
+                    Err(e) => {
+                        eprintln!("gearbox: cannot answer catalogue/load: {e}");
+                        disconnected = true;
+                    }
+                }
             }
             LoadEvent::Projected(gear) => {
                 completed += 1;
-                notify(
+                disconnected |= !notify(
                     connection,
                     method::CATALOGUE_CHANGED,
                     &CatalogueChanged {
@@ -234,7 +285,7 @@ fn catalogue_load(connection: &Connection, state: &State, id: RequestId) -> Opti
                         replaces: gear.gdl_path.as_str().to_owned(),
                     },
                 );
-                notify(
+                disconnected |= !notify(
                     connection,
                     method::PROGRESS,
                     &ProgressParams {
@@ -246,8 +297,33 @@ fn catalogue_load(connection: &Connection, state: &State, id: RequestId) -> Opti
                 );
             }
         }
-        Continue::Yes
+        // A client that is gone will not read the rest of the load, and the
+        // second pass is the expensive one.
+        if disconnected {
+            Continue::Stop
+        } else {
+            Continue::Yes
+        }
     });
+
+    // Everything the second pass produced. The response has already gone out, so
+    // without this the projection and merge failures reach nobody.
+    let remaining: Vec<gearbox_ir::Diagnostic> = scan
+        .catalogue
+        .diagnostics
+        .iter()
+        .skip(already_sent)
+        .cloned()
+        .collect();
+    if answered && !remaining.is_empty() {
+        notify(
+            connection,
+            method::CATALOGUE_DIAGNOSTICS,
+            &CatalogueDiagnostics {
+                diagnostics: remaining,
+            },
+        );
+    }
 
     notify(
         connection,
@@ -275,8 +351,9 @@ fn catalogue_load(connection: &Connection, state: &State, id: RequestId) -> Opti
     if answered {
         return None;
     }
-    // No description evaluated, so the boundary never arrived. Answer with an
-    // empty tree rather than leaving the client waiting.
+    // No description evaluated (or the boundary send failed), so nothing has
+    // answered this request. Answer with an empty tree rather than leaving the
+    // client waiting -- if it is still there, the send loop reports the failure.
     Some(ok(
         id,
         &CatalogueLoadResult {
@@ -287,12 +364,29 @@ fn catalogue_load(connection: &Connection, state: &State, id: RequestId) -> Opti
     ))
 }
 
-fn notify<T: serde::Serialize>(connection: &Connection, method: &str, params: &T) {
-    let params = serde_json::to_value(params).unwrap_or(serde_json::Value::Null);
-    drop(connection.sender.send(Message::Notification(Notification {
+/// Send one notification. `false` means the peer is gone.
+///
+/// A serialization failure is logged rather than encoded as `Null`: a
+/// notification whose params are `null` is one the client cannot tell from a
+/// well-formed empty one, so it would read as "nothing happened".
+fn notify<T: serde::Serialize>(connection: &Connection, method: &str, params: &T) -> bool {
+    let params = match serde_json::to_value(params) {
+        Ok(params) => params,
+        Err(e) => {
+            eprintln!("gearbox: cannot serialize `{method}` params: {e}");
+            return true;
+        }
+    };
+    match connection.sender.send(Message::Notification(Notification {
         method: method.to_owned(),
         params,
-    })));
+    })) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("gearbox: cannot send `{method}`: {e}");
+            false
+        }
+    }
 }
 
 fn cast<P: serde::de::DeserializeOwned>(

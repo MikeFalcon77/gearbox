@@ -17,18 +17,25 @@
 //!    dialect admits them is measured, not assumed: see
 //!    `tests/declarative.rs`.
 
+// Public only where a caller outside this crate genuinely needs it. Evaluation
+// itself is reached through `GdlEngine`, so the modules that build and drive a
+// starlark `Globals` stay internal: a `pub fn` returning one would hand a
+// pre-1.0 host type to a crate the boundary test forbids from naming it.
+//
+// `globals` and `product` are the exception, and only for their `#[starlark_module]`
+// vocabularies, which `tests/export_grammar.rs` reads to generate the editor's
+// syntax highlighting. That test lives in this crate, so the containment holds.
 pub mod declarative;
 pub mod engine;
 pub mod globals;
-pub mod loader;
+pub(crate) mod loader;
 pub mod product;
-pub mod product_intent;
+pub(crate) mod product_intent;
 pub mod records;
-pub mod sink;
-pub mod values;
+pub(crate) mod sink;
+pub(crate) mod values;
 pub mod vocabulary;
 
 pub use engine::{EvalOutcome, FileIdentity, GdlEngine};
-pub use product::product_globals;
 pub use sink::{GearDecl, ProductDecl};
 pub use values::{GdlEnum, GdlNamespace};

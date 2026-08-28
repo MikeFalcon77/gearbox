@@ -172,22 +172,35 @@ fn wrapped_path(expr: &syn::Expr) -> Option<&syn::Path> {
 /// `A.with_a(x).with_b(y)` nests as `MethodCall { receiver: MethodCall { .. } }`,
 /// so descending into the receiver before recording yields source order without
 /// a reversal step.
-fn walk_chain(expr: &syn::Expr, out: &mut Vec<ProjectedClusterProvider>) {
+///
+/// A `with_*_provider` whose argument is not a readable path is an error, not a
+/// skip. The caller is documented to treat a short list as a projection failure,
+/// and it cannot: a chain of three registrations where the middle one is
+/// unreadable yields two, which looks exactly like a chain of two.
+fn walk_chain(expr: &syn::Expr, out: &mut Vec<ProjectedClusterProvider>) -> Result<(), String> {
     let syn::Expr::MethodCall(call) = expr else {
-        return;
+        return Ok(());
     };
-    walk_chain(&call.receiver, out);
+    walk_chain(&call.receiver, out)?;
 
-    let Some(primitive) = primitive_for_setter(&call.method.to_string()) else {
-        return;
+    let setter = call.method.to_string();
+    let Some(primitive) = primitive_for_setter(&setter) else {
+        return Ok(());
     };
+    let unreadable = |what: &str| {
+        Err(format!(
+            "`{setter}(..)` registers a {} provider, but its argument {what}",
+            primitive.slug()
+        ))
+    };
+
     let Some(path) = call.args.first().and_then(wrapped_path) else {
-        return;
+        return unreadable("is not a path, `Arc::new(<path>)` or `Box::new(<path>)`");
     };
 
     let segments: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
     let (plugin_lib, provider_type) = match segments.as_slice() {
-        [] => return,
+        [] => return unreadable("is an empty path"),
         [only] => (String::new(), only.clone()),
         [first, .., last] => (first.clone(), last.clone()),
     };
@@ -197,25 +210,31 @@ fn walk_chain(expr: &syn::Expr, out: &mut Vec<ProjectedClusterProvider>) {
         plugin_lib,
         provider_type,
     });
+    Ok(())
 }
 
 /// Project the `with_*_provider` registrations from `ClusterGear::provider_registry()`.
 ///
-/// Returns them in source order. An empty result means the function was not
-/// found or its body is not a builder chain -- both of which the caller should
-/// treat as a projection failure rather than "no providers", since the cluster
-/// gear always registers at least one.
-#[must_use]
-pub fn project_provider_registry(files: &[RustFile]) -> Vec<ProjectedClusterProvider> {
+/// Returns them in source order. An empty `Ok` means the function was not found
+/// or its body is not a builder chain -- both of which the caller should treat
+/// as a projection failure rather than "no providers", since the cluster gear
+/// always registers at least one.
+///
+/// # Errors
+/// Returns a description of the first `with_*_provider` argument that cannot be
+/// read as a provider path.
+pub fn project_provider_registry(
+    files: &[RustFile],
+) -> Result<Vec<ProjectedClusterProvider>, String> {
     let mut out = Vec::new();
     for (_, imp) in impls(files) {
         if let Some(func) = method(imp, "provider_registry")
             && let Some(expr) = tail_expr(&func.block)
         {
-            walk_chain(expr, &mut out);
+            walk_chain(expr, &mut out)?;
         }
     }
-    out
+    Ok(out)
 }
 
 /// Resolve a `const NAME: &str = "..."` anywhere in `files`.

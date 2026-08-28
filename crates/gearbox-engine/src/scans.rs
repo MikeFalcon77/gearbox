@@ -27,6 +27,11 @@ use gearbox_project::{CrateManifest, RustFile};
 /// and it derefs straight to the `&[RustFile]` every consumer wants. The error
 /// is a `String` because the same failure is handed to every caller, and
 /// `ScanError` carries a non-cloneable `syn::Error`.
+///
+/// Flattening to a string is where the *cause* used to be lost: `ScanError`'s
+/// own `Display` says `cannot parse <path>` and nothing about what rustc would
+/// have said, so an operator saw the file and not the mistake in it. [`chain`]
+/// keeps the whole source chain.
 type ScanResult = Result<Arc<[RustFile]>, String>;
 
 /// The result of one manifest read, shared the same way a scan is.
@@ -56,6 +61,22 @@ pub struct CrateScans {
     requests: usize,
 }
 
+/// An error and every cause beneath it, joined with `: `.
+///
+/// The whole point of caching a `String`: whatever is not in it here is gone
+/// for good, and the rustc-quality parse message under a `ScanError::Parse` is
+/// exactly the part worth keeping.
+fn chain(error: &dyn std::error::Error) -> String {
+    let mut out = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        out.push_str(": ");
+        out.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    out
+}
+
 impl CrateScans {
     #[must_use]
     pub fn new() -> Self {
@@ -76,7 +97,7 @@ impl CrateScans {
             .or_insert_with(|| {
                 gearbox_project::scan_crate(dir)
                     .map(Arc::from)
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| chain(&e))
             })
             .clone()
     }
@@ -92,7 +113,7 @@ impl CrateScans {
             .or_insert_with(|| {
                 gearbox_project::project_manifest(dir)
                     .map(Arc::new)
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| chain(&e))
             })
             .clone()
     }

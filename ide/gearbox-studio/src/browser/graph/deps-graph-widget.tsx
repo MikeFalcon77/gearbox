@@ -20,6 +20,7 @@ import { inject, injectable, postConstruct } from "@theia/core/shared/inversify"
 import React from "@theia/core/shared/react";
 
 import type { GearDescriptor } from "../../common/generated/GearDescriptor";
+import { Row } from "../../common/protocol";
 import { CatalogueStore } from "../catalogue-store";
 
 const NODE_W = 168;
@@ -64,9 +65,7 @@ export class DepsGraphWidget extends ReactWidget {
   }
 
   protected render(): React.ReactNode {
-    const gears = this.store.current.rows
-      .filter((r) => r.kind === "projected")
-      .map((r) => (r as { gear: GearDescriptor }).gear);
+    const gears = this.store.current.rows.filter(isProjected).map((r) => r.gear);
 
     if (gears.length === 0) {
       return (
@@ -178,9 +177,19 @@ export class DepsGraphWidget extends ReactWidget {
                 className={`gbx-node-g ${state}`}
                 data-gear={p.gear.id}
                 data-isolated={p.isolated ? "true" : "false"}
-                onClick={() => {
-                  this.focus = this.focus === p.gear.id ? undefined : p.gear.id;
-                  this.update();
+                // Focusable and Enter/Space operable: painting a closure is the
+                // one interaction this view has, and a mouse-only one makes the
+                // whole panel unreachable from the keyboard.
+                role="button"
+                tabIndex={0}
+                aria-label={`${p.gear.id}: paint co-location closure`}
+                aria-pressed={this.focus === p.gear.id}
+                onClick={() => this.toggleFocus(p.gear.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    this.toggleFocus(p.gear.id);
+                  }
                 }}
               >
                 <rect width={NODE_W} height={NODE_H} rx={4} className="gbx-node" />
@@ -200,6 +209,22 @@ export class DepsGraphWidget extends ReactWidget {
       </div>
     );
   }
+
+  protected toggleFocus(id: string): void {
+    this.focus = this.focus === id ? undefined : id;
+    this.update();
+  }
+}
+
+/**
+ * Narrow a row to its projected variant.
+ *
+ * A type predicate rather than `filter(...).map(r => r as {gear})`: the cast
+ * asserted the very thing the filter was there to establish, so a change to
+ * either side would have compiled.
+ */
+function isProjected(row: Row): row is Extract<Row, { kind: "projected" }> {
+  return row.kind === "projected";
 }
 
 /** Y of the rule between the connected graph and the isolated band. */
@@ -223,20 +248,38 @@ function elbow(x1: number, y1: number, x2: number, y2: number): string {
   return `M ${x1} ${y1} L ${x1 + stub} ${y1} L ${x2 - stub} ${y2} L ${x2} ${y2}`;
 }
 
-/** Every gear reachable from `id`, including `id` itself. */
+/**
+ * Every gear reachable from `id`, including `id` itself.
+ *
+ * Over an adjacency map rather than a scan of every edge per step: the scan was
+ * `O(V*E)` per click, which is invisible at a few dozen nodes and is the first
+ * thing to hurt at a few hundred.
+ */
 function closureOf(id: string, edges: readonly Edge[]): Set<string> {
+  const adjacency = new Map<string, string[]>();
+  for (const edge of edges) {
+    const list = adjacency.get(edge.from);
+    if (list) {
+      list.push(edge.to);
+    } else {
+      adjacency.set(edge.from, [edge.to]);
+    }
+  }
+
   const out = new Set<string>([id]);
   const queue = [id];
-  while (queue.length > 0) {
-    const current = queue.pop() as string;
-    for (const edge of edges) {
-      if (edge.from === current && !out.has(edge.to)) {
-        out.add(edge.to);
-        queue.push(edge.to);
+  for (;;) {
+    const current = queue.pop();
+    if (current === undefined) {
+      return out;
+    }
+    for (const next of adjacency.get(current) ?? []) {
+      if (!out.has(next)) {
+        out.add(next);
+        queue.push(next);
       }
     }
   }
-  return out;
 }
 
 /**
@@ -298,7 +341,10 @@ function layout(gears: readonly GearDescriptor[]): { placed: Placed[]; edges: Ed
   // left to right.
   const columns: string[][] = Array.from({ length: maxLayer + 1 }, () => []);
   for (const gear of connected) {
-    columns[maxLayer - (layer.get(gear.id) ?? 0)].push(gear.id);
+    // The index is in range by construction -- `maxLayer` is the maximum of the
+    // same map -- but saying so beats asserting it, since the arithmetic and the
+    // array length are established several lines apart.
+    columns[maxLayer - (layer.get(gear.id) ?? 0)]?.push(gear.id);
   }
 
   orderColumns(columns, edges);
@@ -366,8 +412,12 @@ function orderColumns(columns: string[][], edges: readonly Edge[]): void {
     // Left to right, then right to left.
     const order = sweep === 0 ? [...columns.keys()] : [...columns.keys()].reverse();
     for (const index of order) {
+      const column = columns[index];
+      if (!column) {
+        continue;
+      }
       const side = sweep === 0 ? "left" : "right";
-      const keyed = columns[index].map((id) => ({ id, key: barycentre(id, side) }));
+      const keyed = column.map((id) => ({ id, key: barycentre(id, side) }));
       keyed.sort((a, b) => {
         if (a.key === undefined && b.key === undefined) return a.id.localeCompare(b.id);
         if (a.key === undefined) return 1;
