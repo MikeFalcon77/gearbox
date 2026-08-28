@@ -185,6 +185,49 @@ pub struct GearSelection {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     #[ts(type = "Record<string, unknown>")]
     pub config: BTreeMap<String, serde_json::Value>,
+
+    /// Implementations chosen for this gear's plugin extension points.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugins: Vec<PluginSelection>,
+}
+
+/// One plugin implementation chosen for a host gear.
+///
+/// Which extension point it fills is a catalogue fact, not recorded here: the
+/// product names an implementing gear and the catalogue says what that gear
+/// implements. Recording it twice would let the two disagree.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PluginSelection {
+    pub gear: GearId,
+
+    /// Per-plugin configuration. `vendor` and `priority` here override the
+    /// crate's compiled-in defaults, and overriding one side without the other
+    /// is what makes a host resolve nothing.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[ts(type = "Record<string, unknown>")]
+    pub config: BTreeMap<String, serde_json::Value>,
+
+    /// Profiles this choice applies to. Empty means every profile.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub profiles: BTreeSet<ProfileId>,
+}
+
+impl PluginSelection {
+    /// The vendor this selection asks for, if the product set one.
+    #[must_use]
+    pub fn configured_vendor(&self) -> Option<&str> {
+        self.config
+            .get("vendor")
+            .and_then(serde_json::Value::as_str)
+    }
+
+    /// The priority this selection asks for, if the product set one.
+    #[must_use]
+    pub fn configured_priority(&self) -> Option<i64> {
+        self.config
+            .get("priority")
+            .and_then(serde_json::Value::as_i64)
+    }
 }
 
 /// What someone asked for regarding one binding.

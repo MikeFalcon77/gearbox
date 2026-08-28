@@ -26,6 +26,13 @@ pub struct AttributeSite<'a> {
     /// The item it is attached to -- the struct whose kebab-case identifier
     /// `#[toolkit::consumes]` derives its config key from.
     pub struct_ident: String,
+    /// Every attribute on that item, `#[toolkit::gear]` included.
+    ///
+    /// Carried because the facts a gear declares are spread across sibling
+    /// attributes: `#[toolkit::provides]` states which transports *this
+    /// provider* actually wires up, which is a different fact from which
+    /// transports the contract could support.
+    pub item_attrs: &'a [syn::Attribute],
 }
 
 // Hand-written rather than derived: deriving would dump the attribute's whole
@@ -107,6 +114,7 @@ fn all_sites(files: &[RustFile]) -> Vec<AttributeSite<'_>> {
                         line: attr.path().segments[0].ident.span().start().line,
                         attr,
                         struct_ident: item_ident(item).unwrap_or_default(),
+                        item_attrs: attrs,
                     });
                 }
             }

@@ -65,18 +65,6 @@ fn restated(field: &str, owner: &str) -> anyhow::Error {
     )
 }
 
-/// Map a list of `transport.*` members to their spellings.
-fn transports(values: &[&GdlEnum]) -> anyhow::Result<Vec<String>> {
-    values
-        .iter()
-        .map(|v| {
-            vocabulary::transport(v)
-                .map(|t| t.as_str().to_owned())
-                .map_err(|e| anyhow::anyhow!(e))
-        })
-        .collect()
-}
-
 #[starlark_module]
 fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     /// `cargo(...)` -- where a gear's or SDK's crate lives.
@@ -177,12 +165,12 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rust: &str,
         #[starlark(require = named)] sdk: &'v CargoRecord,
         #[starlark(require = named)] local: Option<&str>,
-        #[starlark(require = named)] transports: Option<UnpackList<&'v GdlEnum>>,
         #[starlark(require = named)] rest: Option<&'v RestRecord>,
         #[starlark(require = named)] grpc: Option<&'v GrpcRecord>,
         #[starlark(require = named)] policies: Option<UnpackList<String>>,
         // Accepted only to be refused by name: see `restated` below.
         #[starlark(require = named)] version: Option<&str>,
+        #[starlark(require = named)] transports: Option<Value<'v>>,
         #[starlark(require = named)] kind: Option<&'v GdlEnum>,
     ) -> anyhow::Result<ProvideRecord> {
         if version.is_some() {
@@ -194,21 +182,19 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
                 "the contract trait's name suffix (Api / Embedded / Backend / Extension)",
             ));
         }
-        let mut transports = match transports {
-            Some(list) => crate::globals::transports(&list.items)?,
-            // A provider always has an in-process form; saying so explicitly
-            // beats making every description repeat it.
-            None => vec!["local".to_owned()],
-        };
-        transports.sort();
-        transports.dedup();
+        if transports.is_some() {
+            return Err(restated(
+                "transports",
+                "the `<Base>Rest` / `<Base>Grpc` projection traits beside the base trait \
+                 in the sdk crate",
+            ));
+        }
 
         Ok(ProvideRecord {
             contract: contract.to_owned(),
             rust: rust.to_owned(),
             sdk: sdk.clone(),
             local: local.map(str::to_owned),
-            transports,
             rest: rest.cloned(),
             grpc: grpc.cloned(),
             policies: policies.map(|l| l.items).unwrap_or_default(),
@@ -285,6 +271,15 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] category: Option<&str>,
         #[starlark(require = named)] visibility: Option<&str>,
         #[starlark(require = named)] package: &'v CargoRecord,
+        // A locator, like `cluster_plugins`: nothing in a gear's own crate says
+        // where its SDK lives, and the SDK is what declares the plugin-API
+        // traits this gear expects or fills.
+        #[starlark(require = named)] sdk: Option<&'v CargoRecord>,
+        // Escape hatch, not the primary mechanism: only for a crate whose
+        // extension point cannot be read (the bss-rate-provider plugins
+        // implement no trait with `Plugin` in the name). Same shape as `attr`
+        // on `cargo(...)` and `backend` on `cluster_plugin(...)`.
+        #[starlark(require = named)] plugin_interface: Option<&str>,
         #[starlark(require = named)] provides: Option<UnpackList<&'v ProvideRecord>>,
         #[starlark(require = named)] consumes: Option<UnpackList<&'v ConsumeRecord>>,
         #[starlark(require = named)] requires: Option<UnpackList<&'v ClusterRequireRecord>>,
@@ -339,6 +334,8 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             category: category.map(str::to_owned),
             visibility: visibility.map(str::to_owned),
             package: Some(package.clone()),
+            sdk: sdk.cloned(),
+            plugin_interface: plugin_interface.map(str::to_owned),
             provides: provides
                 .map(|l| l.items.into_iter().cloned().collect())
                 .unwrap_or_default(),

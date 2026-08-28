@@ -50,6 +50,7 @@ pub fn merge(
     projected: &ProjectedGear,
     contracts_by_trait: &BTreeMap<String, ProjectedContract>,
     cluster: &crate::cluster::ClusterProjection,
+    plugin: &crate::plugin::PluginProjection,
     diagnostics: &mut Diagnostics,
 ) -> Option<MergedGear> {
     let uri = identity.uri.as_str();
@@ -153,8 +154,13 @@ pub fn merge(
         else {
             continue;
         };
+        // Match the gear's own `#[toolkit::provides]` for this contract.
+        let offered = projected
+            .provides
+            .iter()
+            .find(|p| p.contract_ident == projected_contract.trait_ident);
         if let Some((provider, contract)) =
-            build_provider(uri, &id, record, projected_contract, diagnostics)
+            build_provider(uri, &id, record, projected_contract, offered, diagnostics)
         {
             provides.push(provider);
             contracts.push(contract);
@@ -246,6 +252,11 @@ pub fn merge(
         // Projected from `provider_registry()` plus the plugin crates
         // `cluster_plugins` locates.
         cluster_providers: cluster.providers.clone(),
+        // Projected from the plugin-API traits the declared `sdk` crate holds,
+        // and from which of them this crate implements.
+        extension_points: plugin.extension_points.clone(),
+        fills: plugin.fills.clone(),
+        vendor_selector: plugin.vendor_selector.clone(),
         declared_roles,
         config_schema: decl
             .config_schema
@@ -326,6 +337,7 @@ fn build_provider(
     owner: &GearId,
     record: &gearbox_gdl::records::ProvideRecord,
     projected: &ProjectedContract,
+    offered: Option<&gearbox_project::ProjectedProvide>,
     diagnostics: &mut Diagnostics,
 ) -> Option<(ProviderDescriptor, ContractDescriptor)> {
     let (id, version) = match contract_id(projected) {
@@ -340,24 +352,42 @@ fn build_provider(
         }
     };
 
-    let mut transports = BTreeSet::new();
-    for spelling in &record.transports {
-        match spelling.as_str() {
-            "local" => transports.insert(Transport::Local),
-            "rest" => transports.insert(Transport::Rest),
-            "grpc" => transports.insert(Transport::Grpc),
-            other => {
-                diagnostics.push(invalid(
-                    uri,
-                    format!("unknown transport `{other}`"),
-                    "use a `transport.*` member",
-                ));
-                false
-            }
-        };
+    // Two different facts, and conflating them is easy: the contract's
+    // projection traits say which transports are *possible*, while
+    // `#[toolkit::provides(transports = ...)]` says which ones this gear
+    // actually wires up. `api-contracts` has `PaymentApiGrpc` yet declares
+    // `[local, rest]`, because the gRPC client is behind an opt-in feature.
+    // What the catalogue records for a provider is what the provider offers.
+    let transports = offered.map_or_else(
+        || {
+            // No matching attribute: the provider still has an in-process form,
+            // and claiming more would be inventing a binding.
+            let mut only_local = BTreeSet::new();
+            only_local.insert(Transport::Local);
+            only_local
+        },
+        |o| o.transports.clone(),
+    );
+
+    // A provider cannot offer what the contract has no projection for -- that
+    // would be a Rust-internal inconsistency, the same class as GBX0207.
+    let impossible: Vec<&str> = transports
+        .difference(&projected.transports)
+        .map(|t| t.as_str())
+        .collect();
+    if !impossible.is_empty() {
+        diagnostics.push(invalid(
+            uri,
+            format!(
+                "gear `{owner}` offers `{}` over [{}], but the contract's sdk crate declares no \
+                 matching projection trait",
+                projected.trait_ident,
+                impossible.join(", ")
+            ),
+            "add the `<Base>Rest`/`<Base>Grpc` projection trait to the sdk crate, or drop the \
+             transport from `#[toolkit::provides]`",
+        ));
     }
-    // A provider always has an in-process form.
-    transports.insert(Transport::Local);
 
     let provider = ProviderDescriptor {
         contract: id.clone(),

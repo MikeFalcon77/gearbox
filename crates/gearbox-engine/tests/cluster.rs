@@ -147,7 +147,8 @@ fn deployment_semantics_are_declared_because_rust_does_not_state_them() {
 #[test]
 fn the_slice_projects_cleanly() {
     let catalogue = require_tree!();
-    assert_eq!(catalogue.gears.len(), 8);
+    // 8 original + tenant-resolver + 5 plugin gears.
+    assert_eq!(catalogue.gears.len(), 14);
     let errors: Vec<String> = catalogue
         .diagnostics
         .iter()

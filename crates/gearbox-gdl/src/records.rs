@@ -150,8 +150,6 @@ gdl_record! {
         pub sdk: CargoRecord,
         /// The associated fn building the in-process implementation.
         pub local: Option<String>,
-        /// From `transport.*`. Always contains `local`.
-        pub transports: Vec<String>,
         pub rest: Option<RestRecord>,
         pub grpc: Option<GrpcRecord>,
         pub policies: Vec<String>,
@@ -296,6 +294,8 @@ gdl_record! {
         pub features: Vec<String>,
         /// Opaque per-gear configuration, carried through to the generator.
         pub config: Vec<(String, serde_json::Value)>,
+        /// Implementations chosen for this gear's plugin extension points.
+        pub plugins: Vec<PluginRecord>,
     }
 }
 
@@ -360,5 +360,26 @@ gdl_record! {
         /// `existing-infrastructure`, `fewer-processes` or `isolate`.
         pub kind: String,
         pub gear: Option<String>,
+    }
+}
+
+gdl_record! {
+    /// `plugin("name", config = {...}, profiles = [...])` -- one implementation
+    /// chosen for a host's extension point.
+    ///
+    /// No `interface` field: the catalogue already knows which point this gear
+    /// fills, so naming it here would restate a projected fact. A host with
+    /// several points simply takes several entries.
+    PluginRecord as "gdl_plugin" {
+        /// The implementing gear's id.
+        pub gear: String,
+        /// Per-plugin configuration, merged into the generated config. `vendor`
+        /// and `priority` here override the crate's compiled-in defaults.
+        pub config: Vec<(String, serde_json::Value)>,
+        /// Which deployment profiles this choice applies to. Empty means all.
+        ///
+        /// The reason this exists: the canonical case is static auth in dev and
+        /// real OIDC in prod, and that has to be one product file, not two.
+        pub profiles: Vec<String>,
     }
 }

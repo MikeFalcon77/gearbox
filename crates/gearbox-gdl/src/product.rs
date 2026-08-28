@@ -36,7 +36,7 @@ use starlark::values::list::UnpackList;
 use starlark::values::none::NoneType;
 
 use crate::records::{
-    BindRecord, ClusterProfileRecord, PreferenceRecord, ProcessRecord, ProfileRecord,
+    BindRecord, ClusterProfileRecord, PluginRecord, PreferenceRecord, ProcessRecord, ProfileRecord,
     ProviderBindingRecord, SourceAtRecord, SourceRecord, UseGearRecord,
 };
 use crate::sink::{GdlSink, ProductDecl};
@@ -100,6 +100,23 @@ fn options(
         .collect::<anyhow::Result<Vec<_>>>()?;
     out.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(out)
+}
+
+/// Convert an optional Starlark map into sorted JSON pairs.
+///
+/// Shared by `use_gear(config = ...)` and `plugin(config = ...)`: a plugin's
+/// configuration is a gear's configuration, so it needs no separate machinery.
+fn config_map(
+    what: &str,
+    value: Option<Value<'_>>,
+) -> anyhow::Result<Vec<(String, serde_json::Value)>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    match to_json(what, value)? {
+        serde_json::Value::Object(map) => Ok(map.into_iter().collect()),
+        other => Err(anyhow::anyhow!("`{what}` must be a map, got `{other}`")),
+    }
 }
 
 fn strings(list: Option<UnpackList<String>>) -> Vec<String> {
@@ -229,27 +246,38 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         })
     }
 
-    /// `use_gear("name", source = ..., features = [...], config = {...})`
+    /// `plugin("name", config = {...}, profiles = [...])`
+    ///
+    /// Names an implementing gear. Which extension point it fills comes from the
+    /// catalogue, so there is no `interface` here to get wrong.
+    fn plugin<'v>(
+        #[starlark(require = pos)] gear: &str,
+        #[starlark(require = named)] config: Option<Value<'v>>,
+        #[starlark(require = named)] profiles: Option<UnpackList<String>>,
+    ) -> anyhow::Result<PluginRecord> {
+        Ok(PluginRecord {
+            gear: gear.to_owned(),
+            config: config_map("config", config)?,
+            profiles: strings(profiles),
+        })
+    }
+
+    /// `use_gear("name", source = ..., features = [...], config = {...}, plugins = [...])`
     fn use_gear<'v>(
         #[starlark(require = pos)] gear: &str,
         #[starlark(require = named)] source: &str,
         #[starlark(require = named)] features: Option<UnpackList<String>>,
         #[starlark(require = named)] config: Option<Value<'v>>,
+        #[starlark(require = named)] plugins: Option<UnpackList<&'v PluginRecord>>,
     ) -> anyhow::Result<UseGearRecord> {
-        let config = match config {
-            Some(value) => match to_json("config", value)? {
-                serde_json::Value::Object(map) => map.into_iter().collect(),
-                other => {
-                    return Err(anyhow::anyhow!("`config` must be a map, got `{other}`"));
-                }
-            },
-            None => Vec::new(),
-        };
         Ok(UseGearRecord {
             gear: gear.to_owned(),
             source: source.to_owned(),
             features: strings(features),
-            config,
+            config: config_map("config", config)?,
+            plugins: plugins
+                .map(|l| l.items.into_iter().cloned().collect())
+                .unwrap_or_default(),
         })
     }
 

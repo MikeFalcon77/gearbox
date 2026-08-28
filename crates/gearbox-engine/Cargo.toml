@@ -15,11 +15,11 @@ gearbox-gdl.workspace = true
 gearbox-project.workspace = true
 gearbox-ir.workspace = true
 heck.workspace = true
+serde_json.workspace = true
 gearbox-lock.workspace = true
 thiserror.workspace = true
 walkdir.workspace = true
 
 [dev-dependencies]
 gearbox-project.workspace = true
-serde_json.workspace = true
 walkdir.workspace = true

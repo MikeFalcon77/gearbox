@@ -76,7 +76,14 @@ fn every_projected_gear_field_is_refused_by_name() {
 
 #[test]
 fn projected_contract_fields_are_refused_on_provide() {
-    for field in [r#"version = "v1""#, "kind = contract_kind.api"] {
+    for field in [
+        r#"version = "v1""#,
+        "kind = contract_kind.api",
+        // Which transports exist follows from which projection traits sit beside
+        // the base trait. Declaring the list would let a description claim a
+        // remote binding the code provably rules out.
+        "transports = [transport.local, transport.rest]",
+    ] {
         let src = format!(
             r#"
 SDK = cargo(crate_name = "s", lib = "s")
@@ -90,7 +97,9 @@ gear({PACKAGE}, provides = [provide(contract = "PaymentApi", rust = "s::PaymentA
             "`{field}` on provide should be GBX0210, got {codes:?}"
         );
         assert!(
-            message.contains("contract") || message.contains("suffix"),
+            message.contains("contract")
+                || message.contains("suffix")
+                || message.contains("projection traits"),
             "got: {message}"
         );
     }

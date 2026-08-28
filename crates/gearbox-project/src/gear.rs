@@ -49,6 +49,12 @@ pub struct ProjectedGear {
     /// True when the attribute sits under a `#[cfg(...)]` this crate cannot
     /// evaluate, so its presence in a build is conditional.
     pub conditional: bool,
+    /// What each sibling `#[toolkit::provides]` states.
+    ///
+    /// Which transports a provider wires up is stated here, not in GDL and not
+    /// by the contract's projection traits: the traits say what is *possible*,
+    /// this says what this gear actually offers.
+    pub provides: Vec<crate::contract::ProjectedProvide>,
 }
 
 /// A `lifecycle(...)` clause: a bare flag, or `key = value` pairs.
@@ -198,6 +204,7 @@ fn has_cfg(attrs: &[syn::Attribute]) -> bool {
 pub fn project_gear(site: &crate::attribute::AttributeSite<'_>) -> syn::Result<ProjectedGear> {
     let mut projected: ProjectedGear = site.attr.parse_args::<GearArgs>()?.0;
     projected.struct_ident.clone_from(&site.struct_ident);
+    projected.provides = crate::contract::project_provides(site.item_attrs)?;
     // The cfg check looks at the item's other attributes, which the site does
     // not carry; callers that need it set it. Kept here for shape.
     projected.conditional = false;

@@ -38,6 +38,25 @@ product(
         use_gear("gear-orchestrator", source = "gears-rust"),
         use_gear("api-contracts", source = "gears-rust"),
         use_gear("api-contracts-consumer", source = "gears-rust"),
+
+        # authn-resolver routes to whichever plugin implements its extension
+        # point. The choice is per profile, which is the whole reason `plugins`
+        # takes `profiles`: dev accepts any token, prod validates against a real
+        # issuer, and that is one product file rather than two.
+        #
+        # `vendor` is a join key: the host queries types-registry for plugin
+        # instances matching ITS vendor and takes the lowest priority. Both sides
+        # default to "constructorfabric", so leaving both alone is correct --
+        # overriding one side and not the other is what fails silently at
+        # runtime, and is what GBX0512 refuses.
+        use_gear("authn-resolver", source = "gears-rust",
+            plugins = [
+                plugin("static-authn-plugin", profiles = ["dev"],
+                       config = {"mode": "accept_all"}),
+                plugin("oidc-authn-plugin", profiles = ["local", "prod"],
+                       config = {"issuer": "https://id.example.com"}),
+            ],
+        ),
     ],
 
     bindings = [

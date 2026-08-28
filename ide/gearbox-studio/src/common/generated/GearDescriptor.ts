@@ -3,8 +3,10 @@ import type { CargoRef } from "./CargoRef";
 import type { ClusterProviderDecl } from "./ClusterProviderDecl";
 import type { DeclaredRole } from "./DeclaredRole";
 import type { EndpointDecl } from "./EndpointDecl";
+import type { ExtensionPointDecl } from "./ExtensionPointDecl";
 import type { GearId } from "./GearId";
 import type { LifecycleDecl } from "./LifecycleDecl";
+import type { PluginFill } from "./PluginFill";
 import type { ProviderDescriptor } from "./ProviderDescriptor";
 import type { RelPath } from "./RelPath";
 import type { Requirement } from "./Requirement";
@@ -59,6 +61,26 @@ client_trait?: string | null,
  * Cluster providers this gear registers. Only the cluster gear has any.
  */
 cluster_providers?: Array<ClusterProviderDecl>, 
+/**
+ * Plugin extension points this gear expects an implementation for.
+ *
+ * Projected from the plugin-API traits its SDK crate declares. A gear may
+ * have several: `mini-chat` declares an audit point and a model-policy
+ * point, each filled independently.
+ */
+extension_points?: Array<ExtensionPointDecl>, 
+/**
+ * The extension point this gear *fills*, if it is a plugin.
+ */
+fills?: PluginFill | null, 
+/**
+ * The vendor string this gear's config selects a plugin by.
+ *
+ * Per gear, not per point: the only multi-point host in the tree
+ * (`mini-chat`) declares two extension points and exactly one `vendor`
+ * field, so one selector covers all of a host's points.
+ */
+vendor_selector?: string | null, 
 /**
  * Roles declared for forward compatibility and excluded from resolution.
  */

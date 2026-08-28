@@ -207,6 +207,8 @@ fn project_and_merge(
     // Cluster: profiles come free from the crate scan above; providers cost one
     // extra scan per declared plugin crate, which only `cluster` itself declares.
     let cluster = crate::cluster::project(&root.root, identity, decl, &files, diagnostics);
+    // Plugin facts cost one SDK scan, and only for gears that declare `sdk`.
+    let plugin = crate::plugin::project(&root.root, identity, decl, &files, diagnostics);
 
     crate::merge::merge(
         identity,
@@ -214,6 +216,7 @@ fn project_and_merge(
         &projected,
         &contracts_by_trait,
         &cluster,
+        &plugin,
         diagnostics,
     )
 }

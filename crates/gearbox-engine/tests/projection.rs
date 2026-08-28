@@ -66,7 +66,9 @@ fn the_slice_loads_without_diagnostics() {
         "unexpected diagnostics:\n{}",
         problems.join("\n")
     );
-    assert_eq!(catalogue.gears.len(), 8, "the eight slice gears");
+    // Eight original gears, plus tenant-resolver and the five plugin gears
+    // that make the extension-point projection testable on real code.
+    assert_eq!(catalogue.gears.len(), 14, "the slice gears");
 }
 
 #[test]

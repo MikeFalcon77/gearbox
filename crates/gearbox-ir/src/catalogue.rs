@@ -284,6 +284,26 @@ pub struct GearDescriptor {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cluster_providers: Vec<ClusterProviderDecl>,
 
+    /// Plugin extension points this gear expects an implementation for.
+    ///
+    /// Projected from the plugin-API traits its SDK crate declares. A gear may
+    /// have several: `mini-chat` declares an audit point and a model-policy
+    /// point, each filled independently.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extension_points: Vec<ExtensionPointDecl>,
+
+    /// The extension point this gear *fills*, if it is a plugin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fills: Option<PluginFill>,
+
+    /// The vendor string this gear's config selects a plugin by.
+    ///
+    /// Per gear, not per point: the only multi-point host in the tree
+    /// (`mini-chat`) declares two extension points and exactly one `vendor`
+    /// field, so one selector covers all of a host's points.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor_selector: Option<String>,
+
     /// Roles declared for forward compatibility and excluded from resolution.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declared_roles: Vec<DeclaredRole>,
@@ -292,6 +312,48 @@ pub struct GearDescriptor {
     /// the lock and otherwise unused for now.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_schema: Option<RelPath>,
+}
+
+/// A plugin-API trait a gear expects an implementation of.
+///
+/// The identity is the trait ident **as written**, never a derived short name.
+/// `to_kebab_case("AuthNResolverPluginClient")` gives
+/// `auth-n-resolver-plugin-client` -- the same `AuthN` -> `auth-n` split GBX0206
+/// exists to catch, and the lesson `ClusterProfile` already taught.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+pub struct ExtensionPointDecl {
+    /// e.g. `AuthNResolverPluginClient`.
+    pub trait_ident: String,
+
+    /// The SDK crate's library identifier, e.g. `authn_resolver_sdk`. Together
+    /// with `trait_ident` this is the join key an implementation matches on.
+    pub sdk_lib: String,
+}
+
+impl ExtensionPointDecl {
+    /// How the point is spelled in diagnostics and CLI output.
+    #[must_use]
+    pub fn qualified(&self) -> String {
+        format!("{}::{}", self.sdk_lib, self.trait_ident)
+    }
+}
+
+/// The extension point a plugin gear fills.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PluginFill {
+    /// Which point, matching an [`ExtensionPointDecl`] on the host.
+    pub point: ExtensionPointDecl,
+
+    /// The vendor this plugin registers itself under, compiled in as a default.
+    ///
+    /// `None` means the crate states no default, so a product that does not set
+    /// one leaves the plugin unreachable by the host's selector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_vendor: Option<String>,
+
+    /// Lower wins when several plugins share a vendor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_priority: Option<i64>,
 }
 
 impl GearDescriptor {
@@ -369,6 +431,20 @@ impl Catalogue {
     #[must_use]
     pub fn contract(&self, id: &ContractId) -> Option<&ContractDescriptor> {
         self.contracts.get(id)
+    }
+
+    /// Which gears implement `point`.
+    ///
+    /// This is what makes "which plugins can I use here" a catalogue fact rather
+    /// than a CLI trick: the editor, the CLI and the validator all ask the same
+    /// question of the same data. Several answers is the normal case, and legal
+    /// -- the host picks among linked plugins at runtime by vendor and priority.
+    #[must_use]
+    pub fn implementations_of(&self, point: &ExtensionPointDecl) -> Vec<&GearDescriptor> {
+        self.gears
+            .values()
+            .filter(|g| g.fills.as_ref().is_some_and(|f| f.point == *point))
+            .collect()
     }
 
     /// Which gears provide `contract`.

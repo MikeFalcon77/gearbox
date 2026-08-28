@@ -19,6 +19,7 @@ pub mod attribute;
 pub mod cluster;
 pub mod contract;
 pub mod gear;
+pub mod plugin;
 pub mod profile;
 pub mod scan;
 
@@ -27,7 +28,11 @@ pub use cluster::{
     ClusterProjectionError, ProjectedClusterProvider, SdkDefaultRule, project_backend_capabilities,
     project_provider_name, project_provider_registry, project_sdk_defaults,
 };
-pub use contract::{ProjectedContract, project_contracts};
+pub use contract::{ProjectedContract, ProjectedProvide, project_contracts, project_provides};
 pub use gear::{ProjectedGear, ProjectedLifecycle, project_gear, project_gear_with_attrs};
+pub use plugin::{
+    ExtensionPoint, PluginImplError, VendorDefault, project_extension_points, project_plugin_impl,
+    project_vendor_default,
+};
 pub use profile::{ProjectedProfile, project_cluster_profiles};
 pub use scan::{RustFile, ScanError, scan_crate};

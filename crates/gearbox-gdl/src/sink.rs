@@ -38,6 +38,14 @@ pub struct GearDecl {
     pub category: Option<String>,
     pub visibility: Option<String>,
     pub package: Option<crate::records::CargoRecord>,
+    /// Where this gear's SDK crate is, when it has one.
+    ///
+    /// A locator, not a restatement: the SDK declares the plugin-API traits
+    /// this gear expects (if it is a host) or fills (if it is a plugin), and
+    /// nothing in the gear's own crate says where that SDK is.
+    pub sdk: Option<crate::records::CargoRecord>,
+    /// Narrows the extension point when it cannot be read from an `impl`.
+    pub plugin_interface: Option<String>,
     pub provides: Vec<ProvideRecord>,
     pub consumes: Vec<ConsumeRecord>,
     pub requires: Vec<crate::records::ClusterRequireRecord>,

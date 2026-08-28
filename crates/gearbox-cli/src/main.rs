@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use gearbox_engine::{SourceRoot, load_catalogue, load_product};
+use gearbox_engine::{SourceRoot, check_plugins, load_catalogue, load_product};
 use gearbox_ir::{Diagnostic, Severity, SourceId};
 
 #[derive(Parser)]
@@ -42,6 +42,25 @@ enum Command {
 
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
+    },
+
+    /// Show plugin extension points and the implementations available for them.
+    ///
+    /// Without `--product`, lists what a gear *could* use. With `--product`,
+    /// resolves what it *will* use, per deployment profile -- which is a
+    /// different question, because the choice is profile-scoped.
+    Plugins {
+        /// A source root to scan. Repeatable.
+        #[arg(long, value_name = "DIR", required = true)]
+        root: Vec<PathBuf>,
+
+        /// Limit to one host gear.
+        #[arg(long, value_name = "ID")]
+        gear: Option<String>,
+
+        /// Resolve against a product description instead of listing.
+        #[arg(long, value_name = "FILE")]
+        product: Option<PathBuf>,
     },
 
     /// Evaluate a `product.gdl` and print the operator intent it declares.
@@ -86,6 +105,129 @@ fn run() -> anyhow::Result<ExitCode> {
             format,
         } => catalogue(&root, source_id.as_deref(), format),
         Command::Product { file, format } => product(&file, format),
+        Command::Plugins {
+            root,
+            gear,
+            product,
+        } => plugins(&root, gear.as_deref(), product.as_deref()),
+    }
+}
+
+fn plugins(
+    roots: &[PathBuf],
+    gear: Option<&str>,
+    product_file: Option<&std::path::Path>,
+) -> anyhow::Result<ExitCode> {
+    let mut opened = Vec::with_capacity(roots.len());
+    for path in roots {
+        opened.push(SourceRoot::open(
+            SourceId::new(default_source_id(path))?,
+            path,
+        )?);
+    }
+    let catalogue = load_catalogue(&opened).catalogue;
+
+    if let Some(file) = product_file {
+        return Ok(resolve_plugins(&catalogue, file));
+    }
+    list_plugins(&catalogue, gear);
+    Ok(ExitCode::SUCCESS)
+}
+
+/// What each host *could* use. The answer to "which implementations exist".
+fn list_plugins(catalogue: &gearbox_ir::Catalogue, only: Option<&str>) {
+    let mut any = false;
+    for host in catalogue.gears.values() {
+        if host.extension_points.is_empty() {
+            continue;
+        }
+        if only.is_some_and(|id| host.id.as_str() != id) {
+            continue;
+        }
+        any = true;
+
+        let selector = host.vendor_selector.as_deref().unwrap_or("<none>");
+        println!("\n{}   selector: vendor = \"{selector}\"", host.id);
+
+        for point in &host.extension_points {
+            println!("\n  extension point  {}", point.qualified());
+            let impls = catalogue.implementations_of(point);
+            if impls.is_empty() {
+                println!("    (no implementation in the catalogue)");
+                continue;
+            }
+            for gear in impls {
+                let fill = gear.fills.as_ref();
+                let vendor = fill
+                    .and_then(|f| f.default_vendor.as_deref())
+                    .unwrap_or("<none>");
+                let priority = fill
+                    .and_then(|f| f.default_priority)
+                    .map_or_else(|| "-".to_owned(), |p| p.to_string());
+                // Whether the compiled-in defaults already agree. A mismatch is
+                // not fatal -- the product can set `vendor` on either side --
+                // but it is what silently fails if nobody does.
+                let mark = if host.vendor_selector.as_deref()
+                    == fill.and_then(|f| f.default_vendor.as_deref())
+                {
+                    "matches"
+                } else {
+                    "NEEDS vendor override"
+                };
+                println!(
+                    "    {:<26} vendor={vendor:<20} priority={priority:<6} {mark}",
+                    gear.id
+                );
+                println!("      {} · {}", gear.package.crate_name, gear.gdl_path);
+            }
+        }
+    }
+
+    if !any {
+        println!("no gear declares a plugin extension point");
+        println!("(a host declares `sdk = cargo(...)`; the points are read from that crate)");
+    }
+}
+
+/// What each host *will* use, per profile.
+fn resolve_plugins(catalogue: &gearbox_ir::Catalogue, file: &std::path::Path) -> ExitCode {
+    let scan = load_product(file, None);
+    let Some(intent) = scan.intent else {
+        report(scan.diagnostics.as_slice());
+        return ExitCode::FAILURE;
+    };
+
+    let mut diagnostics = gearbox_ir::Diagnostics::new();
+    let uri = format!("file://{}", file.display());
+    let resolutions = check_plugins(catalogue, &intent, &uri, &mut diagnostics);
+    diagnostics.finish();
+
+    let mut last: Option<(String, String)> = None;
+    for r in &resolutions {
+        let key = (r.host.to_string(), r.point.qualified());
+        if last.as_ref() != Some(&key) {
+            println!("\n{} / {}", key.0, key.1);
+            last = Some(key);
+        }
+        let outcome = match (&r.winner, r.tied, r.linked.len()) {
+            (Some(w), _, 1) => w.to_string(),
+            (Some(w), _, n) => format!("{w}  (wins over {} other linked)", n - 1),
+            (None, true, n) => format!("undefined - {n} tied on priority"),
+            (None, _, 0) => "- nothing selected".to_owned(),
+            (None, _, _) => "- linked, but no vendor match".to_owned(),
+        };
+        println!("  {:<8} -> {outcome}", r.profile.as_str());
+    }
+
+    if resolutions.is_empty() {
+        println!("no selected gear declares a plugin extension point");
+    }
+
+    report(diagnostics.as_slice());
+    if diagnostics.has_errors() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
 
@@ -137,6 +279,22 @@ fn print_intent(intent: &gearbox_ir::ProductIntent) {
     println!("\n  gears");
     for selection in &intent.selected_gears {
         println!("    {} from {}", selection.gear, selection.source);
+        // Which extension point each fills is a catalogue fact, so it is not
+        // shown here: this command evaluates the product alone. `gearbox
+        // plugins --product` resolves them against the catalogue.
+        for plugin in &selection.plugins {
+            let scope = if plugin.profiles.is_empty() {
+                "all profiles".to_owned()
+            } else {
+                plugin
+                    .profiles
+                    .iter()
+                    .map(gearbox_ir::ProfileId::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            println!("      plugin {} [{scope}]", plugin.gear);
+        }
     }
 
     // Profile-scoped declarations are printed per profile, because that is the

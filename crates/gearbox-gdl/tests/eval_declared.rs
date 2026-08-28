@@ -50,7 +50,6 @@ gear(
             rust = "api_contracts_sdk::PaymentApi",
             sdk = PAYMENT_SDK,
             local = "Self::build_local",
-            transports = [transport.local, transport.rest],
             rest = rest(base_path = "/api-contracts/v1"),
         ),
     ],
@@ -81,7 +80,8 @@ fn evaluates_the_declared_half() {
     assert_eq!(decl.provides.len(), 1);
     assert_eq!(decl.provides[0].contract, "PaymentApi");
     assert_eq!(decl.provides[0].rust, "api_contracts_sdk::PaymentApi");
-    assert_eq!(decl.provides[0].transports, ["local", "rest"]);
+    // No transports to assert either: which ones exist follows from the
+    // `<Base>Rest`/`<Base>Grpc` traits in the sdk crate, and is projected.
     assert_eq!(
         decl.provides[0].rest.as_ref().unwrap().base_path,
         "/api-contracts/v1"

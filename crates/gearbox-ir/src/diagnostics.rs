@@ -438,6 +438,50 @@ diagnostic_codes! {
     /// narrow it explicitly.
     ClusterBackendAmbiguous = "GBX0510", Cluster, Error, false, "cluster backend implementation is ambiguous";
 
+    /// A selected host has an extension point with no implementation selected.
+    ///
+    /// The host starts and then fails at the first request that needs the
+    /// plugin: it queries types-registry, finds no instance for its vendor, and
+    /// has nothing to route to. Whether a product tolerates that is a product
+    /// decision, not a property of the gear's code, which is why there is no
+    /// `optional` field on the gear side.
+    PluginPointUnfilled = "GBX0511", Cluster, Error, false, "plugin extension point has no implementation";
+
+    /// The host's effective vendor matches no selected plugin's.
+    ///
+    /// Both sides read `vendor` from their own config and both compile in a
+    /// default, so a product that overrides one and not the other produces a
+    /// host that resolves nothing -- silently, at runtime. `gears-rust` keeps
+    /// this correct today with a hand-written comment in its E2E config.
+    PluginVendorMismatch = "GBX0512", Cluster, Error, false, "no selected plugin matches the host's vendor";
+
+    /// A plugin is selected but no selected gear expects its extension point.
+    PluginHostNotSelected = "GBX0513", Cluster, Error, false, "plugin selected without its host";
+
+    /// A plugin and its host were placed in different processes.
+    ///
+    /// A plugin registers itself with `register_scoped` into the process-local
+    /// `ClientHub`, and `get_scoped` has no remote path, so the host can only
+    /// find a plugin that shares its process. Neither side declares this in
+    /// `deps`, which is why it has to be checked here.
+    PluginNotColocated = "GBX0514", Cluster, Error, true, "plugin and host are in different processes";
+
+    /// A gear other than the host consumes a plugin gear's contract.
+    ///
+    /// The Plugin Isolation Rule: plugin functionality is reachable only through
+    /// the host's public API, which is what keeps implementations swappable.
+    PluginIsolationViolated = "GBX0515", Cluster, Error, true, "plugin consumed directly instead of through its host";
+
+    /// Which extension point a crate fills could not be determined.
+    PluginPointUndetermined = "GBX0516", Cluster, Error, false, "plugin extension point could not be determined";
+
+    /// Several selected plugins share a vendor for one extension point.
+    ///
+    /// Defined behaviour rather than a fault: the host takes the lowest
+    /// `priority`. Reported so the winner is visible, because linking several
+    /// implementations is legitimate -- selection may be per-tenant at runtime.
+    PluginVendorAmbiguous = "GBX0517", Cluster, Info, false, "several plugins share a vendor for one extension point";
+
     // ---------------------------------------------------------------- GBX06xx
     /// Roles were declared. The runtime has no role concept.
     ///

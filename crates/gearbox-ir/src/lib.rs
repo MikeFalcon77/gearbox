@@ -15,8 +15,8 @@ pub mod requirement;
 pub mod resolved;
 
 pub use catalogue::{
-    Catalogue, DeclaredRole, EndpointDecl, GearDescriptor, LifecycleDecl, ResolvedSource,
-    RuntimeCap, SourceKind, Visibility,
+    Catalogue, DeclaredRole, EndpointDecl, ExtensionPointDecl, GearDescriptor, LifecycleDecl,
+    PluginFill, ResolvedSource, RuntimeCap, SourceKind, Visibility,
 };
 pub use contract::{
     CargoRef, ContractDescriptor, ContractKind, ContractVersion, GrpcProjection,
@@ -34,7 +34,8 @@ pub use ids::{
 };
 pub use intent::{
     BindingIntent, BindingMode, ClusterScopeIntent, DeploymentProfileDecl, Discovery,
-    GearSelection, Preference, ProcessPin, ProductIntent, ProviderBinding, SourceDecl,
+    GearSelection, PluginSelection, Preference, ProcessPin, ProductIntent, ProviderBinding,
+    SourceDecl,
 };
 pub use requirement::{
     Capability, ClusterPrimitive, ClusterProviderDecl, Requirement, RequirementKind, capabilities,

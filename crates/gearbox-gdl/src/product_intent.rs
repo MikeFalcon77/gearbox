@@ -18,8 +18,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use gearbox_ir::{
     BindingIntent, BindingMode, ClusterScopeIntent, ContractId, DeploymentProfileDecl, Diagnostic,
-    DiagnosticCode, Diagnostics, Discovery, GearId, GearSelection, Location, Preference, ProcessId,
-    ProcessPin, ProductIntent, ProfileId, ProviderBinding, SourceDecl, SourceId, Transport,
+    DiagnosticCode, Diagnostics, Discovery, GearId, GearSelection, Location, PluginSelection,
+    Preference, ProcessId, ProcessPin, ProductIntent, ProfileId, ProviderBinding, SourceDecl,
+    SourceId, Transport,
 };
 
 use crate::engine::FileIdentity;
@@ -87,7 +88,7 @@ pub fn build(
         display_name: decl.display_name.clone(),
         version: decl.version.clone(),
         gdl_path: identity.gdl_path.clone(),
-        selected_gears: build_gears(uri, decl, &sources, diagnostics),
+        selected_gears: build_gears(uri, decl, &sources, &profiles, diagnostics),
         bindings: build_bindings(uri, decl, &profiles, diagnostics),
         cluster_scopes: build_cluster_scopes(uri, decl, &profiles, diagnostics),
         process_pins: build_process_pins(uri, decl, &profiles, diagnostics),
@@ -180,6 +181,7 @@ fn build_gears(
     uri: &str,
     decl: &ProductDecl,
     sources: &BTreeMap<SourceId, SourceDecl>,
+    profiles: &Profiles,
     diagnostics: &mut Diagnostics,
 ) -> Vec<GearSelection> {
     let mut selected = Vec::new();
@@ -221,14 +223,61 @@ fn build_gears(
             ));
             continue;
         }
+        let plugins = build_plugins(uri, &gear, record, profiles, diagnostics);
         selected.push(GearSelection {
             gear,
             source,
             features: record.features.clone(),
             config: record.config.iter().cloned().collect(),
+            plugins,
         });
     }
     selected
+}
+
+/// Convert one gear's `plugins = [...]`.
+///
+/// The collision checked here is the one the product file can answer on its own:
+/// the same implementation named twice for one host in one profile. Whether two
+/// *different* plugins collide is a catalogue question -- it depends on which
+/// extension point each fills -- and is checked where the catalogue is in scope.
+fn build_plugins(
+    uri: &str,
+    host: &GearId,
+    record: &crate::records::UseGearRecord,
+    profiles: &Profiles,
+    diagnostics: &mut Diagnostics,
+) -> Vec<PluginSelection> {
+    let mut out = Vec::new();
+    let mut claimed: BTreeSet<ScopeKey> = BTreeSet::new();
+
+    for entry in &record.plugins {
+        let Some(gear) = gear_id(uri, &entry.gear, "plugin", diagnostics) else {
+            continue;
+        };
+        let scoped = scoped_profiles(
+            uri,
+            &entry.profiles,
+            &format!("plugin(\"{gear}\") on `{host}`"),
+            profiles,
+            diagnostics,
+        );
+        if !claim(&mut claimed, host.as_str(), gear.as_str(), &scoped) {
+            diagnostics.push(collision(
+                uri,
+                format!("plugin `{gear}` is selected twice for `{host}` in the same profile"),
+                "list each implementation once; per-profile differences belong in \
+                 `profiles = [...]`",
+            ));
+            continue;
+        }
+        out.push(PluginSelection {
+            gear,
+            config: entry.config.iter().cloned().collect(),
+            profiles: scoped,
+        });
+    }
+    out
 }
 
 fn build_bindings(
