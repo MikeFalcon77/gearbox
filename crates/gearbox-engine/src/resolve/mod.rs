@@ -12,9 +12,31 @@
 
 pub mod closure;
 pub mod cuts;
+pub mod partition;
 pub mod profile;
 
-use gearbox_ir::{Catalogue, Diagnostics, ProductIntent, ProfileId};
+use gearbox_ir::{
+    Catalogue, Diagnostic, DiagnosticCode, Diagnostics, Location, ProductIntent, ProfileId,
+};
+
+/// A profile the description does not declare.
+///
+/// Reported rather than defaulted: resolving the wrong topology silently is the
+/// one outcome worse than refusing.
+fn unknown_profile(intent: &ProductIntent, profile: &ProfileId, uri: &str) -> Diagnostic {
+    let declared = intent
+        .profiles
+        .keys()
+        .map(ProfileId::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    Diagnostic::error(
+        DiagnosticCode::GdlUnknownProfile,
+        format!("`{profile}` is not a profile this product declares"),
+        format!("the description declares: {declared}"),
+    )
+    .at(Location::file(uri.to_owned()))
+}
 
 /// Everything one resolution produced.
 pub struct Resolution {
@@ -24,6 +46,8 @@ pub struct Resolution {
     pub closure: closure::Closure,
     /// Which edges a process boundary may run through, and which may not.
     pub cuts: cuts::Cuts,
+    /// The processes. Deliberately not a partition: closures overlap.
+    pub partition: partition::Partition,
     pub diagnostics: Diagnostics,
 }
 
@@ -45,7 +69,7 @@ pub fn resolve(catalogue: &Catalogue, intent: &ProductIntent, profile: &ProfileI
     // Step 1 -- narrow to the profile. Done first because everything after it
     // reads the narrowed view, and because a duplicate that only appears once
     // narrowed is a contradiction the description could not have shown.
-    let _scoped = profile::scope(intent, profile, &mut diagnostics);
+    let scoped = profile::scope(intent, profile, &mut diagnostics);
 
     // Step 2 -- the co-location closure.
     let closure = closure::expand(catalogue, intent, &mut diagnostics);
@@ -54,11 +78,33 @@ pub fn resolve(catalogue: &Catalogue, intent: &ProductIntent, profile: &ProfileI
     let uri = format!("file://{}", intent.gdl_path.as_str());
     let cuts = cuts::classify(catalogue, &closure, &uri, &mut diagnostics);
 
+    // Step 4 -- processes. An unknown profile is reported rather than assumed,
+    // because guessing `embedded` would silently resolve the wrong topology.
+    let selected = intent
+        .selected_gears
+        .iter()
+        .map(|s| s.gear.clone())
+        .collect();
+    let input = partition::Inputs {
+        catalogue,
+        closure: &closure,
+        cuts: &cuts,
+        scoped: &scoped,
+        selected: &selected,
+    };
+    let partition = if let Some(declaration) = intent.profiles.get(profile) {
+        partition::partition(&input, declaration, &uri, &mut diagnostics)
+    } else {
+        diagnostics.push(unknown_profile(intent, profile, &uri));
+        partition::Partition::default()
+    };
+
     diagnostics.finish();
     Resolution {
         profile: profile.clone(),
         closure,
         cuts,
+        partition,
         diagnostics,
     }
 }

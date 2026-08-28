@@ -236,6 +236,14 @@ diagnostic_codes! {
     /// Two declarations scoped to the same profile collide.
     GdlDuplicateProfileScoped = "GBX0110", Gdl, Error, false, "duplicate profile-scoped declaration";
 
+    /// Resolution was asked for a profile the description does not declare.
+    ///
+    /// A caller's mistake rather than the description's, and reported rather
+    /// than defaulted: silently resolving `embedded` when someone asked for
+    /// `prod` would produce a plausible product with the wrong topology, which
+    /// is the one outcome worse than refusing.
+    GdlUnknownProfile = "GBX0111", Gdl, Error, false, "unknown deployment profile";
+
     // ---------------------------------------------------------------- GBX02xx
     // GBX0201-GBX0205 are deliberately absent. They compared a `gear.gdl`
     // restatement of the gear id, co-location dependencies, runtime

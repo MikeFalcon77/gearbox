@@ -236,3 +236,43 @@ pub fn catalogue_local_only_provider() -> Catalogue {
     let r = consumes(&c.id);
     two_gears(vec![c], vec![p], vec![r], &[])
 }
+
+/// Two gears sharing a co-located dependency, with a severable edge between them.
+///
+/// The shape the real slice cannot produce, and the one the whole design exists
+/// for: `shared` ends up in **both** binaries, because a process is a closure and
+/// closures overlap.
+pub fn catalogue_with_overlap() -> Catalogue {
+    let c = contract("Thing", 1, ContractKind::Api);
+    let mut catalogue = Catalogue::default();
+
+    let mut host = descriptor("host");
+    host.consumes = vec![consumes(&c.id)];
+    host.colocated_deps = [gid("shared")].into_iter().collect();
+    catalogue.gears.insert(gid("host"), host);
+
+    let mut provider = descriptor("provider");
+    provider.provides = vec![provides(&c, &[Transport::Local, Transport::Rest])];
+    provider.colocated_deps = [gid("shared")].into_iter().collect();
+    catalogue.gears.insert(gid("provider"), provider);
+
+    catalogue.gears.insert(gid("shared"), descriptor("shared"));
+    catalogue.contracts.insert(c.id.clone(), c);
+    catalogue
+}
+
+/// `intent`, but for a profile that can hold several processes.
+pub fn host_workers_intent(gears: &[&str]) -> ProductIntent {
+    let mut intent = intent(gears);
+    let local = ProfileId::new("local").unwrap();
+    intent.profiles.insert(
+        local.clone(),
+        gearbox_ir::DeploymentProfileDecl::HostWorkers {
+            id: local,
+            host: gearbox_ir::ProcessId::new("gateway").unwrap(),
+            discovery: gearbox_ir::Discovery::Static,
+            target_dir: None,
+        },
+    );
+    intent
+}
