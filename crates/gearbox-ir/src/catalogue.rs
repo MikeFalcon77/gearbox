@@ -327,6 +327,54 @@ pub struct GearDescriptor {
     pub gts_types: Vec<GtsTypeDecl>,
 }
 
+/// How far a gear has got through a staged catalogue load.
+///
+/// Only the incomplete stages are named. A gear that finishes projection leaves
+/// the pending list and enters the catalogue, so there is no `Projected` variant
+/// here -- being in `Catalogue::gears` *is* that state, and giving it a second
+/// spelling would invite the two to disagree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum LoadStage {
+    /// Its `gear.gdl` was found; nothing has been read.
+    Discovered,
+    /// The description was evaluated, so the declared facts are known.
+    Declared,
+}
+
+/// A gear found, and perhaps declared, but not yet projected.
+///
+/// Keyed by `gdl_path` rather than `GearId`, and that is not a convenience:
+/// `id` is projected from `#[toolkit::gear(name = ...)]`, so it does not exist
+/// until the crate is parsed. A registry view therefore has a name to display
+/// long before it has an identifier to key by (ADR
+/// `cpt-gearbox-adr-staged-catalogue-loading`).
+///
+/// Existing as a separate list, rather than as a state on `GearDescriptor`, is
+/// what lets `Option::None` and an empty `Vec` keep the single meaning *absent*
+/// everywhere in the catalogue.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PendingGear {
+    pub source: SourceId,
+
+    /// Where its description lives, relative to that source's root. The stable
+    /// key for this gear until projection supplies an `id`.
+    pub gdl_path: RelPath,
+
+    pub stage: LoadStage,
+
+    /// Available from `Declared` onwards; `None` while merely `Discovered`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// What a tree groups by, and available before anything is parsed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+}
+
 /// Documents describing one gear, all relative to its source root.
 ///
 /// Paths rather than content: the catalogue stays small, and an editor can open

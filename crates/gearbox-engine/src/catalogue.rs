@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use gearbox_gdl::GdlEngine;
 use gearbox_gdl::engine::FileIdentity;
 use gearbox_ir::{
-    Catalogue, ContractDescriptor, ContractId, Diagnostic, DiagnosticCode, Diagnostics, GearId,
-    Location, RelPath,
+    Catalogue, ContractDescriptor, ContractId, Diagnostic, DiagnosticCode, Diagnostics,
+    GearDescriptor, GearId, LoadStage, Location, PendingGear, RelPath,
 };
 
 use crate::source::SourceRoot;
@@ -39,6 +39,45 @@ pub struct CatalogueScan {
     ///
     /// The gap between this and `crates_scanned` is the parsing avoided.
     pub scan_requests: usize,
+    /// Gears declared but not projected.
+    ///
+    /// **Empty when a load runs to completion.** Non-empty only when the event
+    /// callback asked to stop, which is what makes a cancelled load degrade to a
+    /// smaller catalogue rather than to none. If this is ever non-empty after an
+    /// uninterrupted load, gears are going missing silently.
+    pub pending: Vec<PendingGear>,
+}
+
+/// What happened during a staged load.
+///
+/// Borrowed rather than owned: an event is handed to the callback while the load
+/// still holds the value, so forwarding one over RPC means serializing it, not
+/// taking it. That keeps the loader from paying for clones a caller may not want.
+#[derive(Debug)]
+pub enum LoadEvent<'a> {
+    /// Discovery finished. `total` descriptions were found across all roots.
+    ///
+    /// First and once, so a progress bar has a denominator before any work that
+    /// could take a while.
+    Discovered { total: usize },
+
+    /// One description was evaluated. Its declared facts are now known.
+    Declared(&'a PendingGear),
+
+    /// One gear finished projection and entered the catalogue.
+    Projected(&'a GearDescriptor),
+}
+
+/// Whether the load should keep going.
+///
+/// Returned by the event callback, which is what makes `$/cancelRequest`
+/// implementable without the loader knowing anything about RPC. Stopping leaves
+/// what is already projected valid and the rest in `CatalogueScan::pending`,
+/// rather than discarding the work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Continue {
+    Yes,
+    Stop,
 }
 
 /// Find and evaluate every `gear.gdl` under each root, in one catalogue.
@@ -51,10 +90,29 @@ pub struct CatalogueScan {
 /// skipped: one malformed description should not hide the other seven.
 #[must_use]
 pub fn load_catalogue(roots: &[SourceRoot]) -> CatalogueScan {
+    load_catalogue_staged(roots, &mut |_| Continue::Yes)
+}
+
+/// The same load, reporting each stage as it completes.
+///
+/// Two passes, not one per gear, and the order is the point: **every description
+/// is evaluated before any crate is parsed.** A registry view can therefore show
+/// its whole shape -- names grouped by category -- while the expensive stage is
+/// still running, instead of watching rows trickle in one complete gear at a
+/// time. See ADR `cpt-gearbox-adr-staged-catalogue-loading` for the measured
+/// costs; the second pass is roughly ten times the first on a real tree.
+///
+/// Synchronous, with a callback. Threads belong to whoever wants them: the RPC
+/// server runs this on a worker and forwards events as notifications, and the
+/// engine keeps no dependency on parallelism.
+#[must_use]
+pub fn load_catalogue_staged(
+    roots: &[SourceRoot],
+    on_event: &mut dyn FnMut(LoadEvent<'_>) -> Continue,
+) -> CatalogueScan {
     let gdl = GdlEngine::new();
     let mut catalogue = Catalogue::default();
     let mut diagnostics = Diagnostics::new();
-    let mut files = Vec::new();
     // One cache per load: a crate named by several gears is parsed once.
     let mut scans = crate::scans::CrateScans::new();
 
@@ -62,44 +120,93 @@ pub fn load_catalogue(roots: &[SourceRoot]) -> CatalogueScan {
         catalogue
             .sources
             .insert(root.id.clone(), root.to_resolved());
+    }
 
-        for path in discover(&root.root) {
-            files.push(path.clone());
+    // ---- S0: discover -------------------------------------------------------
+    let discovered: Vec<(&SourceRoot, PathBuf)> = roots
+        .iter()
+        .flat_map(|root| discover(&root.root).into_iter().map(move |p| (root, p)))
+        .collect();
 
-            let Some(identity) = identity_for(root, &path, &mut diagnostics) else {
+    let files: Vec<PathBuf> = discovered.iter().map(|(_, p)| p.clone()).collect();
+    if on_event(LoadEvent::Discovered {
+        total: discovered.len(),
+    }) == Continue::Stop
+    {
+        diagnostics.finish();
+        catalogue.diagnostics = diagnostics;
+        return CatalogueScan {
+            catalogue,
+            files,
+            crates_scanned: 0,
+            scan_requests: 0,
+            pending: Vec::new(),
+        };
+    }
+
+    // ---- S1: evaluate every description ------------------------------------
+    let mut declared: Vec<(&SourceRoot, FileIdentity, gearbox_gdl::GearDecl)> = Vec::new();
+    let mut pending: Vec<PendingGear> = Vec::new();
+    let mut stopped = false;
+
+    for (root, path) in &discovered {
+        let Some(identity) = identity_for(root, path, &mut diagnostics) else {
+            continue;
+        };
+
+        let source = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                diagnostics.push(
+                    Diagnostic::error(
+                        DiagnosticCode::GdlEval,
+                        format!("cannot read `{}`: {e}", path.display()),
+                        "check the file's permissions",
+                    )
+                    .at(Location::file(identity.uri.clone())),
+                );
                 continue;
-            };
+            }
+        };
 
-            let source = match std::fs::read_to_string(&path) {
-                Ok(s) => s,
-                Err(e) => {
-                    diagnostics.push(
-                        Diagnostic::error(
-                            DiagnosticCode::GdlEval,
-                            format!("cannot read `{}`: {e}", path.display()),
-                            "check the file's permissions",
-                        )
-                        .at(Location::file(identity.uri.clone())),
-                    );
-                    continue;
-                }
-            };
+        let outcome = gdl.eval_gear(&identity, &source);
+        diagnostics.extend(outcome.diagnostics);
+        let Some(decl) = outcome.value else { continue };
 
-            let outcome = gdl.eval_gear(&identity, &source);
-            diagnostics.extend(outcome.diagnostics);
+        let entry = PendingGear {
+            source: root.id.clone(),
+            gdl_path: identity.gdl_path.clone(),
+            stage: LoadStage::Declared,
+            display_name: decl.name.clone(),
+            description: decl.description.clone(),
+            category: decl.category.clone(),
+        };
+        if on_event(LoadEvent::Declared(&entry)) == Continue::Stop {
+            stopped = true;
+        }
+        pending.push(entry);
+        declared.push((root, identity, decl));
 
-            let Some(decl) = outcome.value else { continue };
+        if stopped {
+            break;
+        }
+    }
 
+    // ---- S2..S4: project and merge -----------------------------------------
+    if !stopped {
+        for (root, identity, decl) in &declared {
             // The declared half is in hand; now project the half the Rust
             // attributes own and merge. A projection failure is fatal for this
             // gear -- under ADR `cpt-gearbox-adr-macro-projected-catalogue` the
             // catalogue cannot be assembled without it, which is a deliberate
             // trade recorded in the PRD's risk table.
-            let Some(merged) =
-                project_and_merge(root, &identity, &decl, &mut scans, &mut diagnostics)
-            else {
-                continue;
-            };
+            let merged = project_and_merge(root, identity, decl, &mut scans, &mut diagnostics);
+
+            // Whether it projected or not, it is no longer in flight: a failure
+            // is represented by its diagnostics, not by staying pending forever.
+            pending.retain(|p| p.gdl_path != identity.gdl_path);
+
+            let Some(merged) = merged else { continue };
 
             let id = merged.gear.id.clone();
             if let Some(previous) = catalogue.gears.insert(id.clone(), merged.gear) {
@@ -110,12 +217,21 @@ pub fn load_catalogue(roots: &[SourceRoot]) -> CatalogueScan {
                             "gear `{id}` is declared twice: `{}` and `{}`",
                             previous.gdl_path, identity.gdl_path
                         ),
-                        "one of the descriptions points at the wrong crate, or names the wrong                          attribute with `attr = \"...\"`",
+                        "one of the descriptions points at the wrong crate, or names the wrong \
+                         attribute with `attr = \"...\"`",
                     )
                     .at(Location::file(identity.uri.clone())),
                 );
             }
             merge_contracts(&mut catalogue.contracts, merged.contracts, &id);
+
+            // Borrowed from the catalogue, so the callback sees the merged gear
+            // rather than a copy made for its benefit.
+            if let Some(stored) = catalogue.gears.get(&id)
+                && on_event(LoadEvent::Projected(stored)) == Continue::Stop
+            {
+                break;
+            }
         }
     }
 
@@ -126,6 +242,7 @@ pub fn load_catalogue(roots: &[SourceRoot]) -> CatalogueScan {
         files,
         crates_scanned: scans.distinct_crates(),
         scan_requests: scans.scan_requests(),
+        pending,
     }
 }
 

@@ -20,7 +20,7 @@ pub mod product;
 pub mod scans;
 pub mod source;
 
-pub use catalogue::{CatalogueScan, load_catalogue};
+pub use catalogue::{CatalogueScan, Continue, LoadEvent, load_catalogue, load_catalogue_staged};
 pub use cluster::ClusterProjection;
 pub use merge::{MergedGear, Projections, merge};
 pub use plugin::PluginProjection;

@@ -19,7 +19,7 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use gearbox_ir::{Catalogue, ExplanationGraph, ProductIntent, ResolvedProduct};
+use gearbox_ir::{Catalogue, ExplanationGraph, PendingGear, ProductIntent, ResolvedProduct};
 use ts_rs::{Config, TS};
 
 /// Where the editor client expects to find them.
@@ -32,6 +32,13 @@ fn export_roots(cfg: &Config) {
     ProductIntent::export_all(cfg).expect("export ProductIntent");
     ResolvedProduct::export_all(cfg).expect("export ResolvedProduct");
     ExplanationGraph::export_all(cfg).expect("export ExplanationGraph");
+    // A root of its own, and the reason is the design rather than an oversight:
+    // `PendingGear` is deliberately *not* reachable from `Catalogue`. Keeping
+    // unprojected gears out of the catalogue is what lets `Option::None` and an
+    // empty `Vec` keep the single meaning *absent* there (ADR
+    // `cpt-gearbox-adr-staged-catalogue-loading`), so the type has to be named
+    // here or the client would receive `pending` with nothing to type it as.
+    PendingGear::export_all(cfg).expect("export PendingGear");
 }
 
 fn generated_files(dir: &Path) -> Vec<PathBuf> {
