@@ -38,6 +38,25 @@ was already taught to send. `npm run verify` builds it first for that reason.
 under test is that a row is useful *before* it is complete. A snapshot taken at the end would pass
 even if the tree had appeared all at once.
 
+## The `.gdl` language
+
+Syntax highlighting is a native Theia contribution
+(`gearbox-studio/src/browser/gdl/`), not a bundled VS Code extension: this app
+has no plugin host, so the `--plugins=local-dir:../plugins` flag in
+`browser-app/package.json` is inert.
+
+**The vocabulary it colours is generated, not written.**
+`gearbox-studio/src/browser/gdl/generated/vocabulary.ts` comes from
+`cargo test -p gearbox-gdl --test export_grammar`, which reads the globals the
+interpreter actually evaluates against -- so the editor cannot colour a function
+the engine does not have, nor miss one it does. Add a function to
+`gdl_vocabulary` and `make grammar-check` fails until you run `make grammar` and
+commit the result, exactly like `make ts-check`.
+
+The regexes in `gdl-grammar.ts` are hand-written and stay that way: the volatile
+part of a grammar is its word lists, the hard part is its patterns, and only the
+first can drift.
+
 ## Two things that will bite
 
 **One pinned `@theia/*` version, repeated in the root `overrides`.** The version lives in

@@ -454,6 +454,20 @@ fn cluster_require(
     })
 }
 
+/// Everything GDL adds on top of whatever the builder already holds.
+///
+/// Factored out of [`gear_globals`] so that [`gear_vocabulary`] can apply the
+/// same additions to an empty builder. One definition, two bases -- the
+/// alternative, subtracting the standard set from the full one, is wrong (see
+/// [`gear_vocabulary`]).
+fn gear_additions(builder: &mut GlobalsBuilder) {
+    gdl_vocabulary(builder);
+    for (name, namespace) in vocabulary::ALL_NAMESPACES {
+        builder.set(name, *namespace);
+    }
+    builder.namespace("cluster", cluster_namespace);
+}
+
 /// Build the globals a `gear.gdl` is evaluated against.
 ///
 /// `GlobalsBuilder::standard()` rather than `new()`: descriptions legitimately
@@ -461,10 +475,20 @@ fn cluster_require(
 /// reaches the outside world.
 #[must_use]
 pub fn gear_globals() -> Globals {
-    let mut builder = GlobalsBuilder::standard().with(gdl_vocabulary);
-    for (name, namespace) in vocabulary::ALL_NAMESPACES {
-        builder.set(name, *namespace);
-    }
-    builder.namespace("cluster", cluster_namespace);
-    builder.build()
+    GlobalsBuilder::standard().with(gear_additions).build()
+}
+
+/// The gear-side GDL vocabulary alone, with no Starlark standard underneath.
+///
+/// Exists so the editor's grammar is generated from the very globals the
+/// interpreter evaluates against, rather than from a list kept in step by hand
+/// (`tests/export_grammar.rs`).
+///
+/// Deliberately *not* `gear_globals()` minus `GlobalsBuilder::standard()`:
+/// `fail` is a Starlark standard global that GDL overrides on purpose, so a
+/// subtraction by name would drop it and the editor would quietly stop
+/// colouring it.
+#[must_use]
+pub fn gear_vocabulary() -> Globals {
+    GlobalsBuilder::new().with(gear_additions).build()
 }

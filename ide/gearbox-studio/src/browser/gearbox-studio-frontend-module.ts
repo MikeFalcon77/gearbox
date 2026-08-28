@@ -8,6 +8,7 @@ import {
 import { WebSocketConnectionProvider } from "@theia/core/lib/browser/messaging";
 import { CommandContribution } from "@theia/core/lib/common";
 import { ContainerModule } from "@theia/core/shared/inversify";
+import { LanguageGrammarDefinitionContribution } from "@theia/monaco/lib/browser/textmate/textmate-contribution";
 
 import { GEARBOX_SERVICE_PATH, GearboxClient, GearboxService } from "../common/protocol";
 import { CatalogueStore } from "./catalogue-store";
@@ -20,10 +21,17 @@ import {
 } from "./view-contributions";
 import { GearDetailWidget } from "./detail/gear-detail-widget";
 import { DepsGraphWidget } from "./graph/deps-graph-widget";
+import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
 
 import "../../src/browser/style/index.css";
 
 export default new ContainerModule((bind) => {
+  // Without this, `.gdl` opens as plaintext: nothing else in the app registers
+  // the language with Monaco.
+  bind(LanguageGrammarDefinitionContribution)
+    .to(GdlLanguageContribution)
+    .inSingletonScope();
+
   bind(CatalogueStore).toSelf().inSingletonScope();
   bind(RevealService).toSelf().inSingletonScope();
   bind(GearboxClient).toService(CatalogueStore);

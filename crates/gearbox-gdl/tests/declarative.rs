@@ -6,9 +6,11 @@
 //! these fail and layer 2 can be reconsidered rather than carried forever on a
 //! stale assumption.
 
-use gearbox_gdl::declarative::{dialect, scan_forbidden_tokens};
+use gearbox_gdl::declarative::{KeywordVerdict, dialect, keyword_verdicts, scan_forbidden_tokens};
 use gearbox_ir::DiagnosticCode;
 use starlark::syntax::AstModule;
+use starlark_syntax::codemap::CodeMap;
+use starlark_syntax::lexer::{Lexer, Token};
 
 fn parses(src: &str) -> bool {
     AstModule::parse("t.gdl", src.to_owned(), &dialect()).is_ok()
@@ -133,4 +135,53 @@ fn forbidden_constructs_carry_a_usable_span() {
     assert!(loc.range.start.character > 0, "a real column");
     // And the diagnostic satisfies the PRD's own invariants.
     assert!(diags[0].validate().is_ok(), "{:?}", diags[0].validate());
+}
+
+#[test]
+fn probe_words_are_all_keywords() {
+    // `keyword_verdicts` classifies by lexing, and its `Allowed` arm is a
+    // fallthrough -- so a word that quietly stopped being a keyword would be
+    // reported as allowed rather than as the drift it is. This is the check
+    // that separates the two: every probe word must still lex to something
+    // other than an identifier.
+    for (word, _) in keyword_verdicts() {
+        let codemap = CodeMap::new("<probe>".to_owned(), word.to_owned());
+        let first = Lexer::new(word, &dialect(), codemap).next();
+        let is_identifier = matches!(first, Some(Ok((_, Token::Identifier(_), _))));
+        assert!(
+            !is_identifier,
+            "`{word}` is no longer a keyword; starlark changed under us and the \
+             editor's grammar is about to colour it wrong"
+        );
+    }
+}
+
+#[test]
+fn load_is_the_only_keyword_gdl_keeps() {
+    // The dialect enables `load` and refuses every other keyword one way or the
+    // other (GBX0103 for the fifteen the lexer names, a parse error for the
+    // reserved ones). If a second keyword ever becomes allowed, that is a
+    // deliberate widening of the language and this test is where it is noticed.
+    let allowed: Vec<&str> = keyword_verdicts()
+        .into_iter()
+        .filter(|(_, v)| *v == KeywordVerdict::Allowed)
+        .map(|(w, _)| w)
+        .collect();
+    assert_eq!(allowed, ["load"], "GDL keeps exactly one keyword");
+}
+
+#[test]
+fn while_is_refused_as_reserved_not_as_forbidden() {
+    // `while` is folded into the lexer's single `Token::Reserved` variant, so
+    // the token scan cannot name it -- it is refused a layer earlier, as a
+    // parse error. Worth pinning: the obvious reading of `forbidden` is that
+    // `while` was overlooked, and it was not.
+    let verdicts = keyword_verdicts();
+    let of = |w: &str| verdicts.iter().find(|(k, _)| *k == w).map(|(_, v)| *v);
+    assert_eq!(of("while"), Some(KeywordVerdict::Reserved));
+    assert_eq!(of("for"), Some(KeywordVerdict::Forbidden));
+    assert!(
+        !parses("while True:\n  pass\n"),
+        "reserved keywords must not parse"
+    );
 }

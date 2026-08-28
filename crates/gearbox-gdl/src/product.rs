@@ -436,6 +436,18 @@ fn prefer_namespace(builder: &mut GlobalsBuilder) {
     }
 }
 
+/// Everything a `product.gdl` adds on top of whatever the builder already holds.
+///
+/// The product mirror of `globals::gear_additions`, and factored out for the
+/// same reason: [`product_vocabulary`] applies it to an empty builder.
+fn product_additions(builder: &mut GlobalsBuilder) {
+    gdl_product_vocabulary(builder);
+    for (name, namespace) in vocabulary::ALL_NAMESPACES {
+        builder.set(name, *namespace);
+    }
+    builder.namespace("prefer", prefer_namespace);
+}
+
 /// Build the globals a `product.gdl` is evaluated against.
 ///
 /// Deliberately a different set from `gear_globals()`: `gear()` is not callable
@@ -443,10 +455,14 @@ fn prefer_namespace(builder: &mut GlobalsBuilder) {
 /// fails at the call rather than producing half of each.
 #[must_use]
 pub fn product_globals() -> starlark::environment::Globals {
-    let mut builder = GlobalsBuilder::standard().with(gdl_product_vocabulary);
-    for (name, namespace) in vocabulary::ALL_NAMESPACES {
-        builder.set(name, *namespace);
-    }
-    builder.namespace("prefer", prefer_namespace);
-    builder.build()
+    GlobalsBuilder::standard().with(product_additions).build()
+}
+
+/// The product-side GDL vocabulary alone, with no Starlark standard underneath.
+///
+/// The product mirror of `globals::gear_vocabulary`; see its note on why this
+/// is built up rather than subtracted down.
+#[must_use]
+pub fn product_vocabulary() -> starlark::environment::Globals {
+    GlobalsBuilder::new().with(product_additions).build()
 }

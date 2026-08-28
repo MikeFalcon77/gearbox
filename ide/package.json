@@ -13,6 +13,7 @@
     "vscode-jsonrpc": "8.2.0"
   },
   "//": "Every @theia/* pinned to the one version in theia-version.txt, and repeated here as overrides. A transitive ^ pulls a second @theia/core copy, which breaks inversify identity -- the most common Theia build failure.",
+  "//monaco-editor-core": "Not on theia-version.txt's schedule -- it tracks Monaco, and 1.108.201 is what @theia/monaco 1.75.0 asks for. Pinned for the same reason as the rest and then some: StandaloneServices is a module-level singleton, so a second copy would hand gearbox-studio's monaco.languages.register a different ILanguageService than the one MonacoTextmateService waits on, and .gdl would render as plaintext with no error anywhere.",
   "overrides": {
     "@theia/core": "1.75.0",
     "@theia/editor": "1.75.0",
@@ -20,6 +21,7 @@
     "@theia/markers": "1.75.0",
     "@theia/messages": "1.75.0",
     "@theia/monaco": "1.75.0",
+    "@theia/monaco-editor-core": "1.108.201",
     "@theia/navigator": "1.75.0",
     "@theia/preferences": "1.75.0",
     "@theia/process": "1.75.0",

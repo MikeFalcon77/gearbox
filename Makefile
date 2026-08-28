@@ -35,7 +35,7 @@ define check_rustup_component
 endef
 
 .PHONY: help setup build fmt fmt-check dev-fmt clippy dev-clippy lint deny test dev-test \
-        ts ts-check check dev clean
+        ts ts-check grammar grammar-check check dev clean
 
 help:
 	@echo "build      compile the workspace"
@@ -46,7 +46,9 @@ help:
 	@echo "test       run all tests"
 	@echo "ts         regenerate the editor client's TypeScript bindings"
 	@echo "ts-check   verify those bindings are up to date"
-	@echo "check      fmt + clippy + lint + deny + test + ts-check"
+	@echo "grammar    regenerate the editor's .gdl grammar vocabulary"
+	@echo "grammar-check  verify that vocabulary is up to date"
+	@echo "check      fmt + clippy + lint + deny + test + ts-check + grammar-check"
 	@echo "dev        dev-fmt + dev-clippy + test"
 	@echo "setup      install the tools the above targets need"
 
@@ -105,7 +107,24 @@ ts-check: ts
 	@git diff --exit-code -- ide/gearbox-studio/src/common/generated \
 		|| { echo "ERROR: TypeScript bindings are stale. Run 'make ts' and commit the result."; exit 1; }
 
-check: fmt clippy lint deny test ts-check
+# The editor's .gdl grammar colours a vocabulary generated from the same globals
+# the interpreter evaluates against, so it cannot drift into colouring a
+# function the engine does not have (cpt-gearbox-nfr-no-type-drift).
+GRAMMAR_OUT := ide/gearbox-studio/src/browser/gdl/generated
+
+grammar:
+	$(CARGO) test -p gearbox-gdl --test export_grammar
+
+# The anti-drift guard: regenerating must change nothing.
+grammar-check: grammar
+	@git diff --exit-code -- $(GRAMMAR_OUT) \
+		|| { echo "ERROR: the .gdl grammar vocabulary is stale. Run 'make grammar' and commit the result."; exit 1; }
+	@# `git diff` only sees tracked files, so a first-ever generated file would
+	@# pass this check while being absent from the commit.
+	@[ -z "$$(git ls-files --others --exclude-standard -- $(GRAMMAR_OUT))" ] \
+		|| { echo "ERROR: 'make grammar' produced an untracked file. Run 'make grammar' and 'git add' the result."; exit 1; }
+
+check: fmt clippy lint deny test ts-check grammar-check
 	@echo "all checks passed"
 
 dev: dev-fmt dev-clippy test

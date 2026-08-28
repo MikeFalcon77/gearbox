@@ -53,6 +53,11 @@ try {
   await page.setViewport({ width: 1600, height: 1000 });
 
   const consoleErrors = [];
+  // Warnings are collected too, and only because of one of them: a grammar that
+  // fails to load is a `logger.warn` inside MonacoTextmateService, never an
+  // error. Without this the editor would quietly fall back to plaintext and
+  // every check below would still pass.
+  const consoleWarnings = [];
   page.on("console", (m) => {
     // The URL of a failed request lives in `location()`, not in `text()`: the
     // text is only "Failed to load resource: ... 404". Without the URL there is
@@ -60,6 +65,9 @@ try {
     if (m.type() === "error") {
       const url = m.location()?.url ?? "";
       consoleErrors.push(url ? `${m.text()} [${url}]` : m.text());
+    }
+    if (m.type() === "warning" || m.type() === "warn") {
+      consoleWarnings.push(m.text());
     }
   });
   page.on("pageerror", (e) => consoleErrors.push(`pageerror: ${e.message}`));
@@ -364,6 +372,64 @@ try {
     "clicking it opens the file",
     opened.opened === true,
     opened.opened ? opened.title : (opened.error ?? "no tab and no error -- silent failure"),
+  );
+
+  // --- and what it opened is a language, not a wall of grey ----------------
+  // A plaintext Monaco model still wraps every line in <span class="mtk1">, so
+  // "spans exist" would have passed with no grammar registered at all -- which
+  // is precisely the state this feature fixed. The signal is that more than one
+  // token class is in play, and that a comment and a string are not the same
+  // one. Both assertions are content-agnostic on purpose: gear.gdl lives in a
+  // sibling repo and its first screen is not ours to pin.
+  const tokens = await page.evaluate(async () => {
+    let last = {};
+    // The model is plaintext for a beat while the grammar's oniguruma wasm
+    // loads, so this polls rather than sampling once. Note the exit condition
+    // cannot be "more than one class exists": a *plaintext* model already
+    // renders several, which is how the first version of this check passed
+    // against an untokenized editor. It has to be the assertion itself.
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      // Visible, not merely attached: Theia keeps a background editor in the
+      // DOM, and only rendered lines are tokenized.
+      const editor = Array.from(document.querySelectorAll(".monaco-editor")).find(
+        (e) => e.getClientRects().length > 0,
+      );
+      const spans = editor
+        ? Array.from(editor.querySelectorAll('.view-lines .view-line span[class^="mtk"]'))
+        : [];
+      const startsWith = (c) =>
+        spans.find((s) => s.textContent.trimStart().startsWith(c))?.className;
+      last = {
+        editor: Boolean(editor),
+        spans: spans.length,
+        classes: new Set(spans.map((s) => s.className)).size,
+        comment: startsWith("#"),
+        string: startsWith('"'),
+      };
+      if (last.classes >= 4 && last.comment && last.string && last.comment !== last.string) {
+        return last;
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return last;
+  });
+
+  check(
+    "the .gdl editor is tokenized, not plaintext",
+    tokens.editor === true && tokens.classes >= 4,
+    `${tokens.classes ?? 0} token classes over ${tokens.spans ?? 0} spans`,
+  );
+  check(
+    "a comment and a string are different colours",
+    Boolean(tokens.comment) && Boolean(tokens.string) && tokens.comment !== tokens.string,
+    `${tokens.comment ?? "no comment run"} vs ${tokens.string ?? "no string run"}`,
+  );
+
+  const grammarWarnings = consoleWarnings.filter((w) => /grammar/i.test(w));
+  check(
+    "no grammar failed to load",
+    grammarWarnings.length === 0,
+    grammarWarnings.slice(0, 2).join(" | "),
   );
 
   // The docs links are the same code path with a different field and a

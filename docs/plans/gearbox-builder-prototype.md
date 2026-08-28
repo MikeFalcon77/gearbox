@@ -864,7 +864,7 @@ because they need the resolver -- and the UI says so, driven by the engine's own
 own when M4 lands.
 
 `ide/scripts/ui-smoke.mjs` drives a headless Chrome against a running `browser-app` and asserts
-**30** things, stable across repeated runs. It is deliberately a *timeline* rather than a final
+**33** things, stable across repeated runs. It is deliberately a *timeline* rather than a final
 state: a snapshot taken after loading would pass even if the tree had appeared all at once, which is
 exactly the claim ADR-0009 makes and could not previously check. On the real tree it catches a
 window of roughly 550 ms in which all 14 rows are on screen, named and grouped, and all 14 are
@@ -881,6 +881,7 @@ Divergences from what §9 planned, each for a reason found while building:
 | `elkjs` `layered` with a fixed seed | hand-rolled layered assignment + two barycentre sweeps | Deterministic by construction rather than by seed, and no async layout pass. The graph is a shallow DAG of 14 nodes. If it grows a cycle or a hundred nodes, `elkjs` is the answer. |
 | detail as part of the Catalogue widget | its own widget in the **bottom** area | In a 300px side panel the projected facts -- provider transports, which point a plugin fills and under which vendor, GTS types -- were clipped. The tree answers "what is there"; the detail answers "what is it", and they need different amounts of room. |
 | `@theia/{core,editor,filesystem,markers,monaco,navigator,process,workspace}` | plus `@theia/{preferences,userstorage,variable-resolver,messages}` | Without `@theia/preferences` the frontend dies on `No matching bindings found for serviceIdentifier: Symbol(PreferenceProvider) - named "1"` -- the user-scope provider. Without `@theia/messages`, `MessageService` still resolves and every message goes nowhere, which is worse than an error: it makes reporting a failure look like handling it. |
+| `.gdl` as a bundled VS Code extension in `ide/gdl-language/`, declared via `theiaPlugins`, with an `extension.ts` starting a `LanguageClient` | a native `LanguageGrammarDefinitionContribution` in `gearbox-studio`, whose vocabulary is **generated** from the engine's own globals | The plugin path is not available: `@theia/plugin-ext` is not installed and `ide/plugins/` does not exist, so the `--plugins=local-dir:../plugins` flag in `browser-app/package.json` is inert. Adding a plugin host to ship one grammar is a large dependency for a small feature, and there is no `LanguageClient` to start -- the engine's JSON-RPC surface is LSP-*shaped* but has no `textDocument/*`. The native path also buys something the plugin could not: `cargo test -p gearbox-gdl --test export_grammar` derives the word lists from `gear_vocabulary()` / `product_vocabulary()` and `keyword_verdicts()`, so the editor cannot colour a function the engine does not have. §9 also listed the forbidden keywords as `if/for/def/lambda/while`; the real set is wider (`and`, `or`, `not`, `in`, `elif`, `else`, `break`, `continue`, `return`, `pass`), and `while` is not in it at all -- the lexer folds it into a single `Token::Reserved` variant, so it is refused as a parse error rather than as GBX0103. It still renders red, from the second of the two generated lists. |
 
 Three failure modes worth writing down, because all three *looked* fine:
 

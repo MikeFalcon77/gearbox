@@ -78,6 +78,69 @@ const fn forbidden(token: &Token) -> Option<&'static str> {
     }
 }
 
+/// Every word the pinned lexer treats as a keyword, refused or not.
+///
+/// The one hand-maintained list here, because `Token` is a Logos enum with no
+/// runtime reflection: there is nothing to iterate. It is complete for
+/// starlark 0.14.2 by construction -- the lexer declares exactly fifteen
+/// `#[token]` keywords and folds every other reserved word into the single
+/// `Token::Reserved` variant, so those are the two groups and both are spelled
+/// out below.
+///
+/// The drift this does *not* catch: a starlark upgrade introducing a new
+/// keyword, plus a new [`forbidden`] arm for it, with nobody adding the
+/// spelling here. Nothing short of `Token` reflection would; the mitigations
+/// are the exact version pin in `Cargo.toml` and `probe_words_are_all_keywords`
+/// below, which fires the moment a listed word stops being one. **If you add an
+/// arm to [`forbidden`], add its spelling here.**
+const KEYWORD_PROBE: &str = "\
+    and break continue def elif else for if in lambda load not or pass return \
+    as assert async await class del except finally from global import is \
+    nonlocal raise try while with yield";
+
+/// What GDL does with a keyword.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeywordVerdict {
+    /// Refused by [`scan_forbidden_tokens`]: GBX0103, with a reason.
+    Forbidden,
+    /// Reserved by Starlark itself. The lexer errors on it, so it resurfaces as
+    /// [`DiagnosticCode::GdlParse`] rather than as a forbidden construct --
+    /// which is why `while` never reaches [`forbidden`] despite being every bit
+    /// as refused as `for`.
+    Reserved,
+    /// Still a keyword, and still legal. In practice `load`, and only `load`.
+    Allowed,
+}
+
+/// Each probe word paired with what GDL does with it.
+///
+/// Derived by lexing rather than restated, so the editor's red cannot disagree
+/// with the engine's refusal. Consumed by `tests/export_grammar.rs`, which
+/// turns the two refused groups into `invalid.illegal` scopes -- a GDL author
+/// sees `if` go red as they type it, before the engine is asked anything.
+#[must_use]
+pub fn keyword_verdicts() -> Vec<(&'static str, KeywordVerdict)> {
+    KEYWORD_PROBE
+        .split_whitespace()
+        .map(|word| (word, verdict(word)))
+        .collect()
+}
+
+/// Lex one bare word and classify the single token it yields.
+///
+/// A lexer error means `Reserved`: for input that is one identifier-shaped word
+/// and nothing else, `LexemeError::ReservedKeyword` is the only error the lexer
+/// can raise. `probe_words_are_all_keywords` is what keeps that true.
+fn verdict(word: &str) -> KeywordVerdict {
+    let codemap = CodeMap::new("<probe>".to_owned(), word.to_owned());
+    let mut lexer = Lexer::new(word, &dialect(), codemap);
+    match lexer.next() {
+        Some(Ok((_, token, _))) if forbidden(&token).is_some() => KeywordVerdict::Forbidden,
+        Some(Err(_)) => KeywordVerdict::Reserved,
+        _ => KeywordVerdict::Allowed,
+    }
+}
+
 /// Scan `source` for constructs that encode a decision: layer 2.
 ///
 /// Returns one [`DiagnosticCode::GdlForbiddenConstruct`] per occurrence, each

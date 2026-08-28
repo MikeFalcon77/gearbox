@@ -31,9 +31,10 @@ logs
 .DS_Store
 
 # Gearbox Studio (ide/): npm tree, build output, tsc incremental cache.
-# The generated TypeScript bindings under
-# ide/gearbox-studio/src/common/generated/ ARE tracked -- `make ts-check`
-# depends on git seeing them.
+# Two generated trees ARE tracked, because the anti-drift checks are `git diff`
+# and so depend on git seeing them: ide/gearbox-studio/src/common/generated/
+# (`make ts-check`) and ide/gearbox-studio/src/browser/gdl/generated/
+# (`make grammar-check`).
 node_modules/
 dist/
 *.tsbuildinfo
