@@ -563,13 +563,18 @@ Diagnostic ranges: `GBX01xx` GDL, `GBX02xx` catalogue assembly, `GBX03xx` topolo
 | `GBX0201` name, `GBX0202` deps, `GBX0203` caps, `GBX0204` provides/cluster-providers, `GBX0205` consumes | **retired** — one authority each, so there is no second value to differ from |
 | `GBX0508` profile not implemented, `GBX0509` provider unprojectable, `GBX0510` backend ambiguous, `GBX0607` cluster not deployable | **added** — the cluster projection's own failure modes; see §3.4 |
 | `GBX0206` gear name is not kebab of its struct ident | **survives, and matters more** — a Rust-internal inconsistency the runtime only `warn!`s about, which silently breaks the `consumer_wiring` override key |
-| `GBX0207` contract suffix or trailing major disagrees | **survives, reframed** — now a Rust-internal check, trait-name suffix against `#[toolkit::contract(version)]` |
-| `GBX0208` gear crate has no `gear.gdl` | **survives unchanged** |
-| `GBX0209` declared lib ident does not match the crate | **survives** — `lib` is a declared fact, checked against `Cargo.toml`, not against an attribute |
+| `GBX0207` contract suffix or trailing major disagrees | **retired** — both halves are compile errors in `toolkit-contract-macros` (`parse.rs:70` unrecognised suffix, `parse.rs:83` marker vs `version`), so a crate exhibiting either does not build and never reaches a catalogue. Replaced by a differential test pinning our suffix and marker rules to the macro's own vectors, because Gearbox now *relies* on those rules and a drift would silently skip a contract |
+| `GBX0208` gear crate has no `gear.gdl` | **survives, and does real work** — with `--product`, a selected gear missing from the catalogue triggers a search for a crate declaring it; found means "here is the `gear.gdl` to write, and the `cargo(...)` line read from its manifest", not found means `GBX0301`. The tree has 44 gear attributes and 14 descriptions, so the found case is the common one |
+| `GBX0209` declared lib ident does not match the crate | **survives** — `crate_name` and `lib` are the only declared facts with an external authority (`Cargo.toml`), checked at catalogue load for **every** `cargo(...)` in a description, not just `package` |
 
 Two are added: `GBX0210` a description restates a projected fact, `GBX0211` the attribute scan found
-zero or several candidates. Retiring and adding codes is an M2 code change, not part of this
-documentation pass.
+zero or several candidates.
+
+**One case is deliberately left unreported.** An *unmarked* trait name with `version = "v2"` or later
+does compile: ADR-0007 makes an unmarked name unconstrained, because a v1 contract keeps its unmarked
+name when v2 is added beside it. Reporting it would contradict the platform's own decision, and the
+tree contains no instance — so it is recorded as a known gap and as an assertion in
+`crates/gearbox-ir/tests/contract_shape.rs`, which is what will notice if the macro ever tightens it.
 
 ---
 
@@ -949,7 +954,7 @@ workspace-member entries. Nothing else in that repo changes.
 | **M0** | **PRD** (§14) — short, `docs/PRD.md` | reviewed against `gears-rust/docs/checklists/PRD.md`; every FR/NFR has an ID and a p-tier; every acceptance criterion maps to a §12 step | — |
 | **M1** | Workspace + IR + lock | `cargo test -p gearbox-ir -p gearbox-lock` incl. a proptest asserting byte-stability over 1000 shuffled input orderings; `make ts && git diff --exit-code` | — |
 | **M2** | GDL evaluator | `gearbox catalogue --root ../gears-rust --format json \| jq '.gears \| length'` == 9; a fixture per GBX01xx code; dialect + blacklist + `load()` sandbox tests | M3 |
-| **M3** | `gearbox validate` | `gearbox validate --root ../gears-rust` → 0 errors; a negative fixture per surviving GBX02xx (esp. 0206 kebab-struct-vs-name, 0209 lib ident) plus the two new ones (0210 restatement, 0211 ambiguous attribute — `mini-chat` is the positive case) | M2, M8a |
+| **M3** — **done** | `gearbox validate` | `gearbox validate --root ../gears-rust` → 0 errors, and with `--product` → 0 errors on the real product; GBX0208 and GBX0301 each proved against the real tree (`bss-ledger` is undescribed, `api-gatewey` is a typo); GBX0209 proved on temporary trees because the repository has no wrong declaration to point at; GBX0207 retired with a differential test in its place | M2, M8a |
 | **M4** | Resolver + explain + lock | all three profiles diff clean against `fixtures/*/product.lock`; every GBX03xx–06xx code reachable; determinism loop | M8a |
 | **M5** | Crate + config generators; **embedded runs** | acceptance §12 step 2 in full | — |
 | **M6** | Host-workers | new gear lands and passes its own test *by hand first*; then generated worker crate; host spawns worker; remote REST binding resolves via directory | M7 |
@@ -980,8 +985,16 @@ Prerequisites: `rustup toolchain install 1.97.0`; `brew install kubeconform kind
 `config/oop-example-master+follower.yaml` and curl the calculator route) before trusting any
 generated output.
 
-**Step 1 — validate.** `gearbox validate --root ../gears-rust` → 0 errors. Then the projection
-checks ADR 0002 needs (all cheap, all offline):
+**Step 1 — validate.** Done and green:
+```bash
+gearbox validate --root ../gears-rust                                  # 0 errors
+gearbox validate --root ../gears-rust --product products/payments-demo/product.gdl
+# GBX0208: a real gear with no description, with the cargo(...) line to write
+gearbox validate --root ../gears-rust --product <product selecting "bss-ledger">
+# GBX0301: nothing declares it, with a spelling hint when one is close
+gearbox validate --root ../gears-rust --product <product selecting "api-gatewey">
+```
+Then the projection checks ADR 0002 needs (all cheap, all offline):
 
 ```bash
 # every projected field really came from Rust: strip the attributes' values from a

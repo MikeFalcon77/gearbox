@@ -780,6 +780,7 @@ dependencies = [
  "serde_json",
  "syn 2.0.119",
  "thiserror",
+ "toml",
  "walkdir",
 ]
 

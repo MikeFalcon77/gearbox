@@ -277,6 +277,12 @@ fn project_and_merge(
     diagnostics: &mut Diagnostics,
 ) -> Option<crate::merge::MergedGear> {
     let package = decl.package.as_ref()?;
+
+    // Before anything is projected: the declared crate identities are the only
+    // facts in a description with an external authority, and a wrong one fails
+    // at `cargo build` on a crate the reader did not write (GBX0209).
+    crate::manifest_check::check(root, identity, decl, scans, diagnostics);
+
     let crate_dir = crate::merge::crate_dir(&root.root, &identity.gdl_path, &package.path);
     let label = format!("{} ({})", package.crate_name, crate_dir.display());
 

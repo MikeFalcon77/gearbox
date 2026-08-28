@@ -96,6 +96,18 @@ fn item_ident(item: &syn::Item) -> Option<String> {
 }
 
 /// Every `#[toolkit::gear]` in `files`, in scan order.
+/// Every `#[toolkit::gear]` in a scanned crate.
+///
+/// Public because a crate with no `gear.gdl` still has to be searchable: GBX0208
+/// asks "does any crate declare this gear", which cannot go through
+/// [`locate_gear_attribute`] -- that one requires exactly one attribute and a
+/// crate declaring three (`gears/mini-chat/mini-chat`) would come back as an
+/// error rather than as three candidates.
+#[must_use]
+pub fn gear_attribute_sites(files: &[RustFile]) -> Vec<AttributeSite<'_>> {
+    all_sites(files)
+}
+
 fn all_sites(files: &[RustFile]) -> Vec<AttributeSite<'_>> {
     let mut sites = Vec::new();
     for file in files {

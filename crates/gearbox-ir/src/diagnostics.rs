@@ -258,9 +258,28 @@ diagnostic_codes! {
     /// never resolves, and the runtime only warns.
     ValidateOwnerGearMismatch = "GBX0206", Validate, Error, true, "gear name is not kebab-case of its struct identifier";
 
-    /// A contract's trait-name suffix or trailing major disagrees with its
-    /// declared kind or version.
-    ValidateContractShape = "GBX0207", Validate, Error, false, "contract suffix or version disagrees with the declaration";
+    // GBX0207 is deliberately absent. It would have compared a contract trait's
+    // name against its `#[toolkit::contract]` -- and both halves are already
+    // compile errors in `toolkit-contract-macros`:
+    //
+    //   * an unrecognised suffix is rejected by `ContractKind::from_suffix`
+    //     (`libs/toolkit-contract-macros/src/parse.rs:70`);
+    //   * a trailing major marker that disagrees with `version` is rejected a
+    //     few lines below it (`parse.rs:83`), citing ADR-0007.
+    //
+    // So a crate exhibiting either does not build, and a catalogue is only ever
+    // assembled from crates that do. Retired for the same reason as
+    // GBX0201-GBX0205 but by a different mechanism: not "one authority" but
+    // "the divergence cannot survive compilation".
+    //
+    // One residual case does compile: an *unmarked* trait name with
+    // `version = "v2"` or later. The macro permits it on purpose -- ADR-0007
+    // makes an unmarked name unconstrained, because a v1 contract keeps its
+    // unmarked name when v2 is added beside it. Reporting it would contradict
+    // the platform's own decision, and the tree contains no instance, so it is
+    // recorded as a known gap rather than as a code. What *is* checked is that
+    // the projector's suffix and marker rules still agree with the macro's, in
+    // `crates/gearbox-ir/tests/contract_shape.rs`.
 
     /// A selected gear crate has no `gear.gdl`.
     ValidateMissingDescription = "GBX0208", Validate, Error, false, "gear has no gear.gdl";

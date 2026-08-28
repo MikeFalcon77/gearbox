@@ -13,12 +13,15 @@
 pub mod catalogue;
 pub mod cluster;
 pub mod docs;
+pub mod manifest_check;
 pub mod merge;
 pub mod plugin;
 pub mod plugin_select;
 pub mod product;
 pub mod scans;
 pub mod source;
+pub mod undescribed;
+pub mod validate;
 
 pub use catalogue::{CatalogueScan, Continue, LoadEvent, load_catalogue, load_catalogue_staged};
 pub use cluster::ClusterProjection;

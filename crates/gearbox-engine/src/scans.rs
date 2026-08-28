@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use gearbox_project::RustFile;
+use gearbox_project::{CrateManifest, RustFile};
 
 /// The result of one crate scan, shared by every gear that named it.
 ///
@@ -28,6 +28,13 @@ use gearbox_project::RustFile;
 /// is a `String` because the same failure is handed to every caller, and
 /// `ScanError` carries a non-cloneable `syn::Error`.
 type ScanResult = Result<Arc<[RustFile]>, String>;
+
+/// The result of one manifest read, shared the same way a scan is.
+///
+/// Cached for the same reason and with more force: `mini-chat` declares three
+/// gears out of one crate, so without this its `Cargo.toml` would be read three
+/// times to answer the same question.
+type ManifestResult = Result<Arc<CrateManifest>, String>;
 
 /// One load's worth of crate scans.
 ///
@@ -40,6 +47,8 @@ pub struct CrateScans {
     /// Failures are cached too: a crate with no `src/` should be reported once,
     /// not once per gear that names it.
     cache: HashMap<PathBuf, ScanResult>,
+    /// Manifests, keyed the same way and for the same reason.
+    manifests: HashMap<PathBuf, ManifestResult>,
     /// How many times a scan was asked for, cache hits included.
     ///
     /// Counted so the saving is measurable rather than asserted: the difference
@@ -67,6 +76,22 @@ impl CrateScans {
             .or_insert_with(|| {
                 gearbox_project::scan_crate(dir)
                     .map(Arc::from)
+                    .map_err(|e| e.to_string())
+            })
+            .clone()
+    }
+
+    /// The `Cargo.toml` in `dir`, read at most once per load.
+    ///
+    /// # Errors
+    /// Returns the projection error's message; see [`ManifestResult`].
+    pub fn manifest(&mut self, dir: &Path) -> ManifestResult {
+        let key = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+        self.manifests
+            .entry(key)
+            .or_insert_with(|| {
+                gearbox_project::project_manifest(dir)
+                    .map(Arc::new)
                     .map_err(|e| e.to_string())
             })
             .clone()

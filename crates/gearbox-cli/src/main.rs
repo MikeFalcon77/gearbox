@@ -78,6 +78,30 @@ enum Command {
         product: Option<PathBuf>,
     },
 
+    /// Check everything that can be checked without resolving.
+    ///
+    /// Runs the catalogue load and reports its diagnostics with an exit code.
+    /// With `--product`, also joins the product's selected gears against the
+    /// catalogue -- the one check that needs both halves but not the resolver.
+    ///
+    /// Exits non-zero when any diagnostic is an error.
+    Validate {
+        /// A source root to scan. Repeatable; each is scanned in order.
+        #[arg(long, value_name = "DIR", required = true)]
+        root: Vec<PathBuf>,
+
+        /// The id to record for the source. Defaults to the root's directory name.
+        #[arg(long, value_name = "ID")]
+        source_id: Option<String>,
+
+        /// Also check a product description's gear selections.
+        #[arg(long, value_name = "FILE")]
+        product: Option<PathBuf>,
+
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+
     /// Evaluate a `product.gdl` and print the operator intent it declares.
     ///
     /// Evaluation only: no catalogue is read, so this reports what the file says
@@ -119,6 +143,12 @@ fn run() -> anyhow::Result<ExitCode> {
             source_id,
             format,
         } => catalogue(&root, source_id.as_deref(), format),
+        Command::Validate {
+            root,
+            source_id,
+            product: product_file,
+            format,
+        } => validate(&root, source_id.as_deref(), product_file.as_deref(), format),
         Command::Product { file, format } => product(&file, format),
         Command::Rpc { stdio, root } => {
             if !stdio {
@@ -409,6 +439,80 @@ fn catalogue(
 ///
 /// Falls back to `local` when the path has no usable final component (`/`, or a
 /// path ending in `..`), which is rare but should not be a hard error.
+/// Open the roots a subcommand was given.
+///
+/// Shared with `catalogue` because opening them differently would make the two
+/// commands disagree about what they are looking at.
+fn open_roots(roots: &[PathBuf], source_id: Option<&str>) -> anyhow::Result<Vec<SourceRoot>> {
+    let mut opened = Vec::with_capacity(roots.len());
+    for path in roots {
+        let id = match source_id {
+            Some(id) => SourceId::new(id)?,
+            None => SourceId::new(default_source_id(path))?,
+        };
+        opened.push(SourceRoot::open(id, path)?);
+    }
+    Ok(opened)
+}
+
+fn validate(
+    roots: &[PathBuf],
+    source_id: Option<&str>,
+    product_file: Option<&std::path::Path>,
+    format: Format,
+) -> anyhow::Result<ExitCode> {
+    let opened = open_roots(roots, source_id)?;
+
+    // The product is evaluated first so its own GBX01xx are reported even when
+    // it cannot be used for the join. A product that does not evaluate is a
+    // different failure from a product that names a gear nobody described, and
+    // collapsing them would hide the first behind the second.
+    let mut intent = None;
+    let mut product_diagnostics = Vec::new();
+    if let Some(path) = product_file {
+        let scan = gearbox_engine::product::load_product(path, None);
+        product_diagnostics.extend(scan.diagnostics.as_slice().iter().cloned());
+        intent = scan.intent;
+    }
+
+    let checked = gearbox_engine::validate::validate_at(&opened, intent.as_ref(), product_file);
+
+    let mut all: Vec<Diagnostic> = product_diagnostics;
+    all.extend(checked.diagnostics.as_slice().iter().cloned());
+
+    match format {
+        Format::Json => {
+            // stdout: the machine-readable contract.
+            println!("{}", serde_json::to_string_pretty(&all)?);
+        }
+        Format::Text => {
+            let errors = all.iter().filter(|d| d.severity.is_error()).count();
+            let warnings = all
+                .iter()
+                .filter(|d| d.severity == gearbox_ir::Severity::Warning)
+                .count();
+            println!(
+                "{} gear(s) checked from {} description file(s): {errors} error(s), \
+                 {warnings} warning(s)",
+                checked.scan.catalogue.gears.len(),
+                checked.scan.files.len()
+            );
+            if let Some(path) = product_file {
+                let selected = intent.as_ref().map_or(0, |i| i.selected_gears.len());
+                println!("  product {}: {selected} selected gear(s)", path.display());
+            }
+        }
+    }
+
+    report(&all);
+
+    Ok(if all.iter().any(|d| d.severity.is_error()) {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
 fn default_source_id(path: &std::path::Path) -> String {
     path.canonicalize()
         .ok()
