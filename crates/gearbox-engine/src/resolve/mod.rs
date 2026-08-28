@@ -10,6 +10,7 @@
 //! one diagnostic and nothing to look at. Refusing to *write* the lock is a
 //! separate decision, made by the caller.
 
+pub mod bindings;
 pub mod closure;
 pub mod cuts;
 pub mod partition;
@@ -49,6 +50,8 @@ pub struct Resolution {
     pub cuts: cuts::Cuts,
     /// The processes. Deliberately not a partition: closures overlap.
     pub partition: partition::Partition,
+    /// How each severable edge is actually established.
+    pub bindings: Vec<gearbox_ir::ResolvedBinding>,
     pub diagnostics: Diagnostics,
 }
 
@@ -103,12 +106,28 @@ pub fn resolve(catalogue: &Catalogue, intent: &ProductIntent, profile: &ProfileI
         partition::Partition::default()
     };
 
+    // Step 6 -- bindings, derived from placement rather than declared.
+    let bindings = intent.profiles.get(profile).map_or_else(Vec::new, |d| {
+        let derived = bindings::derive(
+            catalogue,
+            &cuts,
+            &partition,
+            &scoped,
+            d,
+            &uri,
+            &mut diagnostics,
+        );
+        bindings::report_env_limits(catalogue, &derived, &uri, &mut diagnostics);
+        derived
+    });
+
     diagnostics.finish();
     Resolution {
         profile: profile.clone(),
         closure,
         cuts,
         partition,
+        bindings,
         diagnostics,
     }
 }
