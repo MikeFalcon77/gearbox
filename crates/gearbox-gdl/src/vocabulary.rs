@@ -37,6 +37,29 @@ pub const CONTRACT_KIND: GdlNamespace = GdlNamespace::new(
 pub const CLUSTER_CAP: GdlNamespace =
     GdlNamespace::new("cluster_cap", &["linearizable", "prefix_watch"]);
 
+/// The gear categories the platform actually uses.
+///
+/// Taken from the `gear.toml` files the platform team committed, one per gear:
+/// those seven values and no others. Not a `GdlNamespace` like the closed sets
+/// above, because `category` is a plain string in the description and this list
+/// drives a **warning**, not a refusal -- the taxonomy is visibly still
+/// settling, with `cluster` filed under `serverless` and `account-management`
+/// under `oss`.
+///
+/// `example` is Gearbox's own addition. No `gear.toml` exists anywhere under
+/// `examples/`, so the platform's list has no slot for an example gear; if the
+/// team adds one, rename to match rather than keeping both.
+pub const KNOWN_CATEGORIES: &[&str] = &[
+    "api-ingress",
+    "bss",
+    "core-functionality",
+    "core-platform-integration",
+    "example",
+    "gen-ai",
+    "oss",
+    "serverless",
+];
+
 /// `binding_mode.*` -- what an operator may ask for regarding one edge.
 pub const BINDING_MODE: GdlNamespace =
     GdlNamespace::new("binding_mode", &["auto", "local", "remote"]);

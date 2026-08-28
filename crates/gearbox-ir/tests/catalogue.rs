@@ -68,6 +68,8 @@ fn gear(id: &str, deps: &[&str], caps: &[RuntimeCap]) -> GearDescriptor {
         vendor_selector: None,
         declared_roles: Vec::new(),
         config_schema: None,
+        docs: None,
+        gts_types: Vec::new(),
     }
 }
 

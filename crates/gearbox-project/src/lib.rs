@@ -19,6 +19,7 @@ pub mod attribute;
 pub mod cluster;
 pub mod contract;
 pub mod gear;
+pub mod gts;
 pub mod plugin;
 pub mod profile;
 pub mod scan;
@@ -30,6 +31,7 @@ pub use cluster::{
 };
 pub use contract::{ProjectedContract, ProjectedProvide, project_contracts, project_provides};
 pub use gear::{ProjectedGear, ProjectedLifecycle, project_gear, project_gear_with_attrs};
+pub use gts::{GtsError, GtsType, gts_type_from_schema, project_gts_types};
 pub use plugin::{
     ExtensionPoint, PluginImplError, VendorDefault, project_extension_points, project_plugin_impl,
     project_vendor_default,

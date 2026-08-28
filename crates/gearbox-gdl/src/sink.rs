@@ -46,6 +46,8 @@ pub struct GearDecl {
     pub sdk: Option<crate::records::CargoRecord>,
     /// Narrows the extension point when it cannot be read from an `impl`.
     pub plugin_interface: Option<String>,
+    /// Overrides the convention-based search for this gear's documents.
+    pub docs: Option<crate::records::DocsRecord>,
     pub provides: Vec<ProvideRecord>,
     pub consumes: Vec<ConsumeRecord>,
     pub requires: Vec<crate::records::ClusterRequireRecord>,

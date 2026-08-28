@@ -14,8 +14,6 @@
 //! Both sides name the same SDK crate, which is what lets a host and its plugins
 //! join on a trait ident rather than on a naming convention.
 
-use std::path::Path;
-
 use gearbox_gdl::GearDecl;
 use gearbox_gdl::engine::FileIdentity;
 use gearbox_ir::{
@@ -40,10 +38,10 @@ pub struct PluginProjection {
 /// the role check and the vendor default cost no extra I/O. The SDK costs one
 /// scan, and only for gears that declare `sdk` -- which is opt-in.
 pub fn project(
-    root: &Path,
     identity: &FileIdentity,
     decl: &GearDecl,
     files: &[RustFile],
+    sdk_files: &[RustFile],
     diagnostics: &mut Diagnostics,
 ) -> PluginProjection {
     let uri = identity.uri.as_str();
@@ -51,24 +49,7 @@ pub fn project(
         return PluginProjection::default();
     };
 
-    let sdk_dir = crate::merge::crate_dir(root, &identity.gdl_path, &sdk.path);
-    let sdk_files = match gearbox_project::scan_crate(&sdk_dir) {
-        Ok(files) => files,
-        Err(e) => {
-            diagnostics.push(
-                Diagnostic::error(
-                    DiagnosticCode::ClusterProviderUnprojectable,
-                    format!("cannot read the sdk crate `{}`: {e}", sdk_dir.display()),
-                    "check `sdk = cargo(..., path = \"...\")`; the path is relative to the \
-                     description's own directory",
-                )
-                .at(Location::file(uri.to_owned())),
-            );
-            return PluginProjection::default();
-        }
-    };
-
-    let points: Vec<ExtensionPointDecl> = gearbox_project::project_extension_points(&sdk_files)
+    let points: Vec<ExtensionPointDecl> = gearbox_project::project_extension_points(sdk_files)
         .into_iter()
         .map(|p| ExtensionPointDecl {
             trait_ident: p.trait_ident,

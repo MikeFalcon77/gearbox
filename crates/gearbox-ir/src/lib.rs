@@ -15,8 +15,8 @@ pub mod requirement;
 pub mod resolved;
 
 pub use catalogue::{
-    Catalogue, DeclaredRole, EndpointDecl, ExtensionPointDecl, GearDescriptor, LifecycleDecl,
-    PluginFill, ResolvedSource, RuntimeCap, SourceKind, Visibility,
+    Catalogue, DeclaredRole, EndpointDecl, ExtensionPointDecl, GearDescriptor, GearDocs,
+    GtsTypeDecl, LifecycleDecl, PluginFill, ResolvedSource, RuntimeCap, SourceKind, Visibility,
 };
 pub use contract::{
     CargoRef, ContractDescriptor, ContractKind, ContractVersion, GrpcProjection,

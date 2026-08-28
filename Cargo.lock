@@ -767,6 +767,7 @@ dependencies = [
  "gearbox-ir",
  "heck",
  "proc-macro2",
+ "serde_json",
  "syn 2.0.119",
  "thiserror",
  "walkdir",

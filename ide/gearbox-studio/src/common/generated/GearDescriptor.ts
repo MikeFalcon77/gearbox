@@ -4,7 +4,9 @@ import type { ClusterProviderDecl } from "./ClusterProviderDecl";
 import type { DeclaredRole } from "./DeclaredRole";
 import type { EndpointDecl } from "./EndpointDecl";
 import type { ExtensionPointDecl } from "./ExtensionPointDecl";
+import type { GearDocs } from "./GearDocs";
 import type { GearId } from "./GearId";
+import type { GtsTypeDecl } from "./GtsTypeDecl";
 import type { LifecycleDecl } from "./LifecycleDecl";
 import type { PluginFill } from "./PluginFill";
 import type { ProviderDescriptor } from "./ProviderDescriptor";
@@ -89,4 +91,17 @@ declared_roles?: Array<DeclaredRole>,
  * An opaque pointer to a runtime configuration schema, carried through to
  * the lock and otherwise unused for now.
  */
-config_schema?: RelPath | null, };
+config_schema?: RelPath | null, 
+/**
+ * Where this gear's own documents live.
+ *
+ * Found by convention next to the gear and one level up, because the
+ * platform keeps them at `gears/<name>/docs/` while a `gear.gdl` sits in a
+ * crate subdirectory below that. Absent when the gear has none, which is
+ * ordinary rather than a gap.
+ */
+docs?: GearDocs | null, 
+/**
+ * GTS types this gear exposes, from the schema declarations in its SDK.
+ */
+gts_types?: Array<GtsTypeDecl>, };

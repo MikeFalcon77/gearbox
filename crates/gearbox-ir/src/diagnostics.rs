@@ -216,6 +216,23 @@ diagnostic_codes! {
     /// resolution.
     GdlDowngraded = "GBX0107", Gdl, Warning, true, "GDL construct accepted but not resolved";
 
+    /// A gear's `category` is not one the platform uses.
+    ///
+    /// A warning rather than an error, deliberately. The taxonomy is visibly
+    /// still settling -- `cluster` is filed under `serverless` and
+    /// `account-management` under `oss` -- so treating the set as closed would
+    /// claim more than the evidence supports. It still catches a typo, which is
+    /// the failure that matters: a category nothing else uses puts a gear in a
+    /// bucket of one.
+    GdlUnknownCategory = "GBX0108", Gdl, Warning, false, "gear category is not one the platform uses";
+
+    /// A declared documentation or specification path does not exist.
+    ///
+    /// An error, unlike the absence of a file found by convention: a gear may
+    /// genuinely have no PRD, but a path written by hand and pointing nowhere is
+    /// a typo.
+    GdlMissingDocPath = "GBX0109", Gdl, Error, false, "declared documentation path does not exist";
+
     /// Two declarations scoped to the same profile collide.
     GdlDuplicateProfileScoped = "GBX0110", Gdl, Error, false, "duplicate profile-scoped declaration";
 

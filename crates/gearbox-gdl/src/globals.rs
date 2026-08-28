@@ -35,8 +35,8 @@ use starlark::values::list::UnpackList;
 use starlark::values::none::NoneType;
 
 use crate::records::{
-    CargoRecord, ClusterPluginRecord, ClusterRequireRecord, ConsumeRecord, EndpointRecord,
-    GrpcRecord, LifecycleRecord, ProvideRecord, RestRecord, RoleRecord,
+    CargoRecord, ClusterPluginRecord, ClusterRequireRecord, ConsumeRecord, DocsRecord,
+    EndpointRecord, GrpcRecord, LifecycleRecord, ProvideRecord, RestRecord, RoleRecord,
 };
 use crate::sink::{GdlSink, GearDecl};
 use crate::values::GdlEnum;
@@ -90,6 +90,23 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             default_features,
             link: link.map(|l| l.items).unwrap_or_default(),
             attr: attr.map(str::to_owned),
+        })
+    }
+
+    /// `docs(...)` -- override where this gear's documents live.
+    ///
+    /// Only needed when they are not at `docs/` beside the gear or one level up.
+    fn docs(
+        #[starlark(require = named)] prd: Option<&str>,
+        #[starlark(require = named)] design: Option<&str>,
+        #[starlark(require = named)] adr: Option<UnpackList<String>>,
+        #[starlark(require = named)] openapi: Option<&str>,
+    ) -> anyhow::Result<DocsRecord> {
+        Ok(DocsRecord {
+            prd: prd.map(str::to_owned),
+            design: design.map(str::to_owned),
+            adr: adr.map(|l| l.items).unwrap_or_default(),
+            openapi: openapi.map(str::to_owned),
         })
     }
 
@@ -280,6 +297,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         // implement no trait with `Plugin` in the name). Same shape as `attr`
         // on `cargo(...)` and `backend` on `cluster_plugin(...)`.
         #[starlark(require = named)] plugin_interface: Option<&str>,
+        #[starlark(require = named)] docs: Option<&'v DocsRecord>,
         #[starlark(require = named)] provides: Option<UnpackList<&'v ProvideRecord>>,
         #[starlark(require = named)] consumes: Option<UnpackList<&'v ConsumeRecord>>,
         #[starlark(require = named)] requires: Option<UnpackList<&'v ClusterRequireRecord>>,
@@ -336,6 +354,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             package: Some(package.clone()),
             sdk: sdk.cloned(),
             plugin_interface: plugin_interface.map(str::to_owned),
+            docs: docs.cloned(),
             provides: provides
                 .map(|l| l.items.into_iter().cloned().collect())
                 .unwrap_or_default(),

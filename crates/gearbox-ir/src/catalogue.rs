@@ -312,6 +312,72 @@ pub struct GearDescriptor {
     /// the lock and otherwise unused for now.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_schema: Option<RelPath>,
+
+    /// Where this gear's own documents live.
+    ///
+    /// Found by convention next to the gear and one level up, because the
+    /// platform keeps them at `gears/<name>/docs/` while a `gear.gdl` sits in a
+    /// crate subdirectory below that. Absent when the gear has none, which is
+    /// ordinary rather than a gap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<GearDocs>,
+
+    /// GTS types this gear exposes, from the schema declarations in its SDK.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gts_types: Vec<GtsTypeDecl>,
+}
+
+/// Documents describing one gear, all relative to its source root.
+///
+/// Paths rather than content: the catalogue stays small, and an editor can open
+/// them. Relative to the source root like `gdl_path`, so a lock built on one
+/// machine still points somewhere on another.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct GearDocs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prd: Option<RelPath>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design: Option<RelPath>,
+
+    /// Architecture decision records, sorted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adr: Vec<RelPath>,
+
+    /// A checked-in `OpenAPI` document, when one exists.
+    ///
+    /// Grouped with the prose deliberately: it is found the same way and is the
+    /// same kind of pointer. Usually absent -- the runtime builds the spec from
+    /// the REST projections, and only four gears in the platform check one in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openapi: Option<RelPath>,
+}
+
+impl GearDocs {
+    /// Whether anything was found at all, so the caller can skip an empty block.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.prd.is_none() && self.design.is_none() && self.adr.is_empty() && self.openapi.is_none()
+    }
+}
+
+/// A GTS type a gear exposes.
+///
+/// "Exposes" means declared in the gear's SDK crate, which is what other gears
+/// can depend on. A type declared only in the main crate is internal, and a
+/// `gts_id!` reference is not a declaration at all -- there are over a thousand
+/// of those in the tree, mostly in tests.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+pub struct GtsTypeDecl {
+    /// The GTS identifier, e.g.
+    /// `cf.toolkit.plugins.plugin.v1~cf.core.cluster.plugin.v1~`.
+    pub type_id: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Where it is declared, relative to the SDK crate's `src/`.
+    pub relative: String,
 }
 
 /// A plugin-API trait a gear expects an implementation of.

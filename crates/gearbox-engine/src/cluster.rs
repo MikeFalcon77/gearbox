@@ -48,6 +48,7 @@ pub fn project(
     identity: &FileIdentity,
     decl: &GearDecl,
     files: &[RustFile],
+    scans: &mut crate::scans::CrateScans,
     diagnostics: &mut Diagnostics,
 ) -> ClusterProjection {
     let profiles = gearbox_project::project_cluster_profiles(files)
@@ -63,7 +64,7 @@ pub fn project(
     }
 
     ClusterProjection {
-        providers: providers(root, identity, decl, files, diagnostics),
+        providers: providers(root, identity, decl, files, scans, diagnostics),
         profiles,
     }
 }
@@ -76,7 +77,7 @@ struct Plugin {
     /// Optional narrowing path to the backend impl, when the crate holds more
     /// than one and the trait alone cannot pick.
     backend: Option<String>,
-    files: Vec<RustFile>,
+    files: std::sync::Arc<[RustFile]>,
 }
 
 fn providers(
@@ -84,6 +85,7 @@ fn providers(
     identity: &FileIdentity,
     decl: &GearDecl,
     files: &[RustFile],
+    scans: &mut crate::scans::CrateScans,
     diagnostics: &mut Diagnostics,
 ) -> Vec<ClusterProviderDecl> {
     let uri = identity.uri.as_str();
@@ -93,7 +95,7 @@ fn providers(
     let mut plugins: BTreeMap<String, Plugin> = BTreeMap::new();
     for record in &decl.cluster_plugins {
         let dir = crate::merge::crate_dir(root, &identity.gdl_path, &record.package.path);
-        match gearbox_project::scan_crate(&dir) {
+        match scans.get(&dir) {
             Ok(files) => {
                 plugins.insert(
                     record.package.lib_ident.clone(),

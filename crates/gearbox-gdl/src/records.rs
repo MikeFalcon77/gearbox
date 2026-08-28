@@ -97,6 +97,21 @@ gdl_record! {
 }
 
 gdl_record! {
+    /// `docs(prd = ..., design = ..., adr = [...], openapi = ...)`
+    ///
+    /// Every field is an override, not a requirement. The platform keeps these at
+    /// `gears/<name>/docs/` in 35 of 35 cases, so the engine finds them by
+    /// convention and this record exists only for a gear laid out differently.
+    /// Paths are relative to the description's own directory.
+    DocsRecord as "gdl_docs" {
+        pub prd: Option<String>,
+        pub design: Option<String>,
+        pub adr: Vec<String>,
+        pub openapi: Option<String>,
+    }
+}
+
+gdl_record! {
     /// `lifecycle(entry = ..., stop_timeout = ..., await_ready = ...)`
     LifecycleRecord as "gdl_lifecycle" {
         pub entry: Option<String>,

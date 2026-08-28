@@ -211,7 +211,7 @@ fn declared_facts_survive_the_merge() {
     let gateway = catalogue.gear(&gid("api-gateway")).unwrap();
 
     assert_eq!(gateway.display_name, "API Gateway");
-    assert_eq!(gateway.category.as_deref(), Some("platform"));
+    assert_eq!(gateway.category.as_deref(), Some("api-ingress"));
     // The endpoint's real config key -- a runtime-configuration fact with no
     // Rust attribute to own it.
     assert_eq!(gateway.serves[0].config_key.as_deref(), Some("bind_addr"));

@@ -29,6 +29,16 @@ pub struct CatalogueScan {
     pub catalogue: Catalogue,
     /// The description files that were read, in the order they were evaluated.
     pub files: Vec<PathBuf>,
+    /// How many distinct crates were parsed.
+    ///
+    /// Reported because the cache is otherwise invisible: the catalogue is
+    /// identical with or without it, which is the point, so this is the only
+    /// thing a test can hold on to.
+    pub crates_scanned: usize,
+    /// How many scans were asked for, cache hits included.
+    ///
+    /// The gap between this and `crates_scanned` is the parsing avoided.
+    pub scan_requests: usize,
 }
 
 /// Find and evaluate every `gear.gdl` under each root, in one catalogue.
@@ -45,6 +55,8 @@ pub fn load_catalogue(roots: &[SourceRoot]) -> CatalogueScan {
     let mut catalogue = Catalogue::default();
     let mut diagnostics = Diagnostics::new();
     let mut files = Vec::new();
+    // One cache per load: a crate named by several gears is parsed once.
+    let mut scans = crate::scans::CrateScans::new();
 
     for root in roots {
         catalogue
@@ -83,7 +95,9 @@ pub fn load_catalogue(roots: &[SourceRoot]) -> CatalogueScan {
             // gear -- under ADR `cpt-gearbox-adr-macro-projected-catalogue` the
             // catalogue cannot be assembled without it, which is a deliberate
             // trade recorded in the PRD's risk table.
-            let Some(merged) = project_and_merge(root, &identity, &decl, &mut diagnostics) else {
+            let Some(merged) =
+                project_and_merge(root, &identity, &decl, &mut scans, &mut diagnostics)
+            else {
                 continue;
             };
 
@@ -107,7 +121,12 @@ pub fn load_catalogue(roots: &[SourceRoot]) -> CatalogueScan {
 
     diagnostics.finish();
     catalogue.diagnostics = diagnostics;
-    CatalogueScan { catalogue, files }
+    CatalogueScan {
+        catalogue,
+        files,
+        crates_scanned: scans.distinct_crates(),
+        scan_requests: scans.scan_requests(),
+    }
 }
 
 /// Project the Rust half for one description and merge it with the declared half.
@@ -120,13 +139,14 @@ fn project_and_merge(
     root: &SourceRoot,
     identity: &FileIdentity,
     decl: &gearbox_gdl::GearDecl,
+    scans: &mut crate::scans::CrateScans,
     diagnostics: &mut Diagnostics,
 ) -> Option<crate::merge::MergedGear> {
     let package = decl.package.as_ref()?;
     let crate_dir = crate::merge::crate_dir(&root.root, &identity.gdl_path, &package.path);
     let label = format!("{} ({})", package.crate_name, crate_dir.display());
 
-    let files = match gearbox_project::scan_crate(&crate_dir) {
+    let files = match scans.get(&crate_dir) {
         Ok(files) => files,
         Err(e) => {
             diagnostics.push(
@@ -187,7 +207,7 @@ fn project_and_merge(
     sdk_dirs.dedup();
 
     for sdk_dir in sdk_dirs {
-        match gearbox_project::scan_crate(&sdk_dir) {
+        match scans.get(&sdk_dir) {
             Ok(sdk_files) => {
                 for contract in gearbox_project::project_contracts(&sdk_files) {
                     contracts_by_trait.insert(contract.trait_ident.clone(), contract);
@@ -206,17 +226,88 @@ fn project_and_merge(
 
     // Cluster: profiles come free from the crate scan above; providers cost one
     // extra scan per declared plugin crate, which only `cluster` itself declares.
-    let cluster = crate::cluster::project(&root.root, identity, decl, &files, diagnostics);
+    let cluster = crate::cluster::project(&root.root, identity, decl, &files, scans, diagnostics);
     // Plugin facts cost one SDK scan, and only for gears that declare `sdk`.
-    let plugin = crate::plugin::project(&root.root, identity, decl, &files, diagnostics);
+    // The SDK crate is scanned once and shared: both the plugin projection and
+    // the GTS one read it, and it is the expensive step.
+    let sdk_files = match decl.sdk.as_ref() {
+        None => std::sync::Arc::from(Vec::new()),
+        Some(sdk) => {
+            let sdk_dir = crate::merge::crate_dir(&root.root, &identity.gdl_path, &sdk.path);
+            match scans.get(&sdk_dir) {
+                Ok(files) => files,
+                Err(e) => {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            DiagnosticCode::GdlEval,
+                            format!("cannot read the sdk crate `{}`: {e}", sdk_dir.display()),
+                            "check `sdk = cargo(..., path = \"...\")`; the path is relative to \
+                             the description's own directory",
+                        )
+                        .at(Location::file(identity.uri.clone())),
+                    );
+                    std::sync::Arc::from(Vec::new())
+                }
+            }
+        }
+    };
+
+    let plugin = crate::plugin::project(identity, decl, &files, &sdk_files, diagnostics);
+
+    // GTS types a gear *exposes* are the ones declared in its SDK; a type in the
+    // main crate is internal and a `gts_id!` reference is not a declaration.
+    //
+    // A plugin points at its *host's* SDK, so the types declared there belong to
+    // the host, not to each of its implementations. Without this, one plugin-spec
+    // type declared once in `authn-resolver-sdk` would be reported by the host
+    // and by all of its plugins alike.
+    let sdk_is_the_hosts = plugin.fills.as_ref().is_some_and(|f| {
+        decl.sdk
+            .as_ref()
+            .is_some_and(|sdk| f.point.sdk_lib == sdk.lib_ident)
+    });
+
+    let gts_types = if sdk_is_the_hosts {
+        Vec::new()
+    } else {
+        match gearbox_project::project_gts_types(&sdk_files) {
+            Ok(types) => types
+                .into_iter()
+                .map(|t| gearbox_ir::GtsTypeDecl {
+                    type_id: t.type_id,
+                    description: t.description,
+                    relative: t.relative,
+                })
+                .collect(),
+            Err(e) => {
+                diagnostics.push(
+                    Diagnostic::error(
+                        DiagnosticCode::GdlEval,
+                        format!("cannot project GTS types: {e}"),
+                        "the declaration shape is not modelled; see gearbox-project's gts module",
+                    )
+                    .at(Location::file(identity.uri.clone())),
+                );
+                Vec::new()
+            }
+        }
+    };
+
+    // Documents: pure filesystem lookup, no parsing, so it costs a few stats.
+    let gdl_dir = crate::merge::crate_dir(&root.root, &identity.gdl_path, ".");
+    let docs = crate::docs::project(&root.root, &gdl_dir, identity, decl, diagnostics);
 
     crate::merge::merge(
         identity,
         decl,
-        &projected,
-        &contracts_by_trait,
-        &cluster,
-        &plugin,
+        crate::merge::Projections {
+            gear: &projected,
+            contracts_by_trait: &contracts_by_trait,
+            cluster: &cluster,
+            plugin: &plugin,
+            docs,
+            gts_types,
+        },
         diagnostics,
     )
 }

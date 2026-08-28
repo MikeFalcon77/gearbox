@@ -370,7 +370,7 @@ fn catalogue(
             // stdout: the machine-readable contract.
             println!("{}", serde_json::to_string_pretty(&scan.catalogue)?);
         }
-        Format::Text => print_summary(&scan.catalogue, scan.files.len()),
+        Format::Text => print_summary(&scan),
     }
 
     // Diagnostics always go to stderr, so `| jq` works regardless.
@@ -397,12 +397,20 @@ fn default_source_id(path: &std::path::Path) -> String {
         .unwrap_or_else(|| "local".to_owned())
 }
 
-fn print_summary(catalogue: &gearbox_ir::Catalogue, files: usize) {
+fn print_summary(scan: &gearbox_engine::CatalogueScan) {
+    let catalogue = &scan.catalogue;
     println!(
         "{} gear(s) from {} description file(s), {} contract(s)",
         catalogue.gears.len(),
-        files,
+        scan.files.len(),
         catalogue.contracts.len()
+    );
+    // What the load actually cost. Worth showing because it is the number the
+    // incremental-loading work is about: crates parsed is the expensive stage,
+    // and the gap against requests is the sharing a single load already gets.
+    println!(
+        "  parsed {} crate(s) for {} request(s)",
+        scan.crates_scanned, scan.scan_requests
     );
 
     for gear in catalogue.gears.values() {

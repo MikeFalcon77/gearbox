@@ -44,15 +44,35 @@ fn invalid(uri: &str, message: impl Into<String>, help: impl Into<String>) -> Di
 /// Returns `None` only when the gear has no usable identity. Anything else is
 /// reported and skipped, so one bad contract reference does not hide the rest of
 /// the file.
+/// Everything projected out of Rust for one gear.
+///
+/// A struct rather than eight parameters: the list grew once per projected fact,
+/// and each addition made the call site harder to read than the thing it was
+/// adding. Grouping them also says what they have in common -- every field here
+/// was read from source, none from the description.
+pub struct Projections<'a> {
+    pub gear: &'a ProjectedGear,
+    pub contracts_by_trait: &'a BTreeMap<String, ProjectedContract>,
+    pub cluster: &'a crate::cluster::ClusterProjection,
+    pub plugin: &'a crate::plugin::PluginProjection,
+    pub docs: Option<gearbox_ir::GearDocs>,
+    pub gts_types: Vec<gearbox_ir::GtsTypeDecl>,
+}
+
 pub fn merge(
     identity: &FileIdentity,
     decl: &GearDecl,
-    projected: &ProjectedGear,
-    contracts_by_trait: &BTreeMap<String, ProjectedContract>,
-    cluster: &crate::cluster::ClusterProjection,
-    plugin: &crate::plugin::PluginProjection,
+    projections: Projections<'_>,
     diagnostics: &mut Diagnostics,
 ) -> Option<MergedGear> {
+    let Projections {
+        gear: projected,
+        contracts_by_trait,
+        cluster,
+        plugin,
+        docs,
+        gts_types,
+    } = projections;
     let uri = identity.uri.as_str();
 
     // Projected: `#[toolkit::gear(name = "...")]`. `GearId::new` enforces
@@ -204,6 +224,9 @@ pub fn merge(
         .collect();
     report_role_gaps(uri, &id, &declared_roles, diagnostics);
 
+    let category = decl.category.clone();
+    report_unknown_category(uri, &id, category.as_deref(), diagnostics);
+
     let visibility = match decl.visibility.as_deref() {
         None | Some("internal") => Visibility::Internal,
         Some("public") => Visibility::Public,
@@ -221,7 +244,7 @@ pub fn merge(
         display_name: decl.name.clone().unwrap_or_else(|| id.to_string()),
         id,
         description: decl.description.clone(),
-        category: decl.category.clone(),
+        category,
         visibility,
         source: identity.source.clone(),
         gdl_path: identity.gdl_path.clone(),
@@ -262,6 +285,9 @@ pub fn merge(
             .config_schema
             .as_deref()
             .and_then(|p| RelPath::new(p).ok()),
+        // Found by convention beside the gear and one level up; see `docs.rs`.
+        docs,
+        gts_types,
     };
 
     Some(MergedGear { gear, contracts })
@@ -576,6 +602,36 @@ fn report_role_gaps(uri: &str, id: &GearId, roles: &[DeclaredRole], diagnostics:
             .with_help("drop `sharded`/`instance_addressable`"),
         );
     }
+}
+
+/// Warn when a gear's category is not one the platform uses.
+///
+/// A warning rather than a refusal: the taxonomy is visibly still settling, with
+/// `cluster` filed under `serverless` and `account-management` under `oss`, so
+/// treating the list as closed would claim more than the evidence supports. What
+/// it does catch is the case that matters -- a value nothing else uses, which
+/// puts a gear in a bucket of one and hides it from every category query.
+fn report_unknown_category(
+    uri: &str,
+    id: &GearId,
+    category: Option<&str>,
+    diagnostics: &mut Diagnostics,
+) {
+    let Some(name) = category else { return };
+    if gearbox_gdl::vocabulary::KNOWN_CATEGORIES.contains(&name) {
+        return;
+    }
+    diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::GdlUnknownCategory,
+            format!("gear `{id}` declares category `{name}`, which no other gear uses"),
+        )
+        .at(Location::file(uri.to_owned()))
+        .with_help(format!(
+            "the platform's categories are: {}",
+            gearbox_gdl::vocabulary::KNOWN_CATEGORIES.join(", ")
+        )),
+    );
 }
 
 /// Record that a cluster requirement is a co-location constraint today.
