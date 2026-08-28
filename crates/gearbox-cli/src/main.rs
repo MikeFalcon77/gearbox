@@ -15,7 +15,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use gearbox_engine::{SourceRoot, check_plugins, load_catalogue, load_product};
-use gearbox_ir::{Diagnostic, Severity, SourceId};
+use gearbox_ir::{Diagnostic, ProfileId, Severity, SourceId};
 
 #[derive(Parser)]
 #[command(
@@ -78,6 +78,33 @@ enum Command {
         product: Option<PathBuf>,
     },
 
+    /// Resolve a product for one deployment profile and print the lock.
+    ///
+    /// The mode of every contract binding is *derived* from where the gears end
+    /// up, never declared, so the same description gives a different lock per
+    /// profile. Nothing is written to disk: this prints, and `--format toml`
+    /// prints exactly what a lock file would contain.
+    Resolve {
+        /// A source root to scan. Repeatable.
+        #[arg(long, value_name = "DIR", required = true)]
+        root: Vec<PathBuf>,
+
+        /// The id to record for the source. Defaults to the root's directory name.
+        #[arg(long, value_name = "ID")]
+        source_id: Option<String>,
+
+        /// The product description to resolve.
+        #[arg(long, value_name = "FILE")]
+        product: PathBuf,
+
+        /// Which deployment profile. Defaults to the product's own default.
+        #[arg(long, value_name = "ID")]
+        profile: Option<String>,
+
+        #[arg(long, value_enum, default_value_t = ResolveFormat::Text)]
+        format: ResolveFormat,
+    },
+
     /// Check everything that can be checked without resolving.
     ///
     /// Runs the catalogue load and reports its diagnostics with an exit code.
@@ -117,6 +144,17 @@ enum Command {
     },
 }
 
+/// What `resolve` prints.
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
+enum ResolveFormat {
+    /// The canonical lock, byte-for-byte what would be written to disk.
+    Toml,
+    /// Machine-readable. The stable contract for tooling.
+    Json,
+    /// Human-readable summary.
+    Text,
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
 enum Format {
     /// Machine-readable. The stable contract for tooling.
@@ -143,6 +181,19 @@ fn run() -> anyhow::Result<ExitCode> {
             source_id,
             format,
         } => catalogue(&root, source_id.as_deref(), format),
+        Command::Resolve {
+            root,
+            source_id,
+            product: product_file,
+            profile,
+            format,
+        } => resolve_product(
+            &root,
+            source_id.as_deref(),
+            &product_file,
+            profile.as_deref(),
+            format,
+        ),
         Command::Validate {
             root,
             source_id,
@@ -453,6 +504,136 @@ fn open_roots(roots: &[PathBuf], source_id: Option<&str>) -> anyhow::Result<Vec<
         opened.push(SourceRoot::open(id, path)?);
     }
     Ok(opened)
+}
+
+fn resolve_product(
+    roots: &[PathBuf],
+    source_id: Option<&str>,
+    product_file: &std::path::Path,
+    profile: Option<&str>,
+    format: ResolveFormat,
+) -> anyhow::Result<ExitCode> {
+    let opened = open_roots(roots, source_id)?;
+    let scan = load_catalogue(&opened);
+
+    // Canonicalized so every diagnostic's `file://` URI points at a real path an
+    // editor can open. A relative one renders and does nothing, which is the
+    // failure the Studio's dead links already taught.
+    let product_file = &product_file
+        .canonicalize()
+        .unwrap_or_else(|_| product_file.to_path_buf());
+    let product_scan = gearbox_engine::product::load_product(product_file, None);
+    let mut diagnostics: Vec<Diagnostic> = product_scan.diagnostics.as_slice().to_vec();
+    let Some(intent) = product_scan.intent else {
+        report(&diagnostics);
+        anyhow::bail!("`{}` could not be evaluated", product_file.display());
+    };
+
+    // The product's own default when none is named, so the common invocation is
+    // short and the answer still comes from the description rather than from a
+    // guess made here.
+    let profile = match profile {
+        Some(id) => ProfileId::new(id)?,
+        None => intent.default_profile.clone(),
+    };
+
+    let resolution =
+        gearbox_engine::resolve::resolve_at(&scan.catalogue, &intent, &profile, Some(product_file));
+    let sources = opened
+        .iter()
+        .map(|root| (root.id.clone(), root.to_resolved()))
+        .collect();
+    let resolved =
+        gearbox_engine::resolve::product::assemble(&scan.catalogue, &intent, &resolution, sources);
+
+    match format {
+        // stdout carries the artifact; diagnostics go to stderr, so a pipe into
+        // a file or `jq` gets exactly the artifact and nothing else.
+        ResolveFormat::Toml => print!("{}", gearbox_lock::write_canonical(&resolved)?),
+        ResolveFormat::Json => println!("{}", serde_json::to_string_pretty(&resolved)?),
+        ResolveFormat::Text => print_resolution(&resolved),
+    }
+
+    diagnostics.extend(resolved.diagnostics.as_slice().iter().cloned());
+    report(&diagnostics);
+
+    Ok(if diagnostics.iter().any(|d| d.severity.is_error()) {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+fn print_resolution(resolved: &gearbox_ir::ResolvedProduct) {
+    println!(
+        "{} {} for profile `{}` ({})",
+        resolved.product.id,
+        resolved.product.version,
+        resolved.product.profile,
+        resolved.product.profile_kind
+    );
+    println!("  {}", resolved.product.lock_hash);
+    println!(
+        "  {} gear(s) in {} process(es)",
+        resolved.gears.len(),
+        resolved.processes.len()
+    );
+    for process in &resolved.processes {
+        println!(
+            "    {} [{}] x{} -- {}",
+            process.name,
+            describe_kind(process.kind),
+            process.replicas,
+            process
+                .gears
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    if !resolved.bindings.is_empty() {
+        println!("  bindings:");
+        for b in &resolved.bindings {
+            println!(
+                "    {} -> {} : {} over {} via {}",
+                b.consumer,
+                b.provider,
+                b.contract,
+                b.transport.as_str(),
+                describe_mechanism(b.mechanism)
+            );
+        }
+    }
+    if !resolved.cluster.is_empty() {
+        println!("  cluster:");
+        for c in &resolved.cluster {
+            println!(
+                "    {}/{} -> {}",
+                c.scope,
+                c.primitive.slug(),
+                c.resolved.effective_provider()
+            );
+        }
+    }
+}
+
+/// Written out rather than derived from `Debug`, which the workspace forbids in
+/// output a person reads.
+const fn describe_kind(kind: gearbox_ir::ProcessKind) -> &'static str {
+    match kind {
+        gearbox_ir::ProcessKind::Host => "host",
+        gearbox_ir::ProcessKind::Worker => "worker",
+    }
+}
+
+const fn describe_mechanism(mechanism: gearbox_ir::BindingMechanism) -> &'static str {
+    match mechanism {
+        gearbox_ir::BindingMechanism::ColocatedLocal => "co-located local",
+        gearbox_ir::BindingMechanism::ConsumesStatic => "static endpoint",
+        gearbox_ir::BindingMechanism::ConsumesDirectory => "directory",
+        gearbox_ir::BindingMechanism::ProvidesClientWiring => "provider client wiring",
+    }
 }
 
 fn validate(

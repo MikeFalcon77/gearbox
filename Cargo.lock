@@ -712,6 +712,7 @@ dependencies = [
  "clap",
  "gearbox-engine",
  "gearbox-ir",
+ "gearbox-lock",
  "gearbox-rpc",
  "serde_json",
 ]

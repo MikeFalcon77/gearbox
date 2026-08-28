@@ -15,6 +15,7 @@ pub mod closure;
 pub mod cluster;
 pub mod cuts;
 pub mod partition;
+pub mod product;
 pub mod profile;
 pub mod structural;
 
@@ -71,6 +72,22 @@ impl Resolution {
 /// Never. An unknown profile is a diagnostic, not a panic.
 #[must_use]
 pub fn resolve(catalogue: &Catalogue, intent: &ProductIntent, profile: &ProfileId) -> Resolution {
+    resolve_at(catalogue, intent, profile, None)
+}
+
+/// As [`resolve`], but told where the product description lives on disk.
+///
+/// `product_path` only affects the diagnostics' URI, and it matters: a
+/// `ProductIntent` carries `gdl_path` relative to its own root, so building
+/// `file://` out of it yields `file://product.gdl` -- a URI that renders as a
+/// link and opens nothing.
+#[must_use]
+pub fn resolve_at(
+    catalogue: &Catalogue,
+    intent: &ProductIntent,
+    profile: &ProfileId,
+    product_path: Option<&std::path::Path>,
+) -> Resolution {
     let mut diagnostics = Diagnostics::new();
 
     // Step 1 -- narrow to the profile. Done first because everything after it
@@ -82,7 +99,10 @@ pub fn resolve(catalogue: &Catalogue, intent: &ProductIntent, profile: &ProfileI
     let closure = closure::expand(catalogue, intent, &mut diagnostics);
 
     // Step 3 -- which edges could carry a boundary.
-    let uri = format!("file://{}", intent.gdl_path.as_str());
+    let uri = match product_path {
+        Some(path) => format!("file://{}", path.display()),
+        None => format!("file://{}", intent.gdl_path.as_str()),
+    };
     let cuts = cuts::classify(catalogue, &closure, &uri, &mut diagnostics);
 
     // Step 4 -- processes. An unknown profile is reported rather than assumed,

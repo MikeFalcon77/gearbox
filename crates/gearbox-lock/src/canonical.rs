@@ -66,6 +66,10 @@ fn to_toml(product: &ResolvedProduct) -> Result<String, LockError> {
 
 /// The hash covering everything except the hash field itself, in the
 /// `blake3:<hex>` form recorded in `ResolvedProduct.product.lock_hash`.
+///
+/// # Errors
+/// Returns [`LockError`] when the product cannot be serialized to TOML, which a
+/// value the lock schema does not admit would cause.
 pub fn compute_hash(canonical: &ResolvedProduct) -> Result<String, LockError> {
     let mut blanked = canonical.clone();
     blanked.product.lock_hash.clear();

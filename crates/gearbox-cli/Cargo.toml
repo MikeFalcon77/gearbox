@@ -18,6 +18,7 @@ path = "src/main.rs"
 gearbox-engine.workspace = true
 gearbox-rpc.workspace = true
 gearbox-ir.workspace = true
+gearbox-lock.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true
