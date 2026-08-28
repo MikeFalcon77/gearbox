@@ -91,6 +91,18 @@ proc-macro2 = { version = "1", features = ["span-locations"] }
 # Filesystem
 walkdir = "2"
 
+# Generators. minijinja renders the Rust and text templates; `custom_syntax` is
+# what lets the Helm templates in M7 keep `{{ }}` for Helm and use `<< >>` for
+# us, so a generated chart is still a chart.
+minijinja = { version = "2", features = ["custom_syntax"] }
+# Note the hyphen: `serde-saphyr`, not `serde_yaml`. Pinned to the exact version
+# `gears-rust` deserializes with, because the point of generating AppConfig
+# through it is round-trip fidelity with the runtime's own reader -- a different
+# YAML dialect that merely looks right is the failure this pin prevents.
+serde-saphyr = "=0.0.22"
+# Three-way merge for OperatorOwned files.
+similar = "2"
+
 # Errors / util
 thiserror = "2"
 heck = "0.5"
