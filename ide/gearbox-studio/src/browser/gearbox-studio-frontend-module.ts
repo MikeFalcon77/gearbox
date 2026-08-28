@@ -1,17 +1,16 @@
 // Frontend wiring: two views, one store, one proxied service.
 
-import {
-  FrontendApplicationContribution,
-  WidgetFactory,
-  bindViewContribution,
-} from "@theia/core/lib/browser";
+import { FrontendApplicationContribution, bindViewContribution } from "@theia/core/lib/browser";
 import { WebSocketConnectionProvider } from "@theia/core/lib/browser/messaging";
 import { CommandContribution } from "@theia/core/lib/common";
+import { MenuContribution } from "@theia/core/lib/common/menu";
 import { ContainerModule } from "@theia/core/shared/inversify";
 import { LanguageGrammarDefinitionContribution } from "@theia/monaco/lib/browser/textmate/textmate-contribution";
 
 import { GEARBOX_SERVICE_PATH, GearboxClient, GearboxService } from "../common/protocol";
 import { CatalogueStore } from "./catalogue-store";
+import { bindWidget } from "./contribution";
+import { MenuNarrowing } from "./theia/core/menu-narrowing";
 import { RevealService } from "./reveal-service";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import {
@@ -59,29 +58,15 @@ export default new ContainerModule((bind) => {
     })
     .inSingletonScope();
 
-  bind(CatalogueWidget).toSelf();
-  bind(WidgetFactory)
-    .toDynamicValue(({ container }) => ({
-      id: CatalogueWidget.ID,
-      createWidget: () => container.get<CatalogueWidget>(CatalogueWidget),
-    }))
-    .inSingletonScope();
+  // Bound before the view contributions so it runs last among menu
+  // contributions: removal only works on a tree the contributors have already
+  // filled.
+  bind(MenuNarrowing).toSelf().inSingletonScope();
+  bind(MenuContribution).toService(MenuNarrowing);
 
-  bind(GearDetailWidget).toSelf();
-  bind(WidgetFactory)
-    .toDynamicValue(({ container }) => ({
-      id: GearDetailWidget.ID,
-      createWidget: () => container.get<GearDetailWidget>(GearDetailWidget),
-    }))
-    .inSingletonScope();
-
-  bind(DepsGraphWidget).toSelf();
-  bind(WidgetFactory)
-    .toDynamicValue(({ container }) => ({
-      id: DepsGraphWidget.ID,
-      createWidget: () => container.get<DepsGraphWidget>(DepsGraphWidget),
-    }))
-    .inSingletonScope();
+  bindWidget(bind, CatalogueWidget);
+  bindWidget(bind, GearDetailWidget);
+  bindWidget(bind, DepsGraphWidget);
 
   bindViewContribution(bind, CatalogueViewContribution);
   bind(FrontendApplicationContribution).toService(CatalogueViewContribution);

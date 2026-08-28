@@ -15,6 +15,11 @@ const URL = process.argv[2] ?? "http://127.0.0.1:3000/";
 const SAMPLE_MS = 25;
 const TIMEOUT_MS = 90_000;
 
+// Eleven of these checks sit inside `if` guards, so a run where a guard did not
+// fire reports a *smaller denominator* and still prints "passed". Pinning the
+// total is what turns that silent regression into a failure.
+const EXPECTED_CHECKS = 38;
+
 const checks = [];
 function check(name, ok, detail = "") {
   checks.push({ name, ok, detail });
@@ -524,6 +529,24 @@ try {
   // The app has no favicon: @theia/cli 1.75 offers no hook for one and its
   // generated index.html has no <link rel="icon">. Tolerated by name rather than
   // by filtering every 404, so a real missing resource still fails.
+  // --- the shell is narrowed ------------------------------------------------
+  // ADR 0011 requires that a removed menu be asserted *absent*, not merely
+  // removed once. Selection comes from `@theia/monaco` and Go from
+  // `@theia/editor` — packages the editor needs, so an upgrade that re-registers
+  // either would restore them silently.
+  const menus = await page.evaluate(() =>
+    Array.from(document.querySelectorAll(".lm-MenuBar-itemLabel, .p-MenuBar-itemLabel")).map((e) =>
+      e.textContent.trim(),
+    ),
+  );
+  check(
+    "the menu bar is the domain's, not a general editor's",
+    JSON.stringify(menus) === JSON.stringify(["File", "Edit", "Gearbox", "View", "Help"]),
+    menus.join(" "),
+  );
+  check("Selection is gone", !menus.includes("Selection"), menus.join(" "));
+  check("Go is gone", !menus.includes("Go"), menus.join(" "));
+
   const realErrors = consoleErrors.filter((e) => !/favicon\.ico/.test(e));
   check("no console errors", realErrors.length === 0, realErrors.slice(0, 3).join(" | "));
 
@@ -535,4 +558,12 @@ try {
 
 const failed = checks.filter((c) => !c.ok);
 console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);
+
+if (checks.length !== EXPECTED_CHECKS) {
+  console.log(
+    `\nFAIL ran ${checks.length} checks, expected ${EXPECTED_CHECKS}. A guarded block did not ` +
+      `fire, so this run proved less than it looks. Update EXPECTED_CHECKS when adding one.`,
+  );
+  process.exit(1);
+}
 process.exit(failed.length === 0 ? 0 : 1);

@@ -52,3 +52,6 @@ dist/
 # Python virtualenvs and caches
 /.venv/*
 **/__pycache__
+
+# Agent worktrees, created by the harness under .claude/worktrees/.
+.claude/
