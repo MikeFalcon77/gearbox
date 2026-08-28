@@ -864,7 +864,7 @@ because they need the resolver -- and the UI says so, driven by the engine's own
 own when M4 lands.
 
 `ide/scripts/ui-smoke.mjs` drives a headless Chrome against a running `browser-app` and asserts
-**26** things, stable across repeated runs. It is deliberately a *timeline* rather than a final
+**30** things, stable across repeated runs. It is deliberately a *timeline* rather than a final
 state: a snapshot taken after loading would pass even if the tree had appeared all at once, which is
 exactly the claim ADR-0009 makes and could not previously check. On the real tree it catches a
 window of roughly 550 ms in which all 14 rows are on screen, named and grouped, and all 14 are
@@ -880,7 +880,7 @@ Divergences from what §9 planned, each for a reason found while building:
 |---|---|---|
 | `elkjs` `layered` with a fixed seed | hand-rolled layered assignment + two barycentre sweeps | Deterministic by construction rather than by seed, and no async layout pass. The graph is a shallow DAG of 14 nodes. If it grows a cycle or a hundred nodes, `elkjs` is the answer. |
 | detail as part of the Catalogue widget | its own widget in the **bottom** area | In a 300px side panel the projected facts -- provider transports, which point a plugin fills and under which vendor, GTS types -- were clipped. The tree answers "what is there"; the detail answers "what is it", and they need different amounts of room. |
-| `@theia/{core,editor,filesystem,markers,monaco,navigator,process,workspace}` | plus `@theia/{preferences,userstorage,variable-resolver}` | Without `@theia/preferences` the frontend dies on `No matching bindings found for serviceIdentifier: Symbol(PreferenceProvider) - named "1"` -- the user-scope provider. |
+| `@theia/{core,editor,filesystem,markers,monaco,navigator,process,workspace}` | plus `@theia/{preferences,userstorage,variable-resolver,messages}` | Without `@theia/preferences` the frontend dies on `No matching bindings found for serviceIdentifier: Symbol(PreferenceProvider) - named "1"` -- the user-scope provider. Without `@theia/messages`, `MessageService` still resolves and every message goes nowhere, which is worse than an error: it makes reporting a failure look like handling it. |
 
 Three failure modes worth writing down, because all three *looked* fine:
 
@@ -898,6 +898,33 @@ Three failure modes worth writing down, because all three *looked* fine:
   that never matches is worse than no wait at all: with the timeout swallowed, the step passed or
   failed on timing. Keypresses sent while Theia is still installing its keybindings are simply lost,
   so the check presses F1 until the palette answers.
+
+Two more failure modes surfaced once the app was actually used, both the same
+shape as the three above -- something that looked fine and failed in silence:
+
+- **The `gear.gdl` and docs links were dead.** Every path the catalogue carries
+  is relative to its source root, and the root is the one thing only the engine
+  knows -- `SourceDecl::location` holds the location *as the operator wrote it*,
+  because it goes into `product.lock` and a lock carrying `/Users/someone/...`
+  would not survive being committed. So the relative path went into
+  `new URI(...)`, produced a URI with no scheme, and no opener claimed it.
+  `initialize` now reports `roots: [{ id, path }]` -- an RPC fact, deliberately
+  not an IR one, since the server and its client are on the same machine by
+  construction while the lock has to stay portable.
+- **The failure was swallowed twice.** First by an empty `catch` whose comment
+  assumed the file was outside the workspace -- an assumption never checked.
+  Then, after the first fix reported it through `MessageService`, by the absence
+  of `@theia/messages`: the service resolves without the package, and every
+  message goes nowhere. Reporting a failure looked like handling it.
+
+The lesson for the UI check is the general one: asserting that a link *renders*
+proves nothing, because the broken link rendered perfectly. It now asserts that
+**a tab opens**, for `gear.gdl` and for a docs link.
+
+A third trap, not in the UI at all: `npm run build` does not rebuild the engine.
+The backend spawns `../target/debug/gearbox`, so the Rust half stays stale and
+the symptom is a client reporting something the engine was already taught to
+send. `npm run verify` builds it first.
 
 Known cosmetic gap: the app has no favicon. `@theia/cli` 1.75 offers no hook for one and its
 generated `index.html` has no `<link rel="icon">`. The UI check tolerates that 404 **by name**, so a
@@ -960,7 +987,7 @@ workspace-member entries. Nothing else in that repo changes.
 | **M6** | Host-workers | new gear lands and passes its own test *by hand first*; then generated worker crate; host spawns worker; remote REST binding resolves via directory | M7 |
 | **M7** | Docker + Helm + `values.schema.json` | acceptance §12 step 4 in full | M6 |
 | **M8a** — **done** | JSON-RPC + TS types | `node ide/scripts/rpc-smoke.mjs` drives initialize → catalogue over real framing, 15/15; `cargo test -p gearbox-rpc`; stdout carries nothing but JSON-RPC | from M1 |
-| **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Gear detail and the co-location Graph are built and checked headlessly: `cd ide && npm run verify`, 26/26. Product, Explain, Lock and Generate wait on M4 and say so in the UI | after M4 + M8a |
+| **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Gear detail and the co-location Graph are built and checked headlessly: `cd ide && npm run verify`, 30/30. Product, Explain, Lock and Generate wait on M4 and say so in the UI | after M4 + M8a |
 | **M9** | **DESIGN + ADRs** (§14) — written *after* the prototype runs | reviewed against `docs/checklists/{DESIGN,ADR}.md`; every claim cites either a `gearbox-builder` symbol or a `gears-rust` `file:line`; every §13 gap has a home | — |
 
 Critical path M0 → M1 → M2 → M4 → M5 → M6 → M9. M8a needs only types, so its widgets can be

@@ -35,6 +35,15 @@ export class CatalogueStore implements GearboxClient {
     loading: false,
   };
   protected capabilities: InitializeResult["capabilities"] | undefined;
+  /**
+   * Where each source root is on this machine, from `initialize`.
+   *
+   * Needed because every path the catalogue carries -- `gdl_path`, and every
+   * PRD/DESIGN/ADR link -- is relative to its source root, and the root is the
+   * one thing only the server knows. Without it those paths cannot be opened,
+   * which is exactly how they came to be silently dead.
+   */
+  protected rootsById = new Map<string, string>();
   protected logLines: string[] = [];
 
   /**
@@ -67,6 +76,20 @@ export class CatalogueStore implements GearboxClient {
     return this.selectedKey === undefined ? undefined : this.rowsByKey.get(this.selectedKey);
   }
 
+  /**
+   * Absolute path for a catalogue-relative path, or `undefined` if the source
+   * is unknown.
+   *
+   * Returning `undefined` rather than the relative path: a caller that gets a
+   * path back will try to open it, and a relative path produces a URI with no
+   * scheme that no opener handles -- which fails quietly. Being unable to
+   * answer has to look different from answering.
+   */
+  absolutePath(source: string, relative: string): string | undefined {
+    const root = this.rootsById.get(source);
+    return root === undefined ? undefined : `${root}/${relative}`;
+  }
+
   select(key: string | undefined): void {
     this.selectedKey = key;
     this.onChangedEmitter.fire();
@@ -80,6 +103,7 @@ export class CatalogueStore implements GearboxClient {
 
     const init = await this.service.initialize();
     this.capabilities = init.capabilities;
+    this.rootsById = new Map((init.roots ?? []).map((r) => [r.id, r.path]));
 
     // Resolves at the S1/S2 boundary: the whole tree, none of it projected.
     const loaded = await this.service.loadCatalogue();

@@ -332,6 +332,79 @@ try {
     provider?.slice(0, 200) ?? "row not found",
   );
 
+  // --- the links actually open ---------------------------------------------
+  // This is the check that was missing, and its absence is why the links shipped
+  // dead. Asserting that an <a> exists proves nothing: the original one rendered
+  // perfectly and resolved to a URI with no scheme, and the rejection went into
+  // an empty catch. So the assertion has to be that a *tab opens*.
+  const opened = await page.evaluate(async () => {
+    const before = document.querySelectorAll(".p-TabBar-tab, .lm-TabBar-tab").length;
+    const link = Array.from(document.querySelectorAll(".gbx-links a")).find((a) =>
+      a.textContent.includes("gear.gdl"),
+    );
+    if (!link) return { clicked: false };
+    link.click();
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      await new Promise((r) => setTimeout(r, 100));
+      const tabs = Array.from(document.querySelectorAll(".p-TabBar-tab, .lm-TabBar-tab"));
+      const gdl = tabs.find((t) => t.textContent.includes("gear.gdl"));
+      if (gdl) return { clicked: true, opened: true, title: gdl.textContent.trim() };
+      // A failure now surfaces as a notification instead of silence.
+      const toast = document.querySelector(".theia-notification-message span");
+      if (toast) return { clicked: true, opened: false, error: toast.textContent };
+      if (document.querySelectorAll(".p-TabBar-tab, .lm-TabBar-tab").length > before) {
+        return { clicked: true, opened: true, title: "(new tab)" };
+      }
+    }
+    return { clicked: true, opened: false, error: "nothing happened within 6s" };
+  });
+
+  check("the gear.gdl link is present", opened.clicked);
+  check(
+    "clicking it opens the file",
+    opened.opened === true,
+    opened.opened ? opened.title : (opened.error ?? "no tab and no error -- silent failure"),
+  );
+
+  // The docs links are the same code path with a different field and a
+  // different gear, and `cluster` is the one that has all three kinds.
+  const docs = await page.evaluate(async () => {
+    const row = Array.from(document.querySelectorAll(".gbx-row")).find((r) =>
+      r.querySelector(".gbx-row-name")?.textContent.includes("Cluster Coordination"),
+    );
+    if (!row) return { found: false };
+    row.click();
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await new Promise((r) => setTimeout(r, 50));
+      const links = Array.from(document.querySelectorAll(".gbx-links a")).map((a) =>
+        a.textContent.trim(),
+      );
+      if (links.includes("PRD")) {
+        const prd = Array.from(document.querySelectorAll(".gbx-links a")).find(
+          (a) => a.textContent.trim() === "PRD",
+        );
+        prd.click();
+        for (let wait = 0; wait < 60; wait += 1) {
+          await new Promise((r) => setTimeout(r, 100));
+          const tabs = Array.from(document.querySelectorAll(".lm-TabBar-tabLabel")).map((t) =>
+            t.textContent.trim(),
+          );
+          if (tabs.includes("PRD.md")) return { found: true, opened: true, links };
+          const toast = document.querySelector(".theia-notification-message");
+          if (toast) return { found: true, opened: false, error: toast.textContent };
+        }
+        return { found: true, opened: false, error: "no tab within 6s", links };
+      }
+    }
+    return { found: true, opened: false, error: "no PRD link rendered" };
+  });
+  check("a gear with docs shows PRD, DESIGN and ADR links", docs.found && !!docs.links, (docs.links ?? []).join(", "));
+  check(
+    "a docs link opens too",
+    docs.opened === true,
+    docs.opened ? "PRD.md" : (docs.error ?? "silent failure"),
+  );
+
   const categories = last.groups ?? [];
   check(
     "categories come from the platform, not from us",

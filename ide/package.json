@@ -18,6 +18,7 @@
     "@theia/editor": "1.75.0",
     "@theia/filesystem": "1.75.0",
     "@theia/markers": "1.75.0",
+    "@theia/messages": "1.75.0",
     "@theia/monaco": "1.75.0",
     "@theia/navigator": "1.75.0",
     "@theia/preferences": "1.75.0",
@@ -31,7 +32,9 @@
     "build": "npm run build --workspace gearbox-studio && npm run build --workspace browser-app",
     "start:browser": "npm run start --workspace browser-app",
     "ui-smoke": "node scripts/ui-smoke.mjs",
-    "verify": "npm run smoke && npm run build && npm run ui-smoke"
+    "verify": "npm run engine && npm run smoke && npm run build && npm run ui-smoke",
+    "engine": "cargo build --manifest-path ../Cargo.toml -p gearbox-cli"
   },
-  "//puppeteer": "Declared, not borrowed. puppeteer arrives transitively through @theia/cli, and ui-smoke.mjs would break silently the day that dependency moved -- with a failure that looks like a broken UI rather than a missing tool."
+  "//puppeteer": "Declared, not borrowed. puppeteer arrives transitively through @theia/cli, and ui-smoke.mjs would break silently the day that dependency moved -- with a failure that looks like a broken UI rather than a missing tool.",
+  "//engine": "The backend spawns ../target/debug/gearbox, so a change to the Rust side is invisible to `npm run build`. Leaving the two out of step cost a debugging session: the client reported a missing source root that the engine had already been taught to send."
 }

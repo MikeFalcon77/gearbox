@@ -7,13 +7,13 @@
 // panel clipped all of it. The tree answers "what is there"; this answers "what
 // is it", and the two need different amounts of room.
 
-import { OpenerService, ReactWidget, open } from "@theia/core/lib/browser";
-import { URI } from "@theia/core/lib/common/uri";
+import { ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
 import type { GearDescriptor } from "../../common/generated/GearDescriptor";
 import { CatalogueStore } from "../catalogue-store";
+import { RevealService } from "../reveal-service";
 
 @injectable()
 export class GearDetailWidget extends ReactWidget {
@@ -21,7 +21,7 @@ export class GearDetailWidget extends ReactWidget {
   static readonly LABEL = "Gearbox Gear";
 
   @inject(CatalogueStore) protected readonly store!: CatalogueStore;
-  @inject(OpenerService) protected readonly openerService!: OpenerService;
+  @inject(RevealService) protected readonly reveals!: RevealService;
 
   @postConstruct()
   protected init(): void {
@@ -58,7 +58,7 @@ export class GearDetailWidget extends ReactWidget {
             <span>category</span>
             <span>{row.gear.category ?? "—"}</span>
           </div>
-          {this.renderPath(row.gear.gdl_path)}
+          {this.renderPath(row.gear.source, row.gear.gdl_path)}
           <div className="gbx-empty">
             Capabilities, co-location, contracts and GTS types come from this
             gear's Rust attributes, which have not been read yet.
@@ -178,15 +178,17 @@ export class GearDetailWidget extends ReactWidget {
           <div className="gbx-kv">
             <span>docs</span>
             <span className="gbx-links">
-              {this.renderDocLink("PRD", gear.docs.prd)}
-              {this.renderDocLink("DESIGN", gear.docs.design)}
-              {(gear.docs.adr ?? []).map((adr) => this.renderDocLink(basename(adr), adr))}
+              {this.renderDocLink(gear.source, "PRD", gear.docs.prd)}
+              {this.renderDocLink(gear.source, "DESIGN", gear.docs.design)}
+              {(gear.docs.adr ?? []).map((adr) =>
+                this.renderDocLink(gear.source, adrLabel(adr), adr),
+              )}
               {!gear.docs.prd && !gear.docs.design && (gear.docs.adr ?? []).length === 0 && "—"}
             </span>
           </div>
         )}
 
-        {this.renderPath(gear.gdl_path)}
+        {this.renderPath(gear.source, gear.gdl_path)}
 
         {capabilities && !capabilities.resolve && (
           // Honest about the gap rather than showing an empty panel that reads as
@@ -201,37 +203,48 @@ export class GearDetailWidget extends ReactWidget {
     );
   }
 
-  protected renderPath(gdlPath: string): React.ReactNode {
+  protected renderPath(source: string, gdlPath: string): React.ReactNode {
     return (
       <div className="gbx-kv">
         <span>description file</span>
         <span className="gbx-links">
-          <a onClick={() => void this.reveal(gdlPath)}>{gdlPath}</a>
+          <a onClick={() => void this.reveals.reveal(source, gdlPath)} title={gdlPath}>
+            {gdlPath}
+          </a>
         </span>
       </div>
     );
   }
 
-  protected renderDocLink(label: string, target: string | null | undefined): React.ReactNode {
+  protected renderDocLink(
+    source: string,
+    label: string,
+    target: string | null | undefined,
+  ): React.ReactNode {
     if (target === null || target === undefined) {
       return undefined;
     }
     return (
-      <a key={target} onClick={() => void this.reveal(target)} title={target}>
+      <a key={target} onClick={() => void this.reveals.reveal(source, target)} title={target}>
         {label}
       </a>
     );
   }
 
-  protected async reveal(target: string): Promise<void> {
-    // Best-effort: the engine's source root is not necessarily the opened
-    // workspace, so a path may resolve to nothing openable here.
-    try {
-      await open(this.openerService, new URI(target));
-    } catch {
-      // Nothing to do; the file is outside the opened workspace.
-    }
-  }
+}
+
+/**
+ * `ADR 001` rather than `001-provider-compatibility-and-performance.md`.
+ *
+ * `cluster` has nine ADRs and `types-registry` fifteen, with names long enough
+ * that the full filenames wrapped to three lines and read as a paragraph rather
+ * than as a list. The number is the part anyone actually cites; the filename
+ * stays in the link's tooltip.
+ */
+function adrLabel(target: string): string {
+  const file = basename(target);
+  const numbered = /^(\d+)/.exec(file);
+  return numbered ? `ADR ${numbered[1]}` : file.replace(/\.md$/, "");
 }
 
 function basename(target: string): string {

@@ -54,6 +54,22 @@ pub struct ServerInfo {
     pub version: String,
 }
 
+/// One source root as the server resolved it on this machine.
+///
+/// Deliberately an RPC fact, not an IR one. `SourceDecl::location` keeps the
+/// location *as the operator wrote it* because it goes into `product.lock`, and
+/// a lock carrying `/Users/someone/...` would not survive being committed. But a
+/// client rendering a clickable path needs a real path, and the RPC server and
+/// its client are on the same machine by construction -- so this is the layer
+/// where an absolute path is the right answer.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ResolvedRoot {
+    /// The source id every `GearDescriptor::source` refers to.
+    pub id: String,
+    /// Canonical absolute path of the root directory.
+    pub path: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct InitializeResult {
     pub server_info: ServerInfo,
@@ -61,6 +77,13 @@ pub struct InitializeResult {
     /// worth showing, so a panel is disabled rather than empty when the engine
     /// cannot answer it yet.
     pub capabilities: Capabilities,
+    /// Where each source root actually is.
+    ///
+    /// Without this a client cannot open anything the catalogue points at:
+    /// `gdl_path` and every docs path are relative to their source root, and the
+    /// root is the one thing only the server knows.
+    #[serde(default)]
+    pub roots: Vec<ResolvedRoot>,
 }
 
 /// Deliberately honest about what is not built.

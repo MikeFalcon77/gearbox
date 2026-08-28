@@ -77,6 +77,7 @@ export * from "./ResolvedGear";
 export * from "./ResolvedProcess";
 export * from "./ResolvedProduct";
 export * from "./ResolvedProductHeader";
+export * from "./ResolvedRoot";
 export * from "./ResolvedSource";
 export * from "./RestProjection";
 export * from "./RestVisibility";

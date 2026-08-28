@@ -23,7 +23,7 @@ use lsp_server::{Connection, ExtractError, Message, Notification, Request, Reque
 
 use crate::protocol::{
     Capabilities, CatalogueChanged, CatalogueLoadResult, InitializeParams, InitializeResult,
-    LogParams, ProgressParams, ServerInfo, error_code, method,
+    LogParams, ProgressParams, ResolvedRoot, ServerInfo, error_code, method,
 };
 
 /// Why the server could not run.
@@ -172,6 +172,16 @@ fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Re
                 resolve: false,
                 generate: false,
             },
+            // `SourceRoot::root` is already canonicalized, which is what makes
+            // it safe to join a `gdl_path` onto without `..` ambiguity.
+            roots: state
+                .roots
+                .iter()
+                .map(|root| ResolvedRoot {
+                    id: root.id.as_str().to_owned(),
+                    path: root.root.display().to_string(),
+                })
+                .collect(),
         },
     )
 }

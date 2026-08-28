@@ -23,10 +23,16 @@ GEARBOX_ENGINE=/path/to/gearbox GEARBOX_ROOT=/path/to/gears npm run start:browse
 ## Checking it
 
 ```bash
+npm run engine       # cargo build -p gearbox-cli -- the binary the backend spawns
 npm run smoke        # JSON-RPC over real vscode-jsonrpc framing, no browser
 npm run ui-smoke     # headless Chrome against a running app (start it first)
-npm run verify       # smoke + build + ui-smoke
+npm run verify       # engine + smoke + build + ui-smoke
 ```
+
+**`npm run build` does not rebuild the engine.** The backend spawns
+`../target/debug/gearbox`, so a change on the Rust side is invisible to the
+TypeScript build -- and the symptom is a client that reports something the engine
+was already taught to send. `npm run verify` builds it first for that reason.
 
 `ui-smoke.mjs` samples the DOM on a timeline rather than after loading finishes, because the claim
 under test is that a row is useful *before* it is complete. A snapshot taken at the end would pass

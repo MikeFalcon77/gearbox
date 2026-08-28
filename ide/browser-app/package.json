@@ -7,6 +7,7 @@
     "@theia/editor": "1.75.0",
     "@theia/filesystem": "1.75.0",
     "@theia/markers": "1.75.0",
+    "@theia/messages": "1.75.0",
     "@theia/monaco": "1.75.0",
     "@theia/navigator": "1.75.0",
     "@theia/preferences": "1.75.0",

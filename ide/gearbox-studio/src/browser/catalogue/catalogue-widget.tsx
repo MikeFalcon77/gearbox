@@ -5,8 +5,7 @@
 // reshuffling -- and expressing that is clearer with a render function than with
 // a tree model whose node identity would have to be taught the same rule.
 
-import { OpenerService, ReactWidget, open } from "@theia/core/lib/browser";
-import { URI } from "@theia/core/lib/common/uri";
+import { ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 // The shim is `export = React`, so a namespace import is rejected under
 // esModuleInterop; a default import is the form that works.
@@ -14,6 +13,7 @@ import React from "@theia/core/shared/react";
 
 import { Row, rowKey } from "../../common/protocol";
 import { CatalogueStore } from "../catalogue-store";
+import { RevealService } from "../reveal-service";
 
 @injectable()
 export class CatalogueWidget extends ReactWidget {
@@ -21,7 +21,7 @@ export class CatalogueWidget extends ReactWidget {
   static readonly LABEL = "Gearbox Catalogue";
 
   @inject(CatalogueStore) protected readonly store!: CatalogueStore;
-  @inject(OpenerService) protected readonly openerService!: OpenerService;
+  @inject(RevealService) protected readonly reveals!: RevealService;
 
   @postConstruct()
   protected init(): void {
@@ -84,7 +84,7 @@ export class CatalogueWidget extends ReactWidget {
         onClick={() => {
           this.store.select(key);
         }}
-        onDoubleClick={() => void this.reveal(key)}
+        onDoubleClick={() => void this.reveals.reveal(row.gear.source, key)}
         title={key}
       >
         <span className="gbx-row-name">{label}</span>
@@ -106,16 +106,6 @@ export class CatalogueWidget extends ReactWidget {
     );
   }
 
-  protected async reveal(gdlPath: string): Promise<void> {
-    // The root is the engine's, so this is best-effort until the workspace and
-    // the source root are the same thing.
-    const uri = new URI(gdlPath);
-    try {
-      await open(this.openerService, uri);
-    } catch {
-      // Nothing to do: the file may be outside the opened workspace.
-    }
-  }
 }
 
 function groupByCategory(rows: readonly Row[]): [string, Row[]][] {

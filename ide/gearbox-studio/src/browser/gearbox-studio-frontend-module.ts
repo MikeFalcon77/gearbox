@@ -11,6 +11,7 @@ import { ContainerModule } from "@theia/core/shared/inversify";
 
 import { GEARBOX_SERVICE_PATH, GearboxClient, GearboxService } from "../common/protocol";
 import { CatalogueStore } from "./catalogue-store";
+import { RevealService } from "./reveal-service";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import {
   CatalogueViewContribution,
@@ -24,6 +25,7 @@ import "../../src/browser/style/index.css";
 
 export default new ContainerModule((bind) => {
   bind(CatalogueStore).toSelf().inSingletonScope();
+  bind(RevealService).toSelf().inSingletonScope();
   bind(GearboxClient).toService(CatalogueStore);
 
   bind(GearboxService)
