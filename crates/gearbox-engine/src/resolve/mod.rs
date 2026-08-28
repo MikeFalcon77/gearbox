@@ -14,6 +14,7 @@ pub mod closure;
 pub mod cuts;
 pub mod partition;
 pub mod profile;
+pub mod structural;
 
 use gearbox_ir::{
     Catalogue, Diagnostic, DiagnosticCode, Diagnostics, Location, ProductIntent, ProfileId,
@@ -93,7 +94,10 @@ pub fn resolve(catalogue: &Catalogue, intent: &ProductIntent, profile: &ProfileI
         selected: &selected,
     };
     let partition = if let Some(declaration) = intent.profiles.get(profile) {
-        partition::partition(&input, declaration, &uri, &mut diagnostics)
+        let partition = partition::partition(&input, declaration, &uri, &mut diagnostics);
+        // Step 5 -- what the runtime will refuse, said before a binary exists.
+        structural::check(catalogue, &partition, declaration, &uri, &mut diagnostics);
+        partition
     } else {
         diagnostics.push(unknown_profile(intent, profile, &uri));
         partition::Partition::default()

@@ -276,3 +276,54 @@ pub fn host_workers_intent(gears: &[&str]) -> ProductIntent {
     );
     intent
 }
+
+// ------------------------------------------------------- structural fixtures
+
+use gearbox_ir::RuntimeCap;
+
+/// A gear carrying the given runtime capabilities.
+pub fn gear_with_caps(id: &str, caps: &[RuntimeCap], deps: &[&str]) -> GearDescriptor {
+    let mut g = descriptor(id);
+    g.runtime_caps = caps.iter().copied().collect();
+    g.colocated_deps = deps.iter().map(|d| gid(d)).collect();
+    g
+}
+
+/// Build a catalogue from a list of gears.
+pub fn catalogue_of(gears: Vec<GearDescriptor>) -> Catalogue {
+    let mut catalogue = Catalogue::default();
+    for g in gears {
+        catalogue.gears.insert(g.id.clone(), g);
+    }
+    catalogue
+}
+
+/// An intent with one `host_workers` profile, tunable.
+pub fn host_workers(
+    gears: &[&str],
+    discovery: gearbox_ir::Discovery,
+    target_dir: Option<&str>,
+) -> ProductIntent {
+    let mut intent = intent(gears);
+    let local = ProfileId::new("local").unwrap();
+    intent.profiles.insert(
+        local.clone(),
+        gearbox_ir::DeploymentProfileDecl::HostWorkers {
+            id: local,
+            host: gearbox_ir::ProcessId::new("host").unwrap(),
+            discovery,
+            target_dir: target_dir.map(ToOwned::to_owned),
+        },
+    );
+    intent
+}
+
+/// Force a second process by pinning a gear to one.
+pub fn pin(intent: &mut ProductIntent, name: &str, anchor: &str, replicas: u32) {
+    intent.process_pins.push(gearbox_ir::ProcessPin {
+        name: gearbox_ir::ProcessId::new(name).unwrap(),
+        anchor: gid(anchor),
+        replicas,
+        profiles: BTreeSet::new(),
+    });
+}
