@@ -1,0 +1,207 @@
+//! Turning a `product.lock` into files.
+//!
+//! Everything in this module except [`apply`] is a pure function from a
+//! [`ResolvedProduct`] to a [`FileSet`]: same lock in, same bytes out, no clock,
+//! no environment, no filesystem. That is what makes `--dry-run` trustworthy --
+//! the preview is produced by the same code that produces the artefact, not by a
+//! second implementation that describes it.
+//!
+//! **Why this lives in `gearbox-engine` and not in a `gearbox-gen` crate.** The
+//! plan names a separate crate. Two things argue against it here, and the second
+//! is decisive. First, precedent: this repository has twice folded a planned
+//! crate into an existing one when the boundary bought nothing -- `gearbox-verify`
+//! became `gearbox-project`, `gearbox-resolve` became `gearbox-engine::resolve`.
+//! Second, [`apply`] must live in `gearbox-engine` regardless, because that is
+//! the crate permitted to touch the filesystem; a separate crate would therefore
+//! split the writer from the thing it writes, and every generator would be one
+//! `use` away from a caller that forgot which half it was holding. Purity is a
+//! property of these functions, and it is asserted by testing them from literals
+//! rather than by a manifest that cannot see inside them.
+//!
+//! **What is here and what is not.** M5 covers the embedded profile: the
+//! generated workspace, `rust-toolchain.toml`, the host process crate, and the
+//! runtime configuration. Worker entry points are M6 and Docker and Helm are M7.
+//! A worker process reaching this code is *named* in [`Generated::skipped`]
+//! rather than silently dropped -- a generator that produced four files out of
+//! six and said nothing would be indistinguishable from one that was finished.
+
+mod apply;
+mod config;
+mod manifest;
+mod merge3;
+mod paths;
+mod rust;
+mod workspace;
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use gearbox_ir::{FileSet, ProcessId, ProcessKind, ResolvedProduct, SourceId};
+
+pub use apply::{ApplyOutcome, apply_generate, base_root_for, plan, summarize};
+
+/// Why generation could not produce a usable tree.
+///
+/// Every variant is a condition under which the output would not compile or
+/// would not be readable, so none of them is recoverable by carrying on: a
+/// half-correct crate whose `registered_gears.rs` names a dependency the
+/// manifest does not declare wastes a two-minute `cargo build` to say what this
+/// says immediately.
+#[derive(Debug, thiserror::Error)]
+pub enum GenerateError {
+    #[error("gear `{gear}` is in process `{process}` but not in the lock's gear table")]
+    UnknownGear { process: String, gear: String },
+
+    #[error("gear `{gear}` names source `{id}`, which the generator was not given a path for")]
+    UnknownSource { gear: String, id: String },
+
+    #[error(
+        "gear `{gear}` links `{ident}`, whose crate root `{root}` is not a library identifier the \
+         process depends on; the generated `registered_gears.rs` would not compile"
+    )]
+    UnlinkableIdent {
+        gear: String,
+        ident: String,
+        root: String,
+    },
+
+    #[error(
+        "`{first}` and `{second}` both link as `{ident}`, so one of them would be dropped from \
+         the generated manifest"
+    )]
+    LibIdentCollision {
+        ident: String,
+        first: String,
+        second: String,
+    },
+
+    #[error("`{path}` is not a usable relative path inside the output root")]
+    BadPath { path: String },
+
+    #[error("two generators both claim `{path}`")]
+    DuplicatePath { path: String },
+
+    #[error("could not render the {what} template")]
+    Template {
+        what: &'static str,
+        #[source]
+        source: Box<minijinja::Error>,
+    },
+
+    #[error("could not serialize {what}")]
+    Toml {
+        what: &'static str,
+        #[source]
+        source: toml::ser::Error,
+    },
+
+    #[error("could not serialize {what} as YAML")]
+    Yaml {
+        what: &'static str,
+        #[source]
+        source: serde_saphyr::ser::Error,
+    },
+
+    #[error("could not render the lock")]
+    Lock(#[from] gearbox_lock::LockError),
+
+    #[error("{what} `{}`", .path.display())]
+    Io {
+        what: &'static str,
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// Everything generation needs, and nothing it does not.
+///
+/// The source roots are absolute and canonical: the generated manifests carry
+/// **relative** path dependencies into `gears-rust`, and a relative path can
+/// only be computed between two absolute ones. Passing them in rather than
+/// reading `ResolvedSource::location` is deliberate -- that field records the
+/// location as the operator typed it on the command line, which is relative to
+/// whatever directory they were standing in.
+pub struct GenerateInput<'a> {
+    pub lock: &'a ResolvedProduct,
+
+    /// Absolute, canonicalized root directory per source id.
+    pub source_roots: &'a BTreeMap<SourceId, PathBuf>,
+
+    /// Absolute output root, conventionally `.gearbox/<product>/<profile>/`.
+    pub out_root: &'a Path,
+}
+
+/// What one generation run produced.
+pub struct Generated {
+    pub files: FileSet,
+
+    /// Processes this milestone does not know how to generate for, named rather
+    /// than omitted.
+    pub skipped: Vec<ProcessId>,
+}
+
+/// The whole file set for one resolved product.
+///
+/// # Errors
+/// Returns [`GenerateError`] when the lock describes something the generator
+/// cannot turn into a compilable tree -- see that type; every variant means the
+/// output would be wrong rather than merely incomplete.
+pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
+    let mut files = FileSet::new();
+    let mut skipped = Vec::new();
+
+    let hosts: Vec<_> = input
+        .lock
+        .processes
+        .iter()
+        .filter(|p| matches!(p.kind, ProcessKind::Host))
+        .collect();
+    for process in &input.lock.processes {
+        if !matches!(process.kind, ProcessKind::Host) {
+            skipped.push(process.name.clone());
+        }
+    }
+
+    insert(&mut files, workspace::workspace_manifest(&hosts)?)?;
+    insert(&mut files, workspace::toolchain()?)?;
+    insert(&mut files, workspace::lock_file(input.lock)?)?;
+
+    for process in hosts {
+        insert(&mut files, manifest::process_manifest(input, process)?)?;
+        insert(&mut files, rust::host_main(process)?)?;
+        insert(&mut files, rust::registered_gears(input, process)?)?;
+        insert(&mut files, config::app_config(input, process)?)?;
+    }
+
+    Ok(Generated { files, skipped })
+}
+
+/// Add one entry, refusing rather than overwriting.
+///
+/// Two generators claiming a path is a bug in this module, and the difference
+/// between finding it here and finding it in the output tree is the difference
+/// between a message and an afternoon.
+fn insert(files: &mut FileSet, entry: gearbox_ir::FileEntry) -> Result<(), GenerateError> {
+    let path = entry.path.clone();
+    if files.insert(entry).is_some() {
+        return Err(GenerateError::DuplicatePath {
+            path: path.as_str().to_owned(),
+        });
+    }
+    Ok(())
+}
+
+/// The header every generated file whose format has comments carries.
+///
+/// `DO NOT EDIT` is not decoration. `Generated` files are overwritten without
+/// asking, so the header is the only warning an operator gets before losing an
+/// edit -- and the Go toolchain's convention proves a machine-readable form of
+/// it is worth having.
+fn header(comment: &str) -> String {
+    format!(
+        "{comment} GENERATED by gearbox {} -- do not edit. \
+         Run `gearbox generate` to regenerate.\n",
+        env!("CARGO_PKG_VERSION")
+    )
+}

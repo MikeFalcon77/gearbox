@@ -1,0 +1,120 @@
+{{ header }}
+
+mod registered_gears;
+
+use std::path::PathBuf;
+
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+use toolkit::bootstrap::{
+    AppConfig, dump_effective_gears_config_json, dump_effective_gears_config_yaml, list_gear_names,
+    run_migrate, run_server,
+};
+use toolkit::registry::GearRegistry;
+
+/// The host process for `{{ process }}`.
+#[derive(Parser)]
+#[command(name = "{{ bin_name }}")]
+#[command(about = "Generated Gears host: {{ gear_count }} gear(s) composed by gearbox")]
+struct Cli {
+    /// Path to the configuration file.
+    #[arg(short, long)]
+    config: Option<PathBuf>,
+
+    /// Log verbosity level (-v debug, -vv trace).
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    verbose: u8,
+
+    /// Print the effective configuration (YAML) and exit.
+    #[arg(long)]
+    print_config: bool,
+
+    /// List the gear names the configuration mentions and exit.
+    #[arg(long)]
+    list_gears: bool,
+
+    /// List the gears actually linked into this binary and exit.
+    ///
+    /// The verification oracle: `list_gears` reports what the configuration
+    /// says, this reports what the registry found by inventory discovery.
+    /// Prints `<name>\t<dep>,<dep>` with the dependencies sorted, so the
+    /// output can be compared against `gearbox lock gears` line for line.
+    #[arg(long)]
+    list_registered_gears: bool,
+
+    /// Dump the effective per-gear configuration (YAML) and exit.
+    #[arg(long)]
+    dump_gears_config_yaml: bool,
+
+    /// Dump the effective per-gear configuration (JSON) and exit.
+    #[arg(long)]
+    dump_gears_config_json: bool,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Start the server.
+    Run,
+    /// Load and validate, then exit.
+    Check,
+    /// Run database migrations and exit.
+    Migrate,
+}
+
+/// Print the registry's own inventory, in the order it resolved.
+///
+/// Note the order is *a* topological order, not a canonical one: the registry
+/// seeds Kahn's algorithm from a `HashMap`'s iteration order, so two runs of
+/// the same binary can legitimately disagree about the order of gears that do
+/// not depend on one another. Compare sorted output, not this order.
+fn list_registered_gears() -> Result<()> {
+    let registry = GearRegistry::discover_and_build()?;
+    for entry in registry.gears() {
+        let mut deps: Vec<&str> = entry.deps().to_vec();
+        deps.sort_unstable();
+        println!("{}\t{}", entry.name(), deps.join(","));
+    }
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    // Before the configuration is read, deliberately: the oracle has to be
+    // answerable for a binary whose configuration is the thing under suspicion.
+    if cli.list_registered_gears {
+        return list_registered_gears();
+    }
+
+    let mut config = AppConfig::load_or_default(cli.config.as_ref())?;
+    config.apply_cli_overrides(cli.verbose);
+
+    if cli.print_config {
+        println!("{}", config.to_yaml()?);
+        return Ok(());
+    }
+    if cli.list_gears {
+        for gear in list_gear_names(&config) {
+            println!("{gear}");
+        }
+        return Ok(());
+    }
+    if cli.dump_gears_config_yaml {
+        println!("{}", dump_effective_gears_config_yaml(&config)?);
+        return Ok(());
+    }
+    if cli.dump_gears_config_json {
+        println!("{}", dump_effective_gears_config_json(&config)?);
+        return Ok(());
+    }
+
+    match cli.command.unwrap_or(Commands::Run) {
+        Commands::Run => run_server(config).await,
+        Commands::Migrate => run_migrate(config).await,
+        Commands::Check => Ok(()),
+    }
+}

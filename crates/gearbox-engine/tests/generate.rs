@@ -1,0 +1,534 @@
+//! The generators, against the real tree.
+//!
+//! `products/payments-demo/product.gdl` resolved for `dev` is the M5 slice, and
+//! everything here asserts against what that produces from `../gears-rust`
+//! rather than from a fixture. The one thing a fixture is used for is the
+//! `OperatorOwned` path, and the reason is stated where it appears: the whole
+//! design has exactly one operator-owned file -- Helm's `values.yaml` -- and M7
+//! is where that arrives, so there is nothing real for it to be tried against.
+
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
+)]
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use gearbox_engine::generate::{GenerateInput, Generated, base_root_for, generate};
+use gearbox_engine::{SourceRoot, load_catalogue, load_product};
+use gearbox_ir::{
+    FileAction, FileEntry, FileKind, FileSet, GearId, Ownership, ProfileId, RelPath,
+    ResolvedProduct, SourceId,
+};
+
+fn gears_rust() -> Option<PathBuf> {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../gears-rust")
+        .canonicalize()
+        .ok()
+        .filter(|p| p.join("gears").is_dir())
+}
+
+fn product_gdl() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../products/payments-demo/product.gdl")
+        .canonicalize()
+        .expect("the repository's own product description")
+}
+
+/// Resolve the demo product for one profile against the real tree.
+fn resolve(profile: &str) -> Option<(ResolvedProduct, BTreeMap<SourceId, PathBuf>)> {
+    let root = gears_rust()?;
+    let opened = vec![SourceRoot::open(SourceId::new("gears-rust").unwrap(), &root).unwrap()];
+    let scan = load_catalogue(&opened);
+
+    let path = product_gdl();
+    let product = load_product(&path, None);
+    let intent = product.intent.expect("the product evaluates");
+    let profile = ProfileId::new(profile).unwrap();
+
+    let resolution =
+        gearbox_engine::resolve::resolve_at(&scan.catalogue, &intent, &profile, Some(&path));
+    let sources = opened
+        .iter()
+        .map(|r| (r.id.clone(), r.to_resolved()))
+        .collect();
+    let lock =
+        gearbox_engine::resolve::product::assemble(&scan.catalogue, &intent, &resolution, sources);
+
+    let roots = opened
+        .iter()
+        .map(|r| (r.id.clone(), r.root.clone()))
+        .collect();
+    Some((lock, roots))
+}
+
+/// A fixed output root. Never written to by these tests -- generation is pure,
+/// and the path only decides what the relative dependency paths are relative
+/// to.
+fn out_root() -> PathBuf {
+    PathBuf::from("/workspace/.gearbox/payments-demo/dev")
+}
+
+fn generated(profile: &str) -> Option<(ResolvedProduct, Generated)> {
+    let (lock, source_roots) = resolve(profile)?;
+    let out = out_root();
+    let files = generate(&GenerateInput {
+        lock: &lock,
+        source_roots: &source_roots,
+        out_root: &out,
+    })
+    .expect("generation succeeds for the demo product");
+    Some((lock, files))
+}
+
+fn text<'a>(files: &'a FileSet, path: &str) -> &'a str {
+    files
+        .get(&RelPath::new(path).unwrap())
+        .unwrap_or_else(|| panic!("no generated file at `{path}`"))
+        .as_text()
+        .expect("generated files are UTF-8")
+}
+
+#[test]
+fn the_embedded_profile_generates_the_documented_output_set() {
+    let Some((_, files)) = generated("dev") else {
+        return;
+    };
+    let paths: Vec<&str> = files.files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        [
+            "Cargo.toml",
+            "config/api-gateway.yaml",
+            "processes/api-gateway/Cargo.toml",
+            "processes/api-gateway/src/main.rs",
+            "processes/api-gateway/src/registered_gears.rs",
+            "product.lock",
+            "rust-toolchain.toml",
+        ],
+        "the embedded profile's output set is the plan's section 7 table minus the \
+         Docker and Helm rows, which are M7"
+    );
+    assert!(
+        files.skipped.is_empty(),
+        "the embedded profile has no worker"
+    );
+}
+
+#[test]
+fn every_generated_file_is_tool_owned() {
+    // M5 produces nothing an operator owns. Asserted rather than assumed,
+    // because the three-way merge path is the one that can lose data and the
+    // claim that nothing reaches it should not rest on reading the code.
+    let Some((_, files)) = generated("dev") else {
+        return;
+    };
+    for file in &files.files {
+        assert_eq!(
+            file.ownership,
+            Ownership::Generated,
+            "`{}` is {}, but no M5 output is anything but Generated",
+            file.path,
+            file.ownership
+        );
+    }
+}
+
+#[test]
+fn no_generated_manifest_inherits_from_a_workspace() {
+    // The single most likely build failure: the generated crates live under
+    // `.gearbox/<product>/<profile>/`, outside the `gears-rust` workspace, so
+    // `edition.workspace = true` -- the spelling every crate they depend on
+    // uses -- resolves to nothing.
+    let Some((_, files)) = generated("dev") else {
+        return;
+    };
+    for file in &files.files {
+        if file.kind != FileKind::Toml {
+            continue;
+        }
+        let body = file.as_text().unwrap();
+        assert!(
+            !body.contains("workspace = true"),
+            "`{}` inherits from a workspace that will not be there",
+            file.path
+        );
+    }
+
+    let manifest = text(&files.files, "processes/api-gateway/Cargo.toml");
+    assert!(manifest.contains("edition = \"2024\""));
+    assert!(manifest.contains("rust-version = \"1.95.0\""));
+}
+
+#[test]
+fn the_manifest_and_the_link_file_agree() {
+    // The generated `registered_gears.rs` is also the source of the
+    // `--list-registered-gears` oracle, so a template bug could produce an
+    // oracle that agrees with a wrong composition. The independent check is
+    // that every link line names a dependency the manifest declares, and that
+    // every gear-crate dependency is linked.
+    let Some((lock, files)) = generated("dev") else {
+        return;
+    };
+    let manifest = text(&files.files, "processes/api-gateway/Cargo.toml");
+    let links = text(
+        &files.files,
+        "processes/api-gateway/src/registered_gears.rs",
+    );
+
+    let process = lock
+        .process(&gearbox_ir::ProcessId::new("api-gateway").unwrap())
+        .expect("the embedded profile resolves one process");
+
+    for id in &process.gears {
+        let gear = lock.gears.get(id).unwrap();
+        assert!(
+            manifest.contains(&format!("[dependencies.{}]", gear.package.lib_ident)),
+            "`{id}` has no dependency entry keyed by its library identifier `{}`",
+            gear.package.lib_ident
+        );
+        assert!(
+            manifest.contains(&format!("package = \"{}\"", gear.package.crate_name)),
+            "`{id}`'s package name is not spelled out"
+        );
+        for ident in gear.package.link_idents() {
+            assert!(
+                links.contains(&format!("use {ident} as _;")),
+                "`{id}` links `{ident}`, which the link file does not keep alive"
+            );
+        }
+    }
+
+    // `cf-api-contracts` is the load-bearing case: the crate has no `[lib]`
+    // section, so its identifier is `cf_api_contracts` and not `api_contracts`.
+    // A generator deriving the identifier from the package name gets this wrong
+    // and the mistake compiles nowhere.
+    assert!(links.contains("use cf_api_contracts as _;"));
+    assert!(!links.contains("use api_contracts as _;"));
+}
+
+#[test]
+fn the_config_carries_every_resolved_socket() {
+    let Some((lock, files)) = generated("dev") else {
+        return;
+    };
+    let config = text(&files.files, "config/api-gateway.yaml");
+    let process = lock
+        .process(&gearbox_ir::ProcessId::new("api-gateway").unwrap())
+        .unwrap();
+
+    assert!(
+        !process.listens.is_empty(),
+        "the resolver must assign the REST host a bind address; `bind_addr` has no \
+         serde default, so a config without one fails at startup"
+    );
+    for endpoint in &process.listens {
+        assert!(
+            config.contains(&format!("{}: {}", endpoint.config_key, endpoint.address)),
+            "`{}`'s `{}` is missing from the generated configuration",
+            endpoint.gear,
+            endpoint.config_key
+        );
+    }
+
+    // Every composed gear appears, so `--list-gears` and the composed set match.
+    for id in &process.gears {
+        assert!(
+            config.contains(&format!("  {id}:")),
+            "`{id}` is composed into the binary but absent from its configuration"
+        );
+    }
+}
+
+#[test]
+fn the_lock_is_written_beside_the_tree_it_produced() {
+    // `gearbox lock gears` is answered from this file, and the acceptance
+    // procedure runs it from inside the generated directory.
+    let Some((lock, files)) = generated("dev") else {
+        return;
+    };
+    let written = text(&files.files, "product.lock");
+    let reread = gearbox_lock::read(written).expect("the written lock reads back");
+    assert_eq!(reread.product.lock_hash, lock.product.lock_hash);
+}
+
+#[test]
+fn generation_is_deterministic() {
+    let Some((first, _)) = generated("dev") else {
+        return;
+    };
+    let (second, source_roots) = resolve("dev").unwrap();
+    let out = out_root();
+    let again = generate(&GenerateInput {
+        lock: &second,
+        source_roots: &source_roots,
+        out_root: &out,
+    })
+    .unwrap();
+
+    let one = generate(&GenerateInput {
+        lock: &first,
+        source_roots: &source_roots,
+        out_root: &out,
+    })
+    .unwrap();
+
+    let digests = |g: &Generated| -> Vec<(String, String)> {
+        g.files
+            .iter()
+            .map(|f| (f.path.as_str().to_owned(), f.digest()))
+            .collect()
+    };
+    assert_eq!(digests(&one), digests(&again));
+}
+
+#[test]
+fn the_lock_s_gear_order_is_a_valid_topological_order() {
+    // What `gearbox lock gears --order topo` prints. The running binary's own
+    // order cannot be compared against it -- `GearRegistry` seeds Kahn's
+    // algorithm from `HashMap::keys()`, which is randomized per process -- so
+    // the property that *is* checkable is that the lock's order is one the
+    // registry could legitimately have produced.
+    let Some((lock, _)) = generated("dev") else {
+        return;
+    };
+    for process in &lock.processes {
+        let mut seen: Vec<&GearId> = Vec::new();
+        for id in &process.gears {
+            let gear = lock.gears.get(id).unwrap();
+            for dep in &gear.colocated_deps {
+                assert!(
+                    seen.contains(&dep),
+                    "`{id}` is placed before its co-location dependency `{dep}`"
+                );
+            }
+            seen.push(id);
+        }
+    }
+}
+
+// ---------------------------------------------------------------- the writer
+
+/// A throwaway output tree.
+struct Out(PathBuf);
+
+impl Out {
+    fn new(label: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "gearbox-generate-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("profile")).unwrap();
+        Self(dir)
+    }
+
+    fn root(&self) -> PathBuf {
+        self.0.join("profile")
+    }
+
+    fn write(&self, rel: &str, body: &str) {
+        let path = self.root().join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+
+    fn read(&self, rel: &str) -> String {
+        std::fs::read_to_string(self.root().join(rel)).unwrap()
+    }
+}
+
+impl Drop for Out {
+    fn drop(&mut self) {
+        // A leftover temporary directory is untidy, not wrong, and a test that
+        // panicked during unwinding should not panic again here.
+        drop(std::fs::remove_dir_all(&self.0));
+    }
+}
+
+/// A one-file set. Hand-built: nothing in `gears-rust` produces an
+/// `OperatorOwned` or `GeneratedOnce` file, because the only operator-owned
+/// artefact in the whole design is Helm's `values.yaml` and M7 is where that
+/// arrives.
+fn one(path: &str, body: &str, ownership: Ownership) -> FileSet {
+    let mut set = FileSet::new();
+    drop(set.insert(FileEntry::text(
+        RelPath::new(path).unwrap(),
+        body,
+        FileKind::Yaml,
+        ownership,
+    )));
+    set
+}
+
+fn action(plans: &[gearbox_ir::FilePlan], path: &str) -> FileAction {
+    plans
+        .iter()
+        .find(|p| p.path.as_str() == path)
+        .unwrap_or_else(|| panic!("no plan for `{path}`"))
+        .action
+}
+
+#[test]
+fn a_generated_file_is_overwritten_and_then_reported_unchanged() {
+    let out = Out::new("generated");
+    let base = base_root_for(&out.root());
+    let files = one(
+        "values.generated.yaml",
+        "image: new\n",
+        Ownership::Generated,
+    );
+
+    let outcome = gearbox_engine::apply_generate(&files, &out.root(), &base).unwrap();
+    assert_eq!(
+        action(&outcome.plans, "values.generated.yaml"),
+        FileAction::Create
+    );
+    assert_eq!(outcome.written, 1);
+
+    let again = gearbox_engine::apply_generate(&files, &out.root(), &base).unwrap();
+    assert_eq!(
+        action(&again.plans, "values.generated.yaml"),
+        FileAction::Unchanged
+    );
+    assert_eq!(again.written, 0, "a second apply must be a no-op");
+}
+
+#[test]
+fn a_generated_once_file_is_never_revisited() {
+    let out = Out::new("once");
+    let base = base_root_for(&out.root());
+    out.write("gear.gdl", "the human's version\n");
+
+    let files = one("gear.gdl", "the tool's version\n", Ownership::GeneratedOnce);
+    let outcome = gearbox_engine::apply_generate(&files, &out.root(), &base).unwrap();
+
+    assert_eq!(action(&outcome.plans, "gear.gdl"), FileAction::Kept);
+    assert_eq!(outcome.written, 0);
+    assert_eq!(out.read("gear.gdl"), "the human's version\n");
+}
+
+#[test]
+fn an_operator_file_keeps_its_edits_across_a_regeneration() {
+    let out = Out::new("operator");
+    let base = base_root_for(&out.root());
+
+    // First run establishes the base.
+    let first = one(
+        "values.yaml",
+        "image: old\nport: 8080\n",
+        Ownership::OperatorOwned,
+    );
+    gearbox_engine::apply_generate(&first, &out.root(), &base).unwrap();
+
+    // The operator adds a key.
+    out.write(
+        "values.yaml",
+        "image: old\nport: 8080\nnodeSelector:\n  disk: ssd\n",
+    );
+
+    // The generator changes a different one.
+    let second = one(
+        "values.yaml",
+        "image: new\nport: 8080\n",
+        Ownership::OperatorOwned,
+    );
+    let outcome = gearbox_engine::apply_generate(&second, &out.root(), &base).unwrap();
+
+    assert_eq!(action(&outcome.plans, "values.yaml"), FileAction::Update);
+    assert_eq!(
+        out.read("values.yaml"),
+        "image: new\nport: 8080\nnodeSelector:\n  disk: ssd\n"
+    );
+}
+
+#[test]
+fn a_real_conflict_is_gbx0701_and_writes_nothing() {
+    let out = Out::new("conflict");
+    let base = base_root_for(&out.root());
+
+    let first = one("values.yaml", "image: old\n", Ownership::OperatorOwned);
+    gearbox_engine::apply_generate(&first, &out.root(), &base).unwrap();
+
+    out.write("values.yaml", "image: operators-choice\n");
+    let second = one(
+        "values.yaml",
+        "image: generators-choice\n",
+        Ownership::OperatorOwned,
+    );
+    let outcome = gearbox_engine::apply_generate(&second, &out.root(), &base).unwrap();
+
+    assert_eq!(action(&outcome.plans, "values.yaml"), FileAction::Conflict);
+    assert_eq!(outcome.written, 0);
+    assert!(
+        outcome
+            .diagnostics
+            .as_slice()
+            .iter()
+            .any(|d| d.code == gearbox_ir::DiagnosticCode::GenClobberOperatorFile),
+        "an unresolvable overlap must be GBX0701"
+    );
+    assert_eq!(
+        out.read("values.yaml"),
+        "image: operators-choice\n",
+        "the operator's file must be left exactly as they left it"
+    );
+}
+
+#[test]
+fn a_conflict_stops_the_whole_apply() {
+    // The transactional requirement of ADR
+    // `cpt-gearbox-adr-authoring-ownership-tiers`: a run that wrote the files it
+    // could and left one conflicted produces a tree that is half one product
+    // and half another, and nothing downstream can tell.
+    let out = Out::new("atomic");
+    let base = base_root_for(&out.root());
+
+    let seed = one("values.yaml", "image: old\n", Ownership::OperatorOwned);
+    gearbox_engine::apply_generate(&seed, &out.root(), &base).unwrap();
+    out.write("values.yaml", "image: operators-choice\n");
+
+    let mut files = one(
+        "values.yaml",
+        "image: generators-choice\n",
+        Ownership::OperatorOwned,
+    );
+    drop(files.insert(FileEntry::text(
+        RelPath::new("Cargo.toml").unwrap(),
+        "[workspace]\n",
+        FileKind::Toml,
+        Ownership::Generated,
+    )));
+
+    let outcome = gearbox_engine::apply_generate(&files, &out.root(), &base).unwrap();
+    assert_eq!(outcome.written, 0);
+    assert!(
+        !out.root().join("Cargo.toml").exists(),
+        "no file may be written when any file conflicts"
+    );
+}
+
+#[test]
+fn plan_writes_nothing() {
+    let out = Out::new("plan");
+    let base = base_root_for(&out.root());
+    let files = one(
+        "values.generated.yaml",
+        "image: new\n",
+        Ownership::Generated,
+    );
+
+    let (plans, diagnostics) = gearbox_engine::generate::plan(&files, &out.root(), &base).unwrap();
+    assert_eq!(action(&plans, "values.generated.yaml"), FileAction::Create);
+    assert!(diagnostics.is_empty());
+    assert!(
+        !out.root().join("values.generated.yaml").exists(),
+        "a preview must not write"
+    );
+}

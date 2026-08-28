@@ -1,0 +1,244 @@
+//! `processes/<p>/Cargo.toml`.
+//!
+//! Every inherited field is written out as a literal. The generated crates sit
+//! under `.gearbox/<product>/<profile>/`, which is outside the `gears-rust`
+//! workspace, so `edition.workspace = true` -- the spelling every crate this
+//! output links against uses -- resolves to nothing here. That is the single
+//! most likely way for a generated manifest to fail, and it fails at parse time
+//! with a message about workspace inheritance rather than about editions.
+
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use gearbox_ir::{FileEntry, FileKind, GearId, Ownership, ResolvedGear, ResolvedProcess};
+use serde::Serialize;
+
+use super::{GenerateError, GenerateInput, header, paths, workspace};
+
+/// Where the platform SDK lives inside a source root.
+const TOOLKIT_SUBDIR: &str = "libs/toolkit";
+
+/// The Cargo package name and the alias the generated code uses for it.
+const TOOLKIT_PACKAGE: &str = "cf-gears-toolkit";
+const TOOLKIT_ALIAS: &str = "toolkit";
+
+/// The runtime crates a generated host binary needs, with the versions
+/// `gears-rust` resolves.
+///
+/// Pinned to the platform's own `[workspace.dependencies]` rather than to this
+/// repository's, because the generated crate is compiled against `gears-rust`
+/// sources: a `tokio` that unified differently from the one the toolkit expects
+/// is a runtime failure, not a build one.
+fn runtime_deps() -> [(&'static str, Dependency); 3] {
+    [
+        ("anyhow", Dependency::version("1.0", &[])),
+        ("clap", Dependency::version("4.5", &["derive"])),
+        ("tokio", Dependency::version("1.47", &["full"])),
+    ]
+}
+
+#[derive(Serialize)]
+struct Manifest {
+    package: Package,
+    #[serde(rename = "bin")]
+    bins: Vec<Bin>,
+    dependencies: BTreeMap<String, Dependency>,
+}
+
+#[derive(Serialize)]
+struct Package {
+    name: String,
+    version: String,
+    edition: &'static str,
+    #[serde(rename = "rust-version")]
+    rust_version: &'static str,
+    publish: bool,
+}
+
+#[derive(Serialize)]
+struct Bin {
+    name: String,
+    path: &'static str,
+}
+
+#[derive(Clone, Serialize)]
+struct Dependency {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    package: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    features: Vec<String>,
+    #[serde(rename = "default-features", skip_serializing_if = "Option::is_none")]
+    default_features: Option<bool>,
+}
+
+impl Dependency {
+    /// A registry dependency.
+    fn version(version: &'static str, features: &[&str]) -> Self {
+        Self {
+            package: None,
+            version: Some(version),
+            path: None,
+            features: features.iter().map(|f| (*f).to_owned()).collect(),
+            default_features: None,
+        }
+    }
+}
+
+/// The manifest for one host process crate.
+///
+/// # Errors
+/// Returns [`GenerateError`] when a gear names a source the caller gave no path
+/// for, when a gear is absent from the lock's gear table, or when two gears in
+/// the process share a library identifier -- each of which would produce a
+/// manifest that does not build.
+pub fn process_manifest(
+    input: &GenerateInput<'_>,
+    process: &ResolvedProcess,
+) -> Result<FileEntry, GenerateError> {
+    let crate_dir = input.out_root.join("processes").join(process.name.as_str());
+    let dependencies = dependencies(input, process, &crate_dir)?;
+
+    let manifest = Manifest {
+        package: Package {
+            name: process.crate_name.clone(),
+            version: input.lock.product.version.clone(),
+            edition: workspace::package_edition(),
+            rust_version: workspace::package_rust_version(),
+            publish: false,
+        },
+        bins: vec![Bin {
+            name: process.bin_name.clone(),
+            path: "src/main.rs",
+        }],
+        dependencies,
+    };
+
+    let body = toml::to_string_pretty(&manifest).map_err(|source| GenerateError::Toml {
+        what: "a process manifest",
+        source,
+    })?;
+
+    Ok(FileEntry::text(
+        paths::rel(&["processes", process.name.as_str(), "Cargo.toml"])?,
+        format!("{}\n{body}", header("#")),
+        FileKind::Toml,
+        Ownership::Generated,
+    ))
+}
+
+/// Every dependency the process crate declares, keyed by the identifier the
+/// generated Rust will name it with.
+///
+/// Keyed by `lib_ident` and not by `crate_name`, because the key of a Cargo
+/// dependency is what `use <key> as _;` has to spell. `cf-api-contracts` has no
+/// `[lib]` section, so its identifier is `cf_api_contracts`, and a generator
+/// that derived the key from the package name would emit `cf_api_contracts` in
+/// one file and `cf-api-contracts` in the other.
+fn dependencies(
+    input: &GenerateInput<'_>,
+    process: &ResolvedProcess,
+    crate_dir: &Path,
+) -> Result<BTreeMap<String, Dependency>, GenerateError> {
+    let mut dependencies = BTreeMap::new();
+
+    // The SDK, resolved through the anchor gear's source root. A product drawing
+    // gears from several sources would need to say which one is the platform;
+    // no field records that today, and the anchor's source is the only answer
+    // available that is not a guess about directory names.
+    let anchor = gear_of(input, process, &process.anchor)?;
+    let anchor_root = source_root(input, anchor)?;
+    dependencies.insert(
+        TOOLKIT_ALIAS.to_owned(),
+        Dependency {
+            package: Some(TOOLKIT_PACKAGE.to_owned()),
+            version: None,
+            path: Some(dep_path(crate_dir, &anchor_root.join(TOOLKIT_SUBDIR))),
+            features: vec!["bootstrap".to_owned()],
+            default_features: None,
+        },
+    );
+
+    for (name, dependency) in runtime_deps() {
+        dependencies.insert(name.to_owned(), dependency);
+    }
+
+    for id in &process.gears {
+        let gear = gear_of(input, process, id)?;
+        let root = source_root(input, gear)?;
+        let dependency = Dependency {
+            // Always spelled out, even where it matches the key: the key is the
+            // library identifier and this is the package name, and
+            // `cf-api-contracts` linking as `cf_api_contracts` rather than as
+            // `api_contracts` is precisely the mistake GBX0209 exists for.
+            package: Some(gear.package.crate_name.clone()),
+            version: None,
+            path: Some(dep_path(crate_dir, &root.join(gear.package.path.as_str()))),
+            features: gear.package.features.clone(),
+            // Written only when false. `true` is Cargo's default, and a manifest
+            // restating every default is a manifest nobody reads.
+            default_features: (!gear.package.default_features).then_some(false),
+        };
+
+        // Two crates claiming one library identifier would silently drop one of
+        // them, and the `use x as _;` line that survived would register the
+        // wrong gear -- or fail to compile, if we were lucky.
+        if let Some(existing) = dependencies.insert(gear.package.lib_ident.clone(), dependency)
+            && existing.package.as_deref() != Some(gear.package.crate_name.as_str())
+        {
+            return Err(GenerateError::LibIdentCollision {
+                ident: gear.package.lib_ident.clone(),
+                first: existing.package.unwrap_or_default(),
+                second: gear.package.crate_name.clone(),
+            });
+        }
+    }
+
+    Ok(dependencies)
+}
+
+/// The lock's entry for a gear the process claims to contain.
+fn gear_of<'a>(
+    input: &'a GenerateInput<'_>,
+    process: &ResolvedProcess,
+    id: &GearId,
+) -> Result<&'a ResolvedGear, GenerateError> {
+    input
+        .lock
+        .gears
+        .get(id)
+        .ok_or_else(|| GenerateError::UnknownGear {
+            process: process.name.to_string(),
+            gear: id.to_string(),
+        })
+}
+
+/// The absolute root of the source a gear came from.
+fn source_root<'a>(
+    input: &'a GenerateInput<'_>,
+    gear: &ResolvedGear,
+) -> Result<&'a Path, GenerateError> {
+    input
+        .source_roots
+        .get(&gear.source)
+        .map(std::path::PathBuf::as_path)
+        .ok_or_else(|| GenerateError::UnknownSource {
+            gear: gear.id.to_string(),
+            id: gear.source.to_string(),
+        })
+}
+
+/// A `path = ` value: relative when one exists, absolute otherwise.
+///
+/// Relative is the goal -- a generated tree that still resolves after the whole
+/// checkout moves -- but a source root on another Windows volume has no
+/// relative form, and an absolute path that works beats a relative one that
+/// does not.
+fn dep_path(from: &Path, target: &Path) -> String {
+    paths::relative(from, target)
+        .as_deref()
+        .map_or_else(|| paths::to_slash(target), paths::to_slash)
+}

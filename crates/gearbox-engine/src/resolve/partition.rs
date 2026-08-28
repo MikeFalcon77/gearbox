@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 
 use gearbox_ir::{
     Catalogue, DeploymentProfileDecl, Diagnostic, DiagnosticCode, Diagnostics, Entrypoint, GearId,
-    Location, ProcessId, ProcessKind, ResolvedProcess, RuntimeCap,
+    Location, ProcessId, ProcessKind, ResolvedEndpoint, ResolvedProcess, RuntimeCap,
 };
 
 use super::closure::Closure;
@@ -115,8 +115,83 @@ pub fn partition(
         }
     }
 
+    assign_endpoints(catalogue, &mut processes);
     report_orphans(closure, &processes, uri, diagnostics);
     Partition { processes }
+}
+
+/// The host a generated bind address uses.
+///
+/// Loopback, not `0.0.0.0`: every profile M5 generates for runs on one machine,
+/// and a process that binds every interface by default is a decision nobody
+/// asked for. The Kubernetes profile needs the opposite and will have to say so
+/// here rather than in a template, because the address is a resolved fact the
+/// lock records once and every generator then reads.
+const BIND_HOST: &str = "127.0.0.1";
+
+/// Fill each process's `listens` from what its gears declare they `serve`.
+///
+/// Runs once over every process rather than inside `build`, because the one
+/// thing that cannot be decided per process is the thing that matters: two
+/// processes must not be handed the same port. A gear linked into two binaries
+/// -- which co-location closures produce routinely -- would otherwise get its
+/// declared default twice and the second bind would fail at run time, long
+/// after the lock said everything was fine.
+///
+/// Endpoints with no `default_port` are skipped rather than invented. The gear
+/// then falls back to whatever its own config default is, which is a worse
+/// answer than a resolved one but a much better answer than a fabricated port
+/// the description never mentioned.
+fn assign_endpoints(catalogue: &Catalogue, processes: &mut [ResolvedProcess]) {
+    let mut taken: BTreeSet<u16> = BTreeSet::new();
+
+    // By process name, not by construction order: the lock is written in name
+    // order, so assigning in any other order would let a resolver refactor that
+    // does not change the topology still change every port.
+    let mut order: Vec<usize> = (0..processes.len()).collect();
+    order.sort_by(|a, b| processes[*a].name.cmp(&processes[*b].name));
+
+    for index in order {
+        let gears = processes[index].gears.clone();
+        let mut listens = Vec::new();
+        for gear in gears {
+            let Some(descriptor) = catalogue.gears.get(&gear) else {
+                continue;
+            };
+            for served in &descriptor.serves {
+                if !served.binds_own_socket() {
+                    continue;
+                }
+                let (Some(config_key), Some(default_port)) =
+                    (served.config_key.as_ref(), served.default_port)
+                else {
+                    continue;
+                };
+                let Some(port) = next_free_port(default_port, &taken) else {
+                    continue;
+                };
+                taken.insert(port);
+                listens.push(ResolvedEndpoint {
+                    name: served.name.clone(),
+                    gear: gear.clone(),
+                    config_key: config_key.clone(),
+                    address: format!("{BIND_HOST}:{port}"),
+                    advertise_uri: None,
+                    allow_loopback_advertise: true,
+                });
+            }
+        }
+        processes[index].listens = listens;
+    }
+}
+
+/// `preferred` if it is free, else the next free port above it.
+///
+/// `None` when the search runs off the end of the port space, which cannot
+/// happen for any realistic product but is the honest answer rather than a
+/// wrap-around to a privileged port.
+fn next_free_port(preferred: u16, taken: &BTreeSet<u16>) -> Option<u16> {
+    (preferred..=u16::MAX).find(|port| !taken.contains(port))
 }
 
 /// A host plus one process per gear that moved out of it.

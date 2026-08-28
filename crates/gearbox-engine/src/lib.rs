@@ -13,6 +13,7 @@
 pub mod catalogue;
 pub mod cluster;
 pub mod docs;
+pub mod generate;
 pub mod manifest_check;
 pub mod merge;
 pub mod plugin;
@@ -26,6 +27,7 @@ pub mod validate;
 
 pub use catalogue::{CatalogueScan, Continue, LoadEvent, load_catalogue, load_catalogue_staged};
 pub use cluster::ClusterProjection;
+pub use generate::{GenerateError, GenerateInput, Generated, apply_generate, generate};
 pub use merge::{MergedGear, Projections, merge};
 pub use plugin::PluginProjection;
 pub use plugin_select::{PointResolution, check as check_plugins};

@@ -9,6 +9,7 @@ pub mod catalogue;
 pub mod contract;
 pub mod diagnostics;
 pub mod explain;
+pub mod fileset;
 pub mod ids;
 pub mod intent;
 pub mod requirement;
@@ -29,6 +30,7 @@ pub use diagnostics::{
     RelatedLocation, Severity, UnknownDiagnosticCode,
 };
 pub use explain::{ExplanationGraph, ExplanationNode, NodeKind, ProvenanceEdge, ProvenanceKind};
+pub use fileset::{FileAction, FileEntry, FileKind, FilePlan, FileSet, Ownership};
 pub use ids::{
     CapabilityId, ContractId, GearId, IdError, NodeId, ProcessId, ProfileId, ProviderId, RelPath,
     RequirementId, SourceId,

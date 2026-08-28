@@ -10,6 +10,9 @@
 //! channel, and a stray progress line there would corrupt the protocol. Getting
 //! into that habit now costs nothing and avoids a class of bug later.
 
+mod generate;
+mod lock;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -142,6 +145,48 @@ enum Command {
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
     },
+
+    /// Resolve a product and write its artefacts under `.gearbox/`.
+    ///
+    /// Resolves rather than reading an existing lock, so a preview can never be
+    /// answering about a stale one. Composition output is never written into a
+    /// source root: everything lands under `.gearbox/<product>/<profile>/`,
+    /// including the `product.lock` the tree was generated from.
+    Generate {
+        /// A source root to scan. Repeatable.
+        #[arg(long, value_name = "DIR", required = true)]
+        root: Vec<PathBuf>,
+
+        /// The id to record for the source. Defaults to the root's directory name.
+        #[arg(long, value_name = "ID")]
+        source_id: Option<String>,
+
+        /// The product description to generate from.
+        #[arg(long, value_name = "FILE")]
+        product: PathBuf,
+
+        /// Which deployment profile. Defaults to the product's own default.
+        #[arg(long, value_name = "ID")]
+        profile: Option<String>,
+
+        /// Where to write. Defaults to `.gearbox/<product>/<profile>/`.
+        #[arg(long, value_name = "DIR")]
+        out: Option<PathBuf>,
+
+        /// Report what would be written and write nothing
+        /// (`cpt-gearbox-fr-generate-preview`).
+        #[arg(long)]
+        dry_run: bool,
+
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+
+    /// Ask questions of a written `product.lock`.
+    Lock {
+        #[command(subcommand)]
+        query: lock::LockQuery,
+    },
 }
 
 /// What `resolve` prints.
@@ -156,7 +201,7 @@ enum ResolveFormat {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
-enum Format {
+pub(crate) enum Format {
     /// Machine-readable. The stable contract for tooling.
     Json,
     /// Human-readable summary.
@@ -213,6 +258,24 @@ fn run() -> anyhow::Result<ExitCode> {
             gear,
             product,
         } => plugins(&root, gear.as_deref(), product.as_deref()),
+        Command::Generate {
+            root,
+            source_id,
+            product,
+            profile,
+            out,
+            dry_run,
+            format,
+        } => generate::run(
+            &root,
+            source_id.as_deref(),
+            &product,
+            profile.as_deref(),
+            out.as_deref(),
+            dry_run,
+            format,
+        ),
+        Command::Lock { query } => lock::run(&query),
     }
 }
 
@@ -502,7 +565,10 @@ fn catalogue(
 ///
 /// Shared with `catalogue` because opening them differently would make the two
 /// commands disagree about what they are looking at.
-fn open_roots(roots: &[PathBuf], source_id: Option<&str>) -> anyhow::Result<Vec<SourceRoot>> {
+pub(crate) fn open_roots(
+    roots: &[PathBuf],
+    source_id: Option<&str>,
+) -> anyhow::Result<Vec<SourceRoot>> {
     let mut opened = Vec::with_capacity(roots.len());
     for path in roots {
         let id = match source_id {
@@ -788,7 +854,7 @@ fn print_summary(scan: &gearbox_engine::CatalogueScan) {
 }
 
 /// Print diagnostics to stderr, most severe first.
-fn report(diagnostics: &[Diagnostic]) {
+pub(crate) fn report(diagnostics: &[Diagnostic]) {
     if diagnostics.is_empty() {
         return;
     }
