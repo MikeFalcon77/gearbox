@@ -1,0 +1,85 @@
+/* Deliberately plain: theme variables, no colours of our own, so the widget
+   follows whatever Theia theme is active. */
+
+.gbx-root { padding: 6px 8px; font-size: var(--theia-ui-font-size1); overflow: auto; }
+.gbx-header { padding: 4px 2px 8px; opacity: 0.9; }
+.gbx-progress { opacity: 0.7; font-style: italic; }
+.gbx-empty { padding: 8px 2px; opacity: 0.6; }
+
+.gbx-group { margin-bottom: 10px; }
+.gbx-group-label {
+  text-transform: uppercase;
+  font-size: 0.85em;
+  letter-spacing: 0.05em;
+  opacity: 0.65;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--theia-editorGroup-border);
+}
+
+/* Wraps rather than clips. In a narrow side panel a nowrap row cut the last
+   badge off mid-word ("statefu"), which reads as a rendering fault rather than
+   as a gear having more capabilities than fit. */
+.gbx-row {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 3px 4px; cursor: pointer; border-radius: 3px;
+}
+.gbx-row:hover { background: var(--theia-list-hoverBackground); }
+.gbx-selected { background: var(--theia-list-activeSelectionBackground); }
+.gbx-row-name { flex: 0 1 auto; }
+
+/* A pending row is dimmed but not disabled: its gear.gdl is already known. */
+.gbx-pending .gbx-row-name { opacity: 0.65; }
+.gbx-waiting { opacity: 0.45; font-style: italic; font-size: 0.9em; }
+
+.gbx-id { opacity: 0.55; font-family: var(--theia-code-font-family); font-size: 0.85em; }
+.gbx-badge {
+  font-size: 0.75em; padding: 0 5px; border-radius: 8px;
+  border: 1px solid var(--theia-badge-background);
+  color: var(--theia-badge-foreground); background: var(--theia-badge-background);
+}
+
+.gbx-detail { padding: 4px 2px; }
+.gbx-detail-title { font-weight: 600; margin-bottom: 8px; display: flex; gap: 8px; align-items: baseline; }
+.gbx-kv { display: flex; gap: 10px; padding: 3px 0; align-items: baseline; }
+.gbx-kv > span:first-child { flex: 0 0 150px; opacity: 0.6; font-size: 0.9em; text-align: right; }
+.gbx-kv > span:last-child {
+  flex: 1 1 auto; word-break: break-word;
+  display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: baseline;
+}
+/* One fact per line where a gear has several -- several contracts, several GTS
+   types -- so a list does not read as one run-on value. */
+.gbx-kv > span:last-child > div { flex: 1 0 100%; }
+.gbx-kv code { font-family: var(--theia-code-font-family); font-size: 0.9em; }
+
+.gbx-links { display: flex; gap: 10px; flex-wrap: wrap; }
+.gbx-links a { color: var(--theia-textLink-foreground); cursor: pointer; text-decoration: none; }
+.gbx-links a:hover { text-decoration: underline; }
+
+.gbx-gap {
+  margin-top: 10px; padding: 6px 8px; border-radius: 3px;
+  background: var(--theia-editorWidget-background);
+  border-left: 3px solid var(--theia-editorWarning-foreground);
+  opacity: 0.9;
+}
+
+.gbx-svg { display: block; }
+.gbx-node { fill: var(--theia-editorWidget-background); stroke: var(--theia-editorGroup-border); }
+.gbx-node-label { fill: var(--theia-editor-foreground); font-family: var(--theia-code-font-family); font-size: 11px; }
+.gbx-edge { fill: none; stroke: var(--theia-editor-foreground); stroke-width: 1.3; opacity: 0.7; }
+.gbx-arrow-head { fill: var(--theia-editor-foreground); opacity: 0.7; }
+
+/* Painting a closure: the gears in it come forward, everything else recedes.
+   Dimming rather than hiding, so the closure is seen against the whole graph --
+   "these four, out of fourteen" is the point being made. */
+.gbx-edge-dim { opacity: 0.12; }
+.gbx-edge-lit { stroke: var(--theia-successBackground, #4caf50); stroke-width: 2.2; opacity: 1; }
+.gbx-arrow-head-lit { fill: var(--theia-successBackground, #4caf50); }
+.gbx-node-g { cursor: pointer; }
+.gbx-node-dim { opacity: 0.3; }
+.gbx-node-lit .gbx-node { stroke: var(--theia-successBackground, #4caf50); stroke-width: 2; }
+.gbx-node-focus .gbx-node { stroke: var(--theia-focusBorder); stroke-width: 2.5; }
+
+/* The rule under which unconnected gears sit. */
+.gbx-band-rule { stroke: var(--theia-editorGroup-border); stroke-width: 1; stroke-dasharray: 4 4; }
+
+.gbx-footer { padding: 6px 12px; border-top: 1px solid var(--theia-editorGroup-border); font-size: 12px; }

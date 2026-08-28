@@ -1,0 +1,32 @@
+{
+  "name": "gearbox-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Gearbox Studio: browse the gear catalogue the engine projects.",
+  "main": "lib/common/index.js",
+  "files": ["lib", "src"],
+  "dependencies": {
+    "@theia/core": "1.75.0",
+    "@theia/editor": "1.75.0",
+    "@theia/filesystem": "1.75.0",
+    "@theia/markers": "1.75.0",
+    "@theia/workspace": "1.75.0",
+    "vscode-jsonrpc": "8.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "18.2.0",
+    "rimraf": "5.0.5",
+    "typescript": "5.4.5"
+  },
+  "theiaExtensions": [
+    {
+      "frontend": "lib/browser/gearbox-studio-frontend-module",
+      "backend": "lib/node/gearbox-studio-backend-module"
+    }
+  ],
+  "scripts": {
+    "clean": "rimraf lib",
+    "build": "tsc -p .",
+    "watch": "tsc -w -p ."
+  }
+}

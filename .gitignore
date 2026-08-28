@@ -30,13 +30,23 @@ logs
 .vscode/
 .DS_Store
 
-# Gearbox Studio (ide/): npm tree, Vite output, tsc incremental cache.
+# Gearbox Studio (ide/): npm tree, build output, tsc incremental cache.
 # The generated TypeScript bindings under
 # ide/gearbox-studio/src/common/generated/ ARE tracked -- `make ts-check`
 # depends on git seeing them.
 node_modules/
 dist/
 *.tsbuildinfo
+
+# tsc output of the Theia extension, and everything `theia build` generates.
+# `src-gen/` and the three `*esbuild*.mjs` files are written by @theia/cli from
+# browser-app/package.json on every build, so tracking them would mean a diff
+# for anyone whose Theia version differs.
+/ide/gearbox-studio/lib/
+/ide/browser-app/lib/
+/ide/browser-app/src-gen/
+/ide/browser-app/esbuild.mjs
+/ide/browser-app/gen-esbuild.*.mjs
 
 # Python virtualenvs and caches
 /.venv/*

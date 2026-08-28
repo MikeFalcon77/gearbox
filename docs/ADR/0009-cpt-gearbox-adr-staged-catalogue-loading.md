@@ -161,6 +161,25 @@ cached too, so a crate with no `src/` is reported once rather than once per gear
 `Arc<[RustFile]>` rather than `Arc<Vec<RustFile>>`: one allocation instead of two, and it derefs
 straight to the `&[RustFile]` every consumer already takes, so no downstream signature changed.
 
+### The decision now has a consumer, and it held
+
+This ADR was written before anything rendered a catalogue, which made it an untested design. The
+Theia Catalogue widget is now that consumer, and `ide/scripts/ui-smoke.mjs` checks the claim as a
+timeline rather than as a final state -- a snapshot after loading would pass even if the tree had
+appeared all at once. On `../gears-rust` it observes a window of roughly 550 ms in which all 14 rows
+are on screen, named and grouped by category, and all 14 are still `pending`.
+
+One thing was learned that the ADR did not anticipate. `gdl_path` is load-bearing beyond keying
+rows: the widget keys its **selection** by it as well, so choosing a gear before it is parsed does
+not lose the choice when projection replaces the row. A selection keyed by `GearId` could not work
+at all, for the same reason the tree cannot be -- the id does not exist until S2.
+
+A second, smaller consequence surfaced in the generated TypeScript. Collection fields carry
+`#[serde(default, skip_serializing_if = ...)]`, so `ts-rs` emits them as optional and an empty
+collection is not sent at all. On the client, absent and empty are therefore the same value -- which
+is the intended reading, and worth stating because it means a client cannot use "field missing" as a
+proxy for "not projected yet". `pending` remains the only signal for that.
+
 ## Traceability
 
 * Requirements: `cpt-gearbox-fr-incremental-catalogue`, `cpt-gearbox-nfr-first-paint`.

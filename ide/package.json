@@ -1,11 +1,37 @@
 {
   "private": true,
   "name": "gearbox-ide",
-  "engines": { "node": ">=20 <21" },
+  "engines": {
+    "node": ">=20 <21"
+  },
+  "workspaces": [
+    "gearbox-studio",
+    "browser-app"
+  ],
   "devDependencies": {
+    "puppeteer": "25.1.0",
     "vscode-jsonrpc": "8.2.0"
   },
+  "//": "Every @theia/* pinned to the one version in theia-version.txt, and repeated here as overrides. A transitive ^ pulls a second @theia/core copy, which breaks inversify identity -- the most common Theia build failure.",
+  "overrides": {
+    "@theia/core": "1.75.0",
+    "@theia/editor": "1.75.0",
+    "@theia/filesystem": "1.75.0",
+    "@theia/markers": "1.75.0",
+    "@theia/monaco": "1.75.0",
+    "@theia/navigator": "1.75.0",
+    "@theia/preferences": "1.75.0",
+    "@theia/process": "1.75.0",
+    "@theia/userstorage": "1.75.0",
+    "@theia/variable-resolver": "1.75.0",
+    "@theia/workspace": "1.75.0"
+  },
   "scripts": {
-    "smoke": "node scripts/rpc-smoke.mjs"
-  }
+    "smoke": "node scripts/rpc-smoke.mjs",
+    "build": "npm run build --workspace gearbox-studio && npm run build --workspace browser-app",
+    "start:browser": "npm run start --workspace browser-app",
+    "ui-smoke": "node scripts/ui-smoke.mjs",
+    "verify": "npm run smoke && npm run build && npm run ui-smoke"
+  },
+  "//puppeteer": "Declared, not borrowed. puppeteer arrives transitively through @theia/cli, and ui-smoke.mjs would break silently the day that dependency moved -- with a failure that looks like a broken UI rather than a missing tool."
 }

@@ -850,6 +850,56 @@ the join key, so completing it prevents a GBX0508 rather than reporting one); in
 
 ---
 
+### 9.1 What is built, and where the implementation diverged from this plan
+
+Three widgets exist against the real engine: **Catalogue** (tree by category, staged),
+**Gear detail** and **Graph (co-location)**. Product, Explain, Lock and Generate are not built,
+because they need the resolver -- and the UI says so, driven by the engine's own
+`capabilities.resolve: false` rather than by a hard-coded string, so the notice disappears on its
+own when M4 lands.
+
+`ide/scripts/ui-smoke.mjs` drives a headless Chrome against a running `browser-app` and asserts
+**26** things, stable across repeated runs. It is deliberately a *timeline* rather than a final
+state: a snapshot taken after loading would pass even if the tree had appeared all at once, which is
+exactly the claim ADR-0009 makes and could not previously check. On the real tree it catches a
+window of roughly 550 ms in which all 14 rows are on screen, named and grouped, and all 14 are
+still `pending` -- so the staged design is not merely implemented, it is visible.
+
+**ADR-0009 survived contact with a consumer**, with one thing learned: `gdl_path` turned out to be
+load-bearing beyond keying rows. The *selection* is keyed by it too, so choosing a gear before it
+is parsed does not lose the choice when it finishes. An id-keyed selection could not do that.
+
+Divergences from what §9 planned, each for a reason found while building:
+
+| Planned | Built | Why |
+|---|---|---|
+| `elkjs` `layered` with a fixed seed | hand-rolled layered assignment + two barycentre sweeps | Deterministic by construction rather than by seed, and no async layout pass. The graph is a shallow DAG of 14 nodes. If it grows a cycle or a hundred nodes, `elkjs` is the answer. |
+| detail as part of the Catalogue widget | its own widget in the **bottom** area | In a 300px side panel the projected facts -- provider transports, which point a plugin fills and under which vendor, GTS types -- were clipped. The tree answers "what is there"; the detail answers "what is it", and they need different amounts of room. |
+| `@theia/{core,editor,filesystem,markers,monaco,navigator,process,workspace}` | plus `@theia/{preferences,userstorage,variable-resolver}` | Without `@theia/preferences` the frontend dies on `No matching bindings found for serviceIdentifier: Symbol(PreferenceProvider) - named "1"` -- the user-scope provider. |
+
+Three failure modes worth writing down, because all three *looked* fine:
+
+- **`FrontendApplicationContribution.onStart` opens a view too early.** It runs before the shell is
+  attached, so layout setup left the panel collapsed -- and a collapsed Theia side panel still keeps
+  its widget in the DOM. The tree was queryable and invisible, and the first version of the UI check
+  passed against a blank screen. `initializeLayout` is the correct hook, and it also only runs when
+  there is no saved layout, so a person who closes the panel does not get it forced back open.
+  The check now asserts `getClientRects().length > 0`, not node count.
+- **A two-way RPC proxy plus a store that injects the service is a DI cycle.** inversify reports it
+  as "circular dependency in one of the `toDynamicValue` bindings". One of the two edges has to be
+  deferred; the client edge is the safe one, reached through a forwarder, because no notification
+  can arrive before the store has asked for the service and started a load.
+- **Theia's command palette is `.quick-input-widget`, without the `monaco-` prefix.** A selector
+  that never matches is worse than no wait at all: with the timeout swallowed, the step passed or
+  failed on timing. Keypresses sent while Theia is still installing its keybindings are simply lost,
+  so the check presses F1 until the palette answers.
+
+Known cosmetic gap: the app has no favicon. `@theia/cli` 1.75 offers no hook for one and its
+generated `index.html` has no `<link rel="icon">`. The UI check tolerates that 404 **by name**, so a
+genuinely missing resource still fails.
+
+---
+
 ## 10. The slice
 
 **Real gears (pre-existing, untouched except for an added `gear.gdl`):**
@@ -904,8 +954,8 @@ workspace-member entries. Nothing else in that repo changes.
 | **M5** | Crate + config generators; **embedded runs** | acceptance §12 step 2 in full | — |
 | **M6** | Host-workers | new gear lands and passes its own test *by hand first*; then generated worker crate; host spawns worker; remote REST binding resolves via directory | M7 |
 | **M7** | Docker + Helm + `values.schema.json` | acceptance §12 step 4 in full | M6 |
-| **M8a** | JSON-RPC + TS types | `node ide/scripts/rpc-smoke.mjs` drives initialize → catalogue → resolve → generate/plan over real framing | from M1 |
-| **M8b** | Theia Studio | acceptance §12 step 9 | after M4 + M8a |
+| **M8a** — **done** | JSON-RPC + TS types | `node ide/scripts/rpc-smoke.mjs` drives initialize → catalogue over real framing, 15/15; `cargo test -p gearbox-rpc`; stdout carries nothing but JSON-RPC | from M1 |
+| **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Gear detail and the co-location Graph are built and checked headlessly: `cd ide && npm run verify`, 26/26. Product, Explain, Lock and Generate wait on M4 and say so in the UI | after M4 + M8a |
 | **M9** | **DESIGN + ADRs** (§14) — written *after* the prototype runs | reviewed against `docs/checklists/{DESIGN,ADR}.md`; every claim cites either a `gearbox-builder` symbol or a `gears-rust` `file:line`; every §13 gap has a home | — |
 
 Critical path M0 → M1 → M2 → M4 → M5 → M6 → M9. M8a needs only types, so its widgets can be
@@ -1003,7 +1053,9 @@ git diff --exit-code HEAD -- gears/payments-audit/payments-audit/src   # same sr
 **Step 8 — TS anti-drift.** `make ts && git diff --exit-code ide/.../generated`;
 `gearbox rpc-schema | diff - fixtures/rpc-schema.json`.
 
-**Step 9 — Studio.** `cd ide && npm ci && npm run build && npm run start:browser`. Assert:
+**Step 9 — Studio.** `cd ide && npm ci && npm run verify` (rpc smoke, build, then the headless UI
+check against a running app -- `npm run start:browser` in another shell first). The catalogue,
+detail and co-location graph assertions are automated and green; the ones below still need M4:
 Catalogue lists 9 gears; the profile dropdown has dev/local/prod; switching to prod surfaces
 GBX0603 + GBX0507 in Problems; the Graph "processes" view shows 2 boxes with `cluster` inside
 `audit`; clicking the `payments-audit → api-contracts` edge opens Explain with the DowngradedBy
