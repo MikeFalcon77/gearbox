@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **83** — 65 built, 16 not built, 0 broken, 2 not observed.
+Claims: **87** — 71 built, 14 not built, 0 broken, 2 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -48,7 +48,6 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Explorer stays visible | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
 | a terminal opens | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
 | the Source Control view is present | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
-| Source Control has a git provider | `ADR-0011 §Consequences: Git remains` | 🚧 not built |  |
 | the Gearbox menu offers the domain's commands | `ADR-0011 §Scope: what the menu bar contains` | ✅ built |  |
 | the toolbar hosts the perspective switch | `ADR-0011 §The two perspectives` | 🚧 not built |  |
 | a product perspective exists beside the catalogue | `ADR-0011 §The two perspectives` | 🚧 not built |  |
@@ -57,6 +56,17 @@ Rust, and the ADRs' own Confirmation sections say which.
 | no grammar failed to load | `ADR-0011 §the .gdl grammar is native` | ✅ built |  |
 | exactly one @theia/core is installed | `ADR-0011 §Confirmation` | ✅ built |  |
 | a contribution base class binds five contribution interfaces at once | `ADR-0011 §Consequences` | ✅ built |  |
+
+## `conformance/adr-0011-workspace-and-scm.spec.ts`
+
+| Claim | Source | Status | Note |
+|---|---|---|---|
+| both repositories are workspace roots | `ADR-0011 §Consequences: Explorer remains` | ✅ built |  |
+| the watcher does not walk the Rust target directories | `ADR-0011 §Scope: which packages are present` | ✅ built |  |
+| Source Control lists both repositories | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
+| the change count is the repository's, not a placeholder | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
+| git decorates the Explorer | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
+| a product.lock opened as a file is read-only | `PRD cpt-gearbox-fr-lock-read-only` | ✅ built |  |
 
 ## `conformance/plan-widgets.spec.ts`
 
@@ -104,7 +114,6 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the lock's own hash matches the resolution on screen | `plan §9: lock_hash badge` | ✅ built |  |
 | each profile has its own lock text | `PRD cpt-gearbox-fr-lock-single-source` | ✅ built |  |
 | the client never serializes a lock of its own | `PRD cpt-gearbox-fr-lock-single-source` | ✅ built |  |
-| a product.lock opened as a file is read-only | `PRD cpt-gearbox-fr-lock-read-only` | 🚧 not built |  |
 | the Lock view diffs against the lock on disk | `plan §9: diff toggle vs disk` | 🚧 not built |  |
 
 ## `conformance/prd-product.spec.ts`

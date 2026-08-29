@@ -42,6 +42,7 @@
     "build": "npm run build --workspace gearbox-studio && npm run build --workspace browser-app",
     "start:browser": "npm run start --workspace browser-app",
     "conformance": "playwright test",
+    "plugins": "npm run download:plugins --workspace browser-app",
     "verify": "npm run engine && npm run smoke && npm run build && npm run supervision-smoke && npm run store-smoke && npm run conformance",
     "engine": "cargo build --manifest-path ../Cargo.toml -p gearbox-cli"
   },

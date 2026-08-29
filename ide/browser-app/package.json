@@ -27,7 +27,14 @@
   "scripts": {
     "clean": "theia clean",
     "build": "theia build --mode development",
+    "download:plugins": "theia download:plugins",
     "start": "theia start --plugins=local-dir:../plugins --hostname=127.0.0.1 --port=3000"
+  },
+  "//theiaPlugins": "Git. Theia 1.75 does not ship `@theia/git` -- its last release was 1.61.0-next.8 -- so git is the VS Code extension, running in the plugin host. `git-base` is not optional: `vscode.git` depends on it. Versions are pinned in the URL, so an upgrade is an edit somebody makes on purpose rather than a drift. Fetched by `npm run plugins`, deliberately not by `build`: it downloads a third-party artefact over the network, and the precedent in this repo is `npx playwright install chromium` -- an explicit step, documented, never a postinstall.",
+  "theiaPluginsDir": "../plugins",
+  "theiaPlugins": {
+    "vscode-builtin-git": "https://open-vsx.org/api/vscode/git/1.95.3/file/vscode.git-1.95.3.vsix",
+    "vscode-builtin-git-base": "https://open-vsx.org/api/vscode/git-base/1.95.3/file/vscode.git-base-1.95.3.vsix"
   },
   "theia": {
     "target": "browser",
@@ -35,7 +42,15 @@
       "config": {
         "applicationName": "Gearbox Studio",
         "preferences": {
-          "files.enableTrash": false
+          "files.enableTrash": false,
+          "//files.watcherExclude": "Not optional once a workspace is opened. The roots are two Rust checkouts, and `target/` in either is multi-gigabyte -- Theia would walk both. `.gearbox/` is generated output, regenerated wholesale, so watching it reports churn nobody acts on.",
+          "files.watcherExclude": {
+            "**/.git/objects/**": true,
+            "**/.git/subtree-cache/**": true,
+            "**/node_modules/**": true,
+            "**/target/**": true,
+            "**/.gearbox/**": true
+          }
         }
       }
     }

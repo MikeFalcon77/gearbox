@@ -8,6 +8,7 @@ import { ContainerModule } from "@theia/core/shared/inversify";
 import { DebugFrontendApplicationContribution } from "@theia/debug/lib/browser/debug-frontend-application-contribution";
 import { MonacoEditorProvider } from "@theia/monaco/lib/browser/monaco-editor-provider";
 import { TestViewContribution } from "@theia/test/lib/browser/view/test-view-contribution";
+import { WorkspaceTrustService } from "@theia/workspace/lib/browser/workspace-trust-service";
 import { LanguageGrammarDefinitionContribution } from "@theia/monaco/lib/browser/textmate/textmate-contribution";
 
 import { GEARBOX_SERVICE_PATH, GearboxClient, GearboxService } from "../common/protocol";
@@ -18,6 +19,8 @@ import { bindWidget } from "./contribution";
 import { HiddenDebugView } from "./theia/debug/hidden-debug-view";
 import { MenuNarrowing } from "./theia/core/menu-narrowing";
 import { ReadOnlyLockEditorProvider } from "./theia/monaco/read-only-lock-editor-provider";
+import { DomainWorkspace } from "./theia/workspace/domain-workspace";
+import { StudioWorkspaceTrustService } from "./theia/workspace/studio-workspace-trust-service";
 import { HiddenTestView } from "./theia/test/hidden-test-view";
 import { RevealService } from "./reveal-service";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
@@ -65,6 +68,14 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   rebind(DebugFrontendApplicationContribution).to(HiddenDebugView).inSingletonScope();
   rebind(TestViewContribution).to(HiddenTestView).inSingletonScope();
 
+  // Why: opening a multi-root workspace makes Theia generate
+  // `~/.theia/workspaces/Untitled-NN.theia-workspace`, and its own trust check
+  // then demands that *that* file be inside a trusted folder -- so the
+  // application starts behind a modal dialog that no trusted-folders setting can
+  // dismiss. The subclass drops Theia's own bookkeeping file from the set and
+  // leaves the folder rules alone.
+  rebind(WorkspaceTrustService).to(StudioWorkspaceTrustService).inSingletonScope();
+
   bind(CatalogueStore).toSelf().inSingletonScope();
   // Its own store, not a slice of the catalogue's: the two objects of work do not
   // subordinate one another, and their lifecycles differ -- the catalogue loads
@@ -81,6 +92,13 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // nothing injects it -- and `onStart` is where it subscribes.
   bind(ResolutionMarkers).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(ResolutionMarkers);
+
+  // Opens the directories Studio already knows it works on. Without a workspace
+  // the Explorer is empty, a generated `product.lock` cannot be opened at all,
+  // and the VS Code git extension finds no repositories -- three failures that
+  // none of them look like "no workspace".
+  bind(DomainWorkspace).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(DomainWorkspace);
 
   bind(GearboxService)
     .toDynamicValue(({ container }) => {

@@ -150,23 +150,6 @@ test.describe("the narrowed shell", () => {
     expect(tabs).toContain("Source Control");
   });
 
-  test.fixme(
-    "Source Control has a git provider [ADR-0011 §Consequences: Git remains]",
-    async ({ studio }) => {
-      // The view is there and empty. Theia 1.75 does not ship `@theia/git` --
-      // its last release was `1.61.0-next.8` -- so git comes from the VS Code
-      // `vscode.git` extension running in the plugin host, which is a
-      // third-party artefact fetched from Open VSX rather than a package.json
-      // dependency. `ide/plugins/README.md` says how to add it. Deliberately not
-      // done implicitly: fetching someone else's VSIX is a different kind of
-      // decision from adding a `@theia/*` package.
-      await studio.page.click(
-        "#theia-left-content-panel .lm-TabBar li:has-text('Source Control')",
-      );
-      await expect(studio.page.locator(".theia-scm-provider")).toBeVisible();
-    },
-  );
-
   test("the Gearbox menu offers the domain's commands [ADR-0011 §Scope: what the menu bar contains]", async ({
     studio,
   }) => {

@@ -14,9 +14,16 @@ packages declare no `engines` of their own, so nothing catches a wrong runtime f
 ```bash
 nvm use                               # or any Node 24
 cargo build -p gearbox-cli            # the engine the backend spawns
-cd ide && npm ci && npm run build
+cd ide && npm ci
+npm run plugins                       # once: fetches the VS Code git extension
+npm run build
 npm run start:browser                 # http://127.0.0.1:3000
 ```
+
+Studio opens its own workspace: the repository root plus every source root the engine reports. That
+is what gives the Explorer something to browse, lets a generated `product.lock` be opened at all, and
+lets git find any repositories -- the extension walks workspace folders. It is **multi-root** because
+the two repositories are siblings, so no single folder contains both.
 
 The backend finds the engine at `<repo>/target/debug/gearbox` and the source root at
 `../gears-rust`, both overridable:
@@ -66,7 +73,7 @@ there, and reports it as success.
 ## What is in the shell, and what was taken out
 
 Explorer, Search, Source Control, a terminal, Problems and the editor stack, plus the six Gearbox
-views. Taken out: the **Selection** menu (`@theia/monaco`), **Go** (`@theia/editor`), **Run**
+views. The Explorer shows both repositories, and git decorates it. Taken out: the **Selection** menu (`@theia/monaco`), **Go** (`@theia/editor`), **Run**
 (`@theia/debug`), and the **Debug** and **Testing** views.
 
 The three removed menus and two hidden views all come from packages this application did not choose:
@@ -79,9 +86,29 @@ upgrade putting any of them back gets caught by a test rather than by someone no
 
 **Git is not `@theia/git`.** That package stopped being released after `1.61.0-next.8`. In 1.75 the
 Source Control *view* is `@theia/scm` and git itself is the VS Code `vscode.git` extension running in
-the plugin host, which is why `--plugins=local-dir:../plugins` is in the start script. The view is
-present and has no provider until that extension is fetched; `plugins/README.md` says how, and why it
-is not done implicitly.
+the plugin host, which is why `--plugins=local-dir:../plugins` is in the start script.
+
+`npm run plugins` fetches it. Versions are pinned in the URLs under `theiaPlugins` in
+`browser-app/package.json`, so an upgrade is an edit somebody makes on purpose; `git-base` is not
+optional, because `vscode.git` depends on it. The download is deliberately **not** part of `build`:
+it pulls a third-party artefact over the network, and the precedent here is
+`npx playwright install chromium` -- an explicit step, documented, never a postinstall. `ide/plugins/`
+is entirely untracked, including any placeholder: the plugin deployer treats every entry as a plugin
+candidate and warns about the ones it cannot unpack.
+
+Writing this ourselves was the alternative, and it was measured before being rejected: an `ScmProvider`
+over `simple-git` came to roughly a thousand lines for a subset of what the extension does -- no
+history, no blame, no conflict resolution, no gutter diffs.
+
+**Workspace trust is settled narrowly, not switched off.** An untrusted workspace restricts
+extensions, so git would be present and inert, and Theia puts a modal dialog over the application on
+first launch. `DomainWorkspace` adds exactly the roots it derived to
+`security.workspace.trust.trustedFolders`; it does not set `security.workspace.trust.enabled: false`,
+which would trust every folder anyone ever opens in an application that runs third-party extension
+code. Two traps, both survived: trusted folders are compared as URIs, so a bare `/Users/...` entry
+never matches a `file:///Users/...` root; and Theia requires its *own* generated
+`Untitled-NN.theia-workspace` to be trusted, which no setting can express, so
+`StudioWorkspaceTrustService` drops it from the set.
 
 ## The `.gdl` language
 

@@ -13,7 +13,7 @@
 // reusing a profile. Reusing one would collapse the panels and fail half the
 // claims here for a reason that has nothing to do with the claims.
 
-import { test as base, type Browser, type Page } from "@playwright/test";
+import { test as base, type Browser, type Locator, type Page } from "@playwright/test";
 
 /** One sample of the catalogue's DOM, taken while a load is in flight. */
 export interface Sample {
@@ -334,6 +334,91 @@ export async function problems(
  * waits for visibility before clicking, so without this the click hangs until the
  * test times out, which looks nothing like "the wrong tab is showing".
  */
+/**
+ * Bring a left-panel view to the front, by tab label.
+ *
+ * Needed because the left panel now holds four tabs -- Explorer, Catalogue,
+ * Search, Source Control -- and only one is current. Anything asserting that a
+ * catalogue row is *visible* has to say so first, and clicking the already
+ * current tab would collapse the panel instead.
+ */
+export async function revealLeft(page: Page, label: string | RegExp): Promise<void> {
+  const tab = page.locator("#theia-left-content-panel .lm-TabBar li", { hasText: label });
+  if (!(await tab.first().evaluate((e) => e.classList.contains("lm-mod-current")))) {
+    await tab.first().click();
+  }
+}
+
+export const revealCatalogue = (page: Page): Promise<void> =>
+  revealLeft(page, "Gearbox Catalogue");
+
+/**
+ * Expand the Explorer until `file` is visible, and return its node.
+ *
+ * Not a list of path segments, and that is the point. Theia collapses chains of
+ * single-child directories into one node, so `.gearbox/payments-demo/dev` is
+ * *one* row -- but only while the intermediate directories are unexpanded. Once
+ * something has expanded `.gearbox`, the same path renders as several rows. So
+ * the node text depends on the tree's remembered state, and matching it exactly
+ * is a test that passes or fails on what an earlier test happened to click.
+ *
+ * Instead: expand whatever is collapsed and looks like it leads there, until the
+ * file appears. Also expands only collapsed nodes -- a click on an expanded one
+ * *collapses* it, which is the same toggle hazard as the view commands in a third
+ * disguise.
+ */
+export async function revealInExplorer(
+  page: Page,
+  root: string,
+  pathContains: string,
+  file: string,
+): Promise<Locator> {
+  await revealLeft(page, "Explorer");
+  const target = page.locator(".theia-TreeNode", { hasText: new RegExp(`^${escapeForRegExp(file)}$`) });
+
+  for (let round = 0; round < 10; round += 1) {
+    if ((await target.count()) > 0 && (await target.first().isVisible())) {
+      return target.first();
+    }
+    // The *index* is chosen in the page and the click is done by Playwright. A
+    // `HTMLElement.click()` on the node div does nothing: Theia's tree listens on
+    // an inner caption element, and Playwright clicks the centre of the row, which
+    // lands on it.
+    const index = await page.evaluate(
+      ({ rootName, hint, fileName }) => {
+        const nodes = Array.from(document.querySelectorAll(".theia-TreeNode"));
+        // Expansion state lives on the chevron, not on the row: an expanded node
+        // is one whose `.theia-ExpansionToggle` has lost `theia-mod-collapsed`.
+        // Reading it off the row instead made every node look collapsed, so the
+        // loop clicked the root open and then closed again, forever.
+        const collapsed = (node: Element) =>
+          node.className.includes("theia-ExpandableTreeNode") &&
+          node.querySelector(".theia-ExpansionToggle.theia-mod-collapsed") !== null;
+        const text = (node: Element) => (node.textContent ?? "").trim();
+        const pick = nodes.findIndex((node) => collapsed(node) && text(node) === rootName);
+        if (pick >= 0) return pick;
+        return nodes.findIndex(
+          (node) => collapsed(node) && text(node).includes(hint) && text(node) !== fileName,
+        );
+      },
+      { rootName: root, hint: pathContains, fileName: file },
+    );
+    if (index < 0) break;
+    await page.locator(".theia-TreeNode").nth(index).click();
+    await page.waitForTimeout(500);
+  }
+
+  const visible = await page
+    .locator(".theia-TreeNode")
+    .allTextContents()
+    .then((all) => all.map((one) => one.trim()));
+  throw new Error(`never reached ${file}; the tree shows: ${visible.join(", ")}`);
+}
+
+function escapeForRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export async function revealDetail(page: Page): Promise<void> {
   const tab = page.locator("#theia-bottom-content-panel .lm-TabBar-tab", {
     hasText: "Gearbox Gear",

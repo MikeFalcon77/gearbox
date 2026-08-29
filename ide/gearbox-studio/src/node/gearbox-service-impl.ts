@@ -143,6 +143,21 @@ export class GearboxServiceImpl implements GearboxService {
     return engine.request<CatalogueLoadResult>(method.CATALOGUE_LOAD, {}, LOAD_TIMEOUT_MS);
   }
 
+  async workspaceRoots(): Promise<string[]> {
+    const candidates = [findRepoRoot(__dirname), ...roots()];
+    const seen = new Set<string>();
+    return candidates
+      .map((dir) => path.resolve(dir))
+      .filter((dir) => {
+        // Deduped and existence-checked: `GEARBOX_ROOT` can point at something
+        // inside the repository, and a root that is not there would make Theia
+        // open a workspace with a broken folder in it.
+        if (seen.has(dir) || !fs.existsSync(dir)) return false;
+        seen.add(dir);
+        return true;
+      });
+  }
+
   /**
    * `products/<name>/product.gdl` under the repository root.
    *

@@ -69,6 +69,24 @@ export interface GearboxService {
   loadCatalogue(): Promise<CatalogueLoadResult>;
 
   /**
+   * The directories a Studio workspace should contain.
+   *
+   * The repository root plus every source root the engine was given. Answered
+   * here for the same reason `InitializeResult.roots` is: where things are on
+   * this machine is the one thing only the server knows. And answered as one
+   * list rather than assembled in the client, because the two halves come from
+   * two different places on this side and joining them there would put the
+   * layout knowledge in a second file.
+   *
+   * Why a workspace at all: the Explorer needs one to show anything, an opened
+   * `product.lock` needs one to be openable, and the VS Code git extension finds
+   * repositories by walking workspace folders. The two that matter here --
+   * `gearbox-builder` and `gears-rust` -- are *siblings*, so one folder cannot
+   * cover both and the workspace has to be multi-root.
+   */
+  workspaceRoots(): Promise<string[]>;
+
+  /**
    * The product descriptions under the repository root.
    *
    * Does not touch the engine: this is the Theia backend answering "what could I

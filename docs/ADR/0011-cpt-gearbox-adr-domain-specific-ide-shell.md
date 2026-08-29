@@ -148,16 +148,40 @@ RPC surface.
   views belong to which perspective all become things to get right. Accepted because neither object
   of work is subordinate.
 * **Some Theia surface stays visible on purpose.** Explorer, Search, Terminal and Source Control
-  remain, because the workflow ends in generated crates a person will want to build, inspect and
-  diff. This is a deliberate divergence from Arduino, which hides more.
+  remain. The reason first written here was wrong and is worth correcting rather than quietly
+  replacing: it said "the workflow ends in generated crates a person will want to build, inspect and
+  diff", but the generated crates live under `.gearbox/`, which is **gitignored** -- git cannot see
+  them at all. What a person actually diffs is the descriptions (`product.gdl`, `gear.gdl`) and the
+  gear sources; what they build and inspect is the generated tree, which is a terminal's job, not
+  git's. Both are wanted, for two different reasons.
 
-  Built, with one qualification that changes the shape of the decision: **`@theia/git` does not
-  exist in 1.75.** Its last release was `1.61.0-next.8`. The Source Control *view* comes from
-  `@theia/scm`, and git itself is now the VS Code `vscode.git` extension running in the plugin host
-  -- so "keep Git" is not a dependency line, it is a third-party VSIX fetched from Open VSX. The
-  view is present and providerless until that is done, deliberately: fetching someone else's
-  extension is a different kind of decision from adding a `@theia/*` package, and this ADR should
-  not be read as having pre-approved it.
+  Built, and **`@theia/git` does not exist in 1.75** -- its last release was `1.61.0-next.8`. The
+  Source Control *view* is `@theia/scm`; git itself is the VS Code `vscode.git` extension running in
+  the plugin host, pinned by URL in `theiaPlugins` and fetched by an explicit `npm run plugins`. This
+  is where the earlier decision to install `@theia/plugin-ext` paid for itself: without a plugin host
+  the alternative was writing an `ScmProvider` over `simple-git`, measured at roughly a thousand
+  lines for a subset -- no history, no blame, no conflict resolution, no gutter diffs.
+
+* **Git needs a workspace, and the workspace has to be multi-root.** The extension finds
+  repositories by walking workspace folders, so with none open Source Control stays empty however
+  well the plugin host works. And the two repositories are *siblings* -- `gearbox-builder` and
+  `gears-rust` -- so one folder cannot contain both. `DomainWorkspace` therefore opens the
+  directories the engine already reports, which is this ADR's "make the workspace root a domain
+  object" one step earlier than it was written: not deriving a folder from an opened file, but
+  opening the folders the tool already knows it works on. Two things that had nothing to do with git
+  were unblocked by it -- the Explorer has something to browse, and a generated `product.lock` can
+  be opened at all, so `cpt-gearbox-fr-lock-read-only` stopped being implemented-and-unverifiable.
+
+* **Opening a workspace turns workspace trust into a real gate, and it must be settled narrowly.**
+  With a plugin host present an untrusted workspace restricts extensions, so git would be installed
+  and inert; and Theia puts a *modal* trust dialog over the whole application on first launch. The
+  blunt fix is `security.workspace.trust.enabled: false`, and it is the wrong one -- it would trust
+  every folder anyone opens afterwards, in an application that now runs third-party extension code.
+  Studio instead trusts exactly the roots it derived, and leaves the mechanism in place for
+  everything else. Two details cost time and are recorded so they do not again: trusted folders are
+  compared as URIs, so a bare path entry never matches a `file://` root; and Theia's own generated
+  `Untitled-NN.theia-workspace` is itself required to be trusted, which no trusted-folder setting can
+  satisfy, so it is excluded from the set by a `WorkspaceTrustService` subclass.
 
 * **The plugin host brings surface of its own, and it has to be narrowed too.** Adding
   `@theia/plugin-ext` pulled in `@theia/debug` and `@theia/test`, which opened a **Debug** and a

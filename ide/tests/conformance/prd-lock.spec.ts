@@ -93,22 +93,6 @@ test.describe("the lock", () => {
     expect(offenders).toEqual([]);
   });
 
-  test.fixme(
-    "a product.lock opened as a file is read-only [PRD cpt-gearbox-fr-lock-read-only]",
-    async ({ studio }) => {
-      // Implemented and not reachable, which is why this is a fixme rather than
-      // absent: `ReadOnlyLockEditorProvider` is rebound over Theia's
-      // `MonacoEditorProvider` and forces `readOnly` for any URI ending in
-      // `/product.lock`. What is missing is a way to *open* one from the UI --
-      // no workspace is open, so the Explorer has nothing to browse, and the
-      // written lock's location is the CLI's default (`OUTPUT_DIR` in
-      // `crates/gearbox-cli/src/generate.rs`) rather than anything the RPC
-      // reports. Opening the repository as a workspace is the A4 item that
-      // unblocks this.
-      await expect(studio.page.locator(".monaco-editor.readonly")).toBeVisible();
-    },
-  );
-
   test.fixme("the Lock view diffs against the lock on disk [plan §9: diff toggle vs disk]", async ({
     studio,
   }) => {

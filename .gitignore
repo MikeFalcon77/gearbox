@@ -56,6 +56,14 @@ dist/
 /ide/browser-app/esbuild.mjs
 /ide/browser-app/gen-esbuild.*.mjs
 
+# VS Code extensions fetched by `npm run plugins` -- 5.6 MB of somebody else's
+# build output, and the whole directory including itself. Nothing is kept here,
+# not even a .gitkeep: the plugin deployer treats every entry as a plugin
+# candidate and warns about the ones it cannot unpack, so a placeholder file
+# would put a warning in every startup log. Which versions and why is in
+# ide/README.md, where documentation belongs.
+/ide/plugins/
+
 # Playwright's per-run artifacts: failure screenshots and traces. The
 # conformance table itself IS tracked (docs/conformance.md) -- it is the
 # generated replacement for a hand-maintained section of the plan, so it is only
