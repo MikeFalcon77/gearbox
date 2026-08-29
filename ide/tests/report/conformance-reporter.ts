@@ -141,6 +141,18 @@ export default class ConformanceReporter implements Reporter {
       lines.push("");
     }
 
+    if (all.length === 0) {
+      // A run that collected nothing must not overwrite the record of a run that
+      // collected something. This happened: a `globalSetup` failure produced a
+      // table reading "Claims: 0", replacing 86 rows of real state with an empty
+      // shell. An empty table is not a finding, it is the absence of a run.
+      process.stdout.write(
+        `\nno claims collected, so ${this.out} was left as it was. ` +
+          `Something failed before the tests were reached -- look above this line.\n`,
+      );
+      return { status: "failed" };
+    }
+
     writeFileSync(this.out, lines.join("\n"));
     process.stdout.write(`\nconformance table: ${this.out}\n`);
 

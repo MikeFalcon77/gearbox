@@ -107,11 +107,11 @@
    Dimming rather than hiding, so the closure is seen against the whole graph --
    "these four, out of fourteen" is the point being made. */
 .gbx-edge-dim { opacity: 0.12; }
-.gbx-edge-lit { stroke: var(--theia-successBackground, #4caf50); stroke-width: 2.2; opacity: 1; }
-.gbx-arrow-head-lit { fill: var(--theia-successBackground, #4caf50); }
+.gbx-edge-lit { stroke: var(--theia-successBackground); stroke-width: 2.2; opacity: 1; }
+.gbx-arrow-head-lit { fill: var(--theia-successBackground); }
 .gbx-node-g { cursor: pointer; }
 .gbx-node-dim { opacity: 0.3; }
-.gbx-node-lit .gbx-node { stroke: var(--theia-successBackground, #4caf50); stroke-width: 2; }
+.gbx-node-lit .gbx-node { stroke: var(--theia-successBackground); stroke-width: 2; }
 .gbx-node-focus .gbx-node { stroke: var(--theia-focusBorder); stroke-width: 2.5; }
 .gbx-node-g:focus-visible { outline: none; }
 .gbx-node-g:focus-visible .gbx-node { stroke: var(--theia-focusBorder); stroke-width: 2.5; }

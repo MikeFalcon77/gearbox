@@ -81,13 +81,19 @@ test.describe("the graph draws what it says it draws", () => {
 });
 
 test.describe("nothing failed quietly", () => {
+  test("the Fabric favicon is installed", async ({ studio }) => {
+    // `@theia/cli` 1.75 has no favicon hook; FabricThemeContribution injects one.
+    const href = await studio.page.evaluate(() => {
+      const link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+      return link?.href ?? null;
+    });
+    expect(href, "no link[rel=icon] in document.head").not.toBeNull();
+    expect(href!).toMatch(/^(data:image\/svg\+xml|blob:|https?:)/);
+  });
+
   test("no console errors", async ({ studio }) => {
-    // Two things are tolerated, both by name. Tolerating by name rather than by
-    // pattern is the whole discipline here: a real missing resource or a real
-    // exception still fails.
-    //
-    // The app has no favicon: @theia/cli 1.75 offers no hook for one and its
-    // generated index.html has no `<link rel="icon">`.
+    // Tolerating by name rather than by pattern: a real missing resource or a
+    // real exception still fails.
     //
     // `INVALID tab` is thrown by `@theia/plugin-ext`'s own tab bookkeeping
     // (`src/plugin/tabs.ts`) when a tab update arrives for an id the extension
@@ -96,10 +102,24 @@ test.describe("nothing failed quietly", () => {
     // suite opens and switches editors quickly, and nothing observable breaks --
     // git, the editors and every other claim keep passing. Recorded rather than
     // filtered away quietly, because it is part of what the plugin host costs.
-    const tolerated = [/favicon\.ico/, /^pageerror: INVALID tab$/];
+    const tolerated = [/^pageerror: INVALID tab$/];
     const real = studio.consoleErrors.filter(
       (error) => !tolerated.some((pattern) => pattern.test(error)),
     );
     expect(real, `unexpected console output:\n${real.join("\n")}`).toEqual([]);
+  });
+
+  test("the Fabric theme is the active color theme", async ({ studio }) => {
+    const theme = await studio.page.evaluate(() => {
+      const bg = getComputedStyle(document.documentElement)
+        .getPropertyValue("--theia-editor-background")
+        .trim()
+        .toLowerCase();
+      const bodyClass = document.body.className;
+      return { bg, bodyClass };
+    });
+    // navy-deep from constructorfabric.org styles.css
+    expect(theme.bg).toMatch(/#001838|rgb\(\s*0,\s*24,\s*56\s*\)/);
+    expect(theme.bodyClass).toContain("vs-dark");
   });
 });

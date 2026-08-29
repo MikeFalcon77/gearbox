@@ -38,8 +38,10 @@ import { ExplainWidget } from "./explain/explain-widget";
 import { LockWidget } from "./lock/lock-widget";
 import { ProductWidget } from "./product/product-widget";
 import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
+import { FabricThemeContribution } from "./theme/fabric-theme-contribution";
 
 import "../../src/browser/style/index.css";
+import "../../src/browser/theme/fabric-fonts.css";
 
 export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // Without this, `.gdl` opens as plaintext: nothing else in the app registers
@@ -47,6 +49,13 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bind(LanguageGrammarDefinitionContribution)
     .to(GdlLanguageContribution)
     .inSingletonScope();
+
+  // Why: Gearbox Studio is a Constructor Fabric product. The color theme, fonts
+  // and favicon come from constructorfabric.org tokens, registered natively
+  // (not as a VS Code theme extension) so they ship with the extension and do
+  // not depend on `download:plugins`.
+  bind(FabricThemeContribution).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(FabricThemeContribution);
 
   // The first rebind in this application, so the discipline ADR 0011 asks for
   // starts here: every rebind says why in place. Arduino IDE's frontend module is
