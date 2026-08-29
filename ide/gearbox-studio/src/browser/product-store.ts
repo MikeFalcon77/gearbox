@@ -232,6 +232,18 @@ export class ProductStore {
    * Lazy because the lock costs a TOML serialization the other panels never
    * need, and idempotent because the widget that wants it asks on every render.
    */
+  /**
+   * Forget the lock and fetch it again.
+   *
+   * Narrower than a re-resolve on purpose: the resolution on screen is still the
+   * answer, and only the comparison against disk can have gone stale. Re-solving
+   * would also redraw four other panels for a file that changed outside them.
+   */
+  async refreshLock(): Promise<void> {
+    this.update({ lock: undefined, lockError: undefined });
+    await this.ensureLock();
+  }
+
   async ensureLock(): Promise<void> {
     const ref = this.state.open;
     const profile = this.state.profile;
@@ -241,8 +253,16 @@ export class ProductStore {
       // Once per resolution, failure included. The Lock widget asks from its
       // render and a failure leaves `lock` undefined, so without this a lock the
       // engine refuses is re-requested on every frame for as long as the panel
-      // is open. Cleared with the rest of the lock state at the head of the next
-      // resolve, which is the only thing that could change the answer.
+      // is open.
+      //
+      // A resolve is no longer the only thing that can change the answer: the
+      // result now carries a comparison against the lock **on disk**, and that
+      // file changes when generation applies or when someone runs the CLI in a
+      // terminal. `.gearbox/**` is deliberately excluded from Theia's file
+      // watcher -- generated output is rewritten wholesale and watching it
+      // reports churn nobody acts on -- so nothing notices on its own. Hence
+      // `refreshLock`, called by the Generate view after an apply and by the
+      // Lock view's own control.
       this.state.lockError !== undefined ||
       this.state.status !== "ready" ||
       ref === undefined ||

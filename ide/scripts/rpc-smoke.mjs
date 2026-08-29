@@ -9,7 +9,7 @@
 
 import { execSync } from "node:child_process";
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -186,6 +186,89 @@ try {
     locks.get("dev").canonical !== locks.get("prod").canonical,
     "two profiles produce two different lock texts",
   );
+  // --- the lock against the lock on disk ------------------------------------
+  //
+  // The structured comparison, checked here rather than in the browser: the
+  // interesting cases need a lock file put somewhere on purpose, and the widget
+  // deliberately sends no `out` -- there is one generated tree now.
+  {
+    const scratch = resolve(repo, ".gearbox/smoke/lockdiff");
+    rmSync(scratch, { recursive: true, force: true });
+    mkdirSync(scratch, { recursive: true });
+
+    const fresh = await connection.sendRequest("gearbox/product/lock", {
+      path: product,
+      profile: "dev",
+      out: scratch,
+    });
+    check(
+      fresh.lock_path.endsWith("lockdiff/product.lock"),
+      "product/lock reports where it looked, even with nothing there",
+    );
+    check(
+      fresh.on_disk === undefined || fresh.on_disk === null,
+      "no lock on disk is reported as absent rather than as an empty diff",
+    );
+
+    // The same lock, written where it was expected: no differences.
+    writeFileSync(join(scratch, "product.lock"), fresh.canonical);
+    const same = await connection.sendRequest("gearbox/product/lock", {
+      path: product,
+      profile: "dev",
+      out: scratch,
+    });
+    check(same.on_disk != null, "a lock on disk is found");
+    check(
+      (same.on_disk?.changes ?? ["missing"]).length === 0,
+      "an identical lock on disk reports no changes",
+    );
+    check(
+      same.on_disk?.lock_hash === same.lock_hash,
+      "and the hash it read back matches the one just resolved",
+    );
+
+    // A lock for a *different* profile, so the diff has something structural to
+    // say. This is the case the Lock view exists to show.
+    const other = await connection.sendRequest("gearbox/product/lock", {
+      path: product,
+      profile: "prod",
+    });
+    writeFileSync(join(scratch, "product.lock"), other.canonical);
+    const stale = await connection.sendRequest("gearbox/product/lock", {
+      path: product,
+      profile: "dev",
+      out: scratch,
+    });
+    const changes = stale.on_disk?.changes ?? [];
+    check(changes.length > 0, `a stale lock reports its differences (${changes.length})`);
+    check(
+      changes.some((line) => line.startsWith("~ profile: prod -> dev")),
+      "and names the profile change first, in the engine's own words",
+    );
+    check(
+      changes.every((line) => /^[+~-] /.test(line)),
+      "every line is marked added, removed or changed",
+    );
+
+    // A file that is not a lock is neither current nor stale.
+    writeFileSync(join(scratch, "product.lock"), "this is not a lock\n");
+    const broken = await connection.sendRequest("gearbox/product/lock", {
+      path: product,
+      profile: "dev",
+      out: scratch,
+    });
+    check(
+      (broken.on_disk?.unreadable ?? "") !== "",
+      "a file that will not parse is reported as unreadable, not as no differences",
+    );
+    check(
+      (broken.on_disk?.changes ?? ["x"]).length === 0,
+      "and carries no invented diff",
+    );
+
+    rmSync(scratch, { recursive: true, force: true });
+  }
+
   // Twice for the same profile, byte for byte. This is the determinism the hash
   // is a shorthand for, checked on the text rather than on the digest.
   const again = await connection.sendRequest("gearbox/product/lock", { path: product, profile: "dev" });

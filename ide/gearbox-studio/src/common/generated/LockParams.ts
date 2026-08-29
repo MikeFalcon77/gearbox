@@ -8,4 +8,14 @@
  * work and bytes that the panels reading a resolution do not need, and the
  * client asks for the text only when something is going to show it.
  */
-export type LockParams = { path: string, profile?: string | null, };
+export type LockParams = { path: string, profile?: string | null, 
+/**
+ * The output tree to compare against, when it is not the default
+ * `.gearbox/<product>/<profile>/`.
+ *
+ * The Studio sends none: there is one generated tree now that a lock no
+ * longer depends on which client wrote it. It exists so a test can put a
+ * deliberately stale lock somewhere of its own instead of doctoring the tree
+ * `§12` step 2 builds.
+ */
+out?: string | null, };

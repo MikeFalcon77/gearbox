@@ -189,6 +189,11 @@ export class GenerateService {
         },
         written: outcome.written,
       });
+      // An apply rewrites `product.lock` in the output tree, so the Lock view's
+      // comparison against disk is now about the previous file. Nothing watches
+      // `.gearbox/**` -- it is excluded from the file watcher on purpose -- so the
+      // write has to say so itself.
+      void this.product.refreshLock();
       return outcome;
     } catch (error) {
       this.messages.error(messageOf(error));

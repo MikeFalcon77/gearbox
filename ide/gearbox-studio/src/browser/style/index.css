@@ -447,3 +447,35 @@
 }
 .gbx-generate-preview { flex: 1 1 auto; min-width: 0; min-height: 0; }
 .gbx-generate-diff { height: 100%; min-height: 240px; }
+
+/* --- The lock against the lock on disk ----------------------------------- */
+
+.gbx-lock-disk {
+  padding: 6px 2px;
+  border-top: 1px solid var(--theia-editorGroup-border);
+  border-bottom: 1px solid var(--theia-editorGroup-border);
+  margin: 6px 0;
+  font-size: 12px;
+}
+.gbx-lock-disk-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.gbx-lock-disk code { opacity: 0.7; word-break: break-all; }
+.gbx-lock-toggle {
+  padding: 1px 8px;
+  border: 1px solid var(--theia-editorGroup-border); border-radius: 3px;
+  background: transparent; color: var(--theia-foreground);
+  font-size: 11px; cursor: pointer;
+}
+.gbx-lock-toggle:hover { background: var(--theia-list-hoverBackground); }
+.gbx-lock-toggle:focus-visible { outline: 1px solid var(--theia-focusBorder); }
+
+/* The engine's own `+`/`-`/`~` lines. Monospaced so the marks line up, which is
+   what makes a list of forty of them scannable. */
+.gbx-lock-changes {
+  list-style: none; margin: 6px 0 0; padding: 0;
+  font-family: var(--theia-code-font-family); font-size: 11px;
+  max-height: 12em; overflow: auto;
+}
+.gbx-lock-changes li { padding: 1px 0; white-space: pre; }
+.gbx-lock-changes li[data-lock-change="+"] { color: var(--theia-successBackground); }
+.gbx-lock-changes li[data-lock-change="-"] { color: var(--theia-editorError-foreground); }
+.gbx-lock-changes li[data-lock-change="~"] { color: var(--theia-editorWarning-foreground); }

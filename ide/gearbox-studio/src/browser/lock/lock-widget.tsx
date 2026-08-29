@@ -17,6 +17,7 @@ import { codicon, ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
+import type { LockOnDisk } from "../../common/generated/LockOnDisk";
 import { ProductStore } from "../product-store";
 
 /** `blake3:c4412b91f813…` -> `c4412b91f813`. */
@@ -30,6 +31,9 @@ export class LockWidget extends ReactWidget {
   static readonly LABEL = "Gearbox Lock";
 
   @inject(ProductStore) protected readonly store!: ProductStore;
+
+  /** Whether the text below shows the lock on disk instead of the resolved one. */
+  protected showingDisk = false;
 
   @postConstruct()
   protected init(): void {
@@ -79,7 +83,15 @@ export class LockWidget extends ReactWidget {
     // The hash the lock text carries against the hash the resolution reported.
     // They come from the same resolution, so a mismatch means the two answers on
     // screen are about different runs -- worth saying rather than assuming.
-    const stale = resolved !== undefined && resolved.lock_hash !== lock.lock_hash;
+    const inconsistent = resolved !== undefined && resolved.lock_hash !== lock.lock_hash;
+
+    // Against the lock on disk, which is the comparison §9 actually asked for.
+    // Until the source digest became content-based this could not be honest: a
+    // lock written by the CLI carried that client's spelling of the root and so a
+    // different hash, and every CLI-written lock would have read as stale here
+    // forever.
+    const disk = lock.on_disk ?? undefined;
+    const drifted = disk !== undefined && disk.unreadable == null && disk.changes.length > 0;
 
     return (
       <div className="gbx-lock" data-lock-profile={lock.profile}>
@@ -99,19 +111,120 @@ export class LockWidget extends ReactWidget {
             <code data-lock-text-hash={lock.lock_hash} title={lock.lock_hash}>
               {shortHash(lock.lock_hash)}
             </code>
-            {stale && (
-              <span className="gbx-badge gbx-downgraded" data-lock-stale="true">
+            {inconsistent && (
+              <span className="gbx-badge gbx-downgraded" data-lock-inconsistent="true">
                 does not match the resolution on screen
               </span>
             )}
           </span>
         </div>
+        {this.renderDisk(lock.lock_path, disk, drifted)}
         {/* `readOnly` on a textarea would be editable-looking; a `<pre>` is
             read-only by construction. Selectable and copyable, because comparing
             a lock against one in a terminal is a real thing people do. */}
         <pre className="gbx-lock-text" data-lock-canonical="true">
-          {lock.canonical}
+          {this.showingDisk && disk !== undefined ? disk.canonical : lock.canonical}
         </pre>
+      </div>
+    );
+  }
+
+  /**
+   * The lock on disk: whether there is one, and how it differs.
+   *
+   * Four states, and each is a different thing to do about it -- which is why
+   * none of them collapses into "no badge". There is no lock yet (generate one);
+   * there is one and it matches (nothing to do); there is one and it differs
+   * (regenerate, or find out why); there is a file that does not verify (look at
+   * it). The path is reported in every case, because "nothing on disk" and "I
+   * looked somewhere else" are indistinguishable without it.
+   *
+   * The fourth state exists because a lock is self-verifying: `gearbox_lock::read`
+   * recomputes the hash and refuses on a mismatch. Reporting an empty diff for a
+   * tampered file -- which is what comparing text would do -- would say the
+   * opposite of the truth.
+   */
+  protected renderDisk(
+    path: string,
+    disk: LockOnDisk | undefined,
+    drifted: boolean,
+  ): React.ReactNode {
+    const state =
+      disk === undefined
+        ? "absent"
+        : disk.unreadable != null
+          ? "unreadable"
+          : drifted
+            ? "drifted"
+            : "current";
+
+    return (
+      <div className="gbx-lock-disk" data-lock-disk={state}>
+        <div className="gbx-lock-disk-head">
+          {state === "absent" && <span>No lock on disk yet — the Generate view writes one.</span>}
+          {state === "unreadable" && (
+            <>
+              <span className="gbx-badge gbx-downgraded" data-lock-unverified="true">
+                does not verify
+              </span>
+              <span>{disk?.unreadable}</span>
+            </>
+          )}
+          {state === "drifted" && (
+            <span className="gbx-badge gbx-downgraded" data-lock-stale="true">
+              {disk?.changes.length}{" "}
+              {disk?.changes.length === 1 ? "difference" : "differences"} from the lock on disk
+            </span>
+          )}
+          {state === "current" && (
+            <span className="gbx-badge" data-lock-current="true">
+              matches the lock on disk
+            </span>
+          )}
+
+          <code title={path}>{path}</code>
+
+          {/* In every state, not just the interesting ones: after running
+              `gearbox generate` in a terminal, the state a reader wants to leave
+              is "absent" or "drifted", and that is exactly when the control has to
+              be there. Nothing watches `.gearbox/**` -- it is excluded from
+              Theia's file watcher because generated output is rewritten wholesale
+              and watching it reports churn nobody acts on -- so the comparison is
+              taken when the lock is fetched. An apply from the Generate view
+              refreshes it without being asked. */}
+          <button
+            className="gbx-lock-toggle"
+            data-lock-refresh="true"
+            title="read the lock on disk again"
+            onClick={() => void this.store.refreshLock()}
+          >
+            re-read
+          </button>
+
+          {/* Only when the two differ. A toggle between two identical texts is a
+              control that does nothing, which is worse than no control. */}
+          {state === "drifted" && (
+            <button
+              className="gbx-lock-toggle"
+              data-lock-showing={this.showingDisk ? "disk" : "resolved"}
+              onClick={() => {
+                this.showingDisk = !this.showingDisk;
+                this.update();
+              }}
+            >
+              show {this.showingDisk ? "resolved" : "on disk"}
+            </button>
+          )}
+        </div>
+        {state === "drifted" && (
+          <ul className="gbx-lock-changes">
+            {(disk?.changes ?? []).map((line) => (
+              <li key={line} data-lock-change={line.slice(0, 1)}>
+                {line}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     );
   }

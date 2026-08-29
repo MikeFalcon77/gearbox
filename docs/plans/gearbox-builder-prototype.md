@@ -1079,6 +1079,37 @@ Two claims stay honest rather than green, and both are corpus limits:
   gears `dev` puts in one. The view states this in words instead of letting an absent repeated chip
   imply that a partition is what the model produces.
 
+#### The Lock view against the lock on disk
+
+Built, and **structured rather than textual** -- §9 asked for a "diff toggle vs disk", which sounds
+like two columns of text. `gearbox_lock::diff` already compared two *parsed* locks and its
+`summary()` doc comment names this widget as its consumer, so the view renders the engine's own
+`+`/`-`/`~` lines: "`~ profile: prod -> dev`" rather than "line 214 differs". Computing that in the
+client would be a second answer to the one question a lock settles, so nothing is computed there --
+`LockDiff` is not even on the wire, only its sentences. The bytes on disk come too, behind a toggle,
+for a reader who wants to see them.
+
+`LockResult` carries the comparison rather than a second method answering it, for the same reason
+`ResolveResult` carries its explanation: the two have to be about one resolution, and a separate call
+cannot promise that. `LockParams` gained an `out` override so a test can point at a lock of its own;
+the Studio sends none.
+
+**Four states, because each is a different thing to do about it.** No lock yet (generate one); one
+that matches (nothing to do); one that differs (regenerate, or find out why); and a file that
+**does not verify** -- `gearbox_lock::read` recomputes the hash and refuses on a mismatch, so a lock
+is self-verifying, and reporting an empty diff for a tampered file is what comparing text would do
+and would say the opposite of the truth. The path is shown in every state, because "nothing on disk"
+and "I looked somewhere else" are indistinguishable without it.
+
+**One limitation, stated because it is a design decision and not an oversight.** The comparison is
+taken when the lock is fetched, which is once per resolution. `.gearbox/**` is excluded from Theia's
+file watcher on purpose -- generated output is rewritten wholesale and watching it reports churn
+nobody acts on -- so a `gearbox generate` run in a terminal is not noticed. Hence a `re-read`
+control in every state, and an automatic refresh after the Generate view applies. The comment in
+`ProductStore.ensureLock` that said a resolve was "the only thing that could change the answer" was
+true until this landed and is now corrected in place.
+
+
 #### The lock records what was read, not who asked
 
 `ResolvedSource.digest` was `path:<declared location>` -- the caller's own spelling of the source

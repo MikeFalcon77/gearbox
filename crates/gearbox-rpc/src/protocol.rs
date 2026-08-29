@@ -237,6 +237,16 @@ pub struct LockParams {
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+
+    /// The output tree to compare against, when it is not the default
+    /// `.gearbox/<product>/<profile>/`.
+    ///
+    /// The Studio sends none: there is one generated tree now that a lock no
+    /// longer depends on which client wrote it. It exists so a test can put a
+    /// deliberately stale lock somewhere of its own instead of doctoring the tree
+    /// the plan's section 12 step 2 builds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out: Option<String>,
 }
 
 /// The lock as it would be written.
@@ -251,8 +261,55 @@ pub struct LockResult {
     /// Repeated here so a caller can label the text without parsing it.
     pub lock_hash: String,
     pub profile: String,
+
+    /// Where a lock for this profile lives, whether or not one is there.
+    ///
+    /// Reported even when absent, because "there is no lock yet" and "I did not
+    /// look" are different answers and a client cannot tell them apart from a
+    /// missing field.
+    pub lock_path: String,
+
+    /// The lock already on disk, when there is one.
+    ///
+    /// Carried with the text rather than fetched by a second method, for the same
+    /// reason `ResolveResult` carries its explanation: the two have to be about
+    /// one resolution, and a separate call cannot promise that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_disk: Option<LockOnDisk>,
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// The lock found on disk, and how it differs from the one just resolved.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct LockOnDisk {
+    /// The bytes as they are on disk, so a client can show a text diff without
+    /// reading the file itself.
+    pub canonical: String,
+
+    /// The hash the file carries. Empty when the file could not be parsed.
+    pub lock_hash: String,
+
+    /// What differs, in the engine's own words: `LockDiff::summary()`, whose doc
+    /// comment names this widget as its consumer. `+` added, `-` removed, `~`
+    /// changed.
+    ///
+    /// **Empty means the two are the same**, which is why it is not
+    /// `skip_serializing_if`: an absent list and an empty one would read alike,
+    /// and "no differences" is the answer most worth being sure of.
+    ///
+    /// Sent rather than computed by the client. A second implementation of "what
+    /// changed" is a second answer, and the whole point of a lock is that there
+    /// is one.
+    pub changes: Vec<String>,
+
+    /// Why the file on disk is not a lock, when it is not one.
+    ///
+    /// A file that exists and does not parse is neither "current" nor "stale",
+    /// and saying so beats reporting an empty diff for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unreadable: Option<String>,
 }
 
 /// `gearbox/product/addGear` and `gearbox/product/removeGear`.

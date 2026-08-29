@@ -25,7 +25,8 @@ use lsp_server::{Connection, ExtractError, Message, Notification, Request, Reque
 use crate::protocol::{
     Capabilities, CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, EditGearParams,
     EditGearResult, FailedRoot, GenerateApplyResult, GenerateFileParams, GenerateFileResult,
-    GenerateParams, GeneratePlanResult, InitializeParams, InitializeResult, LockParams, LockResult,
+    GenerateParams, GeneratePlanResult, InitializeParams, InitializeResult, LockOnDisk,
+    LockParams, LockResult,
     LogParams, ProductLoadParams, ProductLoadResult, ProgressParams, ResolveParams, ResolveResult,
     ResolvedRoot, ServerInfo, ValidateParams, ValidateResult, error_code, method,
 };
@@ -440,16 +441,32 @@ fn lock(state: &mut State, id: RequestId, params: &LockParams) -> Response {
         Err(refusal) => return refusal,
         Ok(resolved) => resolved,
     };
+    // The same rule generation uses, so the lock compared against is the lock in
+    // the tree generation writes. A different directory would be a diff nobody
+    // could act on.
+    let lock_path = default_out_root(state, params.out.as_deref(), &resolved)
+        .map(|root| root.join("product.lock"));
+
     match gearbox_lock::write_canonical(&resolved.product) {
-        Ok(canonical) => ok(
-            id,
-            &LockResult {
-                canonical,
-                lock_hash: resolved.product.product.lock_hash.clone(),
-                profile: resolved.profile.to_string(),
-                diagnostics: resolved.diagnostics,
-            },
-        ),
+        Ok(canonical) => {
+            let on_disk = lock_path
+                .as_deref()
+                .and_then(|path| compare_to_disk(path, &resolved.product));
+            ok(
+                id,
+                &LockResult {
+                    canonical,
+                    lock_hash: resolved.product.product.lock_hash.clone(),
+                    profile: resolved.profile.to_string(),
+                    lock_path: lock_path
+                        .as_deref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default(),
+                    on_disk,
+                    diagnostics: resolved.diagnostics,
+                },
+            )
+        }
         // A product that resolved but cannot be written is a defect in the lock
         // writer, not in the description, so it carries the resolution's
         // diagnostics rather than pretending the description was at fault.
@@ -661,6 +678,64 @@ fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
     Ok(resolved)
 }
 
+/// The lock at `path` against the one just resolved.
+///
+/// `None` only when there is no file. Everything else is an answer worth showing:
+/// a file that will not parse is reported as unreadable rather than as an empty
+/// diff, because "there is something there and it is not a lock" is neither
+/// current nor stale.
+///
+/// The difference is `LockDiff::summary()`, which is *structured* comparison of
+/// two parsed locks rather than a text diff -- so it says "this binding changed"
+/// instead of "line 214 differs". Its own doc comment names this widget as the
+/// consumer, which is why the client is sent the sentences instead of computing
+/// them: a second implementation of "what changed" would be a second answer, and
+/// a lock exists to have one.
+fn compare_to_disk(path: &Path, resolved: &ResolvedProduct) -> Option<LockOnDisk> {
+    let canonical = std::fs::read_to_string(path).ok()?;
+    match gearbox_lock::read(&canonical) {
+        Ok(on_disk) => {
+            let diff = gearbox_lock::diff(&on_disk, resolved);
+            Some(LockOnDisk {
+                canonical,
+                lock_hash: on_disk.product.lock_hash,
+                changes: diff.summary(),
+                unreadable: None,
+            })
+        }
+        Err(e) => Some(LockOnDisk {
+            canonical,
+            lock_hash: String::new(),
+            changes: Vec::new(),
+            unreadable: Some(e.to_string()),
+        }),
+    }
+}
+
+/// Where a product's generated tree lives: `out` if the caller named one, else
+/// `.gearbox/<product>/<profile>/` under the declared workspace.
+///
+/// One function because two things need the same answer -- generation writes the
+/// tree and `product/lock` compares against the lock inside it -- and a lock
+/// compared against a different directory than the one generation writes would be
+/// a diff nobody could act on.
+///
+/// `None` means no workspace was declared and no `out` was given, so there is no
+/// default to compute.
+fn default_out_root(state: &State, out: Option<&str>, resolved: &Resolved) -> Option<PathBuf> {
+    if let Some(path) = out {
+        return Some(PathBuf::from(path));
+    }
+    Some(
+        state
+            .workspace
+            .as_ref()?
+            .join(".gearbox")
+            .join(&resolved.product.product.id)
+            .join(resolved.profile.as_str()),
+    )
+}
+
 /// The nearest ancestor of `path` that exists, including `path` itself.
 fn nearest_existing(path: &Path) -> Result<PathBuf, String> {
     let mut cursor = path.to_path_buf();
@@ -705,20 +780,12 @@ fn prepare_generate(
         ));
     }
 
-    let requested = if let Some(p) = out {
-        PathBuf::from(p)
-    } else {
-        let Some(workspace) = &state.workspace else {
-            return Err(error(
-                id.clone(),
-                error_code::GENERATE_REFUSED,
-                "no workspace was declared, so there is no default output root",
-            ));
-        };
-        workspace
-            .join(".gearbox")
-            .join(&resolved.product.product.id)
-            .join(resolved.profile.as_str())
+    let Some(requested) = default_out_root(state, out, &resolved) else {
+        return Err(error(
+            id.clone(),
+            error_code::GENERATE_REFUSED,
+            "no workspace was declared, so there is no default output root",
+        ));
     };
     let out_root = match writable_out_root(state, &requested) {
         Ok(root) => root,

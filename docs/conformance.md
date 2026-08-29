@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **96** — 86 built, 7 not built, 0 broken, 3 not observed.
+Claims: **98** — 89 built, 6 not built, 0 broken, 3 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -123,7 +123,9 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the lock's own hash matches the resolution on screen | `plan §9: lock_hash badge` | ✅ built |  |
 | each profile has its own lock text | `PRD cpt-gearbox-fr-lock-single-source` | ✅ built |  |
 | the client never serializes a lock of its own | `PRD cpt-gearbox-fr-lock-single-source` | ✅ built |  |
-| the Lock view diffs against the lock on disk | `plan §9: diff toggle vs disk` | 🚧 not built |  |
+| the Lock view diffs against the lock on disk | `plan §9: diff toggle vs disk` | ✅ built |  |
+| a tampered lock is neither current nor stale | `plan §9: diff toggle vs disk` | ✅ built |  |
+| a lock that matches the disk says so, without a toggle | `plan §9: lock_hash badge` | ✅ built |  |
 
 ## `conformance/prd-product.spec.ts`
 
