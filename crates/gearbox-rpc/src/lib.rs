@@ -15,15 +15,17 @@
 
 pub mod protocol;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use gearbox_engine::{Continue, LoadEvent, SourceRoot, default_source_ids, load_catalogue_staged};
-use gearbox_ir::{Diagnostic, ExplanationGraph, ProfileId, ResolvedProduct, SourceId};
+use gearbox_ir::{Diagnostic, ExplanationGraph, ProfileId, RelPath, ResolvedProduct, SourceId};
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
 
 use crate::protocol::{
     Capabilities, CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, EditGearParams,
-    EditGearResult, FailedRoot, InitializeParams, InitializeResult, LockParams, LockResult,
+    EditGearResult, FailedRoot, GenerateApplyResult, GenerateFileParams, GenerateFileResult,
+    GenerateParams, GeneratePlanResult, InitializeParams, InitializeResult, LockParams, LockResult,
     LogParams, ProductLoadParams, ProductLoadResult, ProgressParams, ResolveParams, ResolveResult,
     ResolvedRoot, ServerInfo, ValidateParams, ValidateResult, error_code, method,
 };
@@ -236,6 +238,9 @@ fn dispatch(connection: &Connection, state: &mut State, request: Request) -> Opt
                 Err(e) => invalid_params(id, &e),
             },
         }),
+        method::GENERATE_PLAN | method::GENERATE_APPLY | method::GENERATE_FILE => {
+            Some(dispatch_generate(state, request))
+        }
         other => Some(error(
             id,
             lsp_server::ErrorCode::MethodNotFound as i32,
@@ -271,11 +276,11 @@ fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Re
             capabilities: Capabilities {
                 catalogue: true,
                 staged_catalogue: true,
-                // M4 landed, so this is now true and the client's "needs the
-                // resolver" notice disappears on its own -- which is what the
-                // capability was for. `generate` stays false until M5.
+                // M4 and M5 landed, so both are true and the client's "needs
+                // the resolver / generator" notices disappear on their own --
+                // which is what the capabilities were for.
                 resolve: true,
-                generate: false,
+                generate: true,
                 // Echoed back, so a client that forgot to ask for writes can see
                 // that it forgot instead of finding out from a refusal later.
                 writes: state.allow_writes,
@@ -586,6 +591,351 @@ fn writable_path(state: &State, path: &Path) -> Result<(), String> {
             path.display()
         ))
     }
+}
+
+/// Whether a generation output root may be written, and the resolved path when
+/// it may.
+///
+/// Asymmetric with [`writable_path`], and the asymmetry is the point:
+///
+/// * a description edit requires the path to *exist* and to be a `.gdl` file,
+///   because that method rewrites a file the operator already has;
+/// * generation *creates* files that are not `.gdl`, so a missing path is
+///   allowed -- the nearest existing ancestor is what gets checked -- and the
+///   path must **not** sit inside a source root. Writing generated Rust next
+///   to human-authored Rust is ADR-0010 tier 5.
+///
+/// The workspace is still required. Failing closed: if nothing was declared,
+/// nothing is writable.
+fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| format!("cannot resolve working directory: {e}"))?
+            .join(path)
+    };
+
+    let existing = nearest_existing(&absolute)?;
+    let canonical_existing = existing
+        .canonicalize()
+        .map_err(|e| format!("cannot canonicalize `{}`: {e}", existing.display()))?;
+
+    // Rebuild the full path under the canonical ancestor so `starts_with`
+    // compares like-for-like. The suffix is the components that do not exist
+    // yet -- the ones generation is about to create.
+    let suffix = absolute.strip_prefix(&existing).unwrap_or(Path::new(""));
+    let resolved = if suffix.as_os_str().is_empty() {
+        canonical_existing
+    } else {
+        canonical_existing.join(suffix)
+    };
+
+    // Source roots first: they may sit *beside* the workspace (the gears-rust
+    // slice is a sibling of this repository), and "do not write next to human
+    // Rust" is the more specific refusal when both apply.
+    for root in &state.roots {
+        if let Ok(src) = root.root.canonicalize()
+            && resolved.starts_with(&src)
+        {
+            return Err(format!(
+                "`{}` is inside a source root; generation must not write next to \
+                 human-authored crates",
+                path.display()
+            ));
+        }
+    }
+
+    let Some(workspace) = state.workspace.as_ref().and_then(|w| w.canonicalize().ok()) else {
+        return Err("no workspace was declared, so no output root is writable".to_owned());
+    };
+    if !resolved.starts_with(&workspace) {
+        return Err(format!(
+            "`{}` is outside the declared workspace",
+            path.display()
+        ));
+    }
+
+    Ok(resolved)
+}
+
+/// The nearest ancestor of `path` that exists, including `path` itself.
+fn nearest_existing(path: &Path) -> Result<PathBuf, String> {
+    let mut cursor = path.to_path_buf();
+    loop {
+        if cursor.exists() {
+            return Ok(cursor);
+        }
+        match cursor.parent() {
+            Some(parent) => cursor = parent.to_path_buf(),
+            None => {
+                return Err(format!("`{}` has no existing ancestor", path.display()));
+            }
+        }
+    }
+}
+
+/// Everything generation needs after the two gates (resolution is writable,
+/// output root is allowed). Shared by plan, apply and file so they cannot
+/// answer about different trees of the same request.
+struct PreparedGenerate {
+    files: gearbox_ir::FileSet,
+    out_root: PathBuf,
+    base_root: PathBuf,
+    diagnostics: Vec<Diagnostic>,
+    skipped: Vec<String>,
+}
+
+fn prepare_generate(
+    state: &mut State,
+    id: &RequestId,
+    path: &str,
+    profile: Option<&str>,
+    out: Option<&str>,
+) -> Result<PreparedGenerate, Response> {
+    let resolved = resolve_once(state, id, path, profile)?;
+    if !resolved.product.is_writable() {
+        return Err(error_with_diagnostics(
+            id.clone(),
+            error_code::GENERATE_REFUSED,
+            "resolution reported errors; nothing was generated",
+            &resolved.diagnostics,
+        ));
+    }
+
+    let requested = if let Some(p) = out {
+        PathBuf::from(p)
+    } else {
+        let Some(workspace) = &state.workspace else {
+            return Err(error(
+                id.clone(),
+                error_code::GENERATE_REFUSED,
+                "no workspace was declared, so there is no default output root",
+            ));
+        };
+        workspace
+            .join(".gearbox")
+            .join(&resolved.product.product.id)
+            .join(resolved.profile.as_str())
+    };
+    let out_root = match writable_out_root(state, &requested) {
+        Ok(root) => root,
+        Err(refusal) => {
+            return Err(error(id.clone(), error_code::GENERATE_REFUSED, &refusal));
+        }
+    };
+
+    let source_roots: BTreeMap<_, _> = state
+        .roots
+        .iter()
+        .map(|root| (root.id.clone(), root.root.clone()))
+        .collect();
+    let generated = match gearbox_engine::generate(&gearbox_engine::generate::GenerateInput {
+        lock: &resolved.product,
+        source_roots: &source_roots,
+        out_root: &out_root,
+    }) {
+        Ok(generated) => generated,
+        Err(e) => {
+            return Err(error(
+                id.clone(),
+                error_code::GENERATE_REFUSED,
+                &format!("generation failed: {e}"),
+            ));
+        }
+    };
+
+    let base_root = gearbox_engine::generate::base_root_for(&out_root);
+    Ok(PreparedGenerate {
+        files: generated.files,
+        out_root,
+        base_root,
+        diagnostics: resolved.diagnostics,
+        skipped: generated
+            .skipped
+            .iter()
+            .map(gearbox_ir::ProcessId::to_string)
+            .collect(),
+    })
+}
+
+fn dispatch_generate(state: &mut State, request: Request) -> Response {
+    let id = request.id.clone();
+    if let Some(refusal) = require_ready(state, &id) {
+        return refusal;
+    }
+    match request.method.as_str() {
+        method::GENERATE_PLAN => match cast::<GenerateParams>(request) {
+            Ok((id, params)) => generate_plan(state, id, &params),
+            Err(e) => invalid_params(id, &e),
+        },
+        method::GENERATE_APPLY => match cast::<GenerateParams>(request) {
+            Ok((id, params)) => generate_apply(state, id, &params),
+            Err(e) => invalid_params(id, &e),
+        },
+        method::GENERATE_FILE => match cast::<GenerateFileParams>(request) {
+            Ok((id, params)) => generate_file(state, id, &params),
+            Err(e) => invalid_params(id, &e),
+        },
+        other => error(
+            id,
+            lsp_server::ErrorCode::MethodNotFound as i32,
+            &format!("unknown method `{other}`"),
+        ),
+    }
+}
+
+fn generate_plan(state: &mut State, id: RequestId, params: &GenerateParams) -> Response {
+    let prepared = match prepare_generate(
+        state,
+        &id,
+        &params.path,
+        params.profile.as_deref(),
+        params.out.as_deref(),
+    ) {
+        Ok(prepared) => prepared,
+        Err(refusal) => return refusal,
+    };
+
+    match gearbox_engine::generate::plan(&prepared.files, &prepared.out_root, &prepared.base_root) {
+        Ok((plans, apply_diagnostics)) => {
+            let mut diagnostics = prepared.diagnostics;
+            diagnostics.extend(apply_diagnostics.as_slice().iter().cloned());
+            ok(
+                id,
+                &GeneratePlanResult {
+                    plans,
+                    diagnostics,
+                    out_root: prepared.out_root.display().to_string(),
+                    skipped: prepared.skipped,
+                },
+            )
+        }
+        Err(e) => error(
+            id,
+            error_code::GENERATE_REFUSED,
+            &format!("cannot plan generation: {e}"),
+        ),
+    }
+}
+
+fn generate_apply(state: &mut State, id: RequestId, params: &GenerateParams) -> Response {
+    if !state.allow_writes {
+        return error(
+            id,
+            error_code::WRITES_NOT_ALLOWED,
+            "this session declared no write capability, so nothing will be written; \
+             pass `allow_writes: true` to `initialize` if the client is meant to write files",
+        );
+    }
+
+    let prepared = match prepare_generate(
+        state,
+        &id,
+        &params.path,
+        params.profile.as_deref(),
+        params.out.as_deref(),
+    ) {
+        Ok(prepared) => prepared,
+        Err(refusal) => return refusal,
+    };
+
+    match gearbox_engine::apply_generate(&prepared.files, &prepared.out_root, &prepared.base_root) {
+        Ok(outcome) => {
+            let mut diagnostics = prepared.diagnostics;
+            diagnostics.extend(outcome.diagnostics.as_slice().iter().cloned());
+            ok(
+                id,
+                &GenerateApplyResult {
+                    plans: outcome.plans,
+                    diagnostics,
+                    written: u32::try_from(outcome.written).unwrap_or(u32::MAX),
+                },
+            )
+        }
+        Err(e) => error(
+            id,
+            error_code::GENERATE_REFUSED,
+            &format!("cannot apply generation: {e}"),
+        ),
+    }
+}
+
+fn generate_file(state: &mut State, id: RequestId, params: &GenerateFileParams) -> Response {
+    let file = match RelPath::new(&params.file) {
+        Ok(file) => file,
+        Err(e) => {
+            return error(
+                id,
+                error_code::GENERATE_REFUSED,
+                &format!("`{}` is not a usable generated path: {e}", params.file),
+            );
+        }
+    };
+
+    let prepared = match prepare_generate(
+        state,
+        &id,
+        &params.path,
+        params.profile.as_deref(),
+        params.out.as_deref(),
+    ) {
+        Ok(prepared) => prepared,
+        Err(refusal) => return refusal,
+    };
+
+    let Some(entry) = prepared.files.get(&file) else {
+        return error(
+            id,
+            error_code::GENERATE_REFUSED,
+            &format!("`{}` is not in the generated set", params.file),
+        );
+    };
+
+    let (plans, _) = match gearbox_engine::generate::plan(
+        &prepared.files,
+        &prepared.out_root,
+        &prepared.base_root,
+    ) {
+        Ok(planned) => planned,
+        Err(e) => {
+            return error(
+                id,
+                error_code::GENERATE_REFUSED,
+                &format!("cannot plan generation: {e}"),
+            );
+        }
+    };
+    let Some(plan) = plans.iter().find(|p| p.path == file) else {
+        return error(
+            id,
+            error_code::GENERATE_REFUSED,
+            &format!("`{}` is not in the generated set", params.file),
+        );
+    };
+
+    let on_disk = prepared.out_root.join(file.as_str());
+    let current = match std::fs::read(&on_disk) {
+        Ok(bytes) => std::str::from_utf8(&bytes).ok().map(str::to_owned),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            return error(
+                id,
+                error_code::GENERATE_REFUSED,
+                &format!("cannot read `{}`: {e}", on_disk.display()),
+            );
+        }
+    };
+
+    ok(
+        id,
+        &GenerateFileResult {
+            proposed: entry.as_text().map(str::to_owned),
+            current,
+            action: plan.action,
+            ownership: plan.ownership,
+        },
+    )
 }
 
 /// Replace a file's contents without ever leaving it half-written.

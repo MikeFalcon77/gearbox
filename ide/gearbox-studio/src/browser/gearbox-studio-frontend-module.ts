@@ -12,6 +12,7 @@ import { LanguageGrammarDefinitionContribution } from "@theia/monaco/lib/browser
 
 import { GEARBOX_SERVICE_PATH, GearboxClient, GearboxService } from "../common/protocol";
 import { CatalogueStore } from "./catalogue-store";
+import { GenerateService } from "./generate/generate-service";
 import { ProductEditService } from "./product-edit-service";
 import { ProductStore } from "./product-store";
 import { ResolutionMarkers } from "./resolution-markers";
@@ -28,6 +29,7 @@ import {
   CatalogueViewContribution,
   DetailViewContribution,
   ExplainViewContribution,
+  GenerateViewContribution,
   GraphViewContribution,
   LockViewContribution,
   ProductViewContribution,
@@ -35,6 +37,7 @@ import {
 import { GearDetailWidget } from "./detail/gear-detail-widget";
 import { GraphWidget } from "./graph/graph-widget";
 import { ExplainWidget } from "./explain/explain-widget";
+import { GenerateWidget } from "./generate/generate-widget";
 import { LockWidget } from "./lock/lock-widget";
 import { ProductWidget } from "./product/product-widget";
 import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
@@ -95,6 +98,9 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // confirm. A service rather than a widget handler, so the next widget that
   // wants to edit does not reimplement the four checks.
   bind(ProductEditService).toSelf().inSingletonScope();
+  // The policy in front of Apply: generate advertised, writes declared, no
+  // resolution errors, no conflicts. Named in the UI when they fail.
+  bind(GenerateService).toSelf().inSingletonScope();
   bind(RevealService).toSelf().inSingletonScope();
   bind(GearboxClient).toService(CatalogueStore);
 
@@ -150,6 +156,7 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bindWidget(bind, ProductWidget);
   bindWidget(bind, ExplainWidget);
   bindWidget(bind, LockWidget);
+  bindWidget(bind, GenerateWidget);
 
   // `bindViewContribution` already binds `CommandContribution`,
   // `KeybindingContribution` *and* `MenuContribution` -- see
@@ -179,4 +186,5 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bindViewContribution(bind, ProductViewContribution);
   bindViewContribution(bind, ExplainViewContribution);
   bindViewContribution(bind, LockViewContribution);
+  bindViewContribution(bind, GenerateViewContribution);
 });

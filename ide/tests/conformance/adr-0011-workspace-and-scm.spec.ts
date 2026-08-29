@@ -116,17 +116,27 @@ test.describe("what the workspace makes checkable", () => {
     // Implemented long before it could be reached: with no workspace there was no
     // way to open a `product.lock` at all, so `ReadOnlyLockEditorProvider` sat
     // unverified.
+    // Both names: Studio generate writes `.gearbox/studio/` beside the
+    // CLI default `.gearbox/payments-demo/`, so Theia no longer collapses the
+    // chain into one `.gearbox/payments-demo/dev` row. Expanding `.gearbox`
+    // then `payments-demo` reaches the lock in either layout.
     const lock = await revealInExplorer(
       studio.page,
       "gearbox-builder",
-      ".gearbox",
+      [".gearbox", "payments-demo"],
       "product.lock",
     );
     await lock.dblclick();
 
-    const editor = studio.page.locator(".monaco-editor").first();
+    // Not `.monaco-editor`.first(): Generate's preview is a diff editor that
+    // stays in the DOM after ADR-0010 opens a planned file, and its gutter
+    // matches first while remaining hidden.
+    const editor = studio.page
+      .locator(".monaco-editor:not(.gutter)")
+      .locator("visible=true")
+      .first();
     await editor.waitFor({ state: "visible" });
-    await expect(studio.page.locator(".view-lines .view-line").first()).toContainText("GENERATED");
+    await expect(editor.locator(".view-lines .view-line").first()).toContainText("GENERATED");
 
     // Asserted as behaviour, not as a CSS class: the requirement is that a person
     // cannot edit the file, and a class name is Monaco's business and free to
@@ -140,7 +150,7 @@ test.describe("what the workspace makes checkable", () => {
     // lines does not work -- Monaco virtualises them, so a click that scrolls
     // changes what is on screen without anything being edited, which is exactly
     // what the first version of this test mistook for a failure.
-    await studio.page.locator(".view-lines").first().click();
+    await editor.locator(".view-lines").first().click();
     await studio.page.keyboard.type("xx");
 
     // Monaco's own overlay, carrying the message `ReadOnlyLockEditorProvider`

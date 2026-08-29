@@ -3,9 +3,10 @@
 /**
  * Deliberately honest about what is not built.
  *
- * `resolve` and `generate` are `false` until M4 and M5-M7, and the client uses
- * that to say "needs the resolver" rather than rendering an empty panel that
- * looks like a bug.
+ * `resolve` and `generate` are advertised once the engine can answer them, so
+ * the client can hide a panel rather than render an empty one that looks like
+ * a bug. Worker entry points (M6) and Docker/Helm (M7) are still missing; they
+ * arrive as `skipped` on a generate plan, not as `generate: false`.
  */
 export type Capabilities = { catalogue: boolean, staged_catalogue: boolean, resolve: boolean, generate: boolean, 
 /**

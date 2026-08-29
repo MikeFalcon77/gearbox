@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **96** — 83 built, 10 not built, 0 broken, 3 not observed.
+Claims: **96** — 86 built, 7 not built, 0 broken, 3 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -32,7 +32,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 |---|---|---|---|
 | Studio offers a command to scaffold a new gear | `ADR-0010 tier 0` | 🚧 not built |  |
 | a scaffold shows its file plan before writing anything | `ADR-0010 §Consequences: a preview is not optional` | 🚧 not built |  |
-| a generated composition crate carries a header naming its generator | `ADR-0010 tier 2` | 🚧 not built |  |
+| a generated composition crate carries a header naming its generator | `ADR-0010 tier 2` | ✅ built |  |
 | a description edit shows the line before writing it | `ADR-0010 §Consequences: a preview is not optional` | ✅ built |  |
 | adding a gear inserts one line, and removing it restores the file exactly | `ADR-0010 tier 3` | ✅ built |  |
 
@@ -83,7 +83,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the Product view shows what §9 asks it to | `plan §9: Product` | ✅ built |  |
 | the Explain view is in the bottom area | `plan §9: Explain` | ✅ built |  |
 | the Lock view is in the main area | `plan §9: Lock` | ✅ built |  |
-| a Generate view exists | `plan §9: Generate` | 🚧 not built |  |
+| a Generate view exists | `plan §9: Generate` | ✅ built |  |
 | the layout is the same after a reload | `plan §9: deterministic layout` | ✅ built |  |
 | the closure reaches past the direct dependencies | `plan §9: co-location closure` | ✅ built |  |
 | clicking a gear paints its transitive closure | `plan §9: co-location closure` | ✅ built |  |
@@ -160,6 +160,6 @@ Rust, and the ADRs' own Confirmation sections say which.
 | it renders the process graph | `PRD cpt-gearbox-fr-studio: renders the process graph` | ✅ built |  |
 | it renders the cluster graph | `PRD cpt-gearbox-fr-studio: renders the cluster graph` | ⚪ not observed | no gear in the corpus requires a cluster primitive, so the resolution carries no cluster binding to draw; the view explains the absence |
 | it answers why for a selected decision | `PRD cpt-gearbox-fr-studio: answers why` | ✅ built |  |
-| it previews and applies generation | `PRD cpt-gearbox-fr-generate-preview` | 🚧 not built |  |
+| it previews and applies generation | `PRD cpt-gearbox-fr-generate-preview` | ✅ built |  |
 | the resolver notice is gone, and gone because the engine says so | `PRD cpt-gearbox-fr-rpc-api` | ✅ built |  |
 | it contains no resolution logic of its own | `PRD cpt-gearbox-fr-studio: no resolution logic` | ✅ built |  |

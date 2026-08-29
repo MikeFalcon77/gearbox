@@ -13,6 +13,7 @@ import { join } from "node:path";
 import {
   expect,
   openExplain,
+  openGenerate,
   openGraph,
   openGraphView,
   openProduct,
@@ -185,7 +186,8 @@ test.describe("where the views live", () => {
     expect(inMain).toBe(true);
   });
 
-  test.fixme("a Generate view exists [plan §9: Generate]", async ({ studio }) => {
+  test("a Generate view exists [plan §9: Generate]", async ({ studio }) => {
+    await openGenerate(studio.page);
     await expect(studio.page.locator(".gbx-generate")).toBeVisible();
   });
 });

@@ -22,6 +22,8 @@ export namespace GearboxMenus {
   export const GEARBOX_INSPECT: MenuPath = [...GEARBOX, "1_inspect"];
   /** Resolve, explain: things that compute. */
   export const GEARBOX_RESOLVE: MenuPath = [...GEARBOX, "2_resolve"];
+  /** Preview and apply a generated tree. */
+  export const GEARBOX_GENERATE: MenuPath = [...GEARBOX, "3_generate"];
   /** Restart the engine: things that act on the tool itself. */
   export const GEARBOX_ENGINE: MenuPath = [...GEARBOX, "9_engine"];
 }

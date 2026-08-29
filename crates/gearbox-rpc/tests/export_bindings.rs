@@ -26,9 +26,11 @@ use std::path::{Path, PathBuf};
 
 use gearbox_ir::{Catalogue, ExplanationGraph, PendingGear, ProductIntent, ResolvedProduct};
 use gearbox_rpc::protocol::{
-    CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, InitializeParams,
-    InitializeResult, LogParams, ProductLoadParams, ProductLoadResult, ProgressParams,
-    EditGearParams, EditGearResult, LockParams, LockResult, ResolveParams, ResolveResult, ValidateParams, ValidateResult,
+    CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, EditGearParams, EditGearResult,
+    GenerateApplyResult, GenerateFileParams, GenerateFileResult, GenerateParams,
+    GeneratePlanResult, InitializeParams, InitializeResult, LockParams, LockResult, LogParams,
+    ProductLoadParams, ProductLoadResult, ProgressParams, ResolveParams, ResolveResult,
+    ValidateParams, ValidateResult,
 };
 use ts_rs::{Config, TS};
 
@@ -69,6 +71,11 @@ fn export_roots(cfg: &Config) {
     LockResult::export_all(cfg).expect("export LockResult");
     ValidateParams::export_all(cfg).expect("export ValidateParams");
     ValidateResult::export_all(cfg).expect("export ValidateResult");
+    GenerateParams::export_all(cfg).expect("export GenerateParams");
+    GeneratePlanResult::export_all(cfg).expect("export GeneratePlanResult");
+    GenerateApplyResult::export_all(cfg).expect("export GenerateApplyResult");
+    GenerateFileParams::export_all(cfg).expect("export GenerateFileParams");
+    GenerateFileResult::export_all(cfg).expect("export GenerateFileResult");
 }
 
 fn generated_files(dir: &Path) -> Vec<PathBuf> {

@@ -20,6 +20,7 @@ fn application_error_codes_avoid_the_ones_lsp_defines() {
         error_code::NOT_INITIALIZED,
         error_code::WORKSPACE_NOT_OPEN,
         error_code::LOAD_FAILED,
+        error_code::GENERATE_REFUSED,
     ] {
         assert_ne!(code, lsp_server::ErrorCode::ServerNotInitialized as i32);
         assert_ne!(code, -32001, "-32001 is LSP's UnknownErrorCode");
@@ -43,7 +44,13 @@ fn capabilities_report_what_is_absent_rather_than_omitting_it() {
     })
     .unwrap();
 
-    for key in ["catalogue", "staged_catalogue", "resolve", "generate", "writes"] {
+    for key in [
+        "catalogue",
+        "staged_catalogue",
+        "resolve",
+        "generate",
+        "writes",
+    ] {
         assert!(json.get(key).is_some(), "`{key}` must be present");
     }
     assert_eq!(json["resolve"], serde_json::json!(false));

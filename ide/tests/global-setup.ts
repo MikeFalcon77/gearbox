@@ -1,4 +1,4 @@
-// Two preconditions the suite cannot discover for itself, checked before any
+// Three preconditions the suite cannot discover for itself, checked before any
 // browser opens so that a stale tree fails as a setup error rather than as a
 // puzzling conformance failure.
 
@@ -53,6 +53,37 @@ export default function globalSetup(): void {
         `while their contents do not. The comparison is by mtime and errs towards rebuilding, ` +
         `which is the safe direction and costs about two seconds. \`npm run verify\` builds first, ` +
         `so it never sees this.`,
+    );
+  }
+
+  // The product descriptions must match HEAD before anything runs.
+  //
+  // Two claims edit `products/payments-demo/product.gdl` and put it back, and
+  // several more assert on the resolution it produces. A description that is
+  // already modified when the suite starts therefore fails in two unrelated
+  // files at once -- the tier-3 claim refusing to run, and a co-location claim
+  // reporting a gear as `asked for` that it expects to be `pulled in` -- and
+  // neither failure names the cause. That happened: a stray
+  // `use_gear("grpc-hub", ...)` left behind by something outside the suite, and
+  // the two failures sent the reader looking at the graph work instead.
+  //
+  // Checked here rather than in a fixture so it fails once, before any browser
+  // opens, and says what to do. Restoring the file automatically would be worse:
+  // the edit might be someone's work in progress.
+  // `cwd` is the repository, not `ide`: `products/` is its sibling, and a
+  // pathspec git cannot find matches nothing and reports clean -- which is how
+  // this guard silently passed the first time it was written.
+  const dirty = execFileSync("git", ["status", "--porcelain", "--", "products"], {
+    cwd: join(IDE, ".."),
+    encoding: "utf8",
+  }).trim();
+  if (dirty !== "") {
+    throw new Error(
+      `The product descriptions differ from HEAD:\n${dirty}\n\n` +
+        `Two claims edit \`products/payments-demo/product.gdl\` and restore it, and others assert ` +
+        `on the resolution it produces, so a modified description fails claims that have nothing ` +
+        `to do with the change.\n` +
+        `Commit the edit, or run \`git checkout -- products\` if it is a leftover.`,
     );
   }
 }

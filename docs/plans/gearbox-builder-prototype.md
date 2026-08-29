@@ -837,7 +837,7 @@ per frontend connection, one engine per workspace root) and `BackendApplicationC
 |---|---|
 | Catalogue | tree by `category` → gear, **with foldable categories and a filter over name, id, category and path**. `gears-rust` carries 62 crates with `#[toolkit::gear]` against the 14 described today, so the list quadruples as descriptions land; a flat list stops being readable well before that. A filter overrides a fold — a match hidden inside a collapsed category is the one thing a filter must never do, because the reader concludes the gear is absent. Badges for `runtime_caps`, chips for `colocated_deps`, provides/consumes counts. Click reveals the `gear.gdl` at its declaring range. A toggle per projected row adds the gear to the open product or takes it out, writing `products/…/product.gdl` after a preview and a confirmation. **This replaces «produces a *proposed* `use_gear(...)` diff, never an auto-edit», which this plan required until M5.** What changed is the reading of ADR-0010, not the appetite for writing: its tier 3 is «structured manifests | tool edits surgically | **Permitted**», and its survey calls manifest editing «the single most universal behaviour in the set». The tier-5 prohibition covers *human logic*, and a GDL description cannot be logic — `cpt-gearbox-fr-gdl-declarative` refuses every branching construct — so a `use_gear(...)` entry is a data entry in a list, exactly like the line `cargo add` writes. What survives from the old wording is the part that mattered: the diff is still shown first and nothing is written until it is accepted. The four refusals in front of the write are in §9.2. **Renders incrementally** (§2.3): the grouping is available at S1 because `category` is declared, while the badges arrive at S2 because `runtime_caps` and `colocated_deps` are projected — so the tree's shape settles first and fills in. Rows are keyed by `gdl_path`, not `id`, because the id does not exist until S2. A `pending` row renders dimmed, and **clicking it still reveals its `gear.gdl`** — that path is known from S0, so a pending row is never inert. |
 | Gear detail | everything projected for the selected gear: capabilities, co-location, extension points with the vendor the host selects on, what the gear fills and under which vendor, contracts with the transports **this provider wires up**, GTS types, and clickable PRD/DESIGN/ADR links. In the bottom area, not the side panel — the side panel clipped exactly the facts it exists to show. Keyed by `gdl_path` like the tree, so a selection made while a row is pending survives projection. |
-| Product | **a tree, as vision §60 sketches it**: foldable branches for Gears (with `asked for` / `pulled in by the closure` beneath), Processes, Contracts and Cluster, each with an icon and a count. The profile switch, the resolved profile and the description-file link stay in the header rather than becoming a Deployment branch: the switch has to be reachable *while* a resolution is in flight, which a branch of the resolved product cannot be. §60's Security and Artifacts are absent — the first is not modelled in the IR, the second needs `capabilities.generate`, which is `false`. Bindings carry mode/transport/mechanism chips; cluster shows `selected` vs `resolved`; diagnostics summarise at the bottom. |
+| Product | **a tree, as vision §60 sketches it**: foldable branches for Gears (with `asked for` / `pulled in by the closure` beneath), Processes, Contracts and Cluster, each with an icon and a count. The profile switch, the resolved profile and the description-file link stay in the header rather than becoming a Deployment branch: the switch has to be reachable *while* a resolution is in flight, which a branch of the resolved product cannot be. §60's Security is absent — it is not modelled in the IR. Artifacts live in the Generate view, which exists now that `capabilities.generate` is `true`. Bindings carry mode/transport/mechanism chips; cluster shows `selected` vs `resolved`; diagnostics summarise at the bottom. |
 | Graph | four views. **deps** (solid = co-location), **contracts** (dashed = cuttable, solid = forced local, red = undeclared-hub-edge), **processes** (boxes with gear chips, overlapping gears drawn in *every* box — this is what makes closure-not-partition visible), **cluster** (requirement → capability → provider, unsatisfied in red). Layout: `elkjs` `layered` with a fixed seed → deterministic, so screenshots and "why did this move" are stable. Rendered as hand-written React SVG. |
 | Explain | `gearbox/product/explain` for the current selection: `narrative: string[]` as an ordered list, each step linking to its `origin`, plus the subgraph inline. Every `DowngradedBy` edge renders "you asked X → you got Y → because GBXnnnn" with a link to the evidence `file:line`. |
 | Lock | read-only Monaco view of canonical `product.lock`, diff toggle vs disk, `lock_hash` badge that goes stale-yellow when resolve ≠ disk. |
@@ -919,26 +919,43 @@ the join key, so completing it prevents a GBX0508 rather than reporting one); in
 
 ### 9.1 What is built, and where the implementation diverged from this plan
 
-Six widgets exist against the real engine: **Catalogue** (tree by category, staged), **Gear
-detail**, **Graph** (all four views), **Product**, **Explain** and **Lock**. Only **Generate** is
-missing, and it is the one still blocked by the engine -- `capabilities.generate` is `false`, while
-`resolve` has been `true` since M4. The notice that used to explain the absence of the other three
-removed itself when M4 landed, which was the point of driving it from the engine's own capabilities
-rather than from a hard-coded string.
+Seven widgets exist against the real engine: **Catalogue** (tree by category, staged), **Gear
+detail**, **Graph** (all four views), **Product**, **Explain**, **Lock** and **Generate**.
+`capabilities.generate` is `true` now that M5 is on the wire; the view appeared the same way the
+resolver notice disappeared -- driven from the engine's own capability, not from a hard-coded
+string. Worker entry points (M6) and Docker/Helm (M7) are still missing and arrive as `skipped` on
+a generate plan, not as `generate: false`.
 
 Also built since this section was written, and not planned here: the `Contribution` base class ADR
 0011 asks for; the menu narrowing that removes Selection and Go and fills a Gearbox submenu;
 resolution diagnostics as Problems markers, which is what finally uses the long-declared
-`@theia/markers`; six RPC methods -- `product/load`, `resolve`, `validate`, `product/lock`, `product/addGear` and `product/removeGear`; and the description edit the last two carry, which reverses a prohibition this plan used to state (§9.2).
+`@theia/markers`; nine RPC methods -- `product/load`, `resolve`, `validate`, `product/lock`,
+`product/addGear`, `product/removeGear`, `generate/plan`, `generate/apply` and `generate/file`; and
+the description edit the add/remove pair carry, which reverses a prohibition this plan used to
+state (§9.2).
+
+**Two write gates, and they are not the same.** `writable_path` is for description edits: the path
+must exist, must be `.gdl`, and must sit inside the declared workspace or a source root -- "this
+method edits descriptions only". `writable_out_root` is for generation: the path must sit inside
+the workspace, must **not** sit inside any source root (writing generated Rust next to human Rust
+is ADR-0010 tier 5), and may not exist yet -- the nearest existing ancestor is what gets checked,
+or the first generate would always refuse itself. Apply without `allow_writes` is a third refusal
+(`WRITES_NOT_ALLOWED`), and a resolution that reported errors is a fourth (`GENERATE_REFUSED`);
+the client is not the security boundary (`cpt-gearbox-fr-rpc-writes-opt-in`).
+
+**Contents arrive on request, not with the plan.** `FilePlan` is one preview line. The real set
+includes `Cargo.lock` at around a hundred kilobytes, and a diff needs both sides of one file, so
+`gearbox/generate/file` re-runs generation and picks one entry. Stateless, like everything else
+on this server. A cache of the last plan would need a staleness check before apply; that is why
+there is none yet.
 
 **The check is `npm run conformance`, and it is organised by document rather than by feature.**
 `ide/tests/conformance/` holds one test per claim in the PRD, the ADRs and §9 of this plan, each
 named for the claim and carrying its source; `test.fixme` marks a documented claim that is not
 implemented. The run writes `docs/conformance.md`, which is the authoritative version of this
-section: **63 claims, 40 built, 22 not built, 1 not observable on this corpus.** A hand-maintained
-count in prose is what drifted here in five places, so it is not maintained by hand any more, and
-the number of collected claims is pinned so that a claim which stops being collected fails the run
-instead of shrinking the denominator.
+section. A hand-maintained count in prose is what drifted here in five places, so it is not
+maintained by hand any more. What the table cannot say: there is no Electron shell; M6, M7 and M9
+are not started; the toolbar and the two perspectives ADR-0011 asked for are still `test.fixme`.
 
 The staged-loading tests are deliberately a *timeline* rather than a final state: a snapshot taken
 after loading would pass even if the tree had appeared all at once, which is exactly the claim
@@ -1062,6 +1079,38 @@ Two claims stay honest rather than green, and both are corpus limits:
   gears `dev` puts in one. The view states this in words instead of letting an absent repeated chip
   imply that a partition is what the model produces.
 
+#### Why Studio generates into its own tree
+
+Studio applies into `.gearbox/studio/<product>/<profile>/` rather than the engine default
+`.gearbox/<product>/<profile>/`, and the reason is a limitation elsewhere rather than a preference.
+
+**`product.lock` is not client-independent yet.** `SourceRoot::to_resolved`
+(`crates/gearbox-engine/src/source.rs`) records `digest` as `path:<declared location>`, and says in
+place that this is provisional: "a real content or commit digest is what makes a lock reproducible
+rather than merely repeatable... recording a fake one here would be worse than recording an obviously
+provisional one." The declared location is whatever the caller spelled. The CLI is run from the
+repository and declares `../gears-rust`; Studio's backend declares an absolute path. That string is
+part of `lock_hash`, so **the same product and profile serialise to two different locks depending on
+which client asked** -- observed directly: `blake3:5039bf58…` from the CLI against `blake3:c4412b91…`
+from the RPC, differing in exactly those two fields.
+
+Sharing one output tree would therefore mean each client rewriting the other's `product.lock` on
+every apply, indefinitely, and the tree §12 step 2 builds and runs is the CLI's. Nothing else about
+repeating an apply is unsafe: `apply_generate` skips any file whose action does not write, so it
+never touches `target/` and never rewrites an unchanged byte. The separation is only about the lock.
+
+Two consequences worth carrying forward:
+
+* **The Lock view's "diff against the lock on disk" (§9, still `test.fixme`) needs this fixed first.**
+  A lock written by the CLI would otherwise read as permanently stale in Studio -- a false positive
+  from the very field whose job is to make "did anything change" a byte comparison
+  (`cpt-gearbox-nfr-determinism`). Today's stale badge is not affected: it compares two values from
+  the *same* resolution, which is an internal-consistency check, not a disk comparison.
+* **When the digest becomes content-based, the separation goes away.** `GenerateService.outRoot`
+  should be deleted and the engine default allowed to stand: one tree, generated by either client,
+  byte-identical. The conformance suite asserts the current path through `data-out-root`, so the
+  change will show up as a failing claim rather than as drift.
+
 ### 9.2 Writing to a description, and the four refusals
 
 The catalogue toggle is the only thing in Studio that writes a file a person owns, so the checks in
@@ -1161,7 +1210,7 @@ workspace-member entries. Nothing else in that repo changes.
 | **M6** | Host-workers | new gear lands and passes its own test *by hand first*; then generated worker crate; host spawns worker; remote REST binding resolves via directory | M7 |
 | **M7** | Docker + Helm + `values.schema.json` | acceptance §12 step 4 in full | M6 |
 | **M8a** — **done** | JSON-RPC + TS types | `node ide/scripts/rpc-smoke.mjs` drives initialize → catalogue over real framing, 15/15; `cargo test -p gearbox-rpc`; stdout carries nothing but JSON-RPC | from M1 |
-| **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Gear detail, the co-location Graph, Product, Explain and Lock are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Only Generate is missing, and it is the one still waiting on the engine | after M4 + M8a |
+| **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Gear detail, Graph, Product, Explain, Lock and Generate are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Toolbar, perspectives and Electron are still open | after M4 + M8a |
 | **M9** | **DESIGN + ADRs** (§14) — written *after* the prototype runs | reviewed against `docs/checklists/{DESIGN,ADR}.md`; every claim cites either a `gearbox-builder` symbol or a `gears-rust` `file:line`; every §13 gap has a home | — |
 
 **Three things M5 left behind, recorded here because nothing else covers them.**

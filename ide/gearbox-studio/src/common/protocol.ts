@@ -9,6 +9,9 @@ import type { CatalogueChanged } from "./generated/CatalogueChanged";
 import type { CatalogueDiagnostics } from "./generated/CatalogueDiagnostics";
 import type { CatalogueLoadResult } from "./generated/CatalogueLoadResult";
 import type { EditGearResult } from "./generated/EditGearResult";
+import type { GenerateApplyResult } from "./generated/GenerateApplyResult";
+import type { GenerateFileResult } from "./generated/GenerateFileResult";
+import type { GeneratePlanResult } from "./generated/GeneratePlanResult";
 import type { LockResult } from "./generated/LockResult";
 import type { ProductLoadResult } from "./generated/ProductLoadResult";
 import type { ResolveResult } from "./generated/ResolveResult";
@@ -43,6 +46,9 @@ export const method = {
   PRODUCT_ADD_GEAR: "gearbox/product/addGear",
   PRODUCT_REMOVE_GEAR: "gearbox/product/removeGear",
   VALIDATE: "gearbox/validate",
+  GENERATE_PLAN: "gearbox/generate/plan",
+  GENERATE_APPLY: "gearbox/generate/apply",
+  GENERATE_FILE: "gearbox/generate/file",
   CATALOGUE_CHANGED: "gearbox/catalogueChanged",
   CATALOGUE_DIAGNOSTICS: "gearbox/catalogueDiagnostics",
   PROGRESS: "$/progress",
@@ -142,6 +148,29 @@ export interface GearboxService {
   /** Everything checkable without resolving. `product` omitted checks only the
    * catalogue. */
   validate(product?: string): Promise<ValidateResult>;
+
+  /**
+   * What applying generation would do, without doing it.
+   *
+   * `out` is the CLI's `--out`. Omitted, the engine writes under
+   * `<workspace>/.gearbox/<product>/<profile>/`.
+   */
+  planGenerate(path: string, profile?: string, out?: string): Promise<GeneratePlanResult>;
+
+  /** Write the planned tree. Refused unless this client declared writes. */
+  applyGenerate(path: string, profile?: string, out?: string): Promise<GenerateApplyResult>;
+
+  /**
+   * The two sides of one planned file: proposed bytes and what is on disk.
+   *
+   * Re-runs generation; there is no cached plan. `file` is `FilePlan.path`.
+   */
+  generateFile(
+    path: string,
+    file: string,
+    profile?: string,
+    out?: string,
+  ): Promise<GenerateFileResult>;
 
   dispose(): void;
   setClient(client: GearboxClient | undefined): void;

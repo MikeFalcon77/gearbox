@@ -16,6 +16,9 @@ import type { CatalogueChanged } from "../common/generated/CatalogueChanged";
 import type { CatalogueDiagnostics } from "../common/generated/CatalogueDiagnostics";
 import type { CatalogueLoadResult } from "../common/generated/CatalogueLoadResult";
 import type { EditGearResult } from "../common/generated/EditGearResult";
+import type { GenerateApplyResult } from "../common/generated/GenerateApplyResult";
+import type { GenerateFileResult } from "../common/generated/GenerateFileResult";
+import type { GeneratePlanResult } from "../common/generated/GeneratePlanResult";
 import type { InitializeResult } from "../common/generated/InitializeResult";
 import type { LockResult } from "../common/generated/LockResult";
 import type { LogParams } from "../common/generated/LogParams";
@@ -242,6 +245,23 @@ export class GearboxServiceImpl implements GearboxService {
 
   async validate(product?: string): Promise<ValidateResult> {
     return this.request(method.VALIDATE, { product });
+  }
+
+  async planGenerate(path: string, profile?: string, out?: string): Promise<GeneratePlanResult> {
+    return this.request(method.GENERATE_PLAN, { path, profile, out });
+  }
+
+  async applyGenerate(path: string, profile?: string, out?: string): Promise<GenerateApplyResult> {
+    return this.request(method.GENERATE_APPLY, { path, profile, out });
+  }
+
+  async generateFile(
+    path: string,
+    file: string,
+    profile?: string,
+    out?: string,
+  ): Promise<GenerateFileResult> {
+    return this.request(method.GENERATE_FILE, { path, profile, out, file });
   }
 
   /**

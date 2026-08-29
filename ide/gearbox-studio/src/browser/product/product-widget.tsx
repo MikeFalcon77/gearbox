@@ -185,8 +185,9 @@ export class ProductWidget extends ReactWidget {
             There is no Deployment branch: the profile switch above *is* the
             deployment control, and it has to stay reachable while a resolution is
             in flight, which a branch of the resolved product cannot be. Security
-            is not modelled in the IR at all. Artifacts need
-            `capabilities.generate`, which this engine reports as `false`. */}
+            is not modelled in the IR at all. Artifacts live in the Generate
+            view: the engine now reports `capabilities.generate`, and that
+            panel is where the file plan is. */}
         {this.renderBranch("gears", "package", "Gears", entries.length, (
           <>
             {this.renderTwig("asked for", selected.length, (

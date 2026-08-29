@@ -10,7 +10,8 @@
 //! types carry no such attribute for the same reason.
 
 use gearbox_ir::{
-    Diagnostic, ExplanationGraph, GearDescriptor, PendingGear, ProductIntent, ResolvedProduct,
+    Diagnostic, ExplanationGraph, FileAction, FilePlan, GearDescriptor, Ownership, PendingGear,
+    ProductIntent, ResolvedProduct,
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -26,6 +27,9 @@ pub mod method {
     pub const PRODUCT_ADD_GEAR: &str = "gearbox/product/addGear";
     pub const PRODUCT_REMOVE_GEAR: &str = "gearbox/product/removeGear";
     pub const VALIDATE: &str = "gearbox/validate";
+    pub const GENERATE_PLAN: &str = "gearbox/generate/plan";
+    pub const GENERATE_APPLY: &str = "gearbox/generate/apply";
+    pub const GENERATE_FILE: &str = "gearbox/generate/file";
 
     pub const INITIALIZED: &str = "initialized";
     pub const EXIT: &str = "exit";
@@ -66,6 +70,9 @@ pub mod error_code {
     pub const WRITES_NOT_ALLOWED: i32 = -32055;
     /// The path is outside every declared root, or the file could not be edited.
     pub const EDIT_REFUSED: i32 = -32056;
+    /// Generation was refused: the output root is not writable, resolution
+    /// reported errors, or the engine could not produce a tree.
+    pub const GENERATE_REFUSED: i32 = -32057;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -163,9 +170,10 @@ pub struct InitializeResult {
 
 /// Deliberately honest about what is not built.
 ///
-/// `resolve` and `generate` are `false` until M4 and M5-M7, and the client uses
-/// that to say "needs the resolver" rather than rendering an empty panel that
-/// looks like a bug.
+/// `resolve` and `generate` are advertised once the engine can answer them, so
+/// the client can hide a panel rather than render an empty one that looks like
+/// a bug. Worker entry points (M6) and Docker/Helm (M7) are still missing; they
+/// arrive as `skipped` on a generate plan, not as `generate: false`.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[expect(
     clippy::struct_excessive_bools,
@@ -384,4 +392,72 @@ pub struct ProgressParams {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct LogParams {
     pub message: String,
+}
+
+/// `gearbox/generate/plan` and `gearbox/generate/apply`.
+///
+/// The same envelope for both, because they differ only in whether anything is
+/// written. `out` is the CLI's `--out`: a test (and a Studio run that must not
+/// collide with a developer's tree) can send the artefacts to a separate root.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct GenerateParams {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// Absolute output root. Omitted, the server uses
+    /// `<workspace>/.gearbox/<product>/<profile>/`, the same layout as the CLI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out: Option<String>,
+}
+
+/// One line per file, and nothing else: `FilePlan` is a preview line, not a
+/// payload. File contents arrive on `gearbox/generate/file`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct GeneratePlanResult {
+    pub plans: Vec<FilePlan>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<Diagnostic>,
+    pub out_root: String,
+    /// Processes this milestone does not generate (worker entry points are M6).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<String>,
+}
+
+/// What an apply did.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct GenerateApplyResult {
+    pub plans: Vec<FilePlan>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<Diagnostic>,
+    pub written: u32,
+}
+
+/// `gearbox/generate/file` -- the two sides of one planned file.
+///
+/// Re-runs generation and picks one entry. Stateless on purpose: a cached plan
+/// the client later applies would need a staleness check, and we do not have
+/// one yet. `Cargo.lock` is ~100k; putting every file on the plan would make
+/// the preview the expensive call.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct GenerateFileParams {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out: Option<String>,
+    /// Path relative to `out_root`, as `FilePlan.path` spelled it.
+    pub file: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct GenerateFileResult {
+    /// The bytes generation proposes, as text. Absent when they are not UTF-8.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed: Option<String>,
+    /// What is on disk today. Absent when the file does not exist or is not
+    /// UTF-8 -- the same distinction `preview_available` makes on the plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<String>,
+    pub action: FileAction,
+    pub ownership: Ownership,
 }

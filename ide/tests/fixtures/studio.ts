@@ -411,11 +411,12 @@ export async function resetCatalogueView(page: Page): Promise<void> {
 export async function revealInExplorer(
   page: Page,
   root: string,
-  pathContains: string,
+  pathContains: string | readonly string[],
   file: string,
 ): Promise<Locator> {
   await revealLeft(page, "Explorer");
   const target = page.locator(".theia-TreeNode", { hasText: new RegExp(`^${escapeForRegExp(file)}$`) });
+  const hints = typeof pathContains === "string" ? [pathContains] : [...pathContains];
 
   for (let round = 0; round < 10; round += 1) {
     if ((await target.count()) > 0 && (await target.first().isVisible())) {
@@ -426,7 +427,7 @@ export async function revealInExplorer(
     // an inner caption element, and Playwright clicks the centre of the row, which
     // lands on it.
     const index = await page.evaluate(
-      ({ rootName, hint, fileName }) => {
+      ({ rootName, hints: pathHints, fileName }) => {
         const nodes = Array.from(document.querySelectorAll(".theia-TreeNode"));
         // Expansion state lives on the chevron, not on the row: an expanded node
         // is one whose `.theia-ExpansionToggle` has lost `theia-mod-collapsed`.
@@ -439,10 +440,13 @@ export async function revealInExplorer(
         const pick = nodes.findIndex((node) => collapsed(node) && text(node) === rootName);
         if (pick >= 0) return pick;
         return nodes.findIndex(
-          (node) => collapsed(node) && text(node).includes(hint) && text(node) !== fileName,
+          (node) =>
+            collapsed(node) &&
+            pathHints.some((hint) => text(node).includes(hint)) &&
+            text(node) !== fileName,
         );
       },
-      { rootName: root, hint: pathContains, fileName: file },
+      { rootName: root, hints, fileName: file },
     );
     if (index < 0) break;
     await page.locator(".theia-TreeNode").nth(index).click();
@@ -486,6 +490,10 @@ export async function revealLock(page: Page): Promise<void> {
  * pass the moment the button lights up, which happens before the resolution
  * lands -- so the test would read the previous profile's answer.
  */
+export async function openGenerate(page: Page): Promise<void> {
+  await revealView(page, "Gearbox Generate", ".gbx-generate");
+}
+
 export async function openProduct(page: Page, profile: string): Promise<void> {
   await revealView(page, "Gearbox Product", ".gbx-product");
   await page.locator("[data-resolved-profile]").waitFor({ state: "visible", timeout: 60_000 });

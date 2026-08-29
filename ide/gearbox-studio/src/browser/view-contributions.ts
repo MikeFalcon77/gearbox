@@ -13,6 +13,7 @@ import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import { GearDetailWidget } from "./detail/gear-detail-widget";
 import { GraphWidget } from "./graph/graph-widget";
 import { ExplainWidget } from "./explain/explain-widget";
+import { GenerateWidget } from "./generate/generate-widget";
 import { LockWidget } from "./lock/lock-widget";
 import { GearboxMenus } from "./menus";
 import { ProductStore } from "./product-store";
@@ -289,6 +290,30 @@ export class LockViewContribution extends AbstractViewContribution<LockWidget> {
       commandId: this.toggleCommand?.id ?? "",
       label: "Lock",
       order: "4",
+    });
+  }
+}
+
+@injectable()
+export class GenerateViewContribution extends AbstractViewContribution<GenerateWidget> {
+  constructor() {
+    super({
+      widgetId: GenerateWidget.ID,
+      widgetName: GenerateWidget.LABEL,
+      // The main area, beside Product and Lock: the plan is a tree of paths
+      // and a Monaco diff, and both need width. In the bottom strip the
+      // diff would be a keyhole.
+      defaultWidgetOptions: { area: "main" },
+      toggleCommandId: "gearbox.generate.toggle",
+    });
+  }
+
+  override registerMenus(menus: MenuModelRegistry): void {
+    super.registerMenus(menus);
+    menus.registerMenuAction(GearboxMenus.GEARBOX_GENERATE, {
+      commandId: this.toggleCommand?.id ?? "",
+      label: "Generate",
+      order: "1",
     });
   }
 }

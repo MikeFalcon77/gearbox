@@ -20,7 +20,14 @@
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
-import { expect, openProduct, resetCatalogueView, revealCatalogue, test } from "../fixtures/studio";
+import {
+  expect,
+  openGenerate,
+  openProduct,
+  resetCatalogueView,
+  revealCatalogue,
+  test,
+} from "../fixtures/studio";
 
 const REPO = join(__dirname, "../../..");
 const PRODUCT = "products/payments-demo/product.gdl";
@@ -65,15 +72,24 @@ test.describe("what the tool may write", () => {
     },
   );
 
-  test.fixme(
-    "a generated composition crate carries a header naming its generator [ADR-0010 tier 2]",
-    async ({ studio }) => {
-      // Tier 2 is "tool, entirely, with a header". The header is what tells a
-      // reader not to edit the file, and it is the only thing standing between
-      // tier 2 and tier 5.
-      await expect(studio.page.locator(".monaco-editor")).toContainText("GENERATED");
-    },
-  );
+  test("a generated composition crate carries a header naming its generator [ADR-0010 tier 2]", async ({
+    studio,
+  }) => {
+    // Tier 2 is "tool, entirely, with a header". The header is what tells a
+    // reader not to edit the file, and it is the only thing standing between
+    // tier 2 and tier 5. The files were already generated; what was missing
+    // was a place in the UI to open one.
+    await openProduct(studio.page, "dev");
+    await openGenerate(studio.page);
+    await studio.page
+      .locator('[data-plan-path="processes/api-gateway/src/registered_gears.rs"]')
+      .click();
+    // The preview is a diff editor, so `.monaco-editor` matches three hosts
+    // (gutter, original, modified). The header lives on the proposed side.
+    await expect(
+      studio.page.locator(".monaco-editor.modified-in-monaco-diff-editor"),
+    ).toContainText("GENERATED", { timeout: 60_000 });
+  });
 });
 
 test.describe("tier 3: a description edited surgically", () => {

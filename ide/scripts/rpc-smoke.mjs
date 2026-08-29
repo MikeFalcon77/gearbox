@@ -7,9 +7,12 @@
 //
 // Usage: node ide/scripts/rpc-smoke.mjs [--root <dir>]
 
+import { execSync } from "node:child_process";
 import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   createMessageConnection,
   StreamMessageReader,
@@ -78,8 +81,8 @@ try {
     "resolve is advertised now that M4 landed",
   );
   check(
-    init.capabilities?.generate === false,
-    "generate is still advertised as absent rather than pretended",
+    init.capabilities?.generate === true,
+    "generate is advertised now that M5 landed",
   );
   connection.sendNotification("initialized", {});
 
@@ -213,6 +216,21 @@ try {
     `a mutating method is refused without write capability (got ${refusedWithoutCapability})`,
   );
 
+  let generateWithoutWrites = null;
+  try {
+    await connection.sendRequest("gearbox/generate/apply", {
+      path: product,
+      profile: "dev",
+      out: resolve(repo, ".gearbox/smoke/denied"),
+    });
+  } catch (e) {
+    generateWithoutWrites = e.code;
+  }
+  check(
+    generateWithoutWrites === -32055,
+    `generate/apply is refused without write capability (got ${generateWithoutWrites})`,
+  );
+
   // Now declare it. Re-initializing is the honest way to test both postures in
   // one session: the capability is state the client set, so setting it again is
   // the same code path a second client would take.
@@ -282,6 +300,95 @@ try {
     refusedWithReason = e.code === -32053 && (e.data?.diagnostics ?? []).length > 0;
   }
   check(refusedWithReason, "a refused product load carries its diagnostics in `data`");
+
+  // --- generate: preview writes nothing; the four remaining gates ------------
+  //
+  // `writable_out_root` is the other half of the write gate: a description
+  // edit requires the path to exist and to be `.gdl`; generation creates new
+  // files that are not `.gdl`, must stay inside the workspace, and must not
+  // land inside a source root (ADR-0010 tier 5).
+  const out = resolve(repo, ".gearbox/smoke/plan");
+  const porcelain = () =>
+    execSync("git status --porcelain", { cwd: repo, encoding: "utf8" });
+  const beforePlan = porcelain();
+  const planned = await connection.sendRequest("gearbox/generate/plan", {
+    path: product,
+    profile: "dev",
+    out,
+  });
+  check(planned.plans.length > 0, `generate/plan returns a file plan (${planned.plans.length})`);
+  check(
+    planned.plans.every((p) => typeof p.path === "string" && p.action),
+    "each plan line is a path and an action, not a payload",
+  );
+  check(porcelain() === beforePlan, "generate/plan writes nothing");
+
+  let outOutside = null;
+  try {
+    await connection.sendRequest("gearbox/generate/plan", {
+      path: product,
+      profile: "dev",
+      out: "/tmp/gearbox-generate-outside",
+    });
+  } catch (e) {
+    outOutside = e;
+  }
+  check(outOutside?.code === -32057, "an out root outside the workspace is refused");
+  check(
+    /outside the declared workspace/.test(outOutside?.message ?? ""),
+    "and the refusal says the root is outside the workspace",
+  );
+
+  let outInSource = null;
+  try {
+    await connection.sendRequest("gearbox/generate/plan", {
+      path: product,
+      profile: "dev",
+      out: root,
+    });
+  } catch (e) {
+    outInSource = e;
+  }
+  check(outInSource?.code === -32057, "an out root inside a source root is refused");
+  check(
+    /inside a source root/.test(outInSource?.message ?? ""),
+    "and the refusal names the source-root rule",
+  );
+
+  const brokenDir = join(tmpdir(), `gearbox-broken-gen-${process.pid}`);
+  mkdirSync(brokenDir, { recursive: true });
+  const broken = join(brokenDir, "product.gdl");
+  writeFileSync(
+    broken,
+    `product(
+    id = "broken-gen",
+    name = "Broken",
+    version = "0.1.0",
+    sources = [source(id = "gears-rust", at = path(${JSON.stringify(root)}))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [use_gear("no-such-gear-anywhere", source = "gears-rust")],
+)
+`,
+  );
+  let refusedOnErrors = null;
+  try {
+    await connection.sendRequest("gearbox/generate/plan", {
+      path: broken,
+      profile: "dev",
+      out,
+    });
+  } catch (e) {
+    refusedOnErrors = e;
+  }
+  check(
+    refusedOnErrors?.code === -32057,
+    `generation is refused when resolution has errors (got ${refusedOnErrors?.code})`,
+  );
+  check(
+    /resolution reported errors/.test(refusedOnErrors?.message ?? ""),
+    "and the refusal says resolution reported errors",
+  );
 
   await connection.sendRequest("shutdown");
   connection.sendNotification("exit");
