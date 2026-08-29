@@ -37,6 +37,16 @@ import { EngineHandle, spawnEngine } from "./gearbox-engine-process";
  */
 const INITIALIZE_TIMEOUT_MS = 20_000;
 const LOAD_TIMEOUT_MS = 120_000;
+/**
+ * And the same cap for the product methods.
+ *
+ * Between the two: a resolve reads the cached catalogue rather than rescanning
+ * the tree, so it is nowhere near a load's cost, but it is not a constant-time
+ * call either -- it evaluates a description, resolves a profile and may
+ * serialize a lock. Generous enough that a real answer is never cut off, short
+ * enough that the Resolve button stops spinning while someone still cares.
+ */
+const PRODUCT_TIMEOUT_MS = 60_000;
 
 /**
  * The repository root, found by looking for the Cargo workspace manifest.
@@ -75,7 +85,10 @@ function enginePath(): string {
   if (fromEnv) {
     return fromEnv;
   }
-  return path.join(findRepoRoot(__dirname), "target", "debug", "gearbox");
+  // `.exe` on Windows, because `spawn` does not add it and the failure is a
+  // whole-IDE ENOENT for a binary that is sitting right there.
+  const binary = process.platform === "win32" ? "gearbox.exe" : "gearbox";
+  return path.join(findRepoRoot(__dirname), "target", "debug", binary);
 }
 
 function roots(): string[] {
@@ -125,6 +138,12 @@ export class GearboxServiceImpl implements GearboxService {
         this.engine = undefined;
       }
       this.client?.onLog(`engine ${reason}`);
+      // And told as an event, not only as a log line. `loadCatalogue` answers at
+      // the S1/S2 boundary, so an engine that dies during projection has no
+      // outstanding request left to reject and the `$/progress done` that would
+      // have ended the load died with it. Only the client knows whether a load
+      // was live, so the decision is left there.
+      this.client?.onEngineExit(reason);
     });
 
     const result = await engine.request<InitializeResult>(
@@ -197,19 +216,19 @@ export class GearboxServiceImpl implements GearboxService {
   }
 
   async loadProduct(path: string): Promise<ProductLoadResult> {
-    return this.request("gearbox/product/load", { path });
+    return this.request(method.PRODUCT_LOAD, { path });
   }
 
   async resolve(path: string, profile?: string): Promise<ResolveResult> {
-    return this.request("gearbox/product/resolve", { path, profile });
+    return this.request(method.PRODUCT_RESOLVE, { path, profile });
   }
 
   async lock(path: string, profile?: string): Promise<LockResult> {
-    return this.request("gearbox/product/lock", { path, profile });
+    return this.request(method.PRODUCT_LOCK, { path, profile });
   }
 
   async addGear(path: string, gear: string, source: string, dryRun: boolean): Promise<EditGearResult> {
-    return this.request("gearbox/product/addGear", {
+    return this.request(method.PRODUCT_ADD_GEAR, {
       path,
       gear,
       source,
@@ -218,25 +237,30 @@ export class GearboxServiceImpl implements GearboxService {
   }
 
   async removeGear(path: string, gear: string, dryRun: boolean): Promise<EditGearResult> {
-    return this.request("gearbox/product/removeGear", { path, gear, dry_run: dryRun });
+    return this.request(method.PRODUCT_REMOVE_GEAR, { path, gear, dry_run: dryRun });
   }
 
   async validate(product?: string): Promise<ValidateResult> {
-    return this.request("gearbox/validate", { product });
+    return this.request(method.VALIDATE, { product });
   }
 
   /**
-   * One place that refuses when the engine is not up.
+   * One place that refuses when the engine is not up, and one that always
+   * settles when it is.
    *
-   * Without it each method would either repeat the guard or let
-   * `this.engine!` throw a `TypeError` the client cannot act on.
+   * Through `EngineHandle.request` rather than `connection.sendRequest`, which
+   * is the whole point: `sendRequest` on a wedged engine never settles, and a
+   * promise that never settles crosses the Theia proxy as a Resolve button that
+   * spins for the rest of the session with nothing to retry from and nothing in
+   * the log. `initialize` and `catalogue/load` have had the death/timeout race
+   * since the supervisor was written; these methods were reaching past it.
    */
   private async request<T>(method: string, params: unknown): Promise<T> {
     const engine = this.engine;
-    if (!engine) {
+    if (!engine || engine.dead) {
       throw new Error(`cannot call ${method}: the engine is not initialized`);
     }
-    return engine.connection.sendRequest<T>(method, params);
+    return engine.request<T>(method, params, PRODUCT_TIMEOUT_MS);
   }
 
   dispose(): void {

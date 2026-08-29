@@ -34,7 +34,15 @@ export const GEARBOX_SERVICE_PATH = "/services/gearbox";
 export const method = {
   INITIALIZE: "initialize",
   INITIALIZED: "initialized",
+  SHUTDOWN: "shutdown",
+  EXIT: "exit",
   CATALOGUE_LOAD: "gearbox/catalogue/load",
+  PRODUCT_LOAD: "gearbox/product/load",
+  PRODUCT_RESOLVE: "gearbox/product/resolve",
+  PRODUCT_LOCK: "gearbox/product/lock",
+  PRODUCT_ADD_GEAR: "gearbox/product/addGear",
+  PRODUCT_REMOVE_GEAR: "gearbox/product/removeGear",
+  VALIDATE: "gearbox/validate",
   CATALOGUE_CHANGED: "gearbox/catalogueChanged",
   CATALOGUE_DIAGNOSTICS: "gearbox/catalogueDiagnostics",
   PROGRESS: "$/progress",
@@ -146,6 +154,17 @@ export interface GearboxClient {
   onCatalogueDiagnostics(event: CatalogueDiagnostics): void;
   onProgress(event: ProgressParams): void;
   onLog(message: string): void;
+  /**
+   * The engine process is gone, and with it any load still streaming.
+   *
+   * Its own callback rather than a line on `onLog`, because it is the one thing
+   * that has to change state: `loadCatalogue` resolves at the S1/S2 boundary,
+   * so an engine that dies during projection has already answered every request
+   * and there is nothing left to reject. Without this the panel keeps its
+   * `loading` status and reads `n gear(s) projecting` forever -- the progress
+   * `done` that would have ended it died with the process.
+   */
+  onEngineExit(reason: string): void;
 }
 
 /**

@@ -7,9 +7,12 @@
 // base class plus a `configure` helper before it wrote any feature, and the
 // order matters: retrofitting it later means touching every feature again.
 //
-// The base implements all five as no-ops, so a feature overrides only what it
-// actually contributes and the reader can see at a glance which of the five it
-// is. The services every feature turned out to need are injected here rather
+// The base implements the four that have methods as no-ops, so a feature
+// overrides only what it actually contributes and the reader can see at a glance
+// which of them it is. The fifth, `FrontendApplicationContribution`, is bound
+// but not implemented -- every member of it is optional, so there is nothing to
+// no-op; what the binding buys is `onReady`, and the comment on that explains
+// why the binding is needed even so. The services every feature turned out to need are injected here rather
 // than repeated: a command service to invoke, a message service to complain, a
 // store to read, and the state service that `onReady` is built on.
 

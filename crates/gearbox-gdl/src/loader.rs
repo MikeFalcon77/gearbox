@@ -195,7 +195,7 @@ impl<'a> GdlLoader<'a> {
     /// carry the fragment's span, and a fragment failure with no location is
     /// exactly as unhelpful as a top-level one would be.
     fn evaluate(&self, path: &Path) -> starlark::Result<FrozenModule> {
-        let uri = format!("file://{}", path.display());
+        let uri = gearbox_ir::file_uri(path);
         let source = std::fs::read_to_string(path)
             .map_err(|e| other(format!("cannot read `{}`: {e}", path.display())))?;
 

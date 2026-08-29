@@ -6,10 +6,12 @@
 // cpt-gearbox-adr-staged-catalogue-loading).
 //
 // `load()` looks sequential and is not: notifications mutate the same `Map`
-// during its awaits. Two things keep that honest. Every await resumption is
-// guarded by a load epoch, so a superseded load cannot install its pending set
-// over a newer one's projections; and failures move the store to an `error`
-// state instead of leaving `loading` set forever.
+// during its awaits. Three things keep that honest. Every await resumption in
+// `load()` is guarded by a load epoch, so a superseded load cannot install its
+// pending set over a newer one's projections; notifications are accepted only
+// while a load is *streaming*, so an abandoned load's late projections cannot
+// walk an error back to `ready`; and failures move the store to an `error` state
+// instead of leaving `loading` set forever.
 
 import { Emitter, Event } from "@theia/core/lib/common/event";
 import { inject, injectable } from "@theia/core/shared/inversify";
@@ -19,6 +21,14 @@ import type { CatalogueDiagnostics } from "../common/generated/CatalogueDiagnost
 import type { InitializeResult } from "../common/generated/InitializeResult";
 import type { ProgressParams } from "../common/generated/ProgressParams";
 import { CatalogueState, GearboxClient, GearboxService, Row, keyFor } from "../common/protocol";
+
+/**
+ * How many engine log lines are kept.
+ *
+ * A window's worth of context, not a transcript: the engine's own stderr goes to
+ * the backend log, which is where a full history belongs.
+ */
+const LOG_LIMIT = 500;
 
 /** The state a store starts in and returns to at the head of every load. */
 const EMPTY: CatalogueState = {
@@ -62,6 +72,23 @@ export class CatalogueStore implements GearboxClient {
    * projections are not resent.
    */
   protected epoch = 0;
+
+  /**
+   * The epoch of the load currently streaming projections, if one is.
+   *
+   * The epoch alone could not do this job. It says which load is *newest*; this
+   * says whether the newest one is still entitled to be spoken for -- and the
+   * notifications carry no epoch, because the engine has no idea one exists.
+   *
+   * Set when `loadCatalogue` answers at the S1/S2 boundary, which is the moment
+   * projections start arriving, and cleared by anything that ends the load:
+   * terminal progress, a failure, the engine dying, or the head of a newer load.
+   * Without it a load abandoned on timeout stays visible in its consequences --
+   * the engine goes on projecting into a store that has already reported the
+   * error, and the final `$/progress done` sets `ready` over the top of it, so
+   * the panel ends up showing a tree for a load it told the person had failed.
+   */
+  protected streaming: number | undefined;
 
   /**
    * The selected row, keyed the way rows are keyed.
@@ -125,6 +152,7 @@ export class CatalogueStore implements GearboxClient {
    */
   async load(): Promise<void> {
     const epoch = ++this.epoch;
+    this.streaming = undefined;
     this.rowsByKey.clear();
     this.state = { ...EMPTY, status: "loading" };
     this.onChangedEmitter.fire();
@@ -155,10 +183,13 @@ export class CatalogueStore implements GearboxClient {
         total: loaded.total,
         completed: 0,
       };
+      // The boundary is passed: projections for *this* load are now welcome.
+      this.streaming = epoch;
     } catch (error) {
       if (epoch !== this.epoch) {
         return;
       }
+      this.streaming = undefined;
       this.state = {
         ...this.state,
         status: "error",
@@ -171,6 +202,9 @@ export class CatalogueStore implements GearboxClient {
   }
 
   onCatalogueChanged(event: CatalogueChanged): void {
+    if (!this.isStreaming()) {
+      return;
+    }
     // `replaces` is the pending `gdl_path`, and the gear carries the source it
     // came from -- together they are the row key. Sent by the server so the
     // client does not have to know how the pending list was built.
@@ -181,6 +215,9 @@ export class CatalogueStore implements GearboxClient {
   }
 
   onCatalogueDiagnostics(event: CatalogueDiagnostics): void {
+    if (!this.isStreaming()) {
+      return;
+    }
     // Everything the second pass found. A gear that fails to project emits no
     // `catalogueChanged`, so this is the only account of why its row never
     // filled in.
@@ -192,9 +229,15 @@ export class CatalogueStore implements GearboxClient {
   }
 
   onProgress(event: ProgressParams): void {
+    if (!this.isStreaming()) {
+      return;
+    }
     // `done` ends the load whatever is left pending. A row still pending at
     // that point did not project, which the widget says rather than leaving it
     // reading `parsing…` under a finished progress bar.
+    if (event.done) {
+      this.streaming = undefined;
+    }
     this.state = {
       ...this.state,
       completed: event.completed,
@@ -205,8 +248,41 @@ export class CatalogueStore implements GearboxClient {
   }
 
   onLog(message: string): void {
-    this.logLines = [...this.logLines, message];
+    // Capped, and deliberately *not* firing `onChanged`.
+    //
+    // Two costs, neither of which buys anything today. The list grew without
+    // bound for the life of the window, and nothing reads it -- there is no log
+    // view yet. And every line re-rendered all six panels, the dependency graph
+    // among them, which relays its whole SVG: an engine that logs while
+    // projecting made the graph the most expensive thing in the application.
+    // When a log view exists it gets its own emitter; a shared one would put
+    // this cost back.
+    this.logLines = [...this.logLines.slice(1 - LOG_LIMIT), message];
+  }
+
+  onEngineExit(reason: string): void {
+    // Only a load in flight has anything to lose. An engine that exits between
+    // loads -- disposed on reconnect, killed on the way out -- is ordinary, and
+    // reporting it as a catalogue error would put a red panel in front of a
+    // tree that is perfectly good.
+    if (!this.isStreaming()) {
+      return;
+    }
+    this.streaming = undefined;
+    this.state = {
+      ...this.state,
+      status: "error",
+      error: `the engine ${reason} while projecting; reload the catalogue`,
+    };
+    // The rows are kept, unlike a failed `load()`. Everything projected before
+    // the engine died is still true, and a partial tree beside "reload" is more
+    // use than an empty panel.
     this.onChangedEmitter.fire();
+  }
+
+  /** Whether the newest load is at the stage where projections belong to it. */
+  protected isStreaming(): boolean {
+    return this.streaming === this.epoch;
   }
 
   /**

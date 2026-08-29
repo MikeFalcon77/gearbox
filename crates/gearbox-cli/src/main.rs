@@ -526,16 +526,7 @@ fn catalogue(
     source_id: Option<&str>,
     format: Format,
 ) -> anyhow::Result<ExitCode> {
-    let mut opened = Vec::with_capacity(roots.len());
-    for path in roots {
-        let id = match source_id {
-            Some(id) => SourceId::new(id)?,
-            // The directory name is the obvious default and is what a reader
-            // would guess; an explicit `--source-id` overrides it.
-            None => SourceId::new(default_source_id(path))?,
-        };
-        opened.push(SourceRoot::open(id, path)?);
-    }
+    let opened = open_source_roots(roots, source_id)?;
 
     let scan = load_catalogue(&opened);
 
@@ -569,15 +560,45 @@ pub(crate) fn open_roots(
     roots: &[PathBuf],
     source_id: Option<&str>,
 ) -> anyhow::Result<Vec<SourceRoot>> {
-    let mut opened = Vec::with_capacity(roots.len());
-    for path in roots {
-        let id = match source_id {
-            Some(id) => SourceId::new(id)?,
-            None => SourceId::new(default_source_id(path))?,
+    open_source_roots(roots, source_id)
+}
+
+/// Open every root, naming the ones that were not named explicitly.
+///
+/// One function because there were two copies of this loop and they had the same
+/// two faults. `--source-id` with several roots gave every one of them the same
+/// id, and without it the directory-name default gave the same id to any two
+/// roots whose directories happen to share a name -- and an id is an identity, so
+/// either way the second root's gears quietly replaced the first's. Refusing the
+/// first case and disambiguating the second are different answers because the
+/// two are different mistakes: one is a person saying something impossible, the
+/// other is a layout that is perfectly reasonable.
+fn open_source_roots(
+    roots: &[PathBuf],
+    source_id: Option<&str>,
+) -> anyhow::Result<Vec<SourceRoot>> {
+    if let Some(id) = source_id {
+        anyhow::ensure!(
+            roots.len() <= 1,
+            "`--source-id {id}` names one source, but {} roots were given; \
+             drop it and each root is named after its own directory",
+            roots.len(),
+        );
+        // The directory-name default is what a reader would guess; an explicit
+        // `--source-id` overrides it, and for a single root there is nothing to
+        // disambiguate against.
+        let Some(path) = roots.first() else {
+            return Ok(Vec::new());
         };
-        opened.push(SourceRoot::open(id, path)?);
+        return Ok(vec![SourceRoot::open(SourceId::new(id)?, path)?]);
     }
-    Ok(opened)
+    // Named as a set, because the rule that keeps them distinct cannot be
+    // applied one path at a time.
+    roots
+        .iter()
+        .zip(gearbox_engine::default_source_ids(roots))
+        .map(|(path, id)| Ok(SourceRoot::open(SourceId::new(id)?, path)?))
+        .collect()
 }
 
 fn resolve_product(
@@ -780,16 +801,6 @@ fn validate(
     } else {
         ExitCode::SUCCESS
     })
-}
-
-fn default_source_id(path: &std::path::Path) -> String {
-    path.canonicalize()
-        .ok()
-        .as_deref()
-        .and_then(std::path::Path::file_name)
-        .map(|n| n.to_string_lossy().to_lowercase())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "local".to_owned())
 }
 
 fn print_summary(scan: &gearbox_engine::CatalogueScan) {

@@ -14,6 +14,7 @@
 // Usage: node ide/scripts/store-smoke.mjs
 
 import { CatalogueStore } from "../gearbox-studio/lib/browser/catalogue-store.js";
+import { ProductStore } from "../gearbox-studio/lib/browser/product-store.js";
 
 let failures = 0;
 function check(ok, what) {
@@ -203,6 +204,195 @@ const deferred = () => {
     store.absolutePath("one", "../../etc/passwd") === undefined,
     "a path the catalogue could not have produced is refused rather than joined",
   );
+}
+
+// ------------------------------------ an abandoned load cannot come back
+
+{
+  // A load that failed -- a timeout, a dead engine -- and an engine that keeps
+  // projecting into it anyway. The notifications carry no epoch, because the
+  // engine does not know one exists, so the store has to decide for itself
+  // whether it is still listening. Without that decision the final
+  // `$/progress done` set `ready` over the top of the error and the panel showed
+  // a tree for a load it had just said had failed.
+  const store = storeWith({
+    initialize: () => Promise.resolve({ capabilities: {}, roots: [], failed_roots: [] }),
+    loadCatalogue: () => Promise.reject(new Error("the engine did not answer in 120000ms")),
+  });
+
+  await store.load();
+  check(store.current.status === "error", "a load that times out is an error");
+
+  store.onCatalogueChanged({ gear: projected("late/gear.gdl", "late"), replaces: "late/gear.gdl" });
+  store.onCatalogueDiagnostics({
+    diagnostics: [{ code: "GBX0211", severity: "error", message: "late" }],
+  });
+  store.onProgress({ token: "catalogue", completed: 9, total: 9, done: true });
+
+  check(store.current.status === "error", "a late `done` cannot walk the error back to ready");
+  check(store.current.rows.length === 0, "and a late projection cannot add a row to it");
+  check(store.current.diagnostics.length === 0, "nor a late diagnostic");
+}
+
+// ------------------------------------ the engine dying mid-projection
+
+{
+  // `loadCatalogue` answers at the S1/S2 boundary, so by the time the engine
+  // dies there is no request left to reject: every promise has already
+  // resolved. The progress `done` that would have ended the load died with the
+  // process, and the panel read `14 gear(s) projecting 1/14` for the rest of the
+  // session with nothing anywhere saying why.
+  const store = storeWith({
+    initialize: () => Promise.resolve({ capabilities: {}, roots: [], failed_roots: [] }),
+    loadCatalogue: () =>
+      Promise.resolve({
+        total: 2,
+        pending: [pending("a/gear.gdl"), pending("b/gear.gdl")],
+        diagnostics: [],
+      }),
+  });
+
+  await store.load();
+  store.onCatalogueChanged({ gear: projected("a/gear.gdl", "a"), replaces: "a/gear.gdl" });
+  check(store.current.status === "loading", "the load is streaming");
+
+  store.onEngineExit("exited code=null signal=SIGKILL");
+  check(store.current.status === "error", "an engine that dies mid-projection ends the load");
+  check(
+    (store.current.error ?? "").includes("SIGKILL"),
+    "and says what happened rather than only that something did",
+  );
+  check(
+    store.current.rows.length === 2,
+    "the rows that did project are kept -- they are still true",
+  );
+
+  // And an exit *between* loads is ordinary: disposed on reconnect, killed on
+  // the way out. Reporting it would put a red panel over a good tree.
+  store.onProgress({ token: "catalogue", completed: 2, total: 2, done: true });
+  const settled = store.current.status;
+  store.onEngineExit("disposed");
+  check(settled === store.current.status, "an exit with no load in flight changes nothing");
+}
+
+// ------------------------------------------- logs do not drive the panel
+
+{
+  const store = storeWith({
+    initialize: () => Promise.resolve({ capabilities: {}, roots: [], failed_roots: [] }),
+    loadCatalogue: () => Promise.resolve({ total: 0, pending: [], diagnostics: [] }),
+  });
+  await store.load();
+
+  let renders = 0;
+  store.onChanged(() => {
+    renders += 1;
+  });
+  for (let i = 0; i < 2_000; i += 1) {
+    store.onLog(`line ${i}`);
+  }
+  check(renders === 0, `a log line does not re-render six panels (got ${renders})`);
+  check(store.logs.length === 500, `the log buffer is capped (got ${store.logs.length})`);
+  check(store.logs[499] === "line 1999", "and keeps the newest lines rather than the oldest");
+}
+
+// ================================================================ product
+
+/** A product store wired to `service`, bypassing inversify. */
+function productWith(service) {
+  const store = new ProductStore();
+  store.service = service;
+  return store;
+}
+
+const REF = { path: "/repo/products/demo/product.gdl", label: "products/demo/product.gdl" };
+const INTENT = { default_profile: "embedded", profiles: ["embedded"] };
+
+function productService(overrides) {
+  return {
+    listProducts: () => Promise.resolve([REF]),
+    loadProduct: () => Promise.resolve({ intent: INTENT, diagnostics: [] }),
+    resolve: () => Promise.resolve({ product: { product: { lock_hash: "blake3:aa" } }, diagnostics: [] }),
+    lock: () => Promise.resolve({ profile: "embedded", lock_hash: "blake3:aa", text: "" }),
+    ...overrides,
+  };
+}
+
+// -------------------------------- a failed lock does not blank the resolve
+
+{
+  // `ensureLock` runs from the Lock widget's *render*, long after `resolve`
+  // returned. Routing its failure through the shared `error` field replaced a
+  // resolution that had succeeded -- graph, diagnostics, profile and all -- with
+  // a red box about a TOML serialization.
+  const store = productWith(
+    productService({ lock: () => Promise.reject(new Error("cannot serialize the lock")) }),
+  );
+  await store.discover();
+  check(store.current.status === "ready", "the product resolved");
+
+  await store.ensureLock();
+  check(store.current.status === "ready", "a failed lock leaves the resolution standing");
+  check(store.current.resolution !== undefined, "and does not throw the answer away");
+  check(
+    (store.current.lockError ?? "").includes("cannot serialize"),
+    "the failure is reported against the lock",
+  );
+
+  // And once, not once per frame: the widget asks on every render, and `lock`
+  // stays undefined after a failure, so nothing but this stops the retry loop.
+  let calls = 0;
+  store.service.lock = () => {
+    calls += 1;
+    return Promise.reject(new Error("still no"));
+  };
+  await store.ensureLock();
+  await store.ensureLock();
+  check(calls === 0, `a lock that failed is not re-requested every render (got ${calls})`);
+}
+
+// ------------------------------ reopening the panel does not lose the product
+
+{
+  // The Product widget is closable, so its `postConstruct` runs again on every
+  // reopen. `discover()` there bumped the epoch -- abandoning any resolve in
+  // flight -- and then re-listed. With more than one product it does not reopen
+  // anything, so the resolve was thrown away and nothing replaced it: a panel
+  // that had a resolved product came back with `resolution` gone and `status`
+  // back to `idle`, still naming the product it could no longer show.
+  const second = { path: "/repo/products/other/product.gdl", label: "products/other/product.gdl" };
+  const store = productWith(
+    productService({ listProducts: () => Promise.resolve([REF, second]) }),
+  );
+
+  await store.discover();
+  check(store.current.open === undefined, "two products are offered rather than opened");
+  await store.open(REF);
+  check(store.current.status === "ready", `the chosen product resolved (got ${store.current.status})`);
+
+  // The remount.
+  await store.ensureDiscovered();
+  check(store.current.status === "ready", `reopening keeps the resolution (got ${store.current.status})`);
+  check(store.current.open?.path === REF.path, "and keeps the product that was open");
+  check(store.current.resolution !== undefined, "and the resolution itself");
+}
+
+// ---------------------------- and does not re-run the RPCs it already ran
+
+{
+  let listed = 0;
+  const store = productWith(
+    productService({
+      listProducts: () => {
+        listed += 1;
+        return Promise.resolve([REF]);
+      },
+    }),
+  );
+  await store.ensureDiscovered();
+  await store.ensureDiscovered();
+  await store.ensureDiscovered();
+  check(listed === 1, `discovery happens once however often the panel opens (got ${listed})`);
 }
 
 console.log(

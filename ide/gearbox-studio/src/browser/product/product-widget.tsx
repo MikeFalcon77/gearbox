@@ -45,7 +45,7 @@ export class ProductWidget extends ReactWidget {
     this.title.closable = true;
     this.addClass("gearbox-product");
     this.toDispose.push(this.store.onChanged(() => this.update()));
-    void this.store.discover();
+    void this.store.ensureDiscovered();
     this.update();
   }
 

@@ -46,6 +46,17 @@ export class CatalogueWidget extends ReactWidget {
   protected filter = "";
   protected collapsed = new Set<string>();
 
+  /**
+   * The visible rows in the order the eye reads them, rebuilt on every render.
+   *
+   * Needed because the tree is not one list: it is a listbox per category, and
+   * arrow-key navigation has to cross a group boundary the way the reader's eye
+   * does. A flat array of keys is the smallest thing that can answer "what is
+   * below this row" when the answer is in the next group -- or nowhere, because
+   * the group after it is folded.
+   */
+  protected navigable: string[] = [];
+
   @postConstruct()
   protected init(): void {
     this.id = CatalogueWidget.ID;
@@ -66,6 +77,9 @@ export class CatalogueWidget extends ReactWidget {
     const state = this.store.current;
     const matching = state.rows.filter((row) => matches(row, this.filter));
     const groups = groupByCategory(matching);
+    this.navigable = groups
+      .filter(([category]) => !this.isFolded(category))
+      .flatMap(([, rows]) => rows.map(rowKey));
     const loading = state.status === "loading";
     // A row still pending once the load is over did not project. Saying so is
     // the difference between "still working" and "this gear failed, and the
@@ -172,10 +186,7 @@ export class CatalogueWidget extends ReactWidget {
   }
 
   protected renderGroup(category: string, rows: Row[], status: string): React.ReactNode {
-    // Folded groups are ignored while a filter is active. A match hidden inside a
-    // collapsed category is the one thing a filter must never do: the reader
-    // concludes the gear is not there.
-    const folded = this.filter.length === 0 && this.collapsed.has(category);
+    const folded = this.isFolded(category);
     return (
       <div className="gbx-group" key={category} data-category={category}>
         <div
@@ -207,6 +218,17 @@ export class CatalogueWidget extends ReactWidget {
     );
   }
 
+  /**
+   * Whether a category is folded away.
+   *
+   * Folding is ignored while a filter is active. A match hidden inside a
+   * collapsed category is the one thing a filter must never do: the reader
+   * concludes the gear is not there.
+   */
+  protected isFolded(category: string): boolean {
+    return this.filter.length === 0 && this.collapsed.has(category);
+  }
+
   protected toggle(category: string): void {
     if (!this.collapsed.delete(category)) {
       this.collapsed.add(category);
@@ -236,7 +258,13 @@ export class CatalogueWidget extends ReactWidget {
         // the keyboard counterpart of the double-click.
         role="option"
         aria-selected={selected}
-        tabIndex={0}
+        data-row-key={key}
+        // One tab stop for the whole tree, not one per row. `tabIndex={0}`
+        // everywhere put 62 stops between the filter box and the rest of the
+        // shell today and will put hundreds there as the catalogue grows, which
+        // is the ARIA listbox pattern's whole reason for existing: Tab reaches
+        // the list, the arrow keys move inside it.
+        tabIndex={this.isTabbable(key) ? 0 : -1}
         onClick={() => {
           this.store.select(key);
         }}
@@ -266,12 +294,40 @@ export class CatalogueWidget extends ReactWidget {
     );
   }
 
+  /**
+   * Which row carries the tree's single tab stop.
+   *
+   * The selected row, so returning to the list by Tab lands where the reader
+   * left off; the first row otherwise, because a list no key can reach is a list
+   * that is not keyboard-operable at all. Falling back matters when the
+   * selection is filtered out or sits in a folded group -- the selection
+   * survives both, and the tab stop cannot.
+   */
+  protected isTabbable(key: string): boolean {
+    const selected = this.store.selected;
+    if (selected !== undefined && this.navigable.includes(selected)) {
+      return key === selected;
+    }
+    return key === this.navigable[0];
+  }
+
   protected onRowKey(
     event: React.KeyboardEvent<HTMLDivElement>,
     row: Row,
     key: string,
     selected: boolean,
   ): void {
+    const moved = this.neighbour(event.key, key);
+    if (moved !== undefined) {
+      event.preventDefault();
+      this.store.select(moved);
+      // Focused now rather than after the re-render. React keeps the same DOM
+      // node for the same row key, so the element is already there and moving
+      // focus into it survives the patch -- whereas focusing afterwards needs a
+      // hook into an update that `select()` only schedules.
+      this.focusRow(moved);
+      return;
+    }
     if (event.key !== "Enter" && event.key !== " ") {
       return;
     }
@@ -281,6 +337,43 @@ export class CatalogueWidget extends ReactWidget {
       return;
     }
     this.store.select(key);
+  }
+
+  /**
+   * The row a navigation key moves to, or `undefined` if the key is not one.
+   *
+   * Clamped rather than wrapped at both ends: a list that jumps from the last
+   * gear back to the first reads as a bug the first time it happens, and there
+   * is no long list here to make wrapping worth the surprise.
+   */
+  protected neighbour(pressed: string, from: string): string | undefined {
+    const rows = this.navigable;
+    if (rows.length === 0) {
+      return undefined;
+    }
+    const at = rows.indexOf(from);
+    const last = rows.length - 1;
+    switch (pressed) {
+      case "ArrowDown":
+        return rows[Math.min(at + 1, last)];
+      case "ArrowUp":
+        return at <= 0 ? rows[0] : rows[at - 1];
+      case "Home":
+        return rows[0];
+      case "End":
+        return rows[last];
+      default:
+        return undefined;
+    }
+  }
+
+  protected focusRow(key: string): void {
+    // Matched on the dataset rather than interpolated into a selector. A row key
+    // is `<source>:<gdl_path>`, so it carries `:` and `/` and whatever else the
+    // filesystem allows, and getting CSS string escaping right for arbitrary
+    // path text is a worse problem than a loop over a few dozen elements.
+    const rows = Array.from(this.node.querySelectorAll<HTMLElement>("[data-row-key]"));
+    rows.find((node) => node.dataset["rowKey"] === key)?.focus();
   }
 
   protected renderFailedRoot(root: FailedRoot): React.ReactNode {

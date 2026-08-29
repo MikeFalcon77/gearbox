@@ -151,7 +151,7 @@ pub fn load_catalogue_staged(
                     "a directory the process cannot read is indistinguishable from one with no \
                      gears in it; check its permissions",
                 )
-                .at(Location::file(format!("file://{}", root.root.display()))),
+                .at(Location::file(gearbox_ir::file_uri(&root.root))),
             );
         }
     }
@@ -553,7 +553,7 @@ fn identity_for(
     path: &Path,
     diagnostics: &mut Diagnostics,
 ) -> Option<FileIdentity> {
-    let uri = format!("file://{}", path.display());
+    let uri = gearbox_ir::file_uri(path);
 
     let relative = path.strip_prefix(&root.root).ok().and_then(|r| {
         // Forward slashes regardless of platform: the path goes into a lock

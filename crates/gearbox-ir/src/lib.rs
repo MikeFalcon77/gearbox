@@ -27,7 +27,7 @@ pub use contract::{
 };
 pub use diagnostics::{
     Diagnostic, DiagnosticCode, DiagnosticDomain, Diagnostics, Location, Position, Range,
-    RelatedLocation, Severity, UnknownDiagnosticCode,
+    RelatedLocation, Severity, UnknownDiagnosticCode, file_uri,
 };
 pub use explain::{ExplanationGraph, ExplanationNode, NodeKind, ProvenanceEdge, ProvenanceKind};
 pub use fileset::{FileAction, FileEntry, FileKind, FilePlan, FileSet, Ownership};

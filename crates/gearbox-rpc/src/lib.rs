@@ -17,16 +17,15 @@ pub mod protocol;
 
 use std::path::{Path, PathBuf};
 
-use gearbox_engine::{Continue, LoadEvent, SourceRoot, load_catalogue_staged};
+use gearbox_engine::{Continue, LoadEvent, SourceRoot, default_source_ids, load_catalogue_staged};
 use gearbox_ir::{Diagnostic, ExplanationGraph, ProfileId, ResolvedProduct, SourceId};
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
 
 use crate::protocol::{
     Capabilities, CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, EditGearParams,
-    EditGearResult, FailedRoot,
-    InitializeParams, InitializeResult, LockParams, LockResult, LogParams, ProductLoadParams,
-    ProductLoadResult, ProgressParams, ResolveParams, ResolveResult, ResolvedRoot, ServerInfo,
-    ValidateParams, ValidateResult, error_code, method,
+    EditGearResult, FailedRoot, InitializeParams, InitializeResult, LockParams, LockResult,
+    LogParams, ProductLoadParams, ProductLoadResult, ProgressParams, ResolveParams, ResolveResult,
+    ResolvedRoot, ServerInfo, ValidateParams, ValidateResult, error_code, method,
 };
 
 /// Why the server could not run.
@@ -46,9 +45,11 @@ struct State {
     /// Cached because resolving re-reads nothing else: a load parses every gear
     /// crate in the tree, and doing that again per resolve would make the
     /// Resolve button cost a second on a slice and ten on a real registry.
-    /// Invalidated only by an explicit `gearbox/catalogue/load`, which is the
-    /// same contract the CLI has -- there is no file watch yet, and pretending
-    /// otherwise would be worse than saying so.
+    /// Filled by `gearbox/catalogue/load` and replaced by nothing else, which is
+    /// the same contract the CLI has -- there is no file watch yet, and
+    /// pretending otherwise would be worse than saying so. Dropped when
+    /// `initialize` changes the roots, because a catalogue belongs to the roots
+    /// it was scanned from.
     catalogue: Option<gearbox_ir::Catalogue>,
     /// The roots that could not be opened, kept so the client can be told which
     /// and why rather than being handed a shorter list.
@@ -133,9 +134,13 @@ pub fn serve_stdio(default_roots: &[PathBuf]) -> Result<(), ServeError> {
 fn open_roots(paths: &[PathBuf]) -> (Vec<SourceRoot>, Vec<FailedRoot>) {
     let mut opened = Vec::with_capacity(paths.len());
     let mut failed = Vec::new();
-    for path in paths {
+    // Ids for the whole set at once, not one path at a time: the rule that makes
+    // them distinct can only be applied to a set. See
+    // `gearbox_engine::default_source_ids` for why two roots sharing an id is a
+    // silent loss of gears rather than a cosmetic clash.
+    for (path, id) in paths.iter().zip(default_source_ids(paths)) {
         let spelling = path.display().to_string();
-        match SourceId::new(default_source_id(path)) {
+        match SourceId::new(id) {
             Err(e) => failed.push(FailedRoot {
                 path: spelling,
                 error: e.to_string(),
@@ -150,17 +155,6 @@ fn open_roots(paths: &[PathBuf]) -> (Vec<SourceRoot>, Vec<FailedRoot>) {
         }
     }
     (opened, failed)
-}
-
-/// A source id from the root's directory name, matching the CLI's rule.
-fn default_source_id(path: &std::path::Path) -> String {
-    path.canonicalize()
-        .ok()
-        .as_deref()
-        .and_then(std::path::Path::file_name)
-        .map(|n| n.to_string_lossy().to_lowercase())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "local".to_owned())
 }
 
 fn dispatch(connection: &Connection, state: &mut State, request: Request) -> Option<Response> {
@@ -256,6 +250,12 @@ fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Re
             open_roots(&params.roots.iter().map(PathBuf::from).collect::<Vec<_>>());
         state.roots = roots;
         state.failed_roots = failed;
+        // A catalogue is only ever the catalogue *of these roots*. Keeping it
+        // across a re-`initialize` meant a second `initialize` naming different
+        // roots -- which is exactly what a reconnecting client sends -- was
+        // answered for the rest of the session out of a cache built from the
+        // first set. Cheap to be wrong about, and impossible to notice.
+        state.catalogue = None;
     }
     state.initialized = true;
     state.allow_writes = params.allow_writes;
@@ -598,7 +598,9 @@ fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
     let directory = path.parent().unwrap_or(Path::new("."));
     let temporary = directory.join(format!(
         ".{}.gearbox-tmp",
-        path.file_name().and_then(|n| n.to_str()).unwrap_or("product.gdl")
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("product.gdl")
     ));
     std::fs::write(&temporary, contents)?;
     std::fs::rename(&temporary, path)
@@ -667,7 +669,7 @@ fn catalogue_for(state: &mut State) -> &gearbox_ir::Catalogue {
 /// correct for now: cancellation is the answer to a slow load, and it needs the
 /// request loop to be reading anyway. Moving the load to a worker is a change to
 /// make when there is a second concurrent request worth serving.
-fn catalogue_load(connection: &Connection, state: &State, id: RequestId) -> Option<Response> {
+fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> Option<Response> {
     let mut pending = Vec::new();
     let mut total = 0_u32;
     let mut completed = 0_u32;
@@ -781,6 +783,17 @@ fn catalogue_load(connection: &Connection, state: &State, id: RequestId) -> Opti
         },
     );
 
+    let diagnostics = scan.catalogue.diagnostics.as_slice().to_vec();
+    // The whole point of the cache, and it was never being filled.
+    //
+    // A staged load parses every gear crate in the tree -- it is the most
+    // expensive thing the server does. Dropping the result on the floor meant
+    // the first `product/resolve` after a load called `catalogue_for`, found
+    // `None`, and did the entire scan again *non-staged*: the same seconds of
+    // work, this time with no progress notifications and with the request thread
+    // blocked, for a catalogue the client already had on screen.
+    state.catalogue = Some(scan.catalogue);
+
     if answered {
         return None;
     }
@@ -792,7 +805,7 @@ fn catalogue_load(connection: &Connection, state: &State, id: RequestId) -> Opti
         &CatalogueLoadResult {
             total,
             pending: Vec::new(),
-            diagnostics: scan.catalogue.diagnostics.as_slice().to_vec(),
+            diagnostics,
         },
     ))
 }

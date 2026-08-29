@@ -33,4 +33,4 @@ pub use plugin::PluginProjection;
 pub use plugin_select::{PointResolution, check as check_plugins};
 pub use product::{ProductScan, load_product};
 pub use scans::CrateScans;
-pub use source::{SourceRoot, SourceRootError};
+pub use source::{SourceRoot, SourceRootError, default_source_ids};

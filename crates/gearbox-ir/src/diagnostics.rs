@@ -690,6 +690,35 @@ impl Location {
     }
 }
 
+/// A `file://` URI for a path on this machine.
+///
+/// One function because there were five hand-rolled `format!("file://{}",
+/// path.display())` calls, and `Path::display` is the wrong input for a URI on
+/// Windows twice over: it yields `C:\\src\\gear.gdl`, so the result was
+/// `file://C:\\src\\gear.gdl` -- backslashes a URI parser does not accept as
+/// separators, and `C:` read as the *authority* rather than the path, which is
+/// how an editor is handed a link to a host called `c` and opens nothing.
+///
+/// A leading slash is added when the path does not start with one, which is both
+/// the Windows drive-letter case and the relative-path case. The relative one is
+/// a lie -- `file:///product.gdl` says the file is at the filesystem root -- but
+/// it is the lie that was already there, and it is the caller's business:
+/// `resolve_at` exists precisely so a product's diagnostics get an absolute path
+/// to build this from.
+///
+/// Not percent-encoded. A path with a space or a `#` in it still produces a URI
+/// that is strictly invalid; encoding it is a separate change, because every
+/// consumer that today compares these strings would have to be looked at.
+#[must_use]
+pub fn file_uri(path: &std::path::Path) -> String {
+    let text = path.to_string_lossy().replace('\\', "/");
+    if text.starts_with('/') {
+        format!("file://{text}")
+    } else {
+        format!("file:///{text}")
+    }
+}
+
 /// A secondary location that helps explain a diagnostic.
 ///
 /// Maps onto the Language Server Protocol's related-information, so an editor

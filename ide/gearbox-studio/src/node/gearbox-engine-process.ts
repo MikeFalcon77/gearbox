@@ -22,7 +22,11 @@ import {
   StreamMessageWriter,
 } from "vscode-jsonrpc/node";
 
-/** How long a killed engine gets to exit before SIGKILL. */
+import { method } from "../common/protocol";
+
+/** How long the engine gets to act on `exit` before SIGTERM. */
+const EXIT_GRACE_MS = 1_000;
+/** And how long after SIGTERM before SIGKILL. */
 const SIGTERM_GRACE_MS = 2_000;
 
 export interface EngineHandle {
@@ -42,6 +46,14 @@ export interface EngineHandle {
    * microtask after it -- leaves a request nobody will ever settle. Racing the
    * answer against the child's death closes that window; the timeout closes the
    * one where the child is alive and simply never answers.
+   *
+   * A timeout is fatal to the handle, not just to the request. An engine that
+   * missed its deadline is still running the work: it goes on emitting
+   * `catalogueChanged` and a final `$/progress done` for a load the client has
+   * already given up on and reported as an error, which walks the panel back
+   * from "failed" to "ready" with a tree nobody asked for. There is also no way
+   * to cancel the work -- the load runs on the engine's request thread -- so the
+   * only way to make the abandonment real is to end the process.
    *
    * @throws when the engine dies first, or does not answer within `timeoutMs`.
    */
@@ -160,10 +172,13 @@ export function spawnEngine(
       }
       let timer: NodeJS.Timeout | undefined;
       const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`the engine did not answer \`${requestMethod}\` in ${timeoutMs}ms`)),
-          timeoutMs,
-        );
+        timer = setTimeout(() => {
+          // Ended, not merely abandoned. See `EngineHandle.request`: a wedged
+          // engine that later finishes its load would otherwise overwrite the
+          // error the client is already showing.
+          handle.dispose();
+          reject(new Error(`the engine did not answer \`${requestMethod}\` in ${timeoutMs}ms`));
+        }, timeoutMs);
       });
       const died = exited.then((reason): never => {
         throw new Error(`the engine ${reason} while answering \`${requestMethod}\``);
@@ -179,16 +194,45 @@ export function spawnEngine(
       }
     },
     dispose(): void {
+      // Three escalating steps, because only the last one always works and only
+      // the first one is clean.
+      //
+      // `exit` first. The engine's lifecycle is LSP-shaped -- `serve_stdio` in
+      // `crates/gearbox-rpc/src/lib.rs` runs until the client sends it -- so a
+      // shutdown it understands exists, and taking it lets the engine return
+      // from its request loop and release its source roots itself instead of
+      // being cut down between two writes. It has to go out before `die()`,
+      // which disposes the connection.
+      //
+      // Then the signals, for the engine that is wedged and not reading: a
+      // pathological parse or a hung network read ignores `exit`, and leaving it
+      // running holds the source root and its file handles open.
+      //
+      // Notably *not* an EOF on stdin in between. Ending `outbound` propagates
+      // the end through the pipe to a `child.stdin` that a dead child has
+      // already destroyed, and the write-after-end that follows escapes as an
+      // uncaught error -- which is the same class of failure the `PassThrough`
+      // above exists to prevent. SIGTERM ends the process either way.
+      if (!dead) {
+        live.sendNotification(method.EXIT).catch(() => undefined);
+      }
       try {
         die("disposed");
       } finally {
-        child.kill("SIGTERM");
-        // A wedged engine -- an infinite walk, a hung NFS read -- ignores
-        // SIGTERM. Leaving it running holds the source root open and the file
-        // handles with it.
-        const timer = setTimeout(() => child.kill("SIGKILL"), SIGTERM_GRACE_MS);
-        timer.unref?.();
-        child.once("exit", () => clearTimeout(timer));
+        const escalate = [
+          setTimeout(() => child.kill("SIGTERM"), EXIT_GRACE_MS),
+          setTimeout(() => child.kill("SIGKILL"), EXIT_GRACE_MS + SIGTERM_GRACE_MS),
+        ];
+        for (const timer of escalate) {
+          // Unreffed, or a disposal during shutdown holds the event loop open
+          // for the whole grace period and Theia appears to hang on exit.
+          timer.unref?.();
+        }
+        child.once("exit", () => {
+          for (const timer of escalate) {
+            clearTimeout(timer);
+          }
+        });
       }
     },
   };

@@ -87,13 +87,51 @@ if (process.platform === "win32") {
   writeFileSync(stub, "#!/bin/sh\ncat > /dev/null\n");
   chmodSync(stub, 0o755);
 
-  const engine = spawnEngine(stub, [], logger);
-  const request = engine.request("initialize", {}, 30_000);
-  const before = await settlesWithin(400, request);
-  check(before === "timeout", `a silent engine leaves the request pending (got ${before})`);
-  engine.dispose();
-  const after = await settlesWithin(3_000, request);
-  check(after === "rejected", `disposing rejects what was in flight (got ${after})`);
+  {
+    const engine = spawnEngine(stub, [], logger);
+    const request = engine.request("initialize", {}, 30_000);
+    const before = await settlesWithin(400, request);
+    check(before === "timeout", `a silent engine leaves the request pending (got ${before})`);
+    engine.dispose();
+    const after = await settlesWithin(3_000, request);
+    check(after === "rejected", `disposing rejects what was in flight (got ${after})`);
+  }
+
+  // ------------------------------------------- a timeout ends the engine
+
+  {
+    // The case the panel used to lose. A wedged engine that misses its deadline
+    // is still working: it goes on projecting and eventually sends
+    // `$/progress done`, which walked the store from the error it had just
+    // reported back to `ready`. Abandoning the request is not enough -- the
+    // work has to stop, and nothing can cancel it, so the process ends.
+    const engine = spawnEngine(stub, [], logger);
+    const outcome = await settlesWithin(3_000, engine.request("initialize", {}, 300));
+    check(outcome === "rejected", `a timed-out request rejects (got ${outcome})`);
+    check(engine.dead, "and the timeout takes the handle with it");
+    check(
+      (await engine.exited).includes("disposed"),
+      "the engine was disposed rather than left running",
+    );
+    const again = await settlesWithin(3_000, engine.request("initialize", {}, 300));
+    check(again === "rejected", `a request after the timeout refuses at once (got ${again})`);
+  }
+
+  // --------------------------------- a wedged engine refuses product RPCs
+
+  {
+    // `EngineHandle.request` for every method, not just the two that had it.
+    // `connection.sendRequest` against this stub never settles at all, which
+    // crossed the Theia proxy as a Resolve button that spun for the rest of the
+    // session -- no error, no log, nothing to retry from.
+    const engine = spawnEngine(stub, [], logger);
+    const outcome = await settlesWithin(
+      3_000,
+      engine.request("gearbox/product/resolve", { path: "/p/product.gdl" }, 300),
+    );
+    check(outcome === "rejected", `a product RPC on a wedged engine rejects (got ${outcome})`);
+    engine.dispose();
+  }
 }
 
 console.log(

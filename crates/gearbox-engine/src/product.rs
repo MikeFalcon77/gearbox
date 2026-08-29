@@ -31,7 +31,7 @@ pub struct ProductScan {
 /// wants to share fragments with a sibling has to say so by being rooted higher.
 #[must_use]
 pub fn load_product(path: &Path, root: Option<&Path>) -> ProductScan {
-    let uri = format!("file://{}", path.display());
+    let uri = gearbox_ir::file_uri(path);
     let mut diagnostics = Diagnostics::new();
 
     let source = match std::fs::read_to_string(path) {

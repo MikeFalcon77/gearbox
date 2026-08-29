@@ -52,6 +52,19 @@ export class LockWidget extends ReactWidget {
       return <div className="gbx-lock gbx-empty">Resolving {state.profile}…</div>;
     }
 
+    if (state.lockError !== undefined) {
+      // The resolution itself stood: `status` is `ready`, the graph and the
+      // diagnostics are on screen, and only the lock text is missing. Said here
+      // rather than as the product's error for that reason.
+      return (
+        <div className="gbx-lock">
+          <div className="gbx-error" role="alert">
+            the lock could not be written: {state.lockError}
+          </div>
+        </div>
+      );
+    }
+
     const lock = state.lock;
     if (lock === undefined) {
       // Asked for here rather than eagerly on every resolve: the lock costs a

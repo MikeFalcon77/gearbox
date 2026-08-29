@@ -100,8 +100,8 @@ pub fn resolve_at(
 
     // Step 3 -- which edges could carry a boundary.
     let uri = match product_path {
-        Some(path) => format!("file://{}", path.display()),
-        None => format!("file://{}", intent.gdl_path.as_str()),
+        Some(path) => gearbox_ir::file_uri(path),
+        None => gearbox_ir::file_uri(std::path::Path::new(intent.gdl_path.as_str())),
     };
     let cuts = cuts::classify(catalogue, &closure, &uri, &mut diagnostics);
 

@@ -48,6 +48,17 @@ export interface ProductState {
    * the previous profile is worse than none, because it looks like an answer.
    */
   readonly lock: LockResult | undefined;
+  /**
+   * Why the lock could not be fetched, if it could not.
+   *
+   * Its own field rather than `error`, because the two are not the same failure.
+   * `error` means the resolution is not to be trusted; this means one panel of
+   * several has nothing to show. Sharing the field made a failed `lock` call
+   * blank a resolution that had succeeded -- the graph, the diagnostics and the
+   * profile all replaced by a red box -- because `ensureLock` runs from the Lock
+   * widget's render, long after `resolve` returned.
+   */
+  readonly lockError: string | undefined;
   readonly diagnostics: readonly Diagnostic[];
   readonly error: string | undefined;
 }
@@ -60,6 +71,7 @@ const EMPTY: ProductState = {
   profile: undefined,
   resolution: undefined,
   lock: undefined,
+  lockError: undefined,
   diagnostics: [],
   error: undefined,
 };
@@ -107,6 +119,30 @@ export class ProductStore {
    * Opening the single candidate rather than asking: a picker with one entry is
    * a question with one answer, and the panel exists to show a resolution.
    */
+  /**
+   * Discover once, for callers that only want it to have happened.
+   *
+   * The Product widget is closable and transient, so its `postConstruct` runs
+   * again on every reopen -- and `discover()` bumps the epoch, which abandons
+   * whatever resolve was in flight and leaves the panel on `resolving` with a
+   * resolution nobody will ever install. Reopening a panel is not a request to
+   * throw away its contents.
+   *
+   * Not moved to an application `onStart` the way the catalogue load was: the
+   * Product view opens on request, and discovering at startup would spend two
+   * RPCs and open a product for a panel that may never be looked at.
+   */
+  async ensureDiscovered(): Promise<void> {
+    // Nothing in flight to abandon, and nothing already found to discard.
+    if (this.state.status === "loading" || this.state.status === "resolving") {
+      return;
+    }
+    if (this.state.open !== undefined || this.state.products.length > 0) {
+      return;
+    }
+    await this.discover();
+  }
+
   async discover(): Promise<void> {
     const epoch = ++this.epoch;
     this.update({ status: "loading" });
@@ -175,7 +211,7 @@ export class ProductStore {
     const ref = this.state.open;
     const profile = this.state.profile;
     if (ref === undefined || profile === undefined) return;
-    this.update({ status: "resolving", lock: undefined });
+    this.update({ status: "resolving", lock: undefined, lockError: undefined });
     try {
       const resolution = await this.service.resolve(ref.path, profile);
       if (epoch !== this.epoch) return;
@@ -202,6 +238,12 @@ export class ProductStore {
     if (
       this.lockInFlight ||
       this.state.lock !== undefined ||
+      // Once per resolution, failure included. The Lock widget asks from its
+      // render and a failure leaves `lock` undefined, so without this a lock the
+      // engine refuses is re-requested on every frame for as long as the panel
+      // is open. Cleared with the rest of the lock state at the head of the next
+      // resolve, which is the only thing that could change the answer.
+      this.state.lockError !== undefined ||
       this.state.status !== "ready" ||
       ref === undefined ||
       profile === undefined
@@ -213,10 +255,16 @@ export class ProductStore {
     try {
       const lock = await this.service.lock(ref.path, profile);
       if (epoch === this.epoch) {
-        this.update({ lock });
+        this.update({ lock, lockError: undefined });
       }
     } catch (error) {
-      this.fail(epoch, error);
+      // Recorded against the lock, not against the product. See
+      // `ProductState.lockError`: the resolution this lock belongs to succeeded,
+      // and demoting it to `error` would throw away a correct answer over a
+      // failed serialization.
+      if (epoch === this.epoch) {
+        this.update({ lockError: messageOf(error) });
+      }
     } finally {
       this.lockInFlight = false;
     }

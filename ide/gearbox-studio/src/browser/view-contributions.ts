@@ -1,6 +1,10 @@
 // Where the two views live in the shell, and the commands that open them.
 
 import { AbstractViewContribution, FrontendApplicationContribution } from "@theia/core/lib/browser";
+import {
+  ConnectionStatus,
+  ConnectionStatusService,
+} from "@theia/core/lib/browser/connection-status-service";
 import { Command, CommandRegistry, MenuModelRegistry } from "@theia/core/lib/common";
 import { inject, injectable } from "@theia/core/shared/inversify";
 
@@ -30,6 +34,14 @@ export class CatalogueViewContribution
   implements FrontendApplicationContribution
 {
   @inject(CatalogueStore) protected readonly store!: CatalogueStore;
+  @inject(ConnectionStatusService)
+  protected readonly connection!: ConnectionStatusService;
+  // Reached from here because the reconnect edge is one event and both stores
+  // went stale on it. The alternative -- a second contribution listening to the
+  // same event -- would also have to know to run after this one, since it is
+  // `CatalogueStore.load()` that calls `initialize` and so respawns the engine
+  // a product resolve needs.
+  @inject(ProductStore) protected readonly products!: ProductStore;
 
   constructor() {
     super({
@@ -57,6 +69,49 @@ export class CatalogueViewContribution
     // `load()` does not reject -- a failure becomes the store's error state,
     // which the panel renders.
     void this.store.load();
+    this.reloadOnReconnect();
+  }
+
+  /**
+   * Load again after the backend connection comes back.
+   *
+   * Not a nicety. `frontendConnectionTimeout` is `0`, so a closed socket
+   * disposes the backend contribution at once, and
+   * `gearbox-studio-backend-module.ts` disposes the service -- and its engine --
+   * with it. The frontend, meanwhile, reconnects in place: same page, same
+   * stores, same rendered tree, now backed by a fresh `GearboxServiceImpl` that
+   * has never seen `initialize`. Nothing called `initialize` a second time,
+   * because the only caller is `onStart` and the application already started.
+   * The result was a panel showing a complete catalogue where every action
+   * answered "the engine is not running", until someone thought to hit Reload.
+   *
+   * Reloading rather than raising the timeout or setting `reloadOnReconnect`:
+   * both of those are decisions about the whole application -- a longer timeout
+   * keeps every backend contribution alive for a window that may never return,
+   * and `reloadOnReconnect` throws away editor state to fix a catalogue. The
+   * thing that actually went stale is this store, and it knows how to refill
+   * itself.
+   */
+  protected reloadOnReconnect(): void {
+    let offline = this.connection.currentStatus === ConnectionStatus.OFFLINE;
+    this.connection.onStatusChange((status) => {
+      if (status === ConnectionStatus.OFFLINE) {
+        offline = true;
+        return;
+      }
+      // Only the offline-to-online edge. `onStatusChange` also fires for
+      // ONLINE-to-ONLINE on some paths, and a load per ping is not a load.
+      if (offline) {
+        offline = false;
+        void this.store.load().then(() => {
+          // Only if a product was open. Discovering one here would open a panel
+          // nobody asked for, on the strength of a dropped websocket.
+          if (this.products.current.open !== undefined) {
+            void this.products.reload();
+          }
+        });
+      }
+    });
   }
 
   override registerCommands(commands: CommandRegistry): void {

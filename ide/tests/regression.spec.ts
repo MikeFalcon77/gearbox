@@ -39,6 +39,51 @@ test.describe("the panel is operable without a mouse", () => {
     expect(name!.length).toBeGreaterThan(0);
   });
 
+  test("one row at a time is in the tab order", async ({ studio }) => {
+    // `tabIndex={0}` on every row put one tab stop per gear between the filter
+    // box and the rest of the shell -- 62 of them today. The ARIA listbox
+    // pattern is the fix and it is the reason the arrow keys below exist: Tab
+    // reaches the list, the arrows move inside it.
+    const tabbable = await studio.page.evaluate(
+      () =>
+        Array.from(document.querySelectorAll(".gearbox-catalogue .gbx-row")).filter(
+          (row) => row.getAttribute("tabindex") === "0",
+        ).length,
+    );
+    expect(tabbable).toBe(1);
+  });
+
+  test("the arrow keys move between rows", async ({ studio }) => {
+    // Real key events, for the reason at the top of this block. And read off
+    // `activeElement` rather than off the store: the point of the change is that
+    // focus follows the selection, which is what a screen reader announces.
+    const names = () =>
+      studio.page.evaluate(() =>
+        (document.activeElement?.querySelector(".gbx-row-name")?.textContent ?? "").trim(),
+      );
+
+    await studio.page.locator(".gearbox-catalogue .gbx-row").first().focus();
+    const first = await names();
+    await studio.page.keyboard.press("ArrowDown");
+    const second = await names();
+    expect(second, "ArrowDown did not move focus to another row").not.toBe(first);
+    expect(second.length).toBeGreaterThan(0);
+
+    await studio.page.keyboard.press("ArrowUp");
+    expect(await names(), "ArrowUp did not come back").toBe(first);
+
+    // Clamped, not wrapped: a list that jumps from the first gear to the last
+    // reads as a bug the first time it happens.
+    await studio.page.keyboard.press("ArrowUp");
+    expect(await names(), "ArrowUp past the first row wrapped instead of holding").toBe(first);
+
+    await studio.page.keyboard.press("End");
+    const last = await names();
+    expect(last, "End did not reach a different row").not.toBe(first);
+    await studio.page.keyboard.press("Home");
+    expect(await names(), "Home did not return to the first row").toBe(first);
+  });
+
   test("the command palette opens", async ({ studio }) => {
     // Opened and dismissed without running anything: every Gearbox view command
     // is a toggle, so executing one here would change the state the other tests
