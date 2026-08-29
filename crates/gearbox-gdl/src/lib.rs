@@ -26,6 +26,7 @@
 // vocabularies, which `tests/export_grammar.rs` reads to generate the editor's
 // syntax highlighting. That test lives in this crate, so the containment holds.
 pub mod declarative;
+pub mod edit;
 pub mod engine;
 pub mod globals;
 pub(crate) mod loader;
