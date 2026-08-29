@@ -301,7 +301,9 @@ Example:
 ```python
 gear(
     # The stable id, runtime capabilities, co-location deps and lifecycle are
-    # read from #[toolkit::gear]. Restating any of them here is an error.
+    # read from #[toolkit::gear]. Restating any of them here is an error, and
+    # `gear()` accepts each of those names only in order to refuse it by name --
+    # so the diagnostic can say which attribute owns the fact.
 
     name = "Contracts & Agreements",
 
@@ -311,14 +313,24 @@ gear(
     """,
 
     category = "bss",
-
-    kind = service(
-        has_extension_point = True,
-    ),
+    visibility = "internal",
 
     package = cargo(
-        crate = "contracts-agreements",
+        crate_name = "cf-contracts-agreements",
         lib = "contracts_agreements",
+        path = ".",
+    ),
+
+    # A locator, not a restatement: nothing in a gear's own crate says where its
+    # SDK lives, and the SDK is what declares the plugin-API traits this gear
+    # expects or fills. Whether it *has* an extension point is then read from
+    # those traits -- never declared, because `has_extension_point` in the old
+    # `gear.toml` is one of the three facts that were quietly wrong (see ADR
+    # `cpt-gearbox-adr-staged-catalogue-loading`, Decision Drivers).
+    sdk = cargo(
+        crate_name = "cf-contracts-agreements-sdk",
+        lib = "contracts_agreements_sdk",
+        path = "../contracts-agreements-sdk",
     ),
 )
 ```
@@ -434,13 +446,17 @@ Good:
 
 ```python
 gear(
-    id = "event-broker",
+    name = "Event Broker",
+    package = cargo(crate_name = "cf-event-broker", lib = "event_broker"),
 
     requires = [
         cluster.cache(
+            # The scope name, which is the operator side of a join key a gear
+            # declares in Rust as `impl ClusterProfile { const NAME }`.
+            profile = "event-broker",
             capabilities = [
-                "linearizable",
-                "prefix-watch",
+                cluster_cap.linearizable,
+                cluster_cap.prefix_watch,
             ],
         ),
     ],
@@ -561,9 +577,17 @@ This split is fundamental.
 
 ---
 
-# 15. `gear.gdl` Owns Gear Composition Metadata
+# 15. What a Gear Descriptor Carries
 
-A Gear descriptor may include:
+> **This section predates ADR `cpt-gearbox-adr-macro-projected-catalogue`, and its original title
+> claimed the opposite of what §8 decides.** It said `gear.gdl` *owns* gear composition metadata; §8
+> says it "does not restate what the attributes already declare", and the engine enforces that by
+> refusing `id`, `runtime_caps`, `colocated_deps`, `lifecycle`, `client` and `cluster_providers` by
+> name. The list and the example below are kept as written, because what somebody expected a
+> descriptor to hold is worth remembering; §15.1 says what it actually holds and which of these
+> moved. Same treatment as §18/§18.1.
+
+A Gear descriptor was expected to include:
 
 ```text
 identity
@@ -593,7 +617,8 @@ product visibility
 configuration schema references
 ```
 
-Illustrative example:
+Illustrative example, and **not valid GDL today** -- `id`, `kind`, `contract(...)` and
+`cargo(crate = ...)` are all refused or absent now; see §15.1:
 
 ```python
 gear(
@@ -662,6 +687,46 @@ gear(
 ```
 
 The exact GDL syntax is intentionally illustrative.
+
+## 15.1 As implemented
+
+Six of the fields above are gone, and each went the same way: the fact was already in Rust, so the
+descriptor reads it instead of restating it.
+
+| Expected here | Where it lives now |
+|---|---|
+| `identity` | `#[toolkit::gear(name = ...)]`. `gear(id = ...)` is accepted only to be refused, naming the attribute that owns it. |
+| `hard dependencies` | `#[toolkit::gear(deps = [...])]` -- the attribute that *emits the re-exports*, so a description evaluated before `rustc` could not replace it (§17). |
+| `capability requirements` | `#[toolkit::gear(capabilities = [...])]`, which drives compile-time assertions. |
+| `kind` / `plugin/extensibility model` | Read from the SDK crate's `pub trait *Plugin*` declarations. `has_extension_point` as a declared field was one of three facts found to be quietly wrong. |
+| contract `identity` and `version` | `#[toolkit::contract(gear = ..., version = ...)]` on the trait. `provide`/`consume` name the trait as a *join key* and add only what the attribute does not carry. |
+| available transports | Projected from which `<Base>Rest` / `<Base>Grpc` projection traits exist beside the base. A contract with no projection is provably local, and no description can say otherwise. |
+
+`roles` is still accepted, and that is not the same as supported -- see §33.1.
+
+What remains is genuinely new information with no home in Rust: `name`, `description`, `category`,
+`visibility`, the Cargo `package` and `sdk` locators, `docs`, `serves`, cluster `requires`,
+`cluster_plugins`, and `config_schema`. A real one, in full, is
+`gears/system/types-registry/types-registry/gear.gdl`:
+
+```python
+gear(
+    name = "Types Registry",
+    description = "Shared entity-type registry. Pulled in by roughly 22 gears via deps, so it is linked into most processes.",
+    category = "core-functionality",
+    visibility = "internal",
+
+    package = cargo(
+        crate_name = "cf-gears-types-registry",
+        lib = "types_registry",
+        path = ".",
+    ),
+)
+```
+
+Note what is absent and would have been required by the list above: no id, no deps, no capabilities
+-- and yet the catalogue reports all three for this gear, because it read them.
+
 
 ---
 
@@ -833,7 +898,11 @@ A `git` source pinned to a **branch** is accepted and recorded as not immutable
 (`SourceDecl::is_immutable()`), because a lock built from a branch is repeatable but not
 reproducible. A `git` source that pins nothing at all is refused.
 
-Example:
+Example, and the shape changed: a source is **declared once and referenced by id**, so
+`use_gear("my-gear", source = "gears-rust")` names an entry in `sources = [source(id = ..., at =
+path(...))]` rather than carrying a locator inline. Two gears from the same checkout then cannot
+disagree about which revision it is -- which is the whole point of pinning -- and it is why
+`ProductIntent` has a `sources` map at all.
 
 ```python
 product(
@@ -932,8 +1001,6 @@ resolved process topology
 
 replica counts
 
-roles and shards
-
 local/remote contract bindings
 
 contract identities and versions
@@ -981,6 +1048,12 @@ resolved = "k8s-lease"
 The exact serialization format is a detailed-design question.
 
 The conceptual role is not.
+
+Two corrections to the list, both from things the resolver settled later. **Roles and shards are not
+in the lock** -- the runtime has no role concept, and declaring one earns `GBX0601` instead (§33.1);
+the entry has been removed rather than left to be discovered. And `selected vs resolved` is narrower
+than it reads: it is `Selected<T>` sitting next to the resolved value on the same record, carrying
+the request and the `downgraded_by` code when the two differ -- not a parallel copy of the product.
 
 ---
 
@@ -1047,6 +1120,12 @@ production
 These are **presets**, not deployment profiles.
 
 A preset is an intent overlay or preference bundle.
+
+> **Not implemented.** There is no `preset(...)` in GDL, and no `require_high_availability()` or
+> `prefer_external_state()`. The only preference surface that exists is `preferences = [...]` on
+> `product(...)`, taking `prefer.existing_infrastructure()`, `prefer.fewer_processes()` and
+> `prefer.isolate()`. The distinction this section draws -- a preset is not a deployment profile --
+> is still the right one, and is why profiles were not allowed to absorb it.
 
 For example:
 
@@ -1332,7 +1411,11 @@ but the runtime remains responsible for eventual readiness.
 
 # 33. Roles and Shards
 
-Role and shard semantics are first-class product metadata.
+> **The runtime has no role concept, so this section describes an intent rather than a capability.**
+> `gear()` still accepts `roles`, and the resolver answers with `GBX0601 -- roles are not supported
+> by the runtime`. §33.1 says why, with the evidence.
+
+Role and shard semantics were expected to be first-class product metadata.
 
 Example Event Broker structure:
 
@@ -1366,6 +1449,24 @@ shard:
 ```
 
 Avoid reintroducing a generic `entrypoint` flag.
+
+## 33.1 As implemented
+
+The mapping above -- one gear, several roles, each with its own directory name -- is the part the
+runtime cannot do. A worker's directory identity *is* its anchor gear's id, taken verbatim from a
+field fixed in the binary, with no configuration override
+(`crates/gearbox-ir/src/resolved.rs`, on `ResolvedProcess::anchor`). One binary therefore registers
+under exactly one name, and "dispatcher -> event-broker, ingest -> event-broker-ingest" would need
+three.
+
+So declaring roles is accepted and then reported: **`GBX0601`, a `RuntimeGap` warning** -- "roles are
+not supported by the runtime". A warning rather than an error, because the description is not wrong
+about what it wants; it is wrong about what exists. And a `RuntimeGap` code is one of those required
+to cite the `file:line` in `gears-rust` that substantiates the claim
+(`cpt-gearbox-nfr-evidence-cited`), so the refusal carries its own proof rather than an opinion.
+
+Shards are untouched by this: they are instance selection, not directory identity, and nothing here
+decides them either way yet.
 
 ---
 
@@ -1497,7 +1598,7 @@ Automatic
 
 for provider choices.
 
-Example:
+Example, and it is not what was built -- there is no `cluster(...)` block and no `auto()`:
 
 ```python
 cluster(
@@ -1506,6 +1607,16 @@ cluster(
     lock = auto(),
 )
 ```
+
+**Automatic is the absence of a declaration, not a value.** The real surface is
+`cluster_profile(name = ..., cache = provider("postgres"), profiles = [...])`, where
+`leader_election` and `lock` are optional -- omitting one *is* asking for automatic, and the lock
+records it as `Choice::Auto` beside whatever was resolved. Writing `auto()` would have made "decide
+for me" a thing to type, and then "did anyone decide this" would depend on spelling rather than on
+structure.
+
+One asymmetry worth knowing: `cache` is **required**. A cluster scope with no cache has nothing to
+layer the other primitives over, so there is no automatic answer to give.
 
 The resolver chooses a valid implementation.
 
@@ -2253,6 +2364,15 @@ review
 diff
 apply
 ```
+
+The proposal above is illustrative and uses two surfaces that no longer exist: `deployment =` became
+`profiles = [...]` plus `default_profile` (§18.1), and `event-broker.ingest.*` addresses a role, which
+the runtime has no concept of (§33.1). The shape of the mechanism -- propose, resolve, validate,
+review, apply -- is what this section is about and is unaffected.
+
+The write side of it is now decided rather than open: ADR
+`cpt-gearbox-adr-authoring-ownership-tiers` sets out what may be written and by whom, and "a preview
+is not optional" is one of its consequences rather than a preference here.
 
 ---
 
