@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **74** — 54 built, 18 not built, 0 broken, 2 not observed.
+Claims: **80** — 59 built, 19 not built, 0 broken, 2 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -64,7 +64,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the co-location Graph opens in the main area | `plan §9: Graph, main` | ✅ built |  |
 | the Product view shows what §9 asks it to | `plan §9: Product` | ✅ built |  |
 | the Explain view is in the bottom area | `plan §9: Explain` | ✅ built |  |
-| a Lock view exists | `plan §9: Lock` | 🚧 not built |  |
+| the Lock view is in the main area | `plan §9: Lock` | ✅ built |  |
 | a Generate view exists | `plan §9: Generate` | 🚧 not built |  |
 | the layout is the same after a reload | `plan §9: deterministic layout` | ✅ built |  |
 | the closure reaches past the direct dependencies | `plan §9: co-location closure` | ✅ built |  |
@@ -92,6 +92,17 @@ Rust, and the ADRs' own Confirmation sections say which.
 | a plugin's inclusion names the host and the profile | `PRD cpt-gearbox-fr-plugin-selection` | ✅ built |  |
 | a selection that this profile does not contain reads as ordinary | `PRD cpt-gearbox-fr-explain` | ✅ built |  |
 | each step links to the source location of its fact | `PRD cpt-gearbox-fr-explain: the source location of each contributing fact` | 🚧 not built |  |
+
+## `conformance/prd-lock.spec.ts`
+
+| Claim | Source | Status | Note |
+|---|---|---|---|
+| the Lock view shows the canonical text with its generated header | `plan §9: Lock` | ✅ built |  |
+| the lock's own hash matches the resolution on screen | `plan §9: lock_hash badge` | ✅ built |  |
+| each profile has its own lock text | `PRD cpt-gearbox-fr-lock-single-source` | ✅ built |  |
+| the client never serializes a lock of its own | `PRD cpt-gearbox-fr-lock-single-source` | ✅ built |  |
+| a product.lock opened as a file is read-only | `PRD cpt-gearbox-fr-lock-read-only` | 🚧 not built |  |
+| the Lock view diffs against the lock on disk | `plan §9: diff toggle vs disk` | 🚧 not built |  |
 
 ## `conformance/prd-product.spec.ts`
 

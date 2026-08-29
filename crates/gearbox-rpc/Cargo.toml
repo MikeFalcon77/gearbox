@@ -13,6 +13,10 @@ workspace = true
 [dependencies]
 gearbox-engine.workspace = true
 gearbox-ir.workspace = true
+# The one function that decides the lock's bytes. Depended on directly rather
+# than reached through the engine, because a client must never render its own
+# TOML: byte identity across runs is the property the lock exists for.
+gearbox-lock.workspace = true
 # Framing, not a whole LSP implementation. Byte-compatible with
 # `vscode-jsonrpc`'s reader/writer, which is the requirement, and it is the crate
 # rust-analyzer uses for exactly this. Hand-rolling `Content-Length` is easy to

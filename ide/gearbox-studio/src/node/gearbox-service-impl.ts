@@ -16,6 +16,7 @@ import type { CatalogueChanged } from "../common/generated/CatalogueChanged";
 import type { CatalogueDiagnostics } from "../common/generated/CatalogueDiagnostics";
 import type { CatalogueLoadResult } from "../common/generated/CatalogueLoadResult";
 import type { InitializeResult } from "../common/generated/InitializeResult";
+import type { LockResult } from "../common/generated/LockResult";
 import type { LogParams } from "../common/generated/LogParams";
 import type { ProductLoadResult } from "../common/generated/ProductLoadResult";
 import type { ResolveResult } from "../common/generated/ResolveResult";
@@ -174,6 +175,10 @@ export class GearboxServiceImpl implements GearboxService {
 
   async resolve(path: string, profile?: string): Promise<ResolveResult> {
     return this.request("gearbox/product/resolve", { path, profile });
+  }
+
+  async lock(path: string, profile?: string): Promise<LockResult> {
+    return this.request("gearbox/product/lock", { path, profile });
   }
 
   async validate(product?: string): Promise<ValidateResult> {

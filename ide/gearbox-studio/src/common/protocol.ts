@@ -8,6 +8,7 @@
 import type { CatalogueChanged } from "./generated/CatalogueChanged";
 import type { CatalogueDiagnostics } from "./generated/CatalogueDiagnostics";
 import type { CatalogueLoadResult } from "./generated/CatalogueLoadResult";
+import type { LockResult } from "./generated/LockResult";
 import type { ProductLoadResult } from "./generated/ProductLoadResult";
 import type { ResolveResult } from "./generated/ResolveResult";
 import type { ValidateResult } from "./generated/ValidateResult";
@@ -87,6 +88,16 @@ export interface GearboxService {
    * from the description rather than from a guess made in the client.
    */
   resolve(path: string, profile?: string): Promise<ResolveResult>;
+
+  /**
+   * The canonical `product.lock` text for one profile.
+   *
+   * A separate call rather than a field on `resolve`: serializing the lock costs
+   * work and bytes the other panels do not need. And it is the engine's call to
+   * make -- a client rendering its own TOML would be a second answer to the one
+   * question the lock exists to settle byte-for-byte.
+   */
+  lock(path: string, profile?: string): Promise<LockResult>;
 
   /** Everything checkable without resolving. `product` omitted checks only the
    * catalogue. */

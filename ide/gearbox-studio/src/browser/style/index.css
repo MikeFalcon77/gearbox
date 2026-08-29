@@ -196,3 +196,25 @@
 .gbx-product code[data-asked-for]:hover, .gbx-product [data-pulled-in] > code:hover {
   text-decoration: underline;
 }
+
+/* --- Lock ---------------------------------------------------------------- */
+
+.gbx-lock { padding: 6px 10px; overflow: auto; height: 100%; }
+
+/* A `<pre>`, not a textarea and not Monaco: read-only by construction, and with
+   no TOML grammar installed Monaco would render the same uncoloured text behind
+   a far larger component. Selectable and copyable, because comparing a lock
+   against one in a terminal is a real thing people do. */
+.gbx-lock-text {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  font-family: var(--theia-code-font-family);
+  font-size: var(--theia-code-font-size);
+  line-height: 1.4;
+  white-space: pre;
+  overflow: auto;
+  border: 1px solid var(--theia-editorGroup-border);
+  border-radius: 3px;
+  background: var(--theia-editor-background);
+  user-select: text;
+}

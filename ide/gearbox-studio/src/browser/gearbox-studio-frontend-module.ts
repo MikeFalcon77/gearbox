@@ -5,6 +5,7 @@ import { WebSocketConnectionProvider } from "@theia/core/lib/browser/messaging";
 import { CommandContribution } from "@theia/core/lib/common";
 import { MenuContribution } from "@theia/core/lib/common/menu";
 import { ContainerModule } from "@theia/core/shared/inversify";
+import { MonacoEditorProvider } from "@theia/monaco/lib/browser/monaco-editor-provider";
 import { LanguageGrammarDefinitionContribution } from "@theia/monaco/lib/browser/textmate/textmate-contribution";
 
 import { GEARBOX_SERVICE_PATH, GearboxClient, GearboxService } from "../common/protocol";
@@ -12,6 +13,7 @@ import { CatalogueStore } from "./catalogue-store";
 import { ProductStore } from "./product-store";
 import { bindWidget } from "./contribution";
 import { MenuNarrowing } from "./theia/core/menu-narrowing";
+import { ReadOnlyLockEditorProvider } from "./theia/monaco/read-only-lock-editor-provider";
 import { RevealService } from "./reveal-service";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import {
@@ -19,22 +21,35 @@ import {
   DetailViewContribution,
   ExplainViewContribution,
   GraphViewContribution,
+  LockViewContribution,
   ProductViewContribution,
 } from "./view-contributions";
 import { GearDetailWidget } from "./detail/gear-detail-widget";
 import { DepsGraphWidget } from "./graph/deps-graph-widget";
 import { ExplainWidget } from "./explain/explain-widget";
+import { LockWidget } from "./lock/lock-widget";
 import { ProductWidget } from "./product/product-widget";
 import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
 
 import "../../src/browser/style/index.css";
 
-export default new ContainerModule((bind) => {
+export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // Without this, `.gdl` opens as plaintext: nothing else in the app registers
   // the language with Monaco.
   bind(LanguageGrammarDefinitionContribution)
     .to(GdlLanguageContribution)
     .inSingletonScope();
+
+  // The first rebind in this application, so the discipline ADR 0011 asks for
+  // starts here: every rebind says why in place. Arduino IDE's frontend module is
+  // a thousand lines of these and is readable only because each one is justified
+  // where it sits.
+  //
+  // Why: `product.lock` must open read-only (`cpt-gearbox-fr-lock-read-only`),
+  // and `MonacoEditorProvider.createMonacoEditorOptions` is the only hook that
+  // can say so for one filename rather than for a whole URI scheme. The subclass
+  // explains the two alternatives it rejected.
+  rebind(MonacoEditorProvider).to(ReadOnlyLockEditorProvider).inSingletonScope();
 
   bind(CatalogueStore).toSelf().inSingletonScope();
   // Its own store, not a slice of the catalogue's: the two objects of work do not
@@ -78,6 +93,7 @@ export default new ContainerModule((bind) => {
   bindWidget(bind, DepsGraphWidget);
   bindWidget(bind, ProductWidget);
   bindWidget(bind, ExplainWidget);
+  bindWidget(bind, LockWidget);
 
   bindViewContribution(bind, CatalogueViewContribution);
   bind(FrontendApplicationContribution).toService(CatalogueViewContribution);
@@ -102,4 +118,8 @@ export default new ContainerModule((bind) => {
   bindViewContribution(bind, ExplainViewContribution);
   bind(CommandContribution).toService(ExplainViewContribution);
   bind(MenuContribution).toService(ExplainViewContribution);
+
+  bindViewContribution(bind, LockViewContribution);
+  bind(CommandContribution).toService(LockViewContribution);
+  bind(MenuContribution).toService(LockViewContribution);
 });

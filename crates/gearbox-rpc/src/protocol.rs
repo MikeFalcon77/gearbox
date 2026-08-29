@@ -22,6 +22,7 @@ pub mod method {
     pub const CATALOGUE_LOAD: &str = "gearbox/catalogue/load";
     pub const PRODUCT_LOAD: &str = "gearbox/product/load";
     pub const PRODUCT_RESOLVE: &str = "gearbox/product/resolve";
+    pub const PRODUCT_LOCK: &str = "gearbox/product/lock";
     pub const VALIDATE: &str = "gearbox/validate";
 
     pub const INITIALIZED: &str = "initialized";
@@ -171,6 +172,35 @@ pub struct ResolveParams {
     /// rather than from a guess made here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+}
+
+/// `gearbox/product/lock` -- the canonical lock text for one profile.
+///
+/// The same shape as [`ResolveParams`], and deliberately a separate method
+/// rather than another field on [`ResolveResult`]: serializing the lock costs
+/// work and bytes that the panels reading a resolution do not need, and the
+/// client asks for the text only when something is going to show it.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct LockParams {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+}
+
+/// The lock as it would be written.
+///
+/// `canonical` comes from `gearbox_lock::write_canonical`, the one function that
+/// decides the lock's bytes. A client must never render its own TOML: byte
+/// identity across runs is the property the lock exists for
+/// (`cpt-gearbox-nfr-determinism`), and a second serializer is a second answer.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct LockResult {
+    pub canonical: String,
+    /// Repeated here so a caller can label the text without parsing it.
+    pub lock_hash: String,
+    pub profile: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 /// The resolved product, plus everything said while producing it.

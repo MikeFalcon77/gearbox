@@ -18,15 +18,14 @@ pub mod protocol;
 use std::path::PathBuf;
 
 use gearbox_engine::{Continue, LoadEvent, SourceRoot, load_catalogue_staged};
-use gearbox_ir::ProfileId;
-use gearbox_ir::SourceId;
+use gearbox_ir::{Diagnostic, ExplanationGraph, ProfileId, ResolvedProduct, SourceId};
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
 
 use crate::protocol::{
     Capabilities, CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, FailedRoot,
-    InitializeParams, InitializeResult, LogParams, ProductLoadParams, ProductLoadResult,
-    ProgressParams, ResolveParams, ResolveResult, ResolvedRoot, ServerInfo, ValidateParams,
-    ValidateResult, error_code, method,
+    InitializeParams, InitializeResult, LockParams, LockResult, LogParams, ProductLoadParams,
+    ProductLoadResult, ProgressParams, ResolveParams, ResolveResult, ResolvedRoot, ServerInfo,
+    ValidateParams, ValidateResult, error_code, method,
 };
 
 /// Why the server could not run.
@@ -202,6 +201,13 @@ fn dispatch(connection: &Connection, state: &mut State, request: Request) -> Opt
                 Err(e) => invalid_params(id, &e),
             },
         }),
+        method::PRODUCT_LOCK => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<LockParams>(request) {
+                Ok((id, params)) => lock(state, id, &params),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
         method::VALIDATE => Some(match require_ready(state, &id) {
             Some(refusal) => refusal,
             None => match cast::<ValidateParams>(request) {
@@ -304,28 +310,48 @@ fn product_load(id: RequestId, params: &ProductLoadParams) -> Response {
 }
 
 /// Resolve a product for one profile.
-fn resolve(state: &mut State, id: RequestId, params: &ResolveParams) -> Response {
-    let path = PathBuf::from(&params.path);
+/// One resolution, and everything two callers need from it.
+struct Resolved {
+    product: ResolvedProduct,
+    explanation: ExplanationGraph,
+    /// The description's diagnostics plus the resolution's.
+    diagnostics: Vec<Diagnostic>,
+    profile: ProfileId,
+}
+
+/// Evaluate and resolve, or hand back the refusal to send.
+///
+/// Shared by `resolve` and `lock` so the two cannot answer about different
+/// resolutions of the same request -- which is the whole reason the lock text is
+/// not computed from a `ResolveResult` the client already has: the client would
+/// then be re-serializing, and only the engine may decide the lock's bytes.
+fn resolve_once(
+    state: &mut State,
+    id: &RequestId,
+    path_str: &str,
+    profile: Option<&str>,
+) -> Result<Resolved, Response> {
+    let path = PathBuf::from(path_str);
     let scan = gearbox_engine::product::load_product(&path, None);
     let mut diagnostics = scan.diagnostics.as_slice().to_vec();
     let Some(intent) = scan.intent else {
-        return error_with_diagnostics(
-            id,
+        return Err(error_with_diagnostics(
+            id.clone(),
             error_code::PRODUCT_LOAD_FAILED,
-            &format!("`{}` could not be evaluated", params.path),
+            &format!("`{path_str}` could not be evaluated"),
             &diagnostics,
-        );
+        ));
     };
 
-    let profile = match params.profile.as_deref() {
+    let profile = match profile {
         Some(named) => match ProfileId::new(named) {
             Ok(profile) => profile,
             Err(e) => {
-                return error(
-                    id,
+                return Err(error(
+                    id.clone(),
                     error_code::RESOLVE_FAILED,
                     &format!("`{named}` is not a valid profile id: {e}"),
-                );
+                ));
             }
         },
         None => intent.default_profile.clone(),
@@ -347,14 +373,54 @@ fn resolve(state: &mut State, id: RequestId, params: &ResolveParams) -> Response
     // The product's own diagnostics are already inside it; the ones added here
     // are the description's, which resolution never sees.
     diagnostics.extend(resolution.diagnostics.as_slice().iter().cloned());
-    ok(
-        id,
-        &ResolveResult {
-            product: Some(product),
-            explanation: Some(explanation),
-            diagnostics,
-        },
-    )
+    Ok(Resolved {
+        product,
+        explanation,
+        diagnostics,
+        profile,
+    })
+}
+
+fn resolve(state: &mut State, id: RequestId, params: &ResolveParams) -> Response {
+    match resolve_once(state, &id, &params.path, params.profile.as_deref()) {
+        Err(refusal) => refusal,
+        Ok(resolved) => ok(
+            id,
+            &ResolveResult {
+                product: Some(resolved.product),
+                explanation: Some(resolved.explanation),
+                diagnostics: resolved.diagnostics,
+            },
+        ),
+    }
+}
+
+/// The canonical lock text for one profile.
+fn lock(state: &mut State, id: RequestId, params: &LockParams) -> Response {
+    let resolved = match resolve_once(state, &id, &params.path, params.profile.as_deref()) {
+        Err(refusal) => return refusal,
+        Ok(resolved) => resolved,
+    };
+    match gearbox_lock::write_canonical(&resolved.product) {
+        Ok(canonical) => ok(
+            id,
+            &LockResult {
+                canonical,
+                lock_hash: resolved.product.product.lock_hash.clone(),
+                profile: resolved.profile.to_string(),
+                diagnostics: resolved.diagnostics,
+            },
+        ),
+        // A product that resolved but cannot be written is a defect in the lock
+        // writer, not in the description, so it carries the resolution's
+        // diagnostics rather than pretending the description was at fault.
+        Err(e) => error_with_diagnostics(
+            id,
+            error_code::RESOLVE_FAILED,
+            &format!("the resolved product could not be written as a lock: {e}"),
+            &resolved.diagnostics,
+        ),
+    }
 }
 
 /// Everything checkable without resolving.

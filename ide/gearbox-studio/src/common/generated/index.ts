@@ -48,6 +48,8 @@ export * from "./KubernetesSettings";
 export * from "./LifecycleDecl";
 export * from "./LoadStage";
 export * from "./Location";
+export * from "./LockParams";
+export * from "./LockResult";
 export * from "./LogParams";
 export * from "./NodeId";
 export * from "./NodeKind";

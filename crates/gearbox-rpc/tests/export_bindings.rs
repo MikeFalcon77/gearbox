@@ -28,7 +28,7 @@ use gearbox_ir::{Catalogue, ExplanationGraph, PendingGear, ProductIntent, Resolv
 use gearbox_rpc::protocol::{
     CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, InitializeParams,
     InitializeResult, LogParams, ProductLoadParams, ProductLoadResult, ProgressParams,
-    ResolveParams, ResolveResult, ValidateParams, ValidateResult,
+    LockParams, LockResult, ResolveParams, ResolveResult, ValidateParams, ValidateResult,
 };
 use ts_rs::{Config, TS};
 
@@ -63,6 +63,8 @@ fn export_roots(cfg: &Config) {
     ProductLoadResult::export_all(cfg).expect("export ProductLoadResult");
     ResolveParams::export_all(cfg).expect("export ResolveParams");
     ResolveResult::export_all(cfg).expect("export ResolveResult");
+    LockParams::export_all(cfg).expect("export LockParams");
+    LockResult::export_all(cfg).expect("export LockResult");
     ValidateParams::export_all(cfg).expect("export ValidateParams");
     ValidateResult::export_all(cfg).expect("export ValidateResult");
 }

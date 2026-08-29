@@ -10,7 +10,16 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { expect, openExplain, openGraph, openProduct, runCommand, settled, test } from "../fixtures/studio";
+import {
+  expect,
+  openExplain,
+  openGraph,
+  openProduct,
+  revealLock,
+  runCommand,
+  settled,
+  test,
+} from "../fixtures/studio";
 
 const VOCABULARY = join(
   __dirname,
@@ -90,8 +99,15 @@ test.describe("where the views live", () => {
     expect(inBottom).toBe(true);
   });
 
-  test.fixme("a Lock view exists [plan §9: Lock]", async ({ studio }) => {
-    await expect(studio.page.locator(".gbx-lock")).toBeVisible();
+  test("the Lock view is in the main area [plan §9: Lock]", async ({ studio }) => {
+    await openProduct(studio.page, "dev");
+    await revealLock(studio.page);
+    const inMain = await studio.page.evaluate(
+      () => document.querySelector("#theia-main-content-panel .gbx-lock") !== null,
+    );
+    // Beside Product, not in the bottom strip: the lock is the same object at
+    // full fidelity, and reading it means scrolling a few hundred lines.
+    expect(inMain).toBe(true);
   });
 
   test.fixme("a Generate view exists [plan §9: Generate]", async ({ studio }) => {

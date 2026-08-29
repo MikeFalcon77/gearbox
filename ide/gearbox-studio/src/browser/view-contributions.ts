@@ -9,6 +9,7 @@ import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import { GearDetailWidget } from "./detail/gear-detail-widget";
 import { DepsGraphWidget } from "./graph/deps-graph-widget";
 import { ExplainWidget } from "./explain/explain-widget";
+import { LockWidget } from "./lock/lock-widget";
 import { GearboxMenus } from "./menus";
 import { ProductStore } from "./product-store";
 import { ProductWidget } from "./product/product-widget";
@@ -209,6 +210,30 @@ export class ExplainViewContribution extends AbstractViewContribution<ExplainWid
       commandId: this.toggleCommand?.id ?? "",
       label: "Explain",
       order: "3",
+    });
+  }
+}
+
+@injectable()
+export class LockViewContribution extends AbstractViewContribution<LockWidget> {
+  constructor() {
+    super({
+      widgetId: LockWidget.ID,
+      widgetName: LockWidget.LABEL,
+      // The main area, beside Product: the lock is the same object seen at full
+      // fidelity, and reading it means scrolling a few hundred lines. In the
+      // bottom strip it would be a keyhole.
+      defaultWidgetOptions: { area: "main" },
+      toggleCommandId: "gearbox.lock.toggle",
+    });
+  }
+
+  override registerMenus(menus: MenuModelRegistry): void {
+    super.registerMenus(menus);
+    menus.registerMenuAction(GearboxMenus.GEARBOX_RESOLVE, {
+      commandId: this.toggleCommand?.id ?? "",
+      label: "Lock",
+      order: "4",
     });
   }
 }

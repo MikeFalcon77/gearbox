@@ -275,6 +275,13 @@ export async function openExplain(page: Page): Promise<void> {
   await revealView(page, "Gearbox Explain", ".gbx-explain");
 }
 
+export async function revealLock(page: Page): Promise<void> {
+  await revealView(page, "Gearbox Lock", ".gbx-lock");
+  // The text is fetched lazily on first render, so the view being visible is not
+  // the same as the lock being there.
+  await page.locator("[data-lock-canonical]").waitFor({ state: "visible", timeout: 60_000 });
+}
+
 /**
  * Open the Product view and resolve one profile.
  *

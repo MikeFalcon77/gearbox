@@ -852,6 +852,7 @@ version = "0.1.0"
 dependencies = [
  "gearbox-engine",
  "gearbox-ir",
+ "gearbox-lock",
  "gearbox-rpc",
  "lsp-server",
  "serde",

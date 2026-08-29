@@ -19,6 +19,7 @@ import { Emitter, Event } from "@theia/core/lib/common/event";
 import { inject, injectable } from "@theia/core/shared/inversify";
 
 import type { Diagnostic } from "../common/generated/Diagnostic";
+import type { LockResult } from "../common/generated/LockResult";
 import type { ProductIntent } from "../common/generated/ProductIntent";
 import type { ResolveResult } from "../common/generated/ResolveResult";
 import { GearboxService, ProductRef } from "../common/protocol";
@@ -40,6 +41,13 @@ export interface ProductState {
   /** Which profile is being shown. From the intent's default until switched. */
   readonly profile: string | undefined;
   readonly resolution: ResolveResult | undefined;
+  /**
+   * The canonical lock text, fetched only when something is going to show it.
+   *
+   * Cleared at the head of every resolution rather than refreshed: a lock from
+   * the previous profile is worse than none, because it looks like an answer.
+   */
+  readonly lock: LockResult | undefined;
   readonly diagnostics: readonly Diagnostic[];
   readonly error: string | undefined;
 }
@@ -51,6 +59,7 @@ const EMPTY: ProductState = {
   intent: undefined,
   profile: undefined,
   resolution: undefined,
+  lock: undefined,
   diagnostics: [],
   error: undefined,
 };
@@ -71,6 +80,13 @@ export class ProductStore {
   protected state: ProductState = EMPTY;
   protected epoch = 0;
   protected focused: Focus | undefined;
+  /**
+   * Guards the lazy lock fetch against the render that triggers it.
+   *
+   * The Lock widget asks on render, and the answer causes another render, so
+   * without this the first paint would start a request per frame.
+   */
+  protected lockInFlight = false;
 
   get current(): ProductState {
     return this.state;
@@ -159,7 +175,7 @@ export class ProductStore {
     const ref = this.state.open;
     const profile = this.state.profile;
     if (ref === undefined || profile === undefined) return;
-    this.update({ status: "resolving" });
+    this.update({ status: "resolving", lock: undefined });
     try {
       const resolution = await this.service.resolve(ref.path, profile);
       if (epoch !== this.epoch) return;
@@ -171,6 +187,38 @@ export class ProductStore {
       });
     } catch (error) {
       this.fail(epoch, error);
+    }
+  }
+
+  /**
+   * Fetch the canonical lock text for what is on screen, once.
+   *
+   * Lazy because the lock costs a TOML serialization the other panels never
+   * need, and idempotent because the widget that wants it asks on every render.
+   */
+  async ensureLock(): Promise<void> {
+    const ref = this.state.open;
+    const profile = this.state.profile;
+    if (
+      this.lockInFlight ||
+      this.state.lock !== undefined ||
+      this.state.status !== "ready" ||
+      ref === undefined ||
+      profile === undefined
+    ) {
+      return;
+    }
+    this.lockInFlight = true;
+    const epoch = this.epoch;
+    try {
+      const lock = await this.service.lock(ref.path, profile);
+      if (epoch === this.epoch) {
+        this.update({ lock });
+      }
+    } catch (error) {
+      this.fail(epoch, error);
+    } finally {
+      this.lockInFlight = false;
     }
   }
 
