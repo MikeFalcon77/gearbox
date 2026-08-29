@@ -5,7 +5,9 @@ import { WebSocketConnectionProvider } from "@theia/core/lib/browser/messaging";
 import { CommandContribution } from "@theia/core/lib/common";
 import { MenuContribution } from "@theia/core/lib/common/menu";
 import { ContainerModule } from "@theia/core/shared/inversify";
+import { DebugFrontendApplicationContribution } from "@theia/debug/lib/browser/debug-frontend-application-contribution";
 import { MonacoEditorProvider } from "@theia/monaco/lib/browser/monaco-editor-provider";
+import { TestViewContribution } from "@theia/test/lib/browser/view/test-view-contribution";
 import { LanguageGrammarDefinitionContribution } from "@theia/monaco/lib/browser/textmate/textmate-contribution";
 
 import { GEARBOX_SERVICE_PATH, GearboxClient, GearboxService } from "../common/protocol";
@@ -13,8 +15,10 @@ import { CatalogueStore } from "./catalogue-store";
 import { ProductStore } from "./product-store";
 import { ResolutionMarkers } from "./resolution-markers";
 import { bindWidget } from "./contribution";
+import { HiddenDebugView } from "./theia/debug/hidden-debug-view";
 import { MenuNarrowing } from "./theia/core/menu-narrowing";
 import { ReadOnlyLockEditorProvider } from "./theia/monaco/read-only-lock-editor-provider";
+import { HiddenTestView } from "./theia/test/hidden-test-view";
 import { RevealService } from "./reveal-service";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import {
@@ -51,6 +55,15 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // can say so for one filename rather than for a whole URI scheme. The subclass
   // explains the two alternatives it rejected.
   rebind(MonacoEditorProvider).to(ReadOnlyLockEditorProvider).inSingletonScope();
+
+  // Why: `@theia/debug` and `@theia/test` arrive with `@theia/plugin-ext`, which
+  // needs them for the VS Code debug and testing APIs, and both open a panel in
+  // the left bar on first run. A product resolves; it does not execute, and there
+  // is no test explorer for gears. `initializeLayout(): NOOP` keeps the package,
+  // the command and the keybinding and changes only the default layout, so a
+  // saved layout is still respected and the view is one command away.
+  rebind(DebugFrontendApplicationContribution).to(HiddenDebugView).inSingletonScope();
+  rebind(TestViewContribution).to(HiddenTestView).inSingletonScope();
 
   bind(CatalogueStore).toSelf().inSingletonScope();
   // Its own store, not a slice of the catalogue's: the two objects of work do not

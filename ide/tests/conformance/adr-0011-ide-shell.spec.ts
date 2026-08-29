@@ -24,7 +24,11 @@ test.describe("the narrowed shell", () => {
         (e) => (e.textContent ?? "").trim(),
       ),
     );
-    expect(menus).toEqual(["File", "Edit", "Gearbox", "View", "Help"]);
+    // Terminal is here on purpose and Run is not. Both arrive with the plugin
+    // host rather than by choice; a person wants a shell to build a generated
+    // crate in, and nothing here is debuggable -- a product resolves, it does not
+    // execute.
+    expect(menus).toEqual(["File", "Edit", "Gearbox", "View", "Terminal", "Help"]);
   });
 
   test("Selection is absent [ADR-0011 §Confirmation: a removed entry must be asserted absent]", async ({
@@ -47,6 +51,39 @@ test.describe("the narrowed shell", () => {
       ),
     );
     expect(menus).not.toContain("Go");
+  });
+
+  test("Run is absent [ADR-0011 §Confirmation: a removed entry must be asserted absent]", async ({
+    studio,
+  }) => {
+    // `@theia/debug` registers `[...MAIN_MENU_BAR, '6_debug']`, which the bar
+    // labels "Run". It is not a dependency this application picked: it arrives
+    // with `@theia/plugin-ext`, which needs it for the VS Code debug API. So the
+    // package stays and the menu goes -- the trade ADR 0011 describes for a
+    // package kept only because something else needs it.
+    const menus = await studio.page.evaluate(() =>
+      Array.from(document.querySelectorAll(".lm-MenuBar-itemLabel")).map((e) =>
+        (e.textContent ?? "").trim(),
+      ),
+    );
+    expect(menus).not.toContain("Run");
+  });
+
+  test("the Debug and Testing views do not open themselves [ADR-0011 §initializeLayout NOOP]", async ({
+    studio,
+  }) => {
+    // Hidden, not removed. `initializeLayout(): NOOP` keeps the package, the
+    // command and the keybinding, so the view is one command away and a saved
+    // layout is respected. Asserting on the *tabs* rather than on the DOM,
+    // because a hidden-by-closing panel would still have its widget attached --
+    // which is the failure this application already made once.
+    const tabs = await studio.page.evaluate(() =>
+      Array.from(document.querySelectorAll(".lm-TabBar li")).map((e) =>
+        (e.textContent ?? "").trim(),
+      ),
+    );
+    expect(tabs).not.toContain("Debug");
+    expect(tabs).not.toContain("Testing");
   });
 
   test("a catalogue row has a client rectangle [ADR-0011 §Confirmation]", async ({ studio }) => {
@@ -75,31 +112,58 @@ test.describe("the narrowed shell", () => {
     expect(tabs).toContain("Gearbox Catalogue");
   });
 
-  test.fixme(
-    "Terminal stays visible [ADR-0011 §Consequences: some Theia surface stays on purpose]",
-    async ({ studio }) => {
-      // `@theia/terminal` is not a dependency of browser-app, so the ADR's
-      // Consequences overstate what was built. Either the package is added or
-      // that bullet is corrected -- this test is what decides which.
-      const tabs = await studio.page.evaluate(() =>
-        Array.from(document.querySelectorAll(".lm-TabBar li")).map((e) =>
-          (e.textContent ?? "").trim(),
-        ),
-      );
-      expect(tabs).toContain("Terminal");
-    },
-  );
+  test("a terminal opens [ADR-0011 §Consequences: some Theia surface stays on purpose]", async ({
+    studio,
+  }) => {
+    // "The workflow ends in generated crates a person will want to build, inspect
+    // and diff." A live shell in the bottom panel is that, and `@theia/terminal`
+    // needs `node-pty`'s native binary on the backend -- so this failing is as
+    // likely to mean a broken install as a broken shell.
+    const tabs = await studio.page.evaluate(() =>
+      Array.from(
+        document.querySelectorAll("#theia-bottom-content-panel .lm-TabBar-tabLabel"),
+      ).map((e) => (e.textContent ?? "").trim()),
+    );
+    // Named for the shell it started, not "Terminal": Theia labels the tab with
+    // `$SHELL`, so the assertion is on there being a third bottom tab beside
+    // Problems and Gearbox Gear rather than on a fixed label.
+    const shell = tabs.find((tab) => tab !== "Problems" && tab !== "Gearbox Gear");
+    expect(shell, `only found ${tabs.join(", ")}`).toBeTruthy();
+
+    // Activated first: the xterm canvas is created when the tab becomes current,
+    // so checking for it on an inactive tab tests the wrong thing -- the tab
+    // existing proves the contribution ran, not that a pty is attached.
+    await studio.page.click(
+      `#theia-bottom-content-panel .lm-TabBar-tabLabel:text-is("${shell ?? ""}")`,
+    );
+    await expect(studio.page.locator(".xterm").first()).toBeVisible();
+  });
+
+  test("the Source Control view is present [ADR-0011 §Consequences: some Theia surface stays on purpose]", async ({
+    studio,
+  }) => {
+    const tabs = await studio.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#theia-left-content-panel .lm-TabBar li")).map((e) =>
+        (e.textContent ?? "").trim(),
+      ),
+    );
+    expect(tabs).toContain("Source Control");
+  });
 
   test.fixme(
-    "Git stays visible [ADR-0011 §Consequences: some Theia surface stays on purpose]",
+    "Source Control has a git provider [ADR-0011 §Consequences: Git remains]",
     async ({ studio }) => {
-      // Same as Terminal: neither `@theia/scm` nor `@theia/git` is installed.
-      const tabs = await studio.page.evaluate(() =>
-        Array.from(document.querySelectorAll(".lm-TabBar li")).map((e) =>
-          (e.textContent ?? "").trim(),
-        ),
+      // The view is there and empty. Theia 1.75 does not ship `@theia/git` --
+      // its last release was `1.61.0-next.8` -- so git comes from the VS Code
+      // `vscode.git` extension running in the plugin host, which is a
+      // third-party artefact fetched from Open VSX rather than a package.json
+      // dependency. `ide/plugins/README.md` says how to add it. Deliberately not
+      // done implicitly: fetching someone else's VSIX is a different kind of
+      // decision from adding a `@theia/*` package.
+      await studio.page.click(
+        "#theia-left-content-panel .lm-TabBar li:has-text('Source Control')",
       );
-      expect(tabs.some((t) => /Source Control|Git/.test(t))).toBe(true);
+      await expect(studio.page.locator(".theia-scm-provider")).toBeVisible();
     },
   );
 

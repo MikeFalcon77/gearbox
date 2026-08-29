@@ -136,8 +136,9 @@ async function open(browser: Browser): Promise<{ studio: Studio; close: () => Pr
       page.evaluate(
         () => (window as unknown as { __gbxSamples?: Sample[] }).__gbxSamples ?? [],
       ) as Promise<Sample[]>,
-    detailOf: (name: string) =>
-      page.evaluate(async (wanted) => {
+    detailOf: async (name: string) => {
+      await revealDetail(page);
+      return page.evaluate(async (wanted) => {
         const row = Array.from(
           document.querySelectorAll(".gearbox-catalogue .gbx-row"),
         ).find((r) =>
@@ -152,8 +153,11 @@ async function open(browser: Browser): Promise<{ studio: Studio; close: () => Pr
           if (text.includes(wanted)) return text.replace(/\s+/g, " ").trim();
           await new Promise((r) => setTimeout(r, 50));
         }
-        return (document.querySelector(".gbx-detail")?.textContent ?? "").replace(/\s+/g, " ").trim();
-      }, name),
+        return (document.querySelector(".gbx-detail")?.textContent ?? "")
+          .replace(/\s+/g, " ")
+          .trim();
+      }, name);
+    },
     factsOf: async (name: string) => {
       const found = await studio.detailOf(name);
       if (found === null) return null;
@@ -319,6 +323,26 @@ export async function problems(
     previous = nodes;
   }
   throw new Error("the Problems tree never settled");
+}
+
+/**
+ * Bring the Gear detail panel to the front.
+ *
+ * It shares the bottom panel with Problems and with any terminal, so opening
+ * either hides it -- ordinary IDE behaviour, and the reason a test that clicks a
+ * link *inside* the detail panel has to say which tab it wants first. Playwright
+ * waits for visibility before clicking, so without this the click hangs until the
+ * test times out, which looks nothing like "the wrong tab is showing".
+ */
+export async function revealDetail(page: Page): Promise<void> {
+  const tab = page.locator("#theia-bottom-content-panel .lm-TabBar-tab", {
+    hasText: "Gearbox Gear",
+  });
+  if ((await tab.count()) === 0) return;
+  if (!(await tab.evaluate((e) => e.classList.contains("lm-mod-current")))) {
+    await tab.click();
+  }
+  await page.locator(".gbx-detail").waitFor({ state: "visible" });
 }
 
 export async function revealLock(page: Page): Promise<void> {

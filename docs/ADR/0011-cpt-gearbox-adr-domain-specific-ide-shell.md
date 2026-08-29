@@ -147,12 +147,26 @@ RPC surface.
 * **Two perspectives are more surface than one.** Layout state, the switch, and the question of which
   views belong to which perspective all become things to get right. Accepted because neither object
   of work is subordinate.
-* **Some Theia surface stays visible on purpose.** Explorer, Terminal and Git are to remain, because
-  the workflow ends in generated crates a person will want to build, inspect and diff. This is a
-  deliberate divergence from Arduino, which hides more. **Only Explorer is in place today**:
-  `@theia/terminal`, `@theia/scm` and `@theia/git` are not dependencies of `browser-app` yet, so the
-  other two are decided and unbuilt. Recorded here rather than left implied, because the earlier
-  wording claimed all three were present.
+* **Some Theia surface stays visible on purpose.** Explorer, Search, Terminal and Source Control
+  remain, because the workflow ends in generated crates a person will want to build, inspect and
+  diff. This is a deliberate divergence from Arduino, which hides more.
+
+  Built, with one qualification that changes the shape of the decision: **`@theia/git` does not
+  exist in 1.75.** Its last release was `1.61.0-next.8`. The Source Control *view* comes from
+  `@theia/scm`, and git itself is now the VS Code `vscode.git` extension running in the plugin host
+  -- so "keep Git" is not a dependency line, it is a third-party VSIX fetched from Open VSX. The
+  view is present and providerless until that is done, deliberately: fetching someone else's
+  extension is a different kind of decision from adding a `@theia/*` package, and this ADR should
+  not be read as having pre-approved it.
+
+* **The plugin host brings surface of its own, and it has to be narrowed too.** Adding
+  `@theia/plugin-ext` pulled in `@theia/debug` and `@theia/test`, which opened a **Debug** and a
+  **Testing** panel and added a **Run** menu. None of them are choices this application made, and a
+  product resolves rather than executes. So the packages stay -- the plugin host needs them for the
+  VS Code debug and testing APIs -- and their presentation goes, by `initializeLayout(): NOOP` and
+  by `unregisterMenuAction`. This is the case the "keeps a package only because something else needs
+  it, then neuters its presentation" sentence above was written for; it simply arrived later than
+  expected.
 
 ### Confirmation
 

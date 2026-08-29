@@ -63,6 +63,26 @@ was already taught to send. The suite's `globalSetup` builds it, and also fails 
 bundle is older than `gearbox-studio/src` -- testing a stale bundle reports on code that is not
 there, and reports it as success.
 
+## What is in the shell, and what was taken out
+
+Explorer, Search, Source Control, a terminal, Problems and the editor stack, plus the six Gearbox
+views. Taken out: the **Selection** menu (`@theia/monaco`), **Go** (`@theia/editor`), **Run**
+(`@theia/debug`), and the **Debug** and **Testing** views.
+
+The three removed menus and two hidden views all come from packages this application did not choose:
+`@theia/plugin-ext` needs `@theia/debug` and `@theia/test` to implement the VS Code debug and testing
+APIs, and Monaco and the editor bring their own menus. So the packages stay and only their
+presentation goes -- `initializeLayout(): NOOP` for a view, `unregisterMenuAction` for a menu -- which
+keeps the command and the keybinding, respects a saved layout, and leaves the view one command away.
+ADR 0011 is the argument; `tests/conformance/adr-0011-ide-shell.spec.ts` is the check that a Theia
+upgrade putting any of them back gets caught by a test rather than by someone noticing.
+
+**Git is not `@theia/git`.** That package stopped being released after `1.61.0-next.8`. In 1.75 the
+Source Control *view* is `@theia/scm` and git itself is the VS Code `vscode.git` extension running in
+the plugin host, which is why `--plugins=local-dir:../plugins` is in the start script. The view is
+present and has no provider until that extension is fetched; `plugins/README.md` says how, and why it
+is not done implicitly.
+
 ## The `.gdl` language
 
 Syntax highlighting is a native Theia contribution
@@ -98,13 +118,24 @@ certificate`, npm aborts, and the tree is left incomplete:
 export NODE_EXTRA_CA_CERTS=/path/to/corp-ca.pem
 ```
 
-**One of those native modules is load-bearing, despite the browser target.** `@theia/core`'s
-backend requires `drivelist/build/Release/drivelist.node` unconditionally, so skipping install
-scripts -- with `ignore-scripts`, or by leaving npm's `allowScripts` gate unapproved -- produces a
-backend that dies at startup with `Cannot find module`. `drivelist` publishes no prebuild for
-darwin-arm64, so on Apple Silicon it is always compiled. `keytar` and `node-pty` really are unused
-and `esbuild`'s binary really does arrive through its platform package; the mistake to avoid is
-generalising from those to the whole list.
+**Two of those native modules are load-bearing.** `@theia/core`'s backend requires
+`drivelist/build/Release/drivelist.node` unconditionally, browser target or not, and
+`@theia/terminal` needs `node-pty/build/Release/pty.node` for a shell. Skipping install scripts --
+with `ignore-scripts`, or by leaving npm's `allowScripts` gate unapproved -- produces a backend that
+dies at startup with `Cannot find module`. Neither publishes a darwin-arm64 prebuild, so on Apple
+Silicon both are compiled.
+
+`node-pty` has a trap of its own: its install script is
+`node scripts/prebuild.js || node-gyp rebuild`, and `prebuild.js` **exits 0 without producing a
+binary**, so the fallback never runs. `npm rebuild node-pty` therefore reports success and leaves
+nothing behind. Build it directly:
+
+```bash
+(cd node_modules/node-pty && ../.bin/node-gyp rebuild)
+```
+
+`keytar` really is unused and `esbuild`'s binary really does arrive through its platform package;
+the mistake to avoid is generalising from those to the whole list.
 
 npm 11 warns that these scripts are "not yet covered by allowScripts" and then runs them anyway --
 the warning is advice to codify the approvals, not a statement that nothing executed.

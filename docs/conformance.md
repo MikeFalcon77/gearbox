@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **80** — 61 built, 17 not built, 0 broken, 2 not observed.
+Claims: **83** — 65 built, 16 not built, 0 broken, 2 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -42,10 +42,13 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the menu bar is the domain's, not a general editor's | `ADR-0011 §Confirmation` | ✅ built |  |
 | Selection is absent | `ADR-0011 §Confirmation: a removed entry must be asserted absent` | ✅ built |  |
 | Go is absent | `ADR-0011 §Confirmation: a removed entry must be asserted absent` | ✅ built |  |
+| Run is absent | `ADR-0011 §Confirmation: a removed entry must be asserted absent` | ✅ built |  |
+| the Debug and Testing views do not open themselves | `ADR-0011 §initializeLayout NOOP` | ✅ built |  |
 | a catalogue row has a client rectangle | `ADR-0011 §Confirmation` | ✅ built |  |
 | Explorer stays visible | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
-| Terminal stays visible | `ADR-0011 §Consequences: some Theia surface stays on purpose` | 🚧 not built |  |
-| Git stays visible | `ADR-0011 §Consequences: some Theia surface stays on purpose` | 🚧 not built |  |
+| a terminal opens | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
+| the Source Control view is present | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
+| Source Control has a git provider | `ADR-0011 §Consequences: Git remains` | 🚧 not built |  |
 | the Gearbox menu offers the domain's commands | `ADR-0011 §Scope: what the menu bar contains` | ✅ built |  |
 | the toolbar hosts the perspective switch | `ADR-0011 §The two perspectives` | 🚧 not built |  |
 | a product perspective exists beside the catalogue | `ADR-0011 §The two perspectives` | 🚧 not built |  |
