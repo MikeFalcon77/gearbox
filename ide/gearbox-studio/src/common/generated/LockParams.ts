@@ -16,6 +16,6 @@ export type LockParams = { path: string, profile?: string | null,
  * The Studio sends none: there is one generated tree now that a lock no
  * longer depends on which client wrote it. It exists so a test can put a
  * deliberately stale lock somewhere of its own instead of doctoring the tree
- * `§12` step 2 builds.
+ * the plan's section 12 step 2 builds.
  */
 out?: string | null, };
