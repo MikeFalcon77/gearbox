@@ -17,11 +17,13 @@ import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import {
   CatalogueViewContribution,
   DetailViewContribution,
+  ExplainViewContribution,
   GraphViewContribution,
   ProductViewContribution,
 } from "./view-contributions";
 import { GearDetailWidget } from "./detail/gear-detail-widget";
 import { DepsGraphWidget } from "./graph/deps-graph-widget";
+import { ExplainWidget } from "./explain/explain-widget";
 import { ProductWidget } from "./product/product-widget";
 import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
 
@@ -75,6 +77,7 @@ export default new ContainerModule((bind) => {
   bindWidget(bind, GearDetailWidget);
   bindWidget(bind, DepsGraphWidget);
   bindWidget(bind, ProductWidget);
+  bindWidget(bind, ExplainWidget);
 
   bindViewContribution(bind, CatalogueViewContribution);
   bind(FrontendApplicationContribution).toService(CatalogueViewContribution);
@@ -95,4 +98,8 @@ export default new ContainerModule((bind) => {
   bindViewContribution(bind, ProductViewContribution);
   bind(CommandContribution).toService(ProductViewContribution);
   bind(MenuContribution).toService(ProductViewContribution);
+
+  bindViewContribution(bind, ExplainViewContribution);
+  bind(CommandContribution).toService(ExplainViewContribution);
+  bind(MenuContribution).toService(ExplainViewContribution);
 });

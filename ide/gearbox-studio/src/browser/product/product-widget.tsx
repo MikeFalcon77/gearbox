@@ -162,7 +162,7 @@ export class ProductWidget extends ReactWidget {
             {selected.length === 0
               ? "—"
               : selected.map((id) => (
-                  <code key={id} data-asked-for={id}>
+                  <code key={id} data-asked-for={id} onClick={() => this.focusGear(id)}>
                     {id}
                   </code>
                 ))}
@@ -175,7 +175,7 @@ export class ProductWidget extends ReactWidget {
               ? "—"
               : pulled.map(({ id, why }) => (
                   <div key={id} data-pulled-in={id}>
-                    <code>{id}</code> {why}
+                    <code onClick={() => this.focusGear(id)}>{id}</code> {why}
                   </div>
                 ))}
           </span>
@@ -228,6 +228,11 @@ export class ProductWidget extends ReactWidget {
         )}
       </>
     );
+  }
+
+  /** Ask Explain about a gear. Every clickable gear id goes through here. */
+  protected focusGear(id: string): void {
+    this.store.setFocus({ kind: "gear", id });
   }
 
   protected renderProcess(process: ResolvedProcess): React.ReactNode {

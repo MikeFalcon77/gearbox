@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { expect, openGraph, openProduct, runCommand, settled, test } from "../fixtures/studio";
+import { expect, openExplain, openGraph, openProduct, runCommand, settled, test } from "../fixtures/studio";
 
 const VOCABULARY = join(
   __dirname,
@@ -79,8 +79,15 @@ test.describe("where the views live", () => {
     await expect(studio.page.locator(".gbx-diagnostics")).toBeVisible();
   });
 
-  test.fixme("an Explain view exists [plan §9: Explain]", async ({ studio }) => {
-    await expect(studio.page.locator(".gbx-explain")).toBeVisible();
+  test("the Explain view is in the bottom area [plan §9: Explain]", async ({ studio }) => {
+    await openExplain(studio.page);
+    const inBottom = await studio.page.evaluate(
+      () => document.querySelector("#theia-bottom-content-panel .gbx-explain") !== null,
+    );
+    // Beside Gear detail, and for the same reason: it answers about a selection
+    // made elsewhere, so it has to be readable *while* the Product view is on
+    // screen rather than instead of it.
+    expect(inBottom).toBe(true);
   });
 
   test.fixme("a Lock view exists [plan §9: Lock]", async ({ studio }) => {

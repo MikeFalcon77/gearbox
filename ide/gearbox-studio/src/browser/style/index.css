@@ -168,3 +168,31 @@
   background: transparent;
   color: var(--theia-editorWarning-foreground);
 }
+
+/* --- Explain ------------------------------------------------------------- */
+
+.gbx-explain { padding: 6px 10px; overflow: auto; height: 100%; }
+
+/* An <ol> because the steps are ordered -- nearest reason first -- and the
+   numbering is information, not decoration. Markers are outside so the indent
+   that shows depth is not fighting them. */
+.gbx-narrative { margin: 4px 0 0; padding-left: 22px; }
+.gbx-step { padding: 3px 0; }
+.gbx-step-because { line-height: 1.35; }
+.gbx-step-meta { display: flex; gap: 8px; align-items: baseline; opacity: 0.8; font-size: 0.9em; }
+.gbx-step-origin { font-family: var(--theia-code-font-family); font-size: 0.9em; }
+
+/* A downgrade is the one step that must not read as ordinary provenance: it is
+   "you asked for X and got Y", and skimming past it is how a silent downgrade
+   stays silent. */
+.gbx-step-downgrade .gbx-step-because {
+  color: var(--theia-editorWarning-foreground);
+  font-weight: 600;
+}
+
+/* Clickable gear ids in the Product view. Underlined on hover only: a permanent
+   underline on every id turns the closure list into a wall of links. */
+.gbx-product code[data-asked-for], .gbx-product [data-pulled-in] > code { cursor: pointer; }
+.gbx-product code[data-asked-for]:hover, .gbx-product [data-pulled-in] > code:hover {
+  text-decoration: underline;
+}

@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **69** — 48 built, 19 not built, 0 broken, 2 not observed.
+Claims: **74** — 54 built, 18 not built, 0 broken, 2 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -63,7 +63,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the Gear detail is in the bottom area, not the side panel | `plan §9: Gear detail, bottom` | ✅ built |  |
 | the co-location Graph opens in the main area | `plan §9: Graph, main` | ✅ built |  |
 | the Product view shows what §9 asks it to | `plan §9: Product` | ✅ built |  |
-| an Explain view exists | `plan §9: Explain` | 🚧 not built |  |
+| the Explain view is in the bottom area | `plan §9: Explain` | ✅ built |  |
 | a Lock view exists | `plan §9: Lock` | 🚧 not built |  |
 | a Generate view exists | `plan §9: Generate` | 🚧 not built |  |
 | the layout is the same after a reload | `plan §9: deterministic layout` | ✅ built |  |
@@ -82,6 +82,16 @@ Rust, and the ADRs' own Confirmation sections say which.
 | resolution diagnostics appear as problem markers | `PRD cpt-gearbox-fr-editor-diagnostics` | 🚧 not built |  |
 | markers are replaced atomically on each resolution | `PRD cpt-gearbox-fr-editor-diagnostics` | 🚧 not built |  |
 | description diagnostics arrive over a language-server interface with source ranges | `PRD cpt-gearbox-fr-editor-diagnostics` | 🚧 not built |  |
+
+## `conformance/prd-explain.spec.ts`
+
+| Claim | Source | Status | Note |
+|---|---|---|---|
+| a binding's mode is explained by where its two gears ended up | `PRD cpt-gearbox-fr-explain` | ✅ built |  |
+| a gear pulled in by co-location is explained back to a named gear | `PRD cpt-gearbox-fr-explain` | ✅ built |  |
+| a plugin's inclusion names the host and the profile | `PRD cpt-gearbox-fr-plugin-selection` | ✅ built |  |
+| a selection that this profile does not contain reads as ordinary | `PRD cpt-gearbox-fr-explain` | ✅ built |  |
+| each step links to the source location of its fact | `PRD cpt-gearbox-fr-explain: the source location of each contributing fact` | 🚧 not built |  |
 
 ## `conformance/prd-product.spec.ts`
 
@@ -117,7 +127,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | it renders the contract graph | `PRD cpt-gearbox-fr-studio: renders the contract graph` | 🚧 not built |  |
 | it renders the process graph | `PRD cpt-gearbox-fr-studio: renders the process graph` | 🚧 not built |  |
 | it renders the cluster graph | `PRD cpt-gearbox-fr-studio: renders the cluster graph` | 🚧 not built |  |
-| it answers why for a selected decision | `PRD cpt-gearbox-fr-explain` | 🚧 not built |  |
+| it answers why for a selected decision | `PRD cpt-gearbox-fr-studio: answers why` | ✅ built |  |
 | it previews and applies generation | `PRD cpt-gearbox-fr-generate-preview` | 🚧 not built |  |
 | the resolver notice is gone, and gone because the engine says so | `PRD cpt-gearbox-fr-rpc-api` | ✅ built |  |
 | it contains no resolution logic of its own | `PRD cpt-gearbox-fr-studio: no resolution logic` | ✅ built |  |

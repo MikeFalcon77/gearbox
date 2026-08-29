@@ -271,6 +271,10 @@ export async function openGraph(page: Page): Promise<void> {
   await revealView(page, "Gearbox Graph", ".gbx-svg");
 }
 
+export async function openExplain(page: Page): Promise<void> {
+  await revealView(page, "Gearbox Explain", ".gbx-explain");
+}
+
 /**
  * Open the Product view and resolve one profile.
  *

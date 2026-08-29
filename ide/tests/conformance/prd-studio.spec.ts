@@ -11,7 +11,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { expect, openGraph, openProduct, test } from "../fixtures/studio";
+import { expect, openExplain, openGraph, openProduct, test } from "../fixtures/studio";
 
 const STUDIO_SRC = join(__dirname, "../../gearbox-studio/src");
 
@@ -81,15 +81,20 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
     },
   );
 
-  test.fixme(
-    "it answers why for a selected decision [PRD cpt-gearbox-fr-explain]",
-    async ({ studio }) => {
-      // `ResolveResult` already carries an `ExplanationGraph`, recorded at the
-      // moment each choice is made, and the wire type is generated. Nothing
-      // renders it.
-      await expect(studio.page.locator(".gbx-explain")).toBeVisible();
-    },
-  );
+  test("it answers why for a selected decision [PRD cpt-gearbox-fr-studio: answers why]", async ({
+    studio,
+  }) => {
+    // §9 expected a `gearbox/product/explain` call. There is none and none is
+    // needed: `ResolveResult` carries the whole `ExplanationGraph` with the
+    // resolution, so "why" costs no second round trip and cannot answer about a
+    // different resolution than the one on screen. The substance is checked in
+    // `prd-explain.spec.ts`; this clause is only that the view exists and answers.
+    await openProduct(studio.page, "prod");
+    await openExplain(studio.page);
+    await studio.page.click("[data-binding]");
+    await expect(studio.page.locator("[data-explaining]")).toBeVisible();
+    await expect(studio.page.locator(".gbx-step").first()).toBeVisible();
+  });
 
   test.fixme(
     "it previews and applies generation [PRD cpt-gearbox-fr-generate-preview]",

@@ -8,6 +8,7 @@ import { CatalogueStore } from "./catalogue-store";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import { GearDetailWidget } from "./detail/gear-detail-widget";
 import { DepsGraphWidget } from "./graph/deps-graph-widget";
+import { ExplainWidget } from "./explain/explain-widget";
 import { GearboxMenus } from "./menus";
 import { ProductStore } from "./product-store";
 import { ProductWidget } from "./product/product-widget";
@@ -184,6 +185,30 @@ export class ProductViewContribution extends AbstractViewContribution<ProductWid
       commandId: RESOLVE_PRODUCT.id,
       label: "Resolve Product",
       order: "2",
+    });
+  }
+}
+
+@injectable()
+export class ExplainViewContribution extends AbstractViewContribution<ExplainWidget> {
+  constructor() {
+    super({
+      widgetId: ExplainWidget.ID,
+      widgetName: ExplainWidget.LABEL,
+      // The bottom area, beside Gear detail, and for the same reason: it answers
+      // about a selection made elsewhere, so it has to be readable *while* the
+      // Product view is on screen rather than instead of it.
+      defaultWidgetOptions: { area: "bottom" },
+      toggleCommandId: "gearbox.explain.toggle",
+    });
+  }
+
+  override registerMenus(menus: MenuModelRegistry): void {
+    super.registerMenus(menus);
+    menus.registerMenuAction(GearboxMenus.GEARBOX_RESOLVE, {
+      commandId: this.toggleCommand?.id ?? "",
+      label: "Explain",
+      order: "3",
     });
   }
 }

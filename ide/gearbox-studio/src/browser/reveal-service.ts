@@ -12,10 +12,12 @@
 // The links looked live and did nothing.
 
 import { OpenerService, open } from "@theia/core/lib/browser";
+import type { EditorOpenerOptions } from "@theia/editor/lib/browser";
 import { MessageService } from "@theia/core/lib/common/message-service";
 import { URI } from "@theia/core/lib/common/uri";
 import { inject, injectable } from "@theia/core/shared/inversify";
 
+import type { Location } from "../common/generated/Location";
 import { CatalogueStore } from "./catalogue-store";
 
 @injectable()
@@ -41,6 +43,24 @@ export class RevealService {
   uriFor(source: string, relative: string): string | undefined {
     const absolute = this.store.absolutePath(source, relative);
     return absolute === undefined ? undefined : URI.fromFilePath(absolute).toString();
+  }
+
+  /**
+   * Open an engine-reported [`Location`] at its range.
+   *
+   * Simpler than [`reveal`] because a `Location` already carries a `file://`
+   * URI -- the engine sends one precisely so it can be handed to an editor
+   * unchanged. The range needs no conversion either: it is zero-based LSP
+   * semantics, which is what Theia's editor selection takes.
+   */
+  async revealLocation(location: Location): Promise<void> {
+    const options: EditorOpenerOptions = { selection: location.range };
+    try {
+      await open(this.openerService, new URI(location.uri), options);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.messages.error(`Cannot open ${location.uri}: ${reason}`);
+    }
   }
 
   async reveal(source: string, relative: string): Promise<void> {
