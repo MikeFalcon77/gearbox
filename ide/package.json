@@ -2,8 +2,9 @@
   "private": true,
   "name": "gearbox-ide",
   "engines": {
-    "node": ">=20 <21"
+    "node": "^24 || >=26"
   },
+  "//engines": "Theia 1.75 asks for Node >= 24 in its own doc/Developing.md, and its ci-cd.yml build matrix tests exactly [24.x, 26.x] -- so this repeats upstream's tested set instead of inventing one. Node 25 is excluded because it is an odd, non-LTS line nobody upstream builds on. The @theia/* packages declare no engines at all, which is how the previous value -- >=20 <21, our own invention, committed in 8c79cef with no reason given -- went unchallenged until a tool refused to install on it. Recorded in .nvmrc too, so the version lives in the tree rather than in a shell.",
   "workspaces": [
     "gearbox-studio",
     "browser-app"
