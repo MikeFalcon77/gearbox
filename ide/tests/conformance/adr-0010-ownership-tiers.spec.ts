@@ -1,9 +1,14 @@
 // ADR cpt-gearbox-adr-authoring-ownership-tiers.
 //
-// Nothing in this ADR is implemented yet, so every test here is a `test.fixme`.
-// That is the finding, not a gap in the suite: the ADR decided what the tool may
-// write, and the writing surface -- scaffolding a gear, scaffolding a plugin,
-// marking the lock read-only -- does not exist in Studio.
+// The *writing* surface this ADR decided -- scaffolding a gear, scaffolding a
+// plugin, previewing a file plan -- does not exist in Studio, so every test here
+// is a `test.fixme`. That is the finding rather than a gap in the suite.
+//
+// Tier 1's own claim -- `product.lock` presented read-only -- *is* built, and is
+// tested in `adr-0011-workspace-and-scm.spec.ts` beside the workspace that makes
+// a lock file openable at all. It is asserted once, there, rather than twice
+// here: the same claim in two files drifts into two states, which is what this
+// table exists to prevent.
 //
 // Most of the ADR's Confirmation section is not browser-observable and does not
 // belong here: "a scaffold into a directory that already exists must refuse",
@@ -15,20 +20,6 @@
 import { expect, test } from "../fixtures/studio";
 
 test.describe("what the tool may write", () => {
-  test.fixme(
-    "product.lock opens read-only [ADR-0010 tier 1; PRD cpt-gearbox-fr-lock-read-only]",
-    async ({ studio }) => {
-      // "A header comment asks; a read-only editor tells." An edit to the lock is
-      // silently discarded by the next resolve, which is the failure mode worth
-      // preventing rather than detecting.
-      await studio.page.keyboard.press("F1");
-      await studio.page.keyboard.type("product.lock");
-      await studio.page.keyboard.press("Enter");
-      // Monaco marks a read-only model on the editor element itself, so this is
-      // the state a person would run into on their first keystroke.
-      await expect(studio.page.locator(".monaco-editor.readonly")).toBeVisible();
-    },
-  );
 
   test.fixme(
     "Studio offers a command to scaffold a new gear [ADR-0010 tier 0]",

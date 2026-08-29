@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **87** — 71 built, 14 not built, 0 broken, 2 not observed.
+Claims: **86** — 71 built, 13 not built, 0 broken, 2 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -30,7 +30,6 @@ Rust, and the ADRs' own Confirmation sections say which.
 
 | Claim | Source | Status | Note |
 |---|---|---|---|
-| product.lock opens read-only | `ADR-0010 tier 1; PRD cpt-gearbox-fr-lock-read-only` | 🚧 not built |  |
 | Studio offers a command to scaffold a new gear | `ADR-0010 tier 0` | 🚧 not built |  |
 | a scaffold shows its file plan before writing anything | `ADR-0010 §Consequences: a preview is not optional` | 🚧 not built |  |
 | a generated composition crate carries a header naming its generator | `ADR-0010 tier 2` | 🚧 not built |  |

@@ -47,7 +47,12 @@ export default function globalSetup(): void {
     throw new Error(
       `The frontend bundle is older than gearbox-studio/src ` +
         `(source ${new Date(source).toISOString()} > bundle ${new Date(built).toISOString()}).\n` +
-        `Run \`npm run build\`. Testing the old bundle would report on code that is not there.`,
+        `Run \`npm run build\`. Testing the old bundle would report on code that is not there.\n` +
+        `\nThis also fires after \`make ts\` or \`make ts-check\` even when nothing changed: ` +
+        `ts-rs rewrites every file under src/common/generated on each run, so their mtimes move ` +
+        `while their contents do not. The comparison is by mtime and errs towards rebuilding, ` +
+        `which is the safe direction and costs about two seconds. \`npm run verify\` builds first, ` +
+        `so it never sees this.`,
     );
   }
 }
