@@ -147,9 +147,12 @@ RPC surface.
 * **Two perspectives are more surface than one.** Layout state, the switch, and the question of which
   views belong to which perspective all become things to get right. Accepted because neither object
   of work is subordinate.
-* **Some Theia surface stays visible on purpose.** Explorer, Terminal and Git remain, because the
-  workflow ends in generated crates a person will want to build, inspect and diff. This is a
-  deliberate divergence from Arduino, which hides more.
+* **Some Theia surface stays visible on purpose.** Explorer, Terminal and Git are to remain, because
+  the workflow ends in generated crates a person will want to build, inspect and diff. This is a
+  deliberate divergence from Arduino, which hides more. **Only Explorer is in place today**:
+  `@theia/terminal`, `@theia/scm` and `@theia/git` are not dependencies of `browser-app` yet, so the
+  other two are decided and unbuilt. Recorded here rather than left implied, because the earlier
+  wording claimed all three were present.
 
 ### Confirmation
 
@@ -157,7 +160,11 @@ RPC surface.
   rectangle, a clicked link must open a tab, and `.gdl` text must be tokenized into more than one
   colour class. A grammar that fails to load renders plain text with no error, and a collapsed panel
   keeps its widget in the DOM — both are silent successes, and both are now failures.
-* `ide/scripts/ui-smoke.mjs` runs headless against a real application and currently passes 33 checks.
+* `ide/tests/conformance/` runs headless against a real application, one test per claim in this ADR
+  and in the other documents, and writes `docs/conformance.md`. Every claim above is a row there, so
+  a claim this ADR makes and the application does not keep is visible without reading either. The
+  number of collected claims is pinned, because a check that silently stops being collected reports a
+  smaller denominator as success -- which is what the `if`-guarded script this replaced did.
 * `npm ls @theia/core` must report exactly one entry; a second copy breaks inversify identity and is
   the most common Theia build failure.
 * Any menu entry this decision removes must be asserted absent, so that a Theia upgrade restoring it

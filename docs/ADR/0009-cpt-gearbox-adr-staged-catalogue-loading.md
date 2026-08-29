@@ -164,10 +164,18 @@ straight to the `&[RustFile]` every consumer already takes, so no downstream sig
 ### The decision now has a consumer, and it held
 
 This ADR was written before anything rendered a catalogue, which made it an untested design. The
-Theia Catalogue widget is now that consumer, and `ide/scripts/ui-smoke.mjs` checks the claim as a
-timeline rather than as a final state -- a snapshot after loading would pass even if the tree had
-appeared all at once. On `../gears-rust` it observes a window of roughly 550 ms in which all 14 rows
-are on screen, named and grouped by category, and all 14 are still `pending`.
+Theia Catalogue widget is now that consumer, and
+`ide/tests/conformance/adr-0009-staged-loading.spec.ts` checks the claim as a timeline rather than as
+a final state -- a snapshot after loading would pass even if the tree had appeared all at once. The
+sampler is installed before the document has scripts, so it observes a window in which rows are on
+screen, named and grouped by category, and still `pending`. When the load is too short to have been
+observed at all, the test reports "not observed" rather than passing, because a sampling rate is not
+evidence.
+
+One claim in this ADR had no test until that suite existed, and it is the one the widget depends on
+most: **the selection survives the pending-to-projected replacement.** Rows are keyed by
+`(source, gdl_path)` precisely so that choosing a gear before it is parsed does not lose the choice
+when it finishes, and an id-keyed selection could not do that, since the id does not exist at S1.
 
 One thing was learned that the ADR did not anticipate. `gdl_path` is load-bearing beyond keying
 rows: the widget keys its **selection** by it as well, so choosing a gear before it is parsed does

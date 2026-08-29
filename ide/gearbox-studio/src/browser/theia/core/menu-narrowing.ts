@@ -26,9 +26,15 @@ export class MenuNarrowing implements MenuContribution {
     }
 
     // Registered here rather than alongside the commands that fill it, so the
-    // menu exists even when a feature that would populate it is disabled. An
-    // empty submenu is not rendered, so this costs nothing when nothing fills
-    // it.
+    // menu exists even when a feature that would populate it is disabled.
+    //
+    // Note that Theia 1.75 *does* render an empty submenu: "Gearbox" is in the
+    // menu bar today with nothing under it, and the conformance suite asserts
+    // that exact bar. An earlier version of this comment claimed the opposite
+    // and used it as the justification for registering the submenu separately.
+    // The separation is still right -- a menu that appears when its first
+    // command lands is worse than one that is always there -- but the cost is
+    // not zero, and the empty dropdown is tracked as a `test.fixme`.
     registry.registerSubmenu(GearboxMenus.GEARBOX, "Gearbox");
   }
 }

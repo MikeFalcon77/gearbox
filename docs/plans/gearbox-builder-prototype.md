@@ -796,7 +796,7 @@ ide/
               gearbox-service-impl.ts}
   browser-app/            # @theia/cli: theia build / theia start
   electron-app/           # + @theia/electron, electron-builder
-  scripts/{rpc-smoke.mjs, ui-smoke.mjs}
+  scripts/{rpc-smoke.mjs, ...}, tests/{conformance/, fixtures/, report/}
 ```
 
 Two departures from the original sketch, both recorded in ADR
@@ -916,17 +916,30 @@ the join key, so completing it prevents a GBX0508 rather than reporting one); in
 ### 9.1 What is built, and where the implementation diverged from this plan
 
 Three widgets exist against the real engine: **Catalogue** (tree by category, staged),
-**Gear detail** and **Graph (co-location)**. Product, Explain, Lock and Generate are not built,
-because they need the resolver -- and the UI says so, driven by the engine's own
-`capabilities.resolve: false` rather than by a hard-coded string, so the notice disappears on its
-own when M4 lands.
+**Gear detail** and **Graph (co-location)**. Product, Explain, Lock and Generate are still not
+built, but the reason has changed: the engine now reports `capabilities.resolve: true`, and the
+notice that used to explain their absence removed itself when M4 landed -- which was the point of
+driving it from the engine's own capabilities rather than from a hard-coded string. Only Generate is
+still blocked by the engine; the other three are missing widgets, not missing capability.
 
-`ide/scripts/ui-smoke.mjs` drives a headless Chrome against a running `browser-app` and asserts
-**33** things, stable across repeated runs. It is deliberately a *timeline* rather than a final
-state: a snapshot taken after loading would pass even if the tree had appeared all at once, which is
-exactly the claim ADR-0009 makes and could not previously check. On the real tree it catches a
-window of roughly 550 ms in which all 14 rows are on screen, named and grouped, and all 14 are
-still `pending` -- so the staged design is not merely implemented, it is visible.
+Also built since this section was written, and not planned here: the `Contribution` base class ADR
+0011 asks for, the menu narrowing that removes Selection and Go and adds a Gearbox submenu, and
+three RPC methods -- `product/load`, `resolve`, `validate`.
+
+**The check is `npm run conformance`, and it is organised by document rather than by feature.**
+`ide/tests/conformance/` holds one test per claim in the PRD, the ADRs and §9 of this plan, each
+named for the claim and carrying its source; `test.fixme` marks a documented claim that is not
+implemented. The run writes `docs/conformance.md`, which is the authoritative version of this
+section: **63 claims, 40 built, 22 not built, 1 not observable on this corpus.** A hand-maintained
+count in prose is what drifted here in five places, so it is not maintained by hand any more, and
+the number of collected claims is pinned so that a claim which stops being collected fails the run
+instead of shrinking the denominator.
+
+The staged-loading tests are deliberately a *timeline* rather than a final state: a snapshot taken
+after loading would pass even if the tree had appeared all at once, which is exactly the claim
+ADR-0009 makes and could not previously check. On the real tree the sampler catches a window in
+which all 14 rows are on screen, named and grouped, and still `pending` -- so the staged design is
+not merely implemented, it is visible.
 
 **ADR-0009 survived contact with a consumer**, with one thing learned: `gdl_path` turned out to be
 load-bearing beyond keying rows. The *selection* is keyed by it too, so choosing a gear before it
@@ -1046,7 +1059,7 @@ workspace-member entries. Nothing else in that repo changes.
 | **M6** | Host-workers | new gear lands and passes its own test *by hand first*; then generated worker crate; host spawns worker; remote REST binding resolves via directory | M7 |
 | **M7** | Docker + Helm + `values.schema.json` | acceptance §12 step 4 in full | M6 |
 | **M8a** — **done** | JSON-RPC + TS types | `node ide/scripts/rpc-smoke.mjs` drives initialize → catalogue over real framing, 15/15; `cargo test -p gearbox-rpc`; stdout carries nothing but JSON-RPC | from M1 |
-| **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Gear detail and the co-location Graph are built and checked headlessly: `cd ide && npm run verify`, 30/30. Product, Explain, Lock and Generate wait on M4 and say so in the UI | after M4 + M8a |
+| **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Gear detail and the co-location Graph are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Product, Explain, Lock and Generate are not built; only Generate still waits on the engine | after M4 + M8a |
 | **M9** | **DESIGN + ADRs** (§14) — written *after* the prototype runs | reviewed against `docs/checklists/{DESIGN,ADR}.md`; every claim cites either a `gearbox-builder` symbol or a `gears-rust` `file:line`; every §13 gap has a home | — |
 
 Critical path M0 → M1 → M2 → M4 → M5 → M6 → M9. M8a needs only types, so its widgets can be
@@ -1152,10 +1165,12 @@ git diff --exit-code HEAD -- gears/payments-audit/payments-audit/src   # same sr
 **Step 8 — TS anti-drift.** `make ts && git diff --exit-code ide/.../generated`;
 `gearbox rpc-schema | diff - fixtures/rpc-schema.json`.
 
-**Step 9 — Studio.** `cd ide && npm ci && npm run verify` (rpc smoke, build, then the headless UI
-check against a running app -- `npm run start:browser` in another shell first). The catalogue,
-detail and co-location graph assertions are automated and green; the ones below still need M4:
-Catalogue lists 9 gears; the profile dropdown has dev/local/prod; switching to prod surfaces
+**Step 9 — Studio.** `cd ide && npm ci && npm run verify` (rpc smoke, build, then the conformance
+suite, which starts the application itself). The catalogue, detail and co-location graph assertions
+are automated and green; the ones below still need M4's widgets, and each is a named `test.fixme` in
+`ide/tests/conformance/` rather than prose to be checked by hand. Catalogue lists **14** gears --
+this step said 9, which contradicted ADR-0009 and §9.1, and 14 is what the corpus has; the profile
+dropdown has dev/local/prod; switching to prod surfaces
 GBX0603 + GBX0507 in Problems; the Graph "processes" view shows 2 boxes with `cluster` inside
 `audit`; clicking the `payments-audit → api-contracts` edge opens Explain with the DowngradedBy
 narrative; Generate shows 0 conflicts, and after hand-editing `values.yaml` a re-apply reports it

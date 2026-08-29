@@ -30,18 +30,38 @@ GEARBOX_ENGINE=/path/to/gearbox GEARBOX_ROOT=/path/to/gears npm run start:browse
 ```bash
 npm run engine       # cargo build -p gearbox-cli -- the binary the backend spawns
 npm run smoke        # JSON-RPC over real vscode-jsonrpc framing, no browser
-npm run ui-smoke     # headless Chrome against a running app (start it first)
-npm run verify       # engine + smoke + build + ui-smoke
+npm run conformance  # Playwright; starts the app itself
+npm run verify       # all of the above, plus the build and two more smokes
 ```
+
+The browser is one explicit step, once: `npx playwright install chromium`. Playwright has no
+postinstall of its own, so npm's install-script gate does not apply to it -- and nothing fetches
+100 MB behind your back either.
+
+**`npm run conformance` is organised by document, not by feature.** Each test in
+`tests/conformance/` is named for one claim in the PRD, an ADR or §9 of the plan, and carries its
+source in the title; a documented claim that is not implemented is a `test.fixme` with the same
+name, so it is present, counted and traceable rather than absent. The run writes
+`docs/conformance.md`. The number of collected claims is pinned: a claim that stops being collected
+fails the run, because the script this replaced had eleven checks inside `if` guards and reported a
+smaller denominator as "all passed".
+
+The staged-loading tests sample the DOM on a timeline rather than after loading finishes, because
+the claim under test is that a row is useful *before* it is complete. A snapshot taken at the end
+would pass even if the tree had appeared all at once. The sampler is installed with
+`addInitScript`, so it starts before Theia's own scripts.
+
+**Every test gets a fresh browser context, and that is load-bearing.** Theia persists its layout,
+and `initializeLayout` runs only when there is no saved layout -- deliberately, so that a closed
+panel stays closed. An empty `localStorage` is what makes the panels open as designed, so setting
+`storageState` or reusing a profile would fail half the suite for a reason unrelated to any claim.
 
 **`npm run build` does not rebuild the engine.** The backend spawns
 `../target/debug/gearbox`, so a change on the Rust side is invisible to the
 TypeScript build -- and the symptom is a client that reports something the engine
-was already taught to send. `npm run verify` builds it first for that reason.
-
-`ui-smoke.mjs` samples the DOM on a timeline rather than after loading finishes, because the claim
-under test is that a row is useful *before* it is complete. A snapshot taken at the end would pass
-even if the tree had appeared all at once.
+was already taught to send. The suite's `globalSetup` builds it, and also fails if the frontend
+bundle is older than `gearbox-studio/src` -- testing a stale bundle reports on code that is not
+there, and reports it as success.
 
 ## The `.gdl` language
 

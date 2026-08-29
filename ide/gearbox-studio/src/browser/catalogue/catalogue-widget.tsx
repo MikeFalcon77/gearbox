@@ -182,7 +182,7 @@ export class CatalogueWidget extends ReactWidget {
     return (
       <div className="gbx-diagnostics">
         {/* Its own class, not `gbx-group-label`: that one means "a category of
-            gears", and ui-smoke reads it as exactly that. */}
+            gears", and the conformance suite reads it as exactly that. */}
         <div className="gbx-diagnostics-label">diagnostics ({diagnostics.length})</div>
         {diagnostics.map((diagnostic, index) => (
           <div

@@ -10,7 +10,7 @@
     "browser-app"
   ],
   "devDependencies": {
-    "puppeteer": "25.1.0",
+    "@playwright/test": "1.62.1",
     "vscode-jsonrpc": "8.2.0"
   },
   "//": "Every @theia/* pinned to the one version in theia-version.txt, and repeated here as overrides. A transitive ^ pulls a second @theia/core copy, which breaks inversify identity -- the most common Theia build failure.",
@@ -36,10 +36,10 @@
     "store-smoke": "node scripts/store-smoke.mjs",
     "build": "npm run build --workspace gearbox-studio && npm run build --workspace browser-app",
     "start:browser": "npm run start --workspace browser-app",
-    "ui-smoke": "node scripts/ui-smoke.mjs",
-    "verify": "npm run engine && npm run smoke && npm run build && npm run supervision-smoke && npm run store-smoke && npm run ui-smoke",
+    "conformance": "playwright test",
+    "verify": "npm run engine && npm run smoke && npm run build && npm run supervision-smoke && npm run store-smoke && npm run conformance",
     "engine": "cargo build --manifest-path ../Cargo.toml -p gearbox-cli"
   },
-  "//puppeteer": "Declared, not borrowed. puppeteer arrives transitively through @theia/cli, and ui-smoke.mjs would break silently the day that dependency moved -- with a failure that looks like a broken UI rather than a missing tool.",
+  "//conformance": "Playwright, and the browser is a separate explicit step: `npx playwright install chromium`. Playwright has no postinstall of its own -- not in @playwright/test, playwright or playwright-core -- so npm's install-script gate does not apply to it, and nothing downloads 100MB behind your back either.",
   "//engine": "The backend spawns ../target/debug/gearbox, so a change to the Rust side is invisible to `npm run build`. Leaving the two out of step cost a debugging session: the client reported a missing source root that the engine had already been taught to send."
 }

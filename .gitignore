@@ -49,6 +49,15 @@ dist/
 /ide/browser-app/esbuild.mjs
 /ide/browser-app/gen-esbuild.*.mjs
 
+# Playwright's per-run artifacts: failure screenshots and traces. The
+# conformance table itself IS tracked (docs/conformance.md) -- it is the
+# generated replacement for a hand-maintained section of the plan, so it is only
+# useful if a diff shows when a claim changed state.
+/ide/test-results/
+/ide/playwright-report/
+/ide/blob-report/
+/ide/.playwright-artifacts-*/
+
 # Python virtualenvs and caches
 /.venv/*
 **/__pycache__

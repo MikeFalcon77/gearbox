@@ -98,7 +98,7 @@ line in `[workspace] members`, and that is tier 3.
 
 **`GeneratedOnce` already means "scaffold".** §7 defines three ownership classes — `Generated`
 overwrite, `GeneratedOnce` write-if-absent, `OperatorOwned` three-way merge — with `GBX0701`
-(`crates/gearbox-ir/src/diagnostics.rs:568`) for an unresolvable conflict. A new gear consists
+(`crates/gearbox-ir/src/diagnostics.rs:576`) for an unresolvable conflict. A new gear consists
 entirely of absent files, so `GeneratedOnce` covers it with no new vocabulary. This is why the
 one-author invariant is untouched: the tool writes the attribute once, at creation, and never
 returns to it. A fact written once by a machine and thereafter owned by a human has exactly one
