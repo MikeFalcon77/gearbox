@@ -76,7 +76,7 @@ Mapped onto this project:
 | Tier | Owner | Gearbox Builder |
 |---|---|---|
 | 0. New files | tool writes once, then hands over | **Permitted** — a new gear or plugin crate |
-| 1. Tool metadata | tool, entirely | **Permitted** — `product.lock`, and it is marked read-only in the editor |
+| 1. Tool metadata | tool, entirely | **Permitted** — `product.lock`, and it is marked read-only in the editor. Built: `ReadOnlyLockEditorProvider` rebinds Theia's `MonacoEditorProvider`, which is the only hook that can say "this file" rather than "this URI scheme". |
 | 2. Generated source | tool, entirely, with a header | **Permitted** — the composition crates under `.gearbox/` |
 | 3. Structured manifests | tool edits surgically | **Permitted** — one `members` entry in the workspace manifest |
 | 4. Insertion markers in human files | tool owns a point, human owns the file | **Not needed** — see below |

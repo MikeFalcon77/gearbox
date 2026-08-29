@@ -915,16 +915,17 @@ the join key, so completing it prevents a GBX0508 rather than reporting one); in
 
 ### 9.1 What is built, and where the implementation diverged from this plan
 
-Three widgets exist against the real engine: **Catalogue** (tree by category, staged),
-**Gear detail** and **Graph (co-location)**. Product, Explain, Lock and Generate are still not
-built, but the reason has changed: the engine now reports `capabilities.resolve: true`, and the
-notice that used to explain their absence removed itself when M4 landed -- which was the point of
-driving it from the engine's own capabilities rather than from a hard-coded string. Only Generate is
-still blocked by the engine; the other three are missing widgets, not missing capability.
+Six widgets exist against the real engine: **Catalogue** (tree by category, staged), **Gear
+detail**, **Graph (co-location)**, **Product**, **Explain** and **Lock**. Only **Generate** is
+missing, and it is the one still blocked by the engine -- `capabilities.generate` is `false`, while
+`resolve` has been `true` since M4. The notice that used to explain the absence of the other three
+removed itself when M4 landed, which was the point of driving it from the engine's own capabilities
+rather than from a hard-coded string.
 
 Also built since this section was written, and not planned here: the `Contribution` base class ADR
-0011 asks for, the menu narrowing that removes Selection and Go and adds a Gearbox submenu, and
-three RPC methods -- `product/load`, `resolve`, `validate`.
+0011 asks for; the menu narrowing that removes Selection and Go and fills a Gearbox submenu;
+resolution diagnostics as Problems markers, which is what finally uses the long-declared
+`@theia/markers`; and four RPC methods -- `product/load`, `resolve`, `validate`, `product/lock`.
 
 **The check is `npm run conformance`, and it is organised by document rather than by feature.**
 `ide/tests/conformance/` holds one test per claim in the PRD, the ADRs and §9 of this plan, each
@@ -952,6 +953,9 @@ Divergences from what §9 planned, each for a reason found while building:
 | `elkjs` `layered` with a fixed seed | hand-rolled layered assignment + two barycentre sweeps | Deterministic by construction rather than by seed, and no async layout pass. The graph is a shallow DAG of 14 nodes. If it grows a cycle or a hundred nodes, `elkjs` is the answer. |
 | detail as part of the Catalogue widget | its own widget in the **bottom** area | In a 300px side panel the projected facts -- provider transports, which point a plugin fills and under which vendor, GTS types -- were clipped. The tree answers "what is there"; the detail answers "what is it", and they need different amounts of room. |
 | `@theia/{core,editor,filesystem,markers,monaco,navigator,process,workspace}` | plus `@theia/{preferences,userstorage,variable-resolver,messages}` | Without `@theia/preferences` the frontend dies on `No matching bindings found for serviceIdentifier: Symbol(PreferenceProvider) - named "1"` -- the user-scope provider. Without `@theia/messages`, `MessageService` still resolves and every message goes nowhere, which is worse than an error: it makes reporting a failure look like handling it. |
+| Explain calls `gearbox/product/explain` | the explanation arrives with the resolution | `ResolveResult` already carries the whole `ExplanationGraph`, so "why" costs no second round trip -- and, more usefully, cannot answer about a different resolution than the one on screen. A separate call would have to be told which resolution it was about, or guess. |
+| Lock as a read-only Monaco view | a `<pre>`, plus a rebind that makes any `product.lock` read-only *as a file* | No TOML grammar is installed -- the application has no plugin host, which ADR 0011 decided deliberately -- so Monaco would render the same uncoloured text behind a much larger component. What it would add here is a scrollbar. The editor half of `cpt-gearbox-fr-lock-read-only` is met where it matters, by rebinding `MonacoEditorProvider`; `FileService.getReadOnlyMessage` could not do it, because it resolves per URI *scheme* rather than per file. |
+| Lock diffs against the lock on disk | not built, and the blocker is structural | Nothing on the wire says where the lock was written: `.gearbox/<product>/<profile>/` is `OUTPUT_DIR` in `crates/gearbox-cli/src/generate.rs`, a CLI default rather than an engine fact. Reporting it from the RPC would put the layout in a third place. The stale badge §9 pairs with this *is* built, for the comparison that is available -- the lock text's own hash against the resolution's. |
 | `.gdl` as a bundled VS Code extension in `ide/gdl-language/`, declared via `theiaPlugins`, with an `extension.ts` starting a `LanguageClient` | a native `LanguageGrammarDefinitionContribution` in `gearbox-studio`, whose vocabulary is **generated** from the engine's own globals | The plugin path is not available: `@theia/plugin-ext` is not installed and `ide/plugins/` does not exist, so the `--plugins=local-dir:../plugins` flag in `browser-app/package.json` is inert. Adding a plugin host to ship one grammar is a large dependency for a small feature, and there is no `LanguageClient` to start -- the engine's JSON-RPC surface is LSP-*shaped* but has no `textDocument/*`. The native path also buys something the plugin could not: `cargo test -p gearbox-gdl --test export_grammar` derives the word lists from `gear_vocabulary()` / `product_vocabulary()` and `keyword_verdicts()`, so the editor cannot colour a function the engine does not have. §9 also listed the forbidden keywords as `if/for/def/lambda/while`; the real set is wider (`and`, `or`, `not`, `in`, `elif`, `else`, `break`, `continue`, `return`, `pass`), and `while` is not in it at all -- the lexer folds it into a single `Token::Reserved` variant, so it is refused as a parse error rather than as GBX0103. It still renders red, from the second of the two generated lists. |
 
 Three failure modes worth writing down, because all three *looked* fine:
@@ -1059,7 +1063,7 @@ workspace-member entries. Nothing else in that repo changes.
 | **M6** | Host-workers | new gear lands and passes its own test *by hand first*; then generated worker crate; host spawns worker; remote REST binding resolves via directory | M7 |
 | **M7** | Docker + Helm + `values.schema.json` | acceptance §12 step 4 in full | M6 |
 | **M8a** — **done** | JSON-RPC + TS types | `node ide/scripts/rpc-smoke.mjs` drives initialize → catalogue over real framing, 15/15; `cargo test -p gearbox-rpc`; stdout carries nothing but JSON-RPC | from M1 |
-| **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Gear detail and the co-location Graph are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Product, Explain, Lock and Generate are not built; only Generate still waits on the engine | after M4 + M8a |
+| **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Gear detail, the co-location Graph, Product, Explain and Lock are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Only Generate is missing, and it is the one still waiting on the engine | after M4 + M8a |
 | **M9** | **DESIGN + ADRs** (§14) — written *after* the prototype runs | reviewed against `docs/checklists/{DESIGN,ADR}.md`; every claim cites either a `gearbox-builder` symbol or a `gears-rust` `file:line`; every §13 gap has a home | — |
 
 Critical path M0 → M1 → M2 → M4 → M5 → M6 → M9. M8a needs only types, so its widgets can be
