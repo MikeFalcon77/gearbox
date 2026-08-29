@@ -7,7 +7,7 @@
 // panel clipped all of it. The tree answers "what is there"; this answers "what
 // is it", and the two need different amounts of room.
 
-import { ReactWidget } from "@theia/core/lib/browser";
+import { codicon, ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
@@ -28,6 +28,7 @@ export class GearDetailWidget extends ReactWidget {
   protected init(): void {
     this.id = GearDetailWidget.ID;
     this.title.label = GearDetailWidget.LABEL;
+    this.title.iconClass = codicon("info");
     this.title.caption = GearDetailWidget.LABEL;
     this.title.closable = true;
     this.addClass("gearbox-detail");

@@ -20,7 +20,7 @@
 // the new id. Keeping the old id would have meant a widget called "deps" hosting
 // three views that have nothing to do with `deps`.
 
-import { ReactWidget } from "@theia/core/lib/browser";
+import { codicon, ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 // The shim is `export = React`, so a namespace import is rejected under
 // esModuleInterop; a default import is the form that works.
@@ -69,6 +69,7 @@ export class GraphWidget extends ReactWidget {
   protected init(): void {
     this.id = GraphWidget.ID;
     this.title.label = GraphWidget.LABEL;
+    this.title.iconClass = codicon("type-hierarchy-sub");
     this.title.closable = true;
     this.addClass("gearbox-graph");
     // Both stores: the co-location view follows the catalogue as it streams, and

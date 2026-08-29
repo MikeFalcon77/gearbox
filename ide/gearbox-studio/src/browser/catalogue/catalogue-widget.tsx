@@ -10,7 +10,7 @@
 // second one over the first. The load belongs to the application
 // (`CatalogueViewContribution`) and to the reload command; this only subscribes.
 
-import { ReactWidget } from "@theia/core/lib/browser";
+import { codicon, ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 // The shim is `export = React`, so a namespace import is rejected under
 // esModuleInterop; a default import is the form that works.
@@ -61,6 +61,7 @@ export class CatalogueWidget extends ReactWidget {
   protected init(): void {
     this.id = CatalogueWidget.ID;
     this.title.label = CatalogueWidget.LABEL;
+    this.title.iconClass = codicon("library");
     this.title.caption = CatalogueWidget.LABEL;
     this.title.closable = true;
     this.addClass("gearbox-catalogue");

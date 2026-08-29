@@ -5,6 +5,9 @@
 // arrowhead". Kept in their own file so that the conformance files stay a
 // one-to-one map onto the documents.
 
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+
 import { expect, openGraph, openPalette, test } from "./fixtures/studio";
 
 test.describe("the panel is operable without a mouse", () => {
@@ -217,5 +220,93 @@ test.describe("nothing failed quietly", () => {
     // navy-deep from constructorfabric.org styles.css
     expect(theme.bg).toMatch(/#001838|rgb\(\s*0,\s*24,\s*56\s*\)/);
     expect(theme.bodyClass).toContain("vs-dark");
+  });
+});
+
+test.describe("every view has an icon, and the icon exists", () => {
+  // The Catalogue tab in the left activity bar was blank: Theia renders only the
+  // icon there, and no widget set `title.iconClass`. The other six were equally
+  // iconless and nobody noticed, because a main-area or bottom tab shows its
+  // label as well.
+  //
+  // Two checks, because there are two ways to get a blank button and only one of
+  // them is "no icon". A codicon name that does not exist renders an empty box,
+  // which looks exactly like the bug being fixed here -- so the name is checked
+  // against the font rather than trusted.
+
+  const STUDIO_SRC = join(__dirname, "../gearbox-studio/src/browser");
+  const CODICON_CSS = join(
+    __dirname,
+    "../node_modules/@vscode/codicons/dist/codicon.css",
+  );
+
+  /** Every `.ts`/`.tsx` file under a directory, recursively. */
+  function sources(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return sources(path);
+      return /\.tsx?$/.test(entry.name) ? [path] : [];
+    });
+  }
+
+  test("every codicon named in the frontend is a real codicon", () => {
+    const css = readFileSync(CODICON_CSS, "utf8");
+    const known = new Set(
+      [...css.matchAll(/^\.codicon-([a-z0-9-]+):/gm)].map((m) => m[1]),
+    );
+    // A sanity floor: if the stylesheet moved or its format changed, an empty
+    // `known` set would make this test pass by knowing nothing.
+    expect(known.size).toBeGreaterThan(400);
+
+    const named = sources(STUDIO_SRC).flatMap((file) => {
+      const text = readFileSync(file, "utf8");
+      // `codicon("x")` and the literal class form. Names built by interpolation
+      // -- `codicon-${iconFor(process)}` in the process view -- cannot be read
+      // statically; those are covered by the views' own conformance tests, which
+      // assert on the elements that carry them.
+      const found: { file: string; name: string }[] = [];
+      for (const m of text.matchAll(/\bcodicon\("([a-z0-9-]+)"\)/g)) {
+        found.push({ file, name: m[1] });
+      }
+      // The literal class form, e.g. `className="codicon codicon-pinned"`. The
+      // trailing character is captured and inspected rather than bounded with
+      // `\b`, because a `\b` match on `codicon-chevron-${down ? ... }` stops at
+      // `chevron` and reports a codicon nobody wrote. A name that runs into `${`
+      // or ends in `-` is built at runtime, so it is skipped here.
+      for (const m of text.matchAll(/codicon-([a-z0-9-]+)([^a-z0-9-]|$)/g)) {
+        const [, name, next] = m;
+        if (next === "$" || next === "{" || name.endsWith("-")) continue;
+        found.push({ file, name });
+      }
+      return found;
+    });
+    expect(named.length).toBeGreaterThan(6);
+
+    const unknown = [
+      ...new Set(
+        named
+          .filter(({ name }) => !known.has(name))
+          .map(({ file, name }) => `${file.replace(STUDIO_SRC, "")}: codicon-${name}`),
+      ),
+    ];
+    expect(unknown).toEqual([]);
+  });
+
+  test("the Gearbox views carry a codicon in the shell", async ({ studio }) => {
+    // Theia gives every tab the id `shell-tab-<widgetId>`, which is what makes
+    // this checkable without depending on a label the activity bar does not show.
+    const icons = await studio.page.evaluate(() =>
+      Object.fromEntries(
+        ["gearbox.catalogue", "gearbox.detail"].map((id) => {
+          const tab = document.querySelector(`#shell-tab-${CSS.escape(id)}`);
+          const icon = tab?.querySelector(".lm-TabBar-tabIcon");
+          return [id, icon?.className ?? ""];
+        }),
+      ),
+    );
+    // The catalogue is the reported case: left bar, icon only, so an empty class
+    // is a button with nothing in it.
+    expect(icons["gearbox.catalogue"]).toContain("codicon-library");
+    expect(icons["gearbox.detail"]).toContain("codicon-info");
   });
 });

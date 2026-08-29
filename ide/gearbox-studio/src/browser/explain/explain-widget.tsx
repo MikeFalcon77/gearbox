@@ -12,7 +12,7 @@
 // `ExplanationGraph` with the resolution, so "why" costs no second round trip
 // and cannot answer about a different resolution than the one on screen.
 
-import { ReactWidget } from "@theia/core/lib/browser";
+import { codicon, ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
@@ -131,6 +131,7 @@ export class ExplainWidget extends ReactWidget {
   protected init(): void {
     this.id = ExplainWidget.ID;
     this.title.label = ExplainWidget.LABEL;
+    this.title.iconClass = codicon("question");
     this.title.caption = ExplainWidget.LABEL;
     this.title.closable = true;
     this.addClass("gearbox-explain");

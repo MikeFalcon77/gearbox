@@ -11,7 +11,7 @@
 // distinct locks -- and every difference visible without editing anything, which
 // is the property `profiles = [...]` as a data field exists to buy.
 
-import { ReactWidget } from "@theia/core/lib/browser";
+import { codicon, ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
@@ -41,6 +41,7 @@ export class ProductWidget extends ReactWidget {
   protected init(): void {
     this.id = ProductWidget.ID;
     this.title.label = ProductWidget.LABEL;
+    this.title.iconClass = codicon("project");
     this.title.caption = ProductWidget.LABEL;
     this.title.closable = true;
     this.addClass("gearbox-product");

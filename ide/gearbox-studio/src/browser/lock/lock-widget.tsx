@@ -13,7 +13,7 @@
 // matters, on a `product.lock` opened as a file: see
 // `theia/monaco/read-only-lock-editor-provider.ts`.
 
-import { ReactWidget } from "@theia/core/lib/browser";
+import { codicon, ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
@@ -35,6 +35,7 @@ export class LockWidget extends ReactWidget {
   protected init(): void {
     this.id = LockWidget.ID;
     this.title.label = LockWidget.LABEL;
+    this.title.iconClass = codicon("lock");
     this.title.caption = LockWidget.LABEL;
     this.title.closable = true;
     this.addClass("gearbox-lock");

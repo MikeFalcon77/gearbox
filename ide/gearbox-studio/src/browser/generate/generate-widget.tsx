@@ -6,7 +6,7 @@
 // sides of that one file. Putting every file on the plan would drag
 // `Cargo.lock` (~100k) across for a preview nobody asked to read.
 
-import { ReactWidget } from "@theia/core/lib/browser";
+import { codicon, ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 import * as monaco from "@theia/monaco-editor-core";
@@ -99,6 +99,7 @@ export class GenerateWidget extends ReactWidget {
   protected init(): void {
     this.id = GenerateWidget.ID;
     this.title.label = GenerateWidget.LABEL;
+    this.title.iconClass = codicon("checklist");
     this.title.caption = GenerateWidget.LABEL;
     this.title.closable = true;
     this.addClass("gearbox-generate");
