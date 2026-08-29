@@ -29,6 +29,8 @@ export * from "./Diagnostic";
 export * from "./DiagnosticCode";
 export * from "./Diagnostics";
 export * from "./Discovery";
+export * from "./EditGearParams";
+export * from "./EditGearResult";
 export * from "./EndpointDecl";
 export * from "./Entrypoint";
 export * from "./ExplanationGraph";

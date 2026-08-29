@@ -15,14 +15,15 @@
 
 pub mod protocol;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use gearbox_engine::{Continue, LoadEvent, SourceRoot, load_catalogue_staged};
 use gearbox_ir::{Diagnostic, ExplanationGraph, ProfileId, ResolvedProduct, SourceId};
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
 
 use crate::protocol::{
-    Capabilities, CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, FailedRoot,
+    Capabilities, CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, EditGearParams,
+    EditGearResult, FailedRoot,
     InitializeParams, InitializeResult, LockParams, LockResult, LogParams, ProductLoadParams,
     ProductLoadResult, ProgressParams, ResolveParams, ResolveResult, ResolvedRoot, ServerInfo,
     ValidateParams, ValidateResult, error_code, method,
@@ -53,6 +54,14 @@ struct State {
     /// and why rather than being handed a shorter list.
     failed_roots: Vec<FailedRoot>,
     initialized: bool,
+    /// What the client declared at `initialize`.
+    ///
+    /// Recorded rather than inferred: the server cannot judge whether a caller
+    /// should be allowed to write, so it holds the claim and refuses everything
+    /// not claimed (`cpt-gearbox-fr-rpc-writes-opt-in`).
+    allow_writes: bool,
+    /// The directory the client declared as its workspace, if it declared one.
+    workspace: Option<PathBuf>,
 }
 
 /// Run the server on stdio until the client says `exit`.
@@ -71,6 +80,10 @@ pub fn serve_stdio(default_roots: &[PathBuf]) -> Result<(), ServeError> {
         catalogue: None,
         failed_roots,
         initialized: false,
+        // Read-only until a client says otherwise, which is the posture
+        // `cpt-gearbox-fr-rpc-writes-opt-in` asks for.
+        allow_writes: false,
+        workspace: None,
     };
 
     for message in &connection.receiver {
@@ -208,6 +221,20 @@ fn dispatch(connection: &Connection, state: &mut State, request: Request) -> Opt
                 Err(e) => invalid_params(id, &e),
             },
         }),
+        method::PRODUCT_ADD_GEAR => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<EditGearParams>(request) {
+                Ok((id, params)) => edit_gear(state, id, &params, true),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
+        method::PRODUCT_REMOVE_GEAR => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<EditGearParams>(request) {
+                Ok((id, params)) => edit_gear(state, id, &params, false),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
         method::VALIDATE => Some(match require_ready(state, &id) {
             Some(refusal) => refusal,
             None => match cast::<ValidateParams>(request) {
@@ -231,6 +258,8 @@ fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Re
         state.failed_roots = failed;
     }
     state.initialized = true;
+    state.allow_writes = params.allow_writes;
+    state.workspace = params.workspace.as_deref().map(PathBuf::from);
 
     ok(
         id,
@@ -247,6 +276,9 @@ fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Re
                 // capability was for. `generate` stays false until M5.
                 resolve: true,
                 generate: false,
+                // Echoed back, so a client that forgot to ask for writes can see
+                // that it forgot instead of finding out from a refusal later.
+                writes: state.allow_writes,
             },
             // `SourceRoot::root` is already canonicalized, which is what makes
             // it safe to join a `gdl_path` onto without `..` ambiguity.
@@ -421,6 +453,155 @@ fn lock(state: &mut State, id: RequestId, params: &LockParams) -> Response {
             &resolved.diagnostics,
         ),
     }
+}
+
+/// Add or remove a gear in a product description.
+///
+/// Two gates before anything is read, let alone written, and they refuse in that
+/// order because a client without write capability should not learn anything
+/// about which paths exist:
+///
+/// 1. the client declared write capability at `initialize`;
+/// 2. the path is inside a declared source root or beside a known product.
+///
+/// The write itself is temp-file-and-rename, so an interrupted run cannot leave a
+/// truncated description behind -- ADR `cpt-gearbox-adr-authoring-ownership-tiers`
+/// asks for transactional writes, and for one file that is what transactional
+/// means.
+fn edit_gear(state: &mut State, id: RequestId, params: &EditGearParams, add: bool) -> Response {
+    if !state.allow_writes {
+        return error(
+            id,
+            error_code::WRITES_NOT_ALLOWED,
+            "this session declared no write capability, so nothing will be written; \
+             pass `allow_writes: true` to `initialize` if the client is meant to edit files",
+        );
+    }
+
+    let path = PathBuf::from(&params.path);
+    if let Err(refusal) = writable_path(state, &path) {
+        return error(id, error_code::EDIT_REFUSED, &refusal);
+    }
+
+    let before = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) => {
+            return error(
+                id,
+                error_code::EDIT_REFUSED,
+                &format!("cannot read `{}`: {e}", params.path),
+            );
+        }
+    };
+
+    let uri = format!("file://{}", path.display());
+    let outcome = if add {
+        let Some(source_id) = params.source.as_deref() else {
+            return error(
+                id,
+                error_code::EDIT_REFUSED,
+                "adding a gear needs `source`: which declared source it comes from",
+            );
+        };
+        gearbox_gdl::edit::add_gear(&uri, &before, &params.gear, source_id)
+    } else {
+        gearbox_gdl::edit::remove_gear(&uri, &before, &params.gear)
+    };
+
+    let edit = match outcome {
+        Ok(edit) => edit,
+        Err(diagnostics) => {
+            return error_with_diagnostics(
+                id,
+                error_code::EDIT_REFUSED,
+                &format!("`{}` could not be edited", params.path),
+                diagnostics.as_slice(),
+            );
+        }
+    };
+
+    let after = edit.changed().unwrap_or(&before).to_owned();
+    let changed = edit.changed().is_some();
+
+    if changed
+        && !params.dry_run
+        && let Err(e) = write_atomically(&path, &after)
+    {
+        return error(
+            id,
+            error_code::EDIT_REFUSED,
+            &format!("cannot write `{}`: {e}", params.path),
+        );
+    }
+
+    ok(
+        id,
+        &EditGearResult {
+            changed,
+            written: changed && !params.dry_run,
+            before,
+            after,
+            diagnostics: Vec::new(),
+        },
+    )
+}
+
+/// Whether a path may be written, and why not when it may not.
+///
+/// `cpt-gearbox-fr-rpc-writes-opt-in` requires rejecting "any path outside the
+/// declared workspace or source roots". A product description lives in neither a
+/// gear source root nor nowhere -- it sits beside the products -- which is why the
+/// client declares a workspace at `initialize` and this checks against both.
+///
+/// If nothing was declared, nothing is writable. Failing closed is the only
+/// defensible default for a method that changes files.
+fn writable_path(state: &State, path: &Path) -> Result<(), String> {
+    let Ok(canonical) = path.canonicalize() else {
+        return Err(format!("`{}` does not exist", path.display()));
+    };
+    if canonical.extension().and_then(|e| e.to_str()) != Some("gdl") {
+        return Err(format!(
+            "`{}` is not a `.gdl` description; this method edits descriptions only",
+            path.display()
+        ));
+    }
+
+    let mut allowed: Vec<PathBuf> = state
+        .roots
+        .iter()
+        .filter_map(|root| root.root.canonicalize().ok())
+        .collect();
+    allowed.extend(state.workspace.as_ref().and_then(|w| w.canonicalize().ok()));
+
+    if allowed.is_empty() {
+        return Err(
+            "no workspace and no source root were declared, so no path is writable".to_owned(),
+        );
+    }
+    if allowed.iter().any(|root| canonical.starts_with(root)) {
+        Ok(())
+    } else {
+        Err(format!(
+            "`{}` is outside the declared workspace and every source root",
+            path.display()
+        ))
+    }
+}
+
+/// Replace a file's contents without ever leaving it half-written.
+///
+/// Temp file in the same directory, then rename: a rename within one filesystem
+/// is atomic, so a crash leaves either the old description or the new one and
+/// never a truncated one. The same directory matters -- across filesystems a
+/// rename is a copy, and the guarantee is gone.
+fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
+    let directory = path.parent().unwrap_or(Path::new("."));
+    let temporary = directory.join(format!(
+        ".{}.gearbox-tmp",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("product.gdl")
+    ));
+    std::fs::write(&temporary, contents)?;
+    std::fs::rename(&temporary, path)
 }
 
 /// Everything checkable without resolving.

@@ -23,6 +23,8 @@ pub mod method {
     pub const PRODUCT_LOAD: &str = "gearbox/product/load";
     pub const PRODUCT_RESOLVE: &str = "gearbox/product/resolve";
     pub const PRODUCT_LOCK: &str = "gearbox/product/lock";
+    pub const PRODUCT_ADD_GEAR: &str = "gearbox/product/addGear";
+    pub const PRODUCT_REMOVE_GEAR: &str = "gearbox/product/removeGear";
     pub const VALIDATE: &str = "gearbox/validate";
 
     pub const INITIALIZED: &str = "initialized";
@@ -58,6 +60,12 @@ pub mod error_code {
     /// diagnostics, because a partial graph plus three errors is more useful
     /// than one error and nothing to look at.
     pub const RESOLVE_FAILED: i32 = -32054;
+    /// The client never declared write capability, so a mutating method is
+    /// refused outright (`cpt-gearbox-fr-rpc-writes-opt-in`). Distinct from a
+    /// failed write: nothing was attempted.
+    pub const WRITES_NOT_ALLOWED: i32 = -32055;
+    /// The path is outside every declared root, or the file could not be edited.
+    pub const EDIT_REFUSED: i32 = -32056;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -66,6 +74,36 @@ pub struct InitializeParams {
     /// directory.
     #[serde(default)]
     pub roots: Vec<String>,
+
+    /// Whether this client may ask the server to change files.
+    ///
+    /// Declared by the client, defaulting to `false`, and every mutating method
+    /// is refused until it is `true`
+    /// (`cpt-gearbox-fr-rpc-writes-opt-in`): "The API's first clients are an
+    /// editor and an autonomous agent. Read-only by default is the only safe
+    /// posture."
+    ///
+    /// A declaration rather than a negotiation. The server has no way to judge
+    /// whether a caller *should* be allowed to write, so it does not pretend to:
+    /// it records what was claimed and refuses everything not claimed, which
+    /// makes a client that never asks for writes incapable of making one by
+    /// accident.
+    #[serde(default)]
+    pub allow_writes: bool,
+
+    /// The directory writes may touch, beyond the source roots.
+    ///
+    /// `cpt-gearbox-fr-rpc-writes-opt-in` requires rejecting "any path outside
+    /// the declared workspace or source roots", and a product description lives
+    /// in neither: it sits beside the products, not inside a *gear* source root.
+    /// So the workspace is declared too, by the client that knows where it is.
+    ///
+    /// Deliberately not the server's working directory, which was the first
+    /// attempt: the cwd of a process is not a boundary anybody declared, and
+    /// treating it as one means the permitted set changes with how the server
+    /// happened to be launched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -141,6 +179,12 @@ pub struct Capabilities {
     pub staged_catalogue: bool,
     pub resolve: bool,
     pub generate: bool,
+    /// Whether *this session* may change files.
+    ///
+    /// Reflects back what the client declared in `InitializeParams`, not a
+    /// property of the build. A client that forgot to ask can therefore see that
+    /// it forgot, instead of discovering it from a refusal later.
+    pub writes: bool,
 }
 
 /// `gearbox/product/load` -- evaluate a `product.gdl` and return what it says.
@@ -199,6 +243,45 @@ pub struct LockResult {
     /// Repeated here so a caller can label the text without parsing it.
     pub lock_hash: String,
     pub profile: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// `gearbox/product/addGear` and `gearbox/product/removeGear`.
+///
+/// One envelope for both, because they differ only in direction, and a caller
+/// that can express one can express the other without learning a second shape.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct EditGearParams {
+    /// The product description to edit.
+    pub path: String,
+    /// The gear to add or remove.
+    pub gear: String,
+    /// Which declared source the gear comes from. Ignored when removing.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Report what would change and write nothing.
+    ///
+    /// ADR `cpt-gearbox-adr-authoring-ownership-tiers`: "A preview is not
+    /// optional. Every surveyed tool has `--dry-run`." The flag rather than a
+    /// second method, for the same reason `gearbox generate` has one.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// What an edit would do, or did.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct EditGearResult {
+    /// Whether the file needed changing at all. `false` is the idempotent case:
+    /// the description already said this.
+    pub changed: bool,
+    /// Whether the change reached the disk. Always `false` for a dry run.
+    pub written: bool,
+    /// The file as it is now, for a preview to diff against.
+    pub before: String,
+    /// The file as it would be, or as it now is. Equal to `before` when
+    /// `changed` is false.
+    pub after: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<Diagnostic>,
 }

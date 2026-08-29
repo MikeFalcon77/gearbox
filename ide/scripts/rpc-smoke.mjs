@@ -67,8 +67,11 @@ try {
   check(refused !== null, "catalogue/load before initialize is refused");
   check(refused?.code === -32050, `refusal carries the application code (got ${refused?.code})`);
 
+  // Deliberately *without* write capability first: read-only is the default the
+  // requirement asks for, and the refusal below is what proves it.
   const init = await connection.sendRequest("initialize", { roots: [root] });
   check(init.server_info?.name === "gearbox", "initialize returns serverInfo");
+  check(init.capabilities.writes === false, "writes are absent until a client asks");
   check(init.capabilities?.staged_catalogue === true, "staged loading is advertised");
   check(
     init.capabilities?.resolve === true,
@@ -187,6 +190,84 @@ try {
     again.canonical === locks.get("dev").canonical,
     "the same profile resolved twice writes byte-identical text",
   );
+
+  // --- editing a description, and the two gates in front of it ---------------
+  //
+  // `cpt-gearbox-fr-rpc-writes-opt-in`: "The system MUST refuse every
+  // filesystem-mutating RPC method unless the client declared write capability
+  // during initialization, and MUST reject any path outside the declared
+  // workspace or source roots."
+  let refusedWithoutCapability = null;
+  try {
+    await connection.sendRequest("gearbox/product/addGear", {
+      path: product,
+      gear: "cluster",
+      source: "gears-rust",
+      dry_run: true,
+    });
+  } catch (e) {
+    refusedWithoutCapability = e.code;
+  }
+  check(
+    refusedWithoutCapability === -32055,
+    `a mutating method is refused without write capability (got ${refusedWithoutCapability})`,
+  );
+
+  // Now declare it. Re-initializing is the honest way to test both postures in
+  // one session: the capability is state the client set, so setting it again is
+  // the same code path a second client would take.
+  const writable = await connection.sendRequest("initialize", {
+    roots: [root],
+    // snake_case, like every other field on the wire (`server_info`,
+    // `staged_catalogue`). ts-rs does not rename, so the Rust field name *is*
+    // the wire name.
+    allow_writes: true,
+    workspace: repo,
+  });
+  check(writable.capabilities.writes === true, "declared write capability is echoed back");
+
+  const outside = await (async () => {
+    try {
+      await connection.sendRequest("gearbox/product/addGear", {
+        path: "/etc/hosts",
+        gear: "cluster",
+        source: "gears-rust",
+        dry_run: true,
+      });
+      return null;
+    } catch (e) {
+      return e;
+    }
+  })();
+  check(outside?.code === -32056, "a path outside the workspace is rejected");
+  check(
+    /not a `.gdl` description/.test(outside?.message ?? ""),
+    "and the refusal says why rather than just saying no",
+  );
+
+  const preview = await connection.sendRequest("gearbox/product/addGear", {
+    path: product,
+    gear: "cluster",
+    source: "gears-rust",
+    dry_run: true,
+  });
+  check(preview.changed === true, "a dry run reports that the description would change");
+  check(preview.written === false, "a dry run writes nothing");
+  check(
+    preview.after.split("\n").length === preview.before.split("\n").length + 1,
+    "the change is one line",
+  );
+  const commentsBefore = preview.before.split("\n").filter((l) => l.trim().startsWith("#")).length;
+  const commentsAfter = preview.after.split("\n").filter((l) => l.trim().startsWith("#")).length;
+  check(commentsAfter === commentsBefore, `every comment survives (${commentsBefore})`);
+
+  const already = await connection.sendRequest("gearbox/product/addGear", {
+    path: product,
+    gear: "api-gateway",
+    source: "gears-rust",
+    dry_run: true,
+  });
+  check(already.changed === false, "adding a gear the product already names changes nothing");
 
   const validated = await connection.sendRequest("gearbox/validate", { product });
   check(validated.errors === 0, "the real product validates clean over the wire");

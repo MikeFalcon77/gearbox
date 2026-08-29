@@ -7,4 +7,12 @@
  * that to say "needs the resolver" rather than rendering an empty panel that
  * looks like a bug.
  */
-export type Capabilities = { catalogue: boolean, staged_catalogue: boolean, resolve: boolean, generate: boolean, };
+export type Capabilities = { catalogue: boolean, staged_catalogue: boolean, resolve: boolean, generate: boolean, 
+/**
+ * Whether *this session* may change files.
+ *
+ * Reflects back what the client declared in `InitializeParams`, not a
+ * property of the build. A client that forgot to ask can therefore see that
+ * it forgot, instead of discovering it from a refusal later.
+ */
+writes: boolean, };

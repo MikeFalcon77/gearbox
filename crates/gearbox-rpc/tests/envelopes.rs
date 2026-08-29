@@ -39,10 +39,11 @@ fn capabilities_report_what_is_absent_rather_than_omitting_it() {
         staged_catalogue: true,
         resolve: false,
         generate: false,
+        writes: false,
     })
     .unwrap();
 
-    for key in ["catalogue", "staged_catalogue", "resolve", "generate"] {
+    for key in ["catalogue", "staged_catalogue", "resolve", "generate", "writes"] {
         assert!(json.get(key).is_some(), "`{key}` must be present");
     }
     assert_eq!(json["resolve"], serde_json::json!(false));

@@ -5,4 +5,34 @@ export type InitializeParams = {
  * Source roots to scan. Absolute, or relative to the server's working
  * directory.
  */
-roots: Array<string>, };
+roots: Array<string>, 
+/**
+ * Whether this client may ask the server to change files.
+ *
+ * Declared by the client, defaulting to `false`, and every mutating method
+ * is refused until it is `true`
+ * (`cpt-gearbox-fr-rpc-writes-opt-in`): "The API's first clients are an
+ * editor and an autonomous agent. Read-only by default is the only safe
+ * posture."
+ *
+ * A declaration rather than a negotiation. The server has no way to judge
+ * whether a caller *should* be allowed to write, so it does not pretend to:
+ * it records what was claimed and refuses everything not claimed, which
+ * makes a client that never asks for writes incapable of making one by
+ * accident.
+ */
+allow_writes: boolean, 
+/**
+ * The directory writes may touch, beyond the source roots.
+ *
+ * `cpt-gearbox-fr-rpc-writes-opt-in` requires rejecting "any path outside
+ * the declared workspace or source roots", and a product description lives
+ * in neither: it sits beside the products, not inside a *gear* source root.
+ * So the workspace is declared too, by the client that knows where it is.
+ *
+ * Deliberately not the server's working directory, which was the first
+ * attempt: the cwd of a process is not a boundary anybody declared, and
+ * treating it as one means the permitted set changes with how the server
+ * happened to be launched.
+ */
+workspace?: string | null, };

@@ -851,6 +851,7 @@ name = "gearbox-rpc"
 version = "0.1.0"
 dependencies = [
  "gearbox-engine",
+ "gearbox-gdl",
  "gearbox-ir",
  "gearbox-lock",
  "gearbox-rpc",

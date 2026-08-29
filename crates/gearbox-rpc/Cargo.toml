@@ -12,6 +12,9 @@ workspace = true
 
 [dependencies]
 gearbox-engine.workspace = true
+# Editing a description is the business of the crate that owns the parser: the
+# edit is placed at a span the Starlark AST reports, and nothing else has one.
+gearbox-gdl.workspace = true
 gearbox-ir.workspace = true
 # The one function that decides the lock's bytes. Depended on directly rather
 # than reached through the engine, because a client must never render its own
