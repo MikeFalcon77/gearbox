@@ -10,7 +10,7 @@
     reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
 )]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::*;
 
@@ -109,8 +109,7 @@ fn the_real_tree_agrees_with_what_the_descriptions_declare() {
     // The baseline: 25 `cargo(...)` blocks across 14 descriptions, all correct.
     // This asserts the projection reproduces the two cases the tree contains --
     // explicit `[lib]` for the platform gears, derived for the examples.
-    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../gears-rust");
-    let Ok(base) = base.canonicalize() else {
+    let Some(base) = crate::test_corpus::corpus_root() else {
         eprintln!("skipping: ../gears-rust not present");
         return;
     };

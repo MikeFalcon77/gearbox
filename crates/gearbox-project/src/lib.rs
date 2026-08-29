@@ -25,6 +25,11 @@ pub mod plugin;
 pub mod profile;
 pub mod scan;
 
+// Test-only, and declared here because six test modules used to duplicate a
+// brittle path into the real gear tree.
+#[cfg(test)]
+mod test_corpus;
+
 pub use attribute::{AttributeSite, LocateError, gear_attribute_sites, locate_gear_attribute};
 pub use cluster::{
     ClusterProjectionError, ProjectedClusterProvider, SdkDefaultRule, project_backend_capabilities,

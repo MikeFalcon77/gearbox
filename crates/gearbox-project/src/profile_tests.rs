@@ -11,7 +11,7 @@
     reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
 )]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::*;
 
@@ -25,11 +25,7 @@ fn file(src: &str) -> RustFile {
 
 /// Parse a single file from the sibling checkout, if present.
 fn tree_file(rel: &str) -> Option<RustFile> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../gears-rust")
-        .join(rel)
-        .canonicalize()
-        .ok()?;
+    let path = crate::test_corpus::corpus(rel)?;
     let text = std::fs::read_to_string(&path).ok()?;
     Some(RustFile {
         path,

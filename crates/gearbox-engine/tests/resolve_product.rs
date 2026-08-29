@@ -22,11 +22,20 @@ use gearbox_ir::{
 };
 
 fn gears_rust() -> Option<PathBuf> {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../gears-rust")
-        .canonicalize()
-        .ok()
-        .filter(|p| p.join("gears").is_dir())
+    // Walks up instead of counting `..`, and the difference is not cosmetic.
+    // `CARGO_MANIFEST_DIR/../../../gears-rust` is the sibling of the *repository*
+    // root, so from a git worktree -- `.claude/worktrees/<name>/crates/...` -- it
+    // resolved to nothing. Every real-tree test then skipped, printed a reason
+    // nobody reads, and the suite went green having touched none of the corpus.
+    // An agent working in a worktree got that silently.
+    let mut dir: &Path = Path::new(env!("CARGO_MANIFEST_DIR"));
+    loop {
+        let candidate = dir.join("gears-rust");
+        if candidate.join("gears").is_dir() {
+            return candidate.canonicalize().ok();
+        }
+        dir = dir.parent()?;
+    }
 }
 
 fn fixtures() -> Option<(Catalogue, ProductIntent)> {

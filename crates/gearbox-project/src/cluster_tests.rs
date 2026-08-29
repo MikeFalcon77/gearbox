@@ -10,7 +10,7 @@
     reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
 )]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::*;
 use crate::scan::scan_crate;
@@ -25,19 +25,12 @@ fn file(src: &str) -> RustFile {
 
 /// The plugin crate directories, when the sibling checkout is present.
 fn plugin(name: &str) -> Option<Vec<RustFile>> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../gears-rust/gears/system/cluster/plugins")
-        .join(name)
-        .canonicalize()
-        .ok()?;
+    let dir = crate::test_corpus::corpus(&format!("gears/system/cluster/plugins/{name}"))?;
     scan_crate(&dir).ok()
 }
 
 fn cluster_crate() -> Option<Vec<RustFile>> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../gears-rust/gears/system/cluster/cluster")
-        .canonicalize()
-        .ok()?;
+    let dir = crate::test_corpus::corpus("gears/system/cluster/cluster")?;
     scan_crate(&dir).ok()
 }
 

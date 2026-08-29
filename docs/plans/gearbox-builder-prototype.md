@@ -655,8 +655,12 @@ file = "examples/toolkit/api-contracts/api-contracts-consumer/src/gear.rs"
 
 Every generator returns a `FileSet` of `FileEntry { path, bytes, kind, ownership }`.
 `gearbox-engine::apply_generate` is the only writer: `Generated` → overwrite; `GeneratedOnce` →
-write if absent; `OperatorOwned` → 3-way merge against a base cached in `.gearbox/<product>/.base/`
-using `similar`, conflict → GBX0701 and leave the file untouched. Output root
+write if absent; `OperatorOwned` → 3-way merge against a base cached in `.gearbox/<product>/.base/`,
+conflict → GBX0701 and leave the file untouched. **`similar` has no three-way merge** -- it is a
+diffing library, and the reconciliation is `gearbox-engine/src/generate/merge3.rs`, which uses
+`similar` for the two line diffs and decides the policy itself. That policy never emits conflict
+markers: a `values.yaml` containing `<<<<<<<` is a file `helm` can no longer parse, so a merge that
+"succeeded" by writing markers would have destroyed the artefact it was protecting. Output root
 `.gearbox/<product>/<profile>/`. **Composition output is never written into `gears-rust`.**
 
 **Scaffolding a new gear or plugin reuses this writer and adds no vocabulary.** A new crate consists
@@ -753,7 +757,7 @@ must not read absence of a field on a pending entry as absence of the fact.
 `gearbox/lock/{read,write,diff}`, `gearbox/generate/{plan,preview,apply}`, `gearbox/validate`,
 `gearbox/graph`, `gearbox/watch/{start,stop}`.
 `gearbox/generate/plan` returns `FilePlan[] = { path, action: create|update|unchanged|conflict,
-ownership, sha256, previewAvailable }`.
+ownership, kind, blake3, previewAvailable }`.
 `gearbox/graph` returns a `GraphDto { nodes: {id, kind, label, group?, badges[]}[],
 edges: {from, to, kind, label?, style: solid|dashed}[] }` for views `deps|contracts|processes|cluster`.
 
@@ -1056,16 +1060,46 @@ workspace-member entries. Nothing else in that repo changes.
 | # | Deliverable | Verification | Parallel |
 |---|---|---|---|
 | **M0** | **PRD** (§14) — short, `docs/PRD.md` | reviewed against `gears-rust/docs/checklists/PRD.md`; every FR/NFR has an ID and a p-tier; every acceptance criterion maps to a §12 step | — |
-| **M1** | Workspace + IR + lock | `cargo test -p gearbox-ir -p gearbox-lock` incl. a proptest asserting byte-stability over 1000 shuffled input orderings; `make ts && git diff --exit-code` | — |
-| **M2** | GDL evaluator | `gearbox catalogue --root ../gears-rust --format json \| jq '.gears \| length'` == 9; a fixture per GBX01xx code; dialect + blacklist + `load()` sandbox tests | M3 |
+| **M1** — **done** | Workspace + IR + lock | `cargo test -p gearbox-ir -p gearbox-lock` incl. a proptest asserting byte-stability over 1000 shuffled input orderings; `make ts && git diff --exit-code` | — |
+| **M2** — **done** | GDL evaluator | `gearbox catalogue --root ../gears-rust --format json \| jq '.gears \| length'` == 14; a fixture per GBX01xx code; dialect + blacklist + `load()` sandbox tests | M3 |
 | **M3** — **done** | `gearbox validate` | `gearbox validate --root ../gears-rust` → 0 errors, and with `--product` → 0 errors on the real product; GBX0208 and GBX0301 each proved against the real tree (`bss-ledger` is undescribed, `api-gatewey` is a typo); GBX0209 proved on temporary trees because the repository has no wrong declaration to point at; GBX0207 retired with a differential test in its place | M2, M8a |
-| **M4** | Resolver + explain + lock | all three profiles diff clean against `fixtures/*/product.lock`; every GBX03xx–06xx code reachable; determinism loop | M8a |
-| **M5** | Crate + config generators; **embedded runs** | acceptance §12 step 2 in full | — |
+| **M4** — **done** | Resolver + explain + lock | all three profiles diff clean against `fixtures/*/product.lock`; every GBX03xx–06xx code reachable; determinism loop | M8a |
+| **M5** — **done** | Crate + config generators; **embedded runs** | acceptance §12 step 2 in full | — |
 | **M6** | Host-workers | new gear lands and passes its own test *by hand first*; then generated worker crate; host spawns worker; remote REST binding resolves via directory | M7 |
 | **M7** | Docker + Helm + `values.schema.json` | acceptance §12 step 4 in full | M6 |
 | **M8a** — **done** | JSON-RPC + TS types | `node ide/scripts/rpc-smoke.mjs` drives initialize → catalogue over real framing, 15/15; `cargo test -p gearbox-rpc`; stdout carries nothing but JSON-RPC | from M1 |
 | **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Gear detail, the co-location Graph, Product, Explain and Lock are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Only Generate is missing, and it is the one still waiting on the engine | after M4 + M8a |
 | **M9** | **DESIGN + ADRs** (§14) — written *after* the prototype runs | reviewed against `docs/checklists/{DESIGN,ADR}.md`; every claim cites either a `gearbox-builder` symbol or a `gears-rust` `file:line`; every §13 gap has a home | — |
+
+**Three things M5 left behind, recorded here because nothing else covers them.**
+
+- **`ResolvedProcess.cargo_features` is written and never read.** `partition.rs` fills it and no
+  generator consults it, so it is dead weight in every lock — and its shape is wrong anyway: a flat
+  `BTreeSet<String>` across every crate in the process, when a Cargo feature belongs to a specific
+  dependency. Two crates asking for a feature of the same name are indistinguishable in it. Either
+  it becomes per-crate and something uses it, or it goes; leaving it is the one option that costs
+  lock bytes for nothing.
+- **The real-tree tests skipped silently from a git worktree — fixed, and the workaround that hid it
+  is gone.** They located the corpus as `$CARGO_MANIFEST_DIR/../../../gears-rust`, the sibling of the
+  *repository* root, which from `.claude/worktrees/<name>/crates/…` resolves to nothing. An agent in
+  a worktree ran the suite, saw green, and had exercised none of the real corpus.
+
+  What made this hard to see is that it *appeared* to work: someone had created
+  `.claude/worktrees/gears-rust` as a symlink to the real checkout, so the counted `..` happened to
+  land on it. A machine-local symlink, invisible to git, standing in for a path the code got wrong.
+  Demonstrated by moving it aside: at the old code the test printed
+  `skipping: ../gears-rust not present`; with the locator fixed it ran.
+
+  The locator now walks up until it finds a `gears-rust` containing `gears/`, which works from either
+  layout and stops at the filesystem root instead of guessing a depth. It is one function in
+  `gearbox-project` (`src/test_corpus.rs`, used by six test modules) and the same body inlined in the
+  ten `gearbox-engine` integration tests, because those cannot share a module without each declaring
+  one. **That duplication is the remaining debt here** — ten identical copies, correct but repeated.
+  The symlink has been deleted; nothing needs it.
+- **Open question, and it needs an ADR rather than a decision in passing: may a product draw gears
+  from more than one source root?** `ProductIntent.sources` is a map, so the IR says yes, and nothing
+  yet says what it means for two roots to offer the same `GearId`, or which root wins, or whether
+  that is an error. The generators assumed one root without saying so.
 
 Critical path M0 → M1 → M2 → M4 → M5 → M6 → M9. M8a needs only types, so its widgets can be
 stubbed against `fixtures/*/product.lock` until M4 lands.
@@ -1121,11 +1155,24 @@ locator does real work rather than defaulting its way to a right answer.
 
 **Step 2 — embedded.** Resolve + generate + `cargo build --bin gbx-api-gateway`, then the oracles:
 ```bash
-./target/debug/gbx-api-gateway --list-registered-gears | cut -f1 \
-  | diff - <(gearbox lock gears --process api-gateway --order topo)
+./target/debug/gbx-api-gateway --list-registered-gears | sort \
+  | diff - <(gearbox lock gears --process api-gateway --order name --with-deps)
 ./target/debug/gbx-api-gateway --config config/api-gateway.yaml --dump-gears-config-yaml \
   | diff - fixtures/dev/effective-gears.yaml
 ```
+**The first oracle used to be flaky, and the flakiness was the plan's, not the code's.** It diffed
+against `--order topo`, but the runtime's order is *a* topological order and not a canonical one:
+`GearRegistry::build_dependency_graph` seeds Kahn's algorithm from `self.core.keys()` on a `HashMap`
+(`gears-rust/libs/toolkit/src/registry.rs:552`), so two runs of the same binary legitimately disagree
+about gears that do not depend on one another. Demonstrated: two consecutive runs of
+`gbx-api-gateway` gave `types-registry api-contracts grpc-hub …` and
+`api-contracts grpc-hub types-registry …`. The generated `main.rs` already says so in the doc comment
+above `list_registered_gears` -- "Compare sorted output, not this order" -- so the plan was
+contradicting the generator it was checking.
+
+`--order name --with-deps` is not merely the stable form, it is the **stronger** one: both sides emit
+`name<TAB>deps`, so the comparison covers the dependency edges the linker produced and not just the
+set of names. Verified stable over three consecutive runs.
 Run it; assert both REST surfaces answer and `WireOutcome::Local` appears for all three bindings
 with no readiness gate.
 
@@ -1151,7 +1198,7 @@ a non-zero exit, no lock, and both `GBX0502` (no provider satisfies `{linearizab
 — with the per-provider ✔/✘ table and the `CacheFeatures::new(false)` citation) and `GBX0503`
 (`standalone` is process-local but `audit` has replicas=2).
 
-**Step 6 — determinism.** Resolve three times → one distinct sha256. Apply generate twice →
+**Step 6 — determinism.** Resolve three times → one distinct `blake3`. Apply generate twice →
 `git status --porcelain` empty the second time.
 
 **Step 7 — gear src unchanged (the whole point).**

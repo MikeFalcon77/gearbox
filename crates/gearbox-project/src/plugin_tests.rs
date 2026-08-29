@@ -9,7 +9,7 @@
     reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
 )]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::*;
 use crate::scan::scan_crate;
@@ -23,11 +23,7 @@ fn file(src: &str) -> RustFile {
 }
 
 fn tree(rel: &str) -> Option<Vec<RustFile>> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../gears-rust")
-        .join(rel)
-        .canonicalize()
-        .ok()?;
+    let dir = crate::test_corpus::corpus(rel)?;
     scan_crate(&dir).ok()
 }
 

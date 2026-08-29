@@ -11,7 +11,7 @@
     reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
 )]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use gearbox_ir::Transport;
 
@@ -39,10 +39,7 @@ fn transports_of(contracts: &[ProjectedContract], ident: &str) -> Vec<&'static s
 
 /// The api-contracts SDK from the sibling checkout, if present.
 fn api_contracts_sdk() -> Option<Vec<RustFile>> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../gears-rust/examples/toolkit/api-contracts/api-contracts-sdk")
-        .canonicalize()
-        .ok()?;
+    let dir = crate::test_corpus::corpus("examples/toolkit/api-contracts/api-contracts-sdk")?;
     scan_crate(&dir).ok()
 }
 
@@ -257,9 +254,7 @@ fn the_real_provider_offers_less_than_the_contract_allows() {
         "the contract can support gRPC"
     );
 
-    let gear = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../gears-rust/examples/toolkit/api-contracts/api-contracts")
-        .canonicalize()
+    let gear = crate::test_corpus::corpus("examples/toolkit/api-contracts/api-contracts")
         .expect("gear crate");
     let gear_files = scan_crate(&gear).expect("scan");
     let attrs: Vec<syn::Attribute> = gear_files
