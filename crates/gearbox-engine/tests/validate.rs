@@ -89,18 +89,27 @@ fn product_with(extra: &[&str]) -> Option<(tempdir::Dir, gearbox_ir::ProductInte
 /// A minimal temporary directory that cleans itself up.
 mod tempdir {
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Distinct per call, which a clock reading is not.
+    ///
+    /// The name used to end in `SystemTime::now().as_nanos()`. Three tests in this
+    /// file build a temp product concurrently, and two `now()` calls in the same
+    /// tick produced *one* directory: one test then read the `product.gdl` the
+    /// other had written, so a test asserting zero errors saw the deliberate
+    /// `api-gatewey` typo belonging to its neighbour. It surfaced when unrelated
+    /// work changed how long a catalogue load takes, which is how a race
+    /// announces itself -- by moving.
+    static NTH: AtomicUsize = AtomicUsize::new(0);
 
     pub struct Dir(PathBuf);
 
     impl Dir {
         pub fn new(label: &str) -> Self {
             let dir = std::env::temp_dir().join(format!(
-                "{label}-{}-{:?}",
+                "{label}-{}-{}",
                 std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
+                NTH.fetch_add(1, Ordering::Relaxed),
             ));
             std::fs::create_dir_all(&dir).unwrap();
             Self(dir)

@@ -109,19 +109,148 @@ impl SourceRoot {
         })
     }
 
-    /// The `ResolvedSource` this root becomes in a catalogue or lock.
+    /// The `ResolvedSource` this root becomes, before anything has been read.
     ///
-    /// The digest is left as `path:<location>` for now. A real content or commit
-    /// digest is what makes a lock reproducible rather than merely repeatable,
-    /// and it belongs with the resolver that writes the lock -- recording a
-    /// fake one here would be worse than recording an obviously provisional one.
+    /// `digest` is [`DIGEST_UNREAD`], because nothing has been read yet and a
+    /// digest is a statement about content. The catalogue loader replaces it with
+    /// [`content_digest`] once discovery has found the descriptions -- the reader
+    /// is the only thing in a position to say what was read.
+    ///
+    /// `location` is the operator's own spelling, which is what a person reading a
+    /// catalogue wants. A **lock** needs the opposite: see [`lock_sources`], which
+    /// rewrites it relative to the description so that two clients spelling the
+    /// same root differently still produce the same bytes.
     #[must_use]
     pub fn to_resolved(&self) -> ResolvedSource {
         ResolvedSource {
             id: self.id.clone(),
             kind: SourceKind::Path,
             location: self.declared_location.clone(),
-            digest: format!("path:{}", self.declared_location),
+            digest: DIGEST_UNREAD.to_owned(),
         }
+    }
+}
+
+/// The digest of a source nothing has read yet.
+///
+/// Named rather than spelled inline so that a lock carrying it is recognisable as
+/// a lock assembled without a catalogue scan, which is a bug rather than a state
+/// worth supporting.
+pub const DIGEST_UNREAD: &str = "unread";
+
+/// A digest of the descriptions actually read under a source root.
+///
+/// This is the field's documented job -- "what was actually read... what makes a
+/// lock reproducible rather than merely repeatable" -- and it used to be
+/// `path:<location>`, the caller's own spelling of the path. That made
+/// `lock_hash` depend on *how the root was named*: the CLI run from the
+/// repository declared `../gears-rust` and Studio's backend declared an absolute
+/// path, so one product and one profile serialised to two different locks. A hash
+/// whose job is to answer "did anything change" cannot depend on who asked.
+///
+/// Over paths **and** bytes, both sorted: a description that moves is a change,
+/// and so is one that is edited in place. Relative paths, so the digest does not
+/// carry the machine it was computed on. Lengths are written before each field so
+/// that no rearrangement of the same bytes can collide -- without them,
+/// (`ab`, `c`) and (`a`, `bc`) hash alike.
+///
+/// Unreadable files are folded in by name with a marker instead of being skipped.
+/// Skipping would make a description that cannot be read indistinguishable from
+/// one that is absent, and the catalogue reports that case as a diagnostic
+/// separately.
+#[must_use]
+pub fn content_digest(root: &Path, files: &[PathBuf]) -> String {
+    let mut entries: Vec<(String, Option<Vec<u8>>)> = files
+        .iter()
+        .map(|file| {
+            let relative = file
+                .strip_prefix(root)
+                .unwrap_or(file)
+                .to_string_lossy()
+                // `\` on Windows would otherwise give a different digest for the
+                // same tree.
+                .replace('\\', "/");
+            (relative, std::fs::read(file).ok())
+        })
+        .collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut hasher = blake3::Hasher::new();
+    for (path, bytes) in &entries {
+        hasher.update(&u64::try_from(path.len()).unwrap_or(u64::MAX).to_le_bytes());
+        hasher.update(path.as_bytes());
+        match bytes {
+            Some(bytes) => {
+                hasher.update(&u64::try_from(bytes.len()).unwrap_or(u64::MAX).to_le_bytes());
+                hasher.update(bytes);
+            }
+            None => {
+                hasher.update(b"\xffunreadable");
+            }
+        }
+    }
+    format!("blake3:{}", hasher.finalize().to_hex())
+}
+
+/// The `sources` map a lock records.
+///
+/// Two differences from what a catalogue carries, and both exist so that the same
+/// product resolved by two clients produces the same bytes:
+///
+/// * **`location` is relative to the description**, not as declared. A lock is
+///   about one `product.gdl` and is written beside it, so a path relative to that
+///   description means the same thing on every machine -- while an absolute path
+///   means nothing on any other, and a path relative to a working directory
+///   depends on where the command was run.
+/// * **`digest` comes from the catalogue**, which is the thing that read the
+///   files. Recomputing it here would walk the tree a second time and could
+///   disagree with the catalogue the lock was resolved against.
+///
+/// A root the catalogue never scanned keeps [`DIGEST_UNREAD`]; that is visible in
+/// the lock rather than papered over.
+#[must_use]
+pub fn lock_sources(
+    roots: &[SourceRoot],
+    catalogue: &gearbox_ir::Catalogue,
+    product_file: &Path,
+) -> std::collections::BTreeMap<gearbox_ir::SourceId, ResolvedSource> {
+    let base = product_file.parent().unwrap_or(Path::new("."));
+    let base = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
+
+    roots
+        .iter()
+        .map(|root| {
+            let mut resolved = root.to_resolved();
+            resolved.location = relative_to(&base, &root.root);
+            if let Some(scanned) = catalogue.sources.get(&root.id) {
+                resolved.digest.clone_from(&scanned.digest);
+            }
+            (root.id.clone(), resolved)
+        })
+        .collect()
+}
+
+/// `target` expressed from `base`, with `..` for each level up.
+///
+/// Hand-rolled rather than pulled in as a dependency: the inputs are two
+/// canonical absolute paths, which is the only case this has to be right for.
+fn relative_to(base: &Path, target: &Path) -> String {
+    let mut base_parts = base.components().peekable();
+    let mut target_parts = target.components().peekable();
+    while base_parts.peek().is_some() && base_parts.peek() == target_parts.peek() {
+        base_parts.next();
+        target_parts.next();
+    }
+    let up = base_parts.count();
+    let down: Vec<String> = target_parts
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+
+    let mut parts: Vec<String> = std::iter::repeat_n("..".to_owned(), up).collect();
+    parts.extend(down);
+    if parts.is_empty() {
+        ".".to_owned()
+    } else {
+        parts.join("/")
     }
 }

@@ -24,16 +24,31 @@ import {
 
 const REPO = join(__dirname, "../../..");
 /**
- * Where Studio generates, asserted below rather than assumed.
+ * Where Studio generates: the engine's own default, asserted rather than assumed.
  *
- * Studio writes `.gearbox/studio/` rather than the engine default
- * `.gearbox/<product>/<profile>` because `product.lock` is not client-independent
- * yet -- see `GenerateService.outRoot`. This constant used to say `conformance`,
- * which meant the test could not tell "Studio writes where it should" from
- * "Studio writes where the test looks". The path is now a checked claim.
+ * This was `.gearbox/studio/` while `product.lock` still depended on how the
+ * client spelled its source root -- one shared tree would have meant the CLI and
+ * Studio rewriting each other's lock. The digest is content-based now, so both
+ * produce byte-identical trees and one tree serves both. Asserting the path keeps
+ * that a claim: if Studio ever invents its own root again, this fails.
  */
-const GENERATE_OUT = join(REPO, ".gearbox/studio/payments-demo/dev");
-const GENERATE_OUT_SUFFIX = ".gearbox/studio/payments-demo/dev";
+const GENERATE_OUT = join(REPO, ".gearbox/payments-demo/dev");
+const GENERATE_OUT_SUFFIX = ".gearbox/payments-demo/dev";
+
+/**
+ * One generated file this test may delete and have regenerated.
+ *
+ * A config file rather than a `.rs`: it is `Ownership::Generated`, so removing it
+ * makes the plan say `create`, and restoring it cannot invalidate an incremental
+ * Rust build the way touching a source file would.
+ *
+ * Deleting one file rather than clearing the tree, which is what this test used
+ * to do. The tree is now the one §12 step 2 builds and runs, and it carries
+ * gigabytes of `target/`; a suite that wipes it costs a rebuild every run. One
+ * file is also the stronger assertion -- it proves the plan is accurate per file
+ * rather than merely non-empty.
+ */
+const REGENERABLE = "config/api-gateway.yaml";
 
 const STUDIO_SRC = join(__dirname, "../../gearbox-studio/src");
 
@@ -211,7 +226,11 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
   test("it previews and applies generation [PRD cpt-gearbox-fr-generate-preview]", async ({
     studio,
   }) => {
-    rmSync(GENERATE_OUT, { recursive: true, force: true });
+    // Remove one generated file so the plan has something to create. Without
+    // this the tree is already current and every line reads `unchanged`, which
+    // proves nothing about applying.
+    rmSync(join(GENERATE_OUT, REGENERABLE), { force: true });
+
     await openProduct(studio.page, "dev");
     await openGenerate(studio.page);
     await expect(studio.page.locator("[data-plan-path]").first()).toBeVisible({
@@ -220,32 +239,36 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
     await expect(studio.page.locator(".gbx-generate")).toBeVisible();
 
     // The output root is part of the claim, not an implementation detail the test
-    // may quietly follow: a Studio apply must land in Studio's own tree and not
-    // in the one `§12` step 2 builds.
+    // may quietly follow.
     await expect(studio.page.locator(".gbx-generate")).toHaveAttribute(
       "data-out-root",
       new RegExp(`${GENERATE_OUT_SUFFIX.replace(/\./g, "\\.")}$`),
     );
 
+    const line = studio.page.locator(`[data-plan-path="${REGENERABLE}"]`);
+    await expect(line).toHaveAttribute("data-action", "create");
+
     const porcelain = (): string =>
       execFileSync("git", ["status", "--porcelain"], { cwd: REPO, encoding: "utf8" });
     const before = porcelain();
     expect(
-      existsSync(join(GENERATE_OUT, "processes/api-gateway/src/registered_gears.rs")),
-      "the preview must not have written the tree",
+      existsSync(join(GENERATE_OUT, REGENERABLE)),
+      "the preview must not have written the file it plans to create",
     ).toBe(false);
     expect(porcelain(), "a preview must not change the git tree").toBe(before);
 
     await studio.page.locator("[data-apply]").click();
     await expect(studio.page.locator("[data-written-count]")).toBeVisible({ timeout: 60_000 });
-    const first = Number(
+    const written = Number(
       await studio.page.locator("[data-written-count]").getAttribute("data-written-count"),
     );
-    expect(first).toBeGreaterThan(0);
-    expect(
-      existsSync(join(GENERATE_OUT, "processes/api-gateway/src/registered_gears.rs")),
-    ).toBe(true);
+    expect(written).toBeGreaterThan(0);
+    expect(existsSync(join(GENERATE_OUT, REGENERABLE))).toBe(true);
+    await expect(line).toHaveAttribute("data-action", "create");
 
+    // Applying again writes nothing and every line reads `unchanged`. Not a
+    // nicety: ADR-0010 requires generation to be idempotent by content, and this
+    // is the only place that is observable from the interface.
     await studio.page.locator("[data-apply]").click();
     await expect(studio.page.locator("[data-written-count]")).toHaveAttribute(
       "data-written-count",

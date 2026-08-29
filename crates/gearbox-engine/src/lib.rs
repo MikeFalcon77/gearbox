@@ -33,4 +33,6 @@ pub use plugin::PluginProjection;
 pub use plugin_select::{PointResolution, check as check_plugins};
 pub use product::{ProductScan, load_product};
 pub use scans::CrateScans;
-pub use source::{SourceRoot, SourceRootError, default_source_ids};
+pub use source::{
+    DIGEST_UNREAD, SourceRoot, SourceRootError, content_digest, default_source_ids, lock_sources,
+};

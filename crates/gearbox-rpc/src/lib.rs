@@ -395,13 +395,15 @@ fn resolve_once(
     };
 
     // Built before the catalogue borrow, not after: `catalogue_for` needs
-    // `&mut state` to fill the cache, and the sources read `state.roots`.
-    let sources = state
-        .roots
-        .iter()
-        .map(|root| (root.id.clone(), root.to_resolved()))
-        .collect();
+    // The lock's `sources` need the catalogue *and* the roots at once: the digests
+    // come from the catalogue, which is the thing that read the descriptions,
+    // while the paths come from the roots. `catalogue_for` borrows `&mut state`
+    // for as long as its result lives, so the roots are copied out first -- a
+    // `SourceRoot` is an id, a path and a string, and there are one or two of
+    // them.
+    let roots = state.roots.clone();
     let catalogue = catalogue_for(state);
+    let sources = gearbox_engine::lock_sources(&roots, catalogue, &path);
     let resolution = gearbox_engine::resolve::resolve_at(catalogue, &intent, &profile, Some(&path));
     let product =
         gearbox_engine::resolve::product::assemble(catalogue, &intent, &resolution, sources);

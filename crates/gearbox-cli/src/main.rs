@@ -634,10 +634,7 @@ fn resolve_product(
 
     let resolution =
         gearbox_engine::resolve::resolve_at(&scan.catalogue, &intent, &profile, Some(product_file));
-    let sources = opened
-        .iter()
-        .map(|root| (root.id.clone(), root.to_resolved()))
-        .collect();
+    let sources = gearbox_engine::lock_sources(&opened, &scan.catalogue, product_file);
     let resolved =
         gearbox_engine::resolve::product::assemble(&scan.catalogue, &intent, &resolution, sources);
 

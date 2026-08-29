@@ -156,6 +156,27 @@ pub fn load_catalogue_staged(
         }
     }
 
+    // The digest of each source, now that discovery knows what is under it.
+    //
+    // Here rather than in `SourceRoot::open`: a digest is a statement about
+    // content, and this is the first moment anything has looked. Doing it at
+    // `open` would also walk every root twice -- once to hash, once to discover --
+    // and would have to invent an answer for a root whose walk failed.
+    //
+    // Set even when the load is about to stop below, because a caller that
+    // stopped still holds a catalogue and its sources should not claim `unread`
+    // for a root that was in fact read.
+    for root in roots {
+        let under: Vec<PathBuf> = discovered
+            .iter()
+            .filter(|(r, _)| r.id == root.id)
+            .map(|(_, path)| path.clone())
+            .collect();
+        if let Some(source) = catalogue.sources.get_mut(&root.id) {
+            source.digest = crate::source::content_digest(&root.root, &under);
+        }
+    }
+
     let files: Vec<PathBuf> = discovered.iter().map(|(_, p)| p.clone()).collect();
     if on_event(LoadEvent::Discovered {
         total: discovered.len(),

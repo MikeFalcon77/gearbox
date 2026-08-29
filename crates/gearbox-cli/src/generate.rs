@@ -60,10 +60,7 @@ pub fn run(
         &profile,
         Some(&product_file),
     );
-    let sources = opened
-        .iter()
-        .map(|root| (root.id.clone(), root.to_resolved()))
-        .collect();
+    let sources = gearbox_engine::lock_sources(&opened, &scan.catalogue, &product_file);
     let lock =
         gearbox_engine::resolve::product::assemble(&scan.catalogue, &intent, &resolution, sources);
     diagnostics.extend(lock.diagnostics.as_slice().iter().cloned());
