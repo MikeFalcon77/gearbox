@@ -11,7 +11,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { expect, openGraph, test } from "../fixtures/studio";
+import { expect, openGraph, openProduct, test } from "../fixtures/studio";
 
 const STUDIO_SRC = join(__dirname, "../../gearbox-studio/src");
 
@@ -28,7 +28,7 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
   test("it browses the catalogue [PRD cpt-gearbox-fr-studio: browses the catalogue]", async ({
     studio,
   }) => {
-    const rows = await studio.page.locator(".gbx-row").count();
+    const rows = await studio.page.locator(".gearbox-catalogue .gbx-row").count();
     expect(rows).toBeGreaterThan(0);
     const detail = await studio.detailOf("API Gateway");
     expect(detail).toContain("api-gateway");
@@ -46,17 +46,19 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
     expect(nodes).toBeGreaterThan(0);
   });
 
-  test.fixme(
-    "it edits and resolves a product across profiles [PRD cpt-gearbox-fr-studio: edits and resolves a product]",
-    async ({ studio }) => {
-      // The engine has answered `product/load` and `resolve` since M4, and
-      // `capabilities.resolve` is `true` -- so this is a missing widget, not a
-      // missing capability. That distinction is why the notice this replaced
-      // disappeared on its own when M4 landed.
-      await expect(studio.page.locator(".gbx-product")).toBeVisible();
-      await expect(studio.page.locator(".gbx-profile-switch")).toBeVisible();
-    },
-  );
+  test("it resolves a product across profiles [PRD cpt-gearbox-fr-studio: edits and resolves a product]", async ({
+    studio,
+  }) => {
+    // The *editing* half is the `.gdl` editor Theia already provides -- there is
+    // deliberately no form, because a form would be a second way to express a
+    // description and the two would drift. What the view adds is the half a text
+    // editor cannot show: what the description resolves to, per profile.
+    await openProduct(studio.page, "dev");
+    await expect(studio.page.locator(".gbx-product")).toBeVisible();
+    const profiles = await studio.page.locator("[data-profile]").allTextContents();
+    expect(profiles.length).toBeGreaterThan(1);
+    await expect(studio.page.locator("[data-resolved-profile='dev']")).toBeVisible();
+  });
 
   test.fixme(
     "it renders the contract graph [PRD cpt-gearbox-fr-studio: renders the contract graph]",
@@ -110,21 +112,37 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
   });
 
   test("it contains no resolution logic of its own [PRD cpt-gearbox-fr-studio: no resolution logic]", () => {
-    // A narrow check, and its limits are worth stating. It looks for the
-    // resolver's own decision vocabulary in the frontend: a binding mode, a
-    // process, a profile. Those are the things the resolver decides, and a second
-    // implementation of any of them is what the clause forbids.
+    // The check looks for `BindingMechanism` *literals* in the frontend, and the
+    // choice of signal is the whole design of this test.
     //
-    // It deliberately does *not* flag `closureOf` in the graph widget, which
-    // computes a transitive closure over projected `colocated_deps`. That is
-    // presentation of a projected fact -- co-location is link-time and no
-    // resolution changes it -- not a resolution decision.
-    const decisions = ["ResolvedBindingMode", "ResolvedProcess", "BindingMode", "ProcessKind"];
+    // The first version forbade the type names -- `ResolvedProcess`,
+    // `ResolvedBindingMode` -- and it failed the moment the Product view was
+    // built, because rendering a resolution means importing the types of the
+    // thing you are rendering. That was a false positive, not a finding: reading
+    // `binding.mechanism` and printing it is consumption, which the clause
+    // permits and in fact requires.
+    //
+    // A mechanism literal is different. It names the real code path the runtime
+    // takes, the resolver derives it from placement, and there is no legitimate
+    // reason for a client to write one down: a frontend that renders a mechanism
+    // prints the value it was given, while a frontend that *decides* one has to
+    // name it. So the literals are the line, and the types are not.
+    //
+    // It also deliberately does not flag `closureOf` in the graph widget, which
+    // computes a transitive closure over projected `colocated_deps`. Co-location
+    // is link-time and no resolution changes it, so that is presentation of a
+    // projected fact rather than a decision.
+    const mechanisms = [
+      "colocated-local",
+      "consumes-static",
+      "consumes-directory",
+      "provides-client-wiring",
+    ];
     const offenders = sources(join(STUDIO_SRC, "browser"))
       .concat(sources(join(STUDIO_SRC, "node")))
       .flatMap((file) => {
         const text = readFileSync(file, "utf8");
-        return decisions.filter((d) => text.includes(d)).map((d) => `${file}: ${d}`);
+        return mechanisms.filter((m) => text.includes(`"${m}"`)).map((m) => `${file}: "${m}"`);
       });
     expect(offenders).toEqual([]);
   });

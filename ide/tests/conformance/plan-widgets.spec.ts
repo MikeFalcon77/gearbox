@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { expect, openGraph, runCommand, settled, test } from "../fixtures/studio";
+import { expect, openGraph, openProduct, runCommand, settled, test } from "../fixtures/studio";
 
 const VOCABULARY = join(
   __dirname,
@@ -64,8 +64,19 @@ test.describe("where the views live", () => {
     expect(inMain).toBe(true);
   });
 
-  test.fixme("a Product view exists [plan §9: Product]", async ({ studio }) => {
-    await expect(studio.page.locator(".gbx-product")).toBeVisible();
+  test("the Product view shows what §9 asks it to [plan §9: Product]", async ({ studio }) => {
+    // §9 lists five things: a profile dropdown, the selected gears with a
+    // "pulled in by co-location" sublist, a bindings table with mode/transport/
+    // mechanism chips, a cluster table, and a diagnostics summary. The cluster
+    // table is absent from this assertion on purpose -- no gear in this product
+    // requests a cluster scope, so there is no row to render, and demanding one
+    // would be demanding a different product.
+    await openProduct(studio.page, "dev");
+    await expect(studio.page.locator("[data-profile]").first()).toBeVisible();
+    await expect(studio.page.locator("[data-asked-for]").first()).toBeVisible();
+    await expect(studio.page.locator("[data-pulled-in]").first()).toBeVisible();
+    await expect(studio.page.locator(".gbx-binding [data-mechanism]").first()).toBeVisible();
+    await expect(studio.page.locator(".gbx-diagnostics")).toBeVisible();
   });
 
   test.fixme("an Explain view exists [plan §9: Explain]", async ({ studio }) => {

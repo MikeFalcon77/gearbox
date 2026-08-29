@@ -21,7 +21,7 @@ import type { ProductLoadResult } from "../common/generated/ProductLoadResult";
 import type { ResolveResult } from "../common/generated/ResolveResult";
 import type { ValidateResult } from "../common/generated/ValidateResult";
 import type { ProgressParams } from "../common/generated/ProgressParams";
-import { GearboxClient, GearboxService, method } from "../common/protocol";
+import { GearboxClient, GearboxService, ProductRef, method } from "../common/protocol";
 import { EngineHandle, spawnEngine } from "./gearbox-engine-process";
 
 /**
@@ -140,6 +140,32 @@ export class GearboxServiceImpl implements GearboxService {
       throw new Error("the engine is not running; reload the catalogue to start it");
     }
     return engine.request<CatalogueLoadResult>(method.CATALOGUE_LOAD, {}, LOAD_TIMEOUT_MS);
+  }
+
+  /**
+   * `products/<name>/product.gdl` under the repository root.
+   *
+   * One level deep and one fixed filename, deliberately: this is a picker, not a
+   * discovery mechanism, and a recursive walk would make the client's idea of
+   * "the products" differ from what anyone typed on a command line. A product
+   * outside this layout is still resolvable -- open it in the editor.
+   */
+  async listProducts(): Promise<ProductRef[]> {
+    const root = findRepoRoot(__dirname);
+    const dir = path.join(root, "products");
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      // No `products/` directory is an ordinary state, not a failure: a checkout
+      // that has none simply has nothing to offer.
+      return [];
+    }
+    return entries
+      .map((name) => path.join(dir, name, "product.gdl"))
+      .filter((candidate) => fs.existsSync(candidate))
+      .sort()
+      .map((candidate) => ({ path: candidate, label: path.relative(root, candidate) }));
   }
 
   async loadProduct(path: string): Promise<ProductLoadResult> {

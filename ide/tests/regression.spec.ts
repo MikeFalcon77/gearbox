@@ -15,7 +15,7 @@ test.describe("the panel is operable without a mouse", () => {
   // shape would pass here while a keyboard would not.
 
   test("a catalogue row can take focus", async ({ studio }) => {
-    await studio.page.locator(".gbx-row").first().focus();
+    await studio.page.locator(".gearbox-catalogue .gbx-row").first().focus();
     const focused = await studio.page.evaluate(() =>
       document.activeElement?.classList.contains("gbx-row"),
     );
@@ -28,7 +28,7 @@ test.describe("the panel is operable without a mouse", () => {
     // into the editor. Establishing the precondition here rather than relying on
     // what an earlier test left behind, since the read-only tests share one
     // loaded application.
-    await studio.page.locator(".gbx-row:not(.gbx-selected)").first().focus();
+    await studio.page.locator(".gearbox-catalogue .gbx-row:not(.gbx-selected)").first().focus();
     await studio.page.keyboard.press("Enter");
     const name = await studio.page.evaluate(() =>
       document.activeElement?.classList.contains("gbx-selected") === true

@@ -1,0 +1,380 @@
+// One product, resolved for one profile.
+//
+// The clause this answers is "edits and resolves a product across profiles"
+// (`cpt-gearbox-fr-studio`). The *editing* is the `.gdl` editor Theia already
+// gives us -- there is no form here on purpose, because a form would be a second
+// way to express a description and the two would drift. What the panel adds is
+// the half a text editor cannot show: what the description *resolves to*, and how
+// that answer differs between profiles.
+//
+// The profile switch is the centre of it. One description, three profiles, three
+// distinct locks -- and every difference visible without editing anything, which
+// is the property `profiles = [...]` as a data field exists to buy.
+
+import { ReactWidget } from "@theia/core/lib/browser";
+import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
+import React from "@theia/core/shared/react";
+
+import type { Choice } from "../../common/generated/Choice";
+import type { ClusterResolution } from "../../common/generated/ClusterResolution";
+import type { Diagnostic } from "../../common/generated/Diagnostic";
+import type { InclusionReason } from "../../common/generated/InclusionReason";
+import type { ResolvedBinding } from "../../common/generated/ResolvedBinding";
+import type { ResolvedProcess } from "../../common/generated/ResolvedProcess";
+import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
+import { ProductStore } from "../product-store";
+
+@injectable()
+export class ProductWidget extends ReactWidget {
+  static readonly ID = "gearbox.product";
+  static readonly LABEL = "Gearbox Product";
+
+  @inject(ProductStore) protected readonly store!: ProductStore;
+
+  @postConstruct()
+  protected init(): void {
+    this.id = ProductWidget.ID;
+    this.title.label = ProductWidget.LABEL;
+    this.title.caption = ProductWidget.LABEL;
+    this.title.closable = true;
+    this.addClass("gearbox-product");
+    this.toDispose.push(this.store.onChanged(() => this.update()));
+    void this.store.discover();
+    this.update();
+  }
+
+  protected render(): React.ReactNode {
+    const state = this.store.current;
+
+    if (state.status === "error") {
+      return (
+        <div className="gbx-product">
+          <div className="gbx-error" role="alert">
+            {state.error}
+          </div>
+          {renderDiagnostics(state.diagnostics)}
+        </div>
+      );
+    }
+
+    if (state.open === undefined) {
+      return (
+        <div className="gbx-product">
+          {state.products.length === 0 ? (
+            <div className="gbx-empty">
+              No <code>products/*/product.gdl</code> under the repository root. Open a product
+              description in the editor to resolve it.
+            </div>
+          ) : (
+            <div className="gbx-kv">
+              <span>product</span>
+              <span>
+                {state.products.map((ref) => (
+                  <button
+                    className="gbx-choice"
+                    key={ref.path}
+                    onClick={() => void this.store.open(ref)}
+                  >
+                    {ref.label}
+                  </button>
+                ))}
+              </span>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const intent = state.intent;
+    const product = state.resolution?.product ?? undefined;
+
+    return (
+      <div className="gbx-product">
+        <div className="gbx-detail-title">
+          {intent?.display_name ?? state.open.label}{" "}
+          <span className="gbx-id">{intent?.id}</span>
+        </div>
+
+        {intent && (
+          <div className="gbx-kv">
+            <span>profile</span>
+            <span className="gbx-profiles">
+              {Object.keys(intent.profiles).map((id) => (
+                <button
+                  className={`gbx-choice ${id === state.profile ? "gbx-choice-on" : ""}`}
+                  key={id}
+                  aria-pressed={id === state.profile}
+                  data-profile={id}
+                  onClick={() => void this.store.setProfile(id)}
+                >
+                  {id}
+                  {id === intent.default_profile ? " (default)" : ""}
+                </button>
+              ))}
+            </span>
+          </div>
+        )}
+
+        {state.status === "resolving" && <div className="gbx-progress">resolving…</div>}
+
+        {product && this.renderResolved(product)}
+        {renderDiagnostics(state.diagnostics)}
+      </div>
+    );
+  }
+
+  protected renderResolved(product: ResolvedProduct): React.ReactNode {
+    const entries = Object.entries(product.gears);
+    const selected = entries
+      .filter(([, gear]) => gear.selected_by.some((reason) => reason.reason === "selected"))
+      .map(([id]) => id);
+    const pulled = entries
+      .filter(([, gear]) => !gear.selected_by.some((reason) => reason.reason === "selected"))
+      .map(([id, gear]) => ({ id, why: gear.selected_by.map(describeInclusion).join("; ") }));
+    return (
+      <>
+        <div className="gbx-kv">
+          {/* The digest, not a timestamp: "did anything actually change" is meant
+              to be a byte comparison rather than a judgement, and switching the
+              profile above is the fastest way to see that it is. */}
+          <span>lock hash</span>
+          {/* The profile is taken from the *resolved header*, not from the switch
+              above. They should agree, and stating both is what makes a
+              disagreement visible instead of leaving the panel labelled one way
+              and showing another profile's answer. */}
+          <span
+            data-resolved-profile={product.product.profile}
+            data-lock-hash={product.product.lock_hash}
+          >
+            <code>{product.product.lock_hash.slice(0, 16)}</code> ·{" "}
+            {product.product.profile} · {product.product.profile_kind}
+          </span>
+        </div>
+
+        {/* Split, not counted. "Why is this even here" is one of the most common
+            questions about a resolved product, and the answer is a field on every
+            gear -- so the panel groups by it rather than making a reader open the
+            lock. The product names four gears; the closure and the plugin
+            selection bring the rest. */}
+        <div className="gbx-kv">
+          <span>asked for</span>
+          <span>
+            {selected.length === 0
+              ? "—"
+              : selected.map((id) => (
+                  <code key={id} data-asked-for={id}>
+                    {id}
+                  </code>
+                ))}
+          </span>
+        </div>
+        <div className="gbx-kv">
+          <span>pulled in</span>
+          <span className="gbx-pulled-in">
+            {pulled.length === 0
+              ? "—"
+              : pulled.map(({ id, why }) => (
+                  <div key={id} data-pulled-in={id}>
+                    <code>{id}</code> {why}
+                  </div>
+                ))}
+          </span>
+        </div>
+
+        <div className="gbx-section">processes</div>
+        {product.processes.map((process) => this.renderProcess(process))}
+
+        {(product.bindings ?? []).length > 0 && (
+          <>
+            <div className="gbx-section">bindings</div>
+            {(product.bindings ?? []).map((binding) => this.renderBinding(binding))}
+          </>
+        )}
+
+        {(product.cluster ?? []).length > 0 && (
+          <>
+            <div className="gbx-section">cluster</div>
+            {(product.cluster ?? []).map((binding) => (
+              <div className="gbx-kv" key={`${binding.scope}/${binding.primitive}`}>
+                <span>
+                  {binding.scope}/{binding.primitive}
+                </span>
+                <span>
+                  {/* Asked-for beside resolved, as §9 requires: the two differ
+                      whenever nothing was declared for this profile, and a panel
+                      showing only the outcome hides that the SDK default is
+                      standing in for a provider nobody chose. */}
+                  asked {describeChoice(binding.selected.selected)} · got{" "}
+                  <code>{describeClusterResolution(binding.resolved)}</code>
+                  {" · for "}
+                  {binding.requesters.join(", ")}
+                  {/* `options` is deliberately not rendered. It carries whatever
+                      the description passed -- connection strings among them --
+                      and a panel that prints it wholesale is one schema change
+                      away from putting a credential on screen
+                      (`cpt-gearbox-fr-no-secrets-in-values`). The reference to
+                      externally managed credentials is safe to name, because it
+                      is a reference and never a credential. */}
+                  {binding.secret_ref !== null && binding.secret_ref !== undefined && (
+                    <>
+                      {" · secret "}
+                      <code>{binding.secret_ref}</code>
+                    </>
+                  )}
+                </span>
+              </div>
+            ))}
+          </>
+        )}
+      </>
+    );
+  }
+
+  protected renderProcess(process: ResolvedProcess): React.ReactNode {
+    const focus = this.store.focus;
+    const selected = focus?.kind === "process" && focus.id === process.name;
+    return (
+      <div
+        className={`gbx-row gbx-process ${selected ? "gbx-selected" : ""}`}
+        key={process.name}
+        data-process={process.name}
+        role="option"
+        aria-selected={selected}
+        tabIndex={0}
+        onClick={() => this.store.setFocus({ kind: "process", id: process.name })}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            this.store.setFocus({ kind: "process", id: process.name });
+          }
+        }}
+      >
+        <span className="gbx-row-name">{process.name}</span>
+        <span className="gbx-badge">{process.kind}</span>
+        {process.replicas > 1 && <span className="gbx-badge">×{process.replicas}</span>}
+        {/* The gears are listed rather than counted because they may overlap
+            another process: co-location is a closure, not a partition, and a
+            count hides the gear that is linked into two binaries. */}
+        <span className="gbx-process-gears">{process.gears.join(", ")}</span>
+      </div>
+    );
+  }
+
+  protected renderBinding(binding: ResolvedBinding): React.ReactNode {
+    const focus = this.store.focus;
+    const selected =
+      focus?.kind === "binding" &&
+      focus.consumer === binding.consumer &&
+      focus.contract === binding.contract;
+    return (
+      <div
+        className={`gbx-row gbx-binding ${selected ? "gbx-selected" : ""}`}
+        key={`${binding.consumer}/${binding.contract}`}
+        data-binding={`${binding.consumer}/${binding.contract}`}
+        role="option"
+        aria-selected={selected}
+        tabIndex={0}
+        onClick={() =>
+          this.store.setFocus({
+            kind: "binding",
+            consumer: binding.consumer,
+            contract: binding.contract,
+          })
+        }
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            this.store.setFocus({
+              kind: "binding",
+              consumer: binding.consumer,
+              contract: binding.contract,
+            });
+          }
+        }}
+      >
+        <span className="gbx-row-name">
+          {binding.consumer} → {binding.provider}
+        </span>
+        <span className="gbx-id">{binding.contract}</span>
+        {/* `mode` is derived from placement and never configured, so showing it
+            beside the transport is showing a conclusion, not an echo of the
+            description (`cpt-gearbox-fr-derive-binding-from-placement`). */}
+        <span className="gbx-badge" data-mode={binding.mode}>
+          {binding.mode}
+        </span>
+        <span className="gbx-badge">{binding.transport}</span>
+        {/* The mechanism names the real code path rather than an abstraction over
+            it, which is what lets a reader check the lock against what the
+            runtime does. */}
+        <span className="gbx-badge" data-mechanism={binding.mechanism}>
+          {binding.mechanism}
+        </span>
+        {binding.critical && <span className="gbx-badge">critical</span>}
+        {/* "You asked for X and got Y, because GBXnnnn." The request lives beside
+            the outcome precisely so this is an explanation rather than a
+            surprise; the full narrative is Explain's job. */}
+        {binding.selected.downgraded_by !== null &&
+          binding.selected.downgraded_by !== undefined && (
+            <span className="gbx-badge gbx-downgraded" data-downgraded-by={binding.selected.downgraded_by}>
+              asked {describeChoice(binding.selected.selected)} · {binding.selected.downgraded_by}
+            </span>
+          )}
+      </div>
+    );
+  }
+}
+
+/**
+ * `sdk-cas-default` is not a provider, and saying "provider: x" for it would be
+ * wrong in the one case worth noticing: the SDK's content-addressed default
+ * layered over a cache, which is what a `dev` profile gets when nothing declared
+ * a provider.
+ */
+function describeClusterResolution(resolution: ClusterResolution): string {
+  return resolution.via === "provider"
+    ? resolution.name
+    : `sdk cas default over ${resolution.over_cache}`;
+}
+
+/** `auto` means "you decide", so it has no value to print. */
+function describeChoice(choice: Choice<unknown>): string {
+  return choice.choice === "explicit" ? String(choice.value) : "auto";
+}
+
+/**
+ * Why a gear is in the product, in words.
+ *
+ * `plugin_of` names the profile as well as the host, because it is the only
+ * inclusion reason that differs between profiles -- dev links the static plugin
+ * and prod the OIDC one, from the same description.
+ */
+function describeInclusion(reason: InclusionReason): string {
+  switch (reason.reason) {
+    case "selected":
+      return "asked for by the product";
+    case "colocated_by":
+      return `co-located with ${reason.gear}`;
+    case "required_by_profile":
+      return `required by profile ${reason.profile} (${reason.why})`;
+    case "plugin_of":
+      return `plugin of ${reason.host} for ${reason.profile}`;
+  }
+}
+
+function renderDiagnostics(diagnostics: readonly Diagnostic[]): React.ReactNode {
+  if (diagnostics.length === 0) return undefined;
+  return (
+    <div className="gbx-diagnostics">
+      <div className="gbx-diagnostics-label">{diagnostics.length} diagnostic(s)</div>
+      {diagnostics.map((diagnostic, index) => (
+        <div
+          className={`gbx-diagnostic gbx-diagnostic-${String(diagnostic.severity).toLowerCase()}`}
+          key={`${diagnostic.code}-${index}`}
+        >
+          <span className="gbx-id">{diagnostic.code}</span>
+          <span className="gbx-diagnostic-message">{diagnostic.message}</span>
+        </div>
+      ))}
+    </div>
+  );
+}

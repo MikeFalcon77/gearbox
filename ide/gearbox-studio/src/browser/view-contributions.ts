@@ -1,17 +1,25 @@
 // Where the two views live in the shell, and the commands that open them.
 
 import { AbstractViewContribution, FrontendApplicationContribution } from "@theia/core/lib/browser";
-import { Command, CommandRegistry } from "@theia/core/lib/common";
+import { Command, CommandRegistry, MenuModelRegistry } from "@theia/core/lib/common";
 import { inject, injectable } from "@theia/core/shared/inversify";
 
 import { CatalogueStore } from "./catalogue-store";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import { GearDetailWidget } from "./detail/gear-detail-widget";
 import { DepsGraphWidget } from "./graph/deps-graph-widget";
+import { GearboxMenus } from "./menus";
+import { ProductStore } from "./product-store";
+import { ProductWidget } from "./product/product-widget";
 
 export const RELOAD_CATALOGUE: Command = {
   id: "gearbox.catalogue.reload",
   label: "Gearbox: Reload Catalogue",
+};
+
+export const RESOLVE_PRODUCT: Command = {
+  id: "gearbox.product.resolve",
+  label: "Gearbox: Resolve Product",
 };
 
 @injectable()
@@ -53,6 +61,28 @@ export class CatalogueViewContribution
     super.registerCommands(commands);
     commands.registerCommand(RELOAD_CATALOGUE, {
       execute: () => this.store.load(),
+    });
+  }
+
+  /**
+   * Put the catalogue commands under Gearbox.
+   *
+   * `menus.ts` has declared the submenu since the shell was narrowed, and until
+   * now nothing registered into it -- so the menu bar carried a "Gearbox" label
+   * with an empty dropdown. Theia 1.75 renders an empty submenu, so that was
+   * visible rather than merely latent.
+   */
+  override registerMenus(menus: MenuModelRegistry): void {
+    super.registerMenus(menus);
+    menus.registerMenuAction(GearboxMenus.GEARBOX_INSPECT, {
+      commandId: this.toggleCommand?.id ?? "",
+      label: "Catalogue",
+      order: "1",
+    });
+    menus.registerMenuAction(GearboxMenus.GEARBOX_INSPECT, {
+      commandId: RELOAD_CATALOGUE.id,
+      label: "Reload Catalogue",
+      order: "2",
     });
   }
 
@@ -103,5 +133,57 @@ export class DetailViewContribution
     // Not activated: the catalogue keeps focus, because selecting a gear there
     // is the first thing anyone does.
     await this.openView({ activate: false, reveal: true });
+  }
+}
+
+/**
+ * Deliberately *not* a `FrontendApplicationContribution`.
+ *
+ * The other two views implement it to open themselves in `initializeLayout`.
+ * This one opens on request, so it has no member of that interface to implement
+ * -- and since every member is optional, claiming it would be a declaration
+ * TypeScript rejects for having nothing in common with the type.
+ */
+@injectable()
+export class ProductViewContribution extends AbstractViewContribution<ProductWidget> {
+  @inject(ProductStore) protected readonly store!: ProductStore;
+
+  constructor() {
+    super({
+      widgetId: ProductWidget.ID,
+      widgetName: ProductWidget.LABEL,
+      // The main area: a product is an object of work in its own right, not a
+      // detail of the catalogue. ADR 0011 puts it in a second perspective, and
+      // until the perspective switch exists this is the honest placement -- it
+      // opens on request rather than on startup, so it does not compete with the
+      // catalogue for the first thing a person sees.
+      defaultWidgetOptions: { area: "main" },
+      toggleCommandId: "gearbox.product.toggle",
+    });
+  }
+
+  override registerCommands(commands: CommandRegistry): void {
+    super.registerCommands(commands);
+    commands.registerCommand(RESOLVE_PRODUCT, {
+      // Re-resolves whatever is open for whatever profile is selected, which is
+      // what "resolve" means once a product is on screen. Opening one is the
+      // toggle command's job.
+      execute: () => this.store.reload(),
+      isEnabled: () => this.store.current.open !== undefined,
+    });
+  }
+
+  override registerMenus(menus: MenuModelRegistry): void {
+    super.registerMenus(menus);
+    menus.registerMenuAction(GearboxMenus.GEARBOX_RESOLVE, {
+      commandId: this.toggleCommand?.id ?? "",
+      label: "Product",
+      order: "1",
+    });
+    menus.registerMenuAction(GearboxMenus.GEARBOX_RESOLVE, {
+      commandId: RESOLVE_PRODUCT.id,
+      label: "Resolve Product",
+      order: "2",
+    });
   }
 }

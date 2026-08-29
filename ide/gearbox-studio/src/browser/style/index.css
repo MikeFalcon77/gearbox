@@ -120,3 +120,51 @@
 .gbx-band-rule { stroke: var(--theia-editorGroup-border); stroke-width: 1; stroke-dasharray: 4 4; }
 
 .gbx-footer { padding: 6px 12px; border-top: 1px solid var(--theia-editorGroup-border); font-size: 12px; }
+
+/* --- Product ------------------------------------------------------------- */
+
+.gbx-product { padding: 6px 10px; overflow: auto; height: 100%; }
+
+/* A section rule rather than a heading element: these group rows inside one
+   scrolling panel, and an <h*> would inherit the theme's document heading sizes
+   and out-shout the widget title. */
+.gbx-section {
+  text-transform: uppercase;
+  font-size: 0.8em;
+  letter-spacing: 0.05em;
+  opacity: 0.65;
+  margin: 12px 0 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--theia-editorGroup-border);
+}
+
+/* The profile switch. Buttons, not a <select>: the set is small and fixed by the
+   description, and all three being visible at once is the point -- the panel
+   exists to show that one description yields three different answers. */
+.gbx-profiles { display: flex; gap: 6px; flex-wrap: wrap; }
+.gbx-choice {
+  font: inherit; font-size: 0.9em;
+  padding: 1px 8px; border-radius: 3px; cursor: pointer;
+  color: var(--theia-button-secondaryForeground);
+  background: var(--theia-button-secondaryBackground);
+  border: 1px solid var(--theia-editorGroup-border);
+}
+.gbx-choice:hover { background: var(--theia-button-secondaryHoverBackground); }
+.gbx-choice-on {
+  color: var(--theia-button-foreground);
+  background: var(--theia-button-background);
+  border-color: var(--theia-focusBorder);
+}
+.gbx-choice:focus-visible { outline: 1px solid var(--theia-focusBorder); outline-offset: 1px; }
+
+.gbx-process-gears { opacity: 0.7; font-size: 0.85em; font-family: var(--theia-code-font-family); }
+.gbx-pulled-in code { margin-right: 4px; }
+
+/* The downgrade chip is the one badge that must not blend in: it is the whole
+   "you asked for X and got Y" signal, and reading it as decoration is how a
+   silent downgrade stays silent. */
+.gbx-downgraded {
+  border-color: var(--theia-editorWarning-foreground);
+  background: transparent;
+  color: var(--theia-editorWarning-foreground);
+}

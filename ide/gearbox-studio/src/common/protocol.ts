@@ -39,6 +39,22 @@ export const method = {
   LOG: "gearbox/log",
 } as const;
 
+/**
+ * A product description the client offered to open.
+ *
+ * A client-side convenience, not part of the engine's contract: the engine only
+ * ever receives an explicit absolute path. Discovery lives here for the same
+ * reason `InitializeResult.roots` does -- where the repository is on this
+ * machine is the one thing only the server knows -- and for the reason an IDE
+ * lists sketches rather than making a person type a path.
+ */
+export interface ProductRef {
+  /** Absolute path, which is what `loadProduct` and `resolve` take. */
+  readonly path: string;
+  /** Relative to the repository root, which is what a person recognises. */
+  readonly label: string;
+}
+
 export const GearboxService = Symbol("GearboxService");
 export interface GearboxService {
   /** Start the engine and hand back what it can do. */
@@ -50,6 +66,15 @@ export interface GearboxService {
    * callback.
    */
   loadCatalogue(): Promise<CatalogueLoadResult>;
+
+  /**
+   * The product descriptions under the repository root.
+   *
+   * Does not touch the engine: this is the Theia backend answering "what could I
+   * open", so it works before `initialize` and does not fail when the engine is
+   * down.
+   */
+  listProducts(): Promise<ProductRef[]>;
 
   /** Evaluate a `product.gdl`. Evaluation only; nothing is joined against the
    * catalogue. */

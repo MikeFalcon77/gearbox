@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **63** — 40 built, 22 not built, 0 broken, 1 not observed.
+Claims: **69** — 48 built, 19 not built, 0 broken, 2 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -46,7 +46,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Explorer stays visible | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
 | Terminal stays visible | `ADR-0011 §Consequences: some Theia surface stays on purpose` | 🚧 not built |  |
 | Git stays visible | `ADR-0011 §Consequences: some Theia surface stays on purpose` | 🚧 not built |  |
-| the Gearbox menu offers at least one command | `ADR-0011 §Scope: what the menu bar contains` | 🚧 not built |  |
+| the Gearbox menu offers the domain's commands | `ADR-0011 §Scope: what the menu bar contains` | ✅ built |  |
 | the toolbar hosts the perspective switch | `ADR-0011 §The two perspectives` | 🚧 not built |  |
 | a product perspective exists beside the catalogue | `ADR-0011 §The two perspectives` | 🚧 not built |  |
 | a clicked link opens the file | `ADR-0011 §Confirmation: a clicked link must open a tab` | ✅ built |  |
@@ -62,7 +62,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the Catalogue is in the left area | `plan §9: Catalogue, left` | ✅ built |  |
 | the Gear detail is in the bottom area, not the side panel | `plan §9: Gear detail, bottom` | ✅ built |  |
 | the co-location Graph opens in the main area | `plan §9: Graph, main` | ✅ built |  |
-| a Product view exists | `plan §9: Product` | 🚧 not built |  |
+| the Product view shows what §9 asks it to | `plan §9: Product` | ✅ built |  |
 | an Explain view exists | `plan §9: Explain` | 🚧 not built |  |
 | a Lock view exists | `plan §9: Lock` | 🚧 not built |  |
 | a Generate view exists | `plan §9: Generate` | 🚧 not built |  |
@@ -78,10 +78,21 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Claim | Source | Status | Note |
 |---|---|---|---|
 | the Problems view is present to receive markers | `PRD cpt-gearbox-fr-editor-diagnostics` | ✅ built |  |
-| the catalogue panel renders the diagnostics a load produced | `PRD cpt-gearbox-fr-editor-diagnostics` | ⚪ not observed | the gear tree loads clean, so no diagnostic was rendered to inspect |
+| the catalogue panel renders the diagnostics a load produced | `PRD cpt-gearbox-fr-editor-diagnostics` | ⚪ not observed | the gear tree loads clean, so the catalogue rendered no diagnostic to inspect |
 | resolution diagnostics appear as problem markers | `PRD cpt-gearbox-fr-editor-diagnostics` | 🚧 not built |  |
 | markers are replaced atomically on each resolution | `PRD cpt-gearbox-fr-editor-diagnostics` | 🚧 not built |  |
 | description diagnostics arrive over a language-server interface with source ranges | `PRD cpt-gearbox-fr-editor-diagnostics` | 🚧 not built |  |
+
+## `conformance/prd-product.spec.ts`
+
+| Claim | Source | Status | Note |
+|---|---|---|---|
+| one description gives three profiles three distinct locks | `PRD cpt-gearbox-fr-lock-single-source` | ✅ built |  |
+| a binding's mode is derived from placement, never declared | `PRD cpt-gearbox-fr-derive-binding-from-placement` | ✅ built |  |
+| the plugin linked for a profile is the one that profile selected | `PRD cpt-gearbox-fr-plugin-selection` | ✅ built |  |
+| a gear pulled in by co-location names the gear that pulled it | `PRD cpt-gearbox-fr-never-cut-colocation` | ✅ built |  |
+| every gear in the closure ends up in some process | `plan §9: no orphans` | ✅ built |  |
+| processes overlap rather than partition the gears | `plan §9: closure not partition` | ⚪ not observed | no anchor in this product shares a co-location closure with another, so no overlap exists to see |
 
 ## `conformance/prd-projection.spec.ts`
 
@@ -102,7 +113,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 |---|---|---|---|
 | it browses the catalogue | `PRD cpt-gearbox-fr-studio: browses the catalogue` | ✅ built |  |
 | it renders the dependency graph | `PRD cpt-gearbox-fr-studio: renders the dependency graph` | ✅ built |  |
-| it edits and resolves a product across profiles | `PRD cpt-gearbox-fr-studio: edits and resolves a product` | 🚧 not built |  |
+| it resolves a product across profiles | `PRD cpt-gearbox-fr-studio: edits and resolves a product` | ✅ built |  |
 | it renders the contract graph | `PRD cpt-gearbox-fr-studio: renders the contract graph` | 🚧 not built |  |
 | it renders the process graph | `PRD cpt-gearbox-fr-studio: renders the process graph` | 🚧 not built |  |
 | it renders the cluster graph | `PRD cpt-gearbox-fr-studio: renders the cluster graph` | 🚧 not built |  |

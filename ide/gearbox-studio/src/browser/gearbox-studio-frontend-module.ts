@@ -1,4 +1,4 @@
-// Frontend wiring: two views, one store, one proxied service.
+// Frontend wiring: the views, two stores, one proxied service.
 
 import { FrontendApplicationContribution, bindViewContribution } from "@theia/core/lib/browser";
 import { WebSocketConnectionProvider } from "@theia/core/lib/browser/messaging";
@@ -9,6 +9,7 @@ import { LanguageGrammarDefinitionContribution } from "@theia/monaco/lib/browser
 
 import { GEARBOX_SERVICE_PATH, GearboxClient, GearboxService } from "../common/protocol";
 import { CatalogueStore } from "./catalogue-store";
+import { ProductStore } from "./product-store";
 import { bindWidget } from "./contribution";
 import { MenuNarrowing } from "./theia/core/menu-narrowing";
 import { RevealService } from "./reveal-service";
@@ -17,9 +18,11 @@ import {
   CatalogueViewContribution,
   DetailViewContribution,
   GraphViewContribution,
+  ProductViewContribution,
 } from "./view-contributions";
 import { GearDetailWidget } from "./detail/gear-detail-widget";
 import { DepsGraphWidget } from "./graph/deps-graph-widget";
+import { ProductWidget } from "./product/product-widget";
 import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
 
 import "../../src/browser/style/index.css";
@@ -32,6 +35,10 @@ export default new ContainerModule((bind) => {
     .inSingletonScope();
 
   bind(CatalogueStore).toSelf().inSingletonScope();
+  // Its own store, not a slice of the catalogue's: the two objects of work do not
+  // subordinate one another, and their lifecycles differ -- the catalogue loads
+  // once and streams, a product is re-resolved on every profile switch.
+  bind(ProductStore).toSelf().inSingletonScope();
   bind(RevealService).toSelf().inSingletonScope();
   bind(GearboxClient).toService(CatalogueStore);
 
@@ -67,10 +74,12 @@ export default new ContainerModule((bind) => {
   bindWidget(bind, CatalogueWidget);
   bindWidget(bind, GearDetailWidget);
   bindWidget(bind, DepsGraphWidget);
+  bindWidget(bind, ProductWidget);
 
   bindViewContribution(bind, CatalogueViewContribution);
   bind(FrontendApplicationContribution).toService(CatalogueViewContribution);
   bind(CommandContribution).toService(CatalogueViewContribution);
+  bind(MenuContribution).toService(CatalogueViewContribution);
 
   bindViewContribution(bind, DetailViewContribution);
   bind(FrontendApplicationContribution).toService(DetailViewContribution);
@@ -78,4 +87,12 @@ export default new ContainerModule((bind) => {
 
   bindViewContribution(bind, GraphViewContribution);
   bind(CommandContribution).toService(GraphViewContribution);
+
+  // No `FrontendApplicationContribution` here: the Product view opens on
+  // request, so it has no `initializeLayout` to run. `MenuContribution` is what
+  // finally puts commands under the Gearbox menu, which until now rendered as an
+  // empty dropdown.
+  bindViewContribution(bind, ProductViewContribution);
+  bind(CommandContribution).toService(ProductViewContribution);
+  bind(MenuContribution).toService(ProductViewContribution);
 });

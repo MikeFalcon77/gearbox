@@ -83,7 +83,13 @@ const SAMPLE_MS = 25;
 function installSampler(): void {
   const samples: unknown[] = [];
   (window as unknown as { __gbxSamples: unknown[] }).__gbxSamples = samples;
-  const q = (sel: string): Element[] => Array.from(document.querySelectorAll(sel));
+  // Scoped to the catalogue widget. `.gbx-row` is shared with the Product view's
+  // process and binding rows on purpose -- they are the same kind of thing and
+  // should look alike -- which means an unscoped count silently mixes the two.
+  // That is not hypothetical: a diagnostics test started passing because the
+  // Product panel had rendered a diagnostic the catalogue never produced.
+  const q = (sel: string): Element[] =>
+    Array.from(document.querySelectorAll(`.gearbox-catalogue ${sel}`));
   const text = (e: Element): string => (e.textContent ?? "").trim();
   setInterval(() => {
     const rows = q(".gbx-row");
@@ -132,7 +138,9 @@ async function open(browser: Browser): Promise<{ studio: Studio; close: () => Pr
       ) as Promise<Sample[]>,
     detailOf: (name: string) =>
       page.evaluate(async (wanted) => {
-        const row = Array.from(document.querySelectorAll(".gbx-row")).find((r) =>
+        const row = Array.from(
+          document.querySelectorAll(".gearbox-catalogue .gbx-row"),
+        ).find((r) =>
           r.querySelector(".gbx-row-name")?.textContent?.includes(wanted),
         );
         if (!row) return null;
@@ -229,17 +237,55 @@ export async function runCommand(page: Page, label: string): Promise<void> {
 }
 
 /**
- * Open the co-location graph, idempotently.
+ * Bring a view to the front, idempotently.
  *
- * `AbstractViewContribution` registers a *toggle* command, so calling it when the
- * view is already open closes it -- which is what happens after a reload, since
- * Theia's layout restorer brings the tab back on its own.
+ * Three Theia behaviours have to be respected at once, and each of them broke a
+ * test before this helper existed:
+ *
+ *   - the view command is a *toggle*, so calling it on the active view closes it;
+ *   - `visible` is not `attached` -- a tab that exists but is not current keeps
+ *     its widget in the DOM, and with two Gearbox views in the main area that is
+ *     the normal case;
+ *   - Theia's layout restorer reopens tabs after a reload, so a view may already
+ *     be there before anything asks for it.
+ *
+ * So: check visibility, not presence, and let the toggle activate rather than
+ * open. `toggleView` activates a view that is open but not focused, which is
+ * exactly what is wanted here.
  */
-export async function openGraph(page: Page): Promise<void> {
-  if ((await page.locator(".gbx-svg").count()) === 0) {
-    await runCommand(page, "Gearbox Graph");
+async function revealView(page: Page, command: string, selector: string): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (await page.locator(selector).first().isVisible()) return;
+    await runCommand(page, command);
+    const shown = await page
+      .locator(selector)
+      .first()
+      .waitFor({ state: "visible", timeout: 15_000 })
+      .then(() => true, () => false);
+    if (shown) return;
   }
-  await page.locator(".gbx-svg").waitFor({ state: "visible" });
+  await page.locator(selector).first().waitFor({ state: "visible" });
+}
+
+export async function openGraph(page: Page): Promise<void> {
+  await revealView(page, "Gearbox Graph", ".gbx-svg");
+}
+
+/**
+ * Open the Product view and resolve one profile.
+ *
+ * Waits on `data-resolved-profile`, which the widget reads off the resolved
+ * header rather than off the profile switch. Waiting on the switch instead would
+ * pass the moment the button lights up, which happens before the resolution
+ * lands -- so the test would read the previous profile's answer.
+ */
+export async function openProduct(page: Page, profile: string): Promise<void> {
+  await revealView(page, "Gearbox Product", ".gbx-product");
+  await page.locator("[data-resolved-profile]").waitFor({ state: "visible", timeout: 60_000 });
+  await page.locator(`[data-profile="${profile}"]`).click();
+  await page
+    .locator(`[data-resolved-profile="${profile}"]`)
+    .waitFor({ state: "visible", timeout: 60_000 });
 }
 
 export const test = base.extend<{ freshStudio: Studio }, { studio: Studio }>({

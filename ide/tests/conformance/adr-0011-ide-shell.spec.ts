@@ -51,7 +51,7 @@ test.describe("the narrowed shell", () => {
 
   test("a catalogue row has a client rectangle [ADR-0011 §Confirmation]", async ({ studio }) => {
     const visible = await studio.page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll(".gbx-row"));
+      const rows = Array.from(document.querySelectorAll(".gearbox-catalogue .gbx-row"));
       return {
         total: rows.length,
         withRect: rows.filter((r) => (r as HTMLElement).getClientRects().length > 0).length,
@@ -103,21 +103,22 @@ test.describe("the narrowed shell", () => {
     },
   );
 
-  test.fixme("the Gearbox menu offers at least one command [ADR-0011 §Scope: what the menu bar contains]", async ({
+  test("the Gearbox menu offers the domain's commands [ADR-0011 §Scope: what the menu bar contains]", async ({
     studio,
   }) => {
-    // `menus.ts` registers three submenu paths -- Inspect, Resolve, Engine -- and
-    // no command is registered into any of them, so the dropdown is empty. Worth
-    // recording: the comment in `menu-narrowing.ts` claims an empty submenu is
-    // not rendered, and the menu-bar test above proves otherwise, since
-    // "Gearbox" is in the bar today.
+    // `menus.ts` declared three submenu paths -- Inspect, Resolve, Engine -- long
+    // before anything registered into them, so the bar carried a "Gearbox" label
+    // over an empty dropdown. Theia 1.75 renders an empty submenu, which is how
+    // that was visible rather than merely latent.
     await studio.page.click(".lm-MenuBar-itemLabel:text('Gearbox')");
     const items = await studio.page.evaluate(() =>
       Array.from(document.querySelectorAll(".lm-Menu-itemLabel")).map((e) =>
         (e.textContent ?? "").trim(),
       ),
     );
-    expect(items.length).toBeGreaterThan(0);
+    expect(items).toContain("Catalogue");
+    expect(items).toContain("Product");
+    await studio.page.keyboard.press("Escape");
   });
 
   test.fixme("the toolbar hosts the perspective switch [ADR-0011 §The two perspectives]", async ({

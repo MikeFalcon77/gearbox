@@ -134,7 +134,7 @@ test.describe("staged catalogue loading", () => {
     // yet at S1 cannot survive that. Nothing tested this before.
     const selected = await freshStudio.page.evaluate(async () => {
       for (let attempt = 0; attempt < 600; attempt += 1) {
-        const row = document.querySelector(".gbx-row.gbx-pending");
+        const row = document.querySelector(".gearbox-catalogue .gbx-row.gbx-pending");
         if (row) {
           (row as HTMLElement).click();
           return row.querySelector(".gbx-row-name")?.textContent?.trim() ?? "";
@@ -148,7 +148,7 @@ test.describe("staged catalogue loading", () => {
     await settled(freshStudio.page);
 
     const after = await freshStudio.page.evaluate(() => {
-      const row = document.querySelector(".gbx-row.gbx-selected");
+      const row = document.querySelector(".gearbox-catalogue .gbx-row.gbx-selected");
       return row === null
         ? null
         : {

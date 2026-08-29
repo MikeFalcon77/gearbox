@@ -25,17 +25,19 @@ test.describe("diagnostics reach a person", () => {
   test("the catalogue panel renders the diagnostics a load produced [PRD cpt-gearbox-fr-editor-diagnostics]", async ({
     studio,
   }) => {
-    // The widget has a `.gbx-diagnostics` block and this corpus produces no
-    // diagnostics, so there is nothing to render. Reported as not observed
-    // rather than as a pass: a run that cannot reach the state proves nothing
-    // about it, and calling that green is the exact failure this suite replaced.
-    const count = await studio.page.locator(".gbx-diagnostic").count();
+    // Scoped to the catalogue widget, and that scoping is the point. Unscoped,
+    // this test flipped to green the day the Product view landed -- because the
+    // Product panel renders GBX0307 for the dev profile, on the same page. It was
+    // reporting a resolver diagnostic as evidence that the catalogue renders
+    // catalogue diagnostics, which is precisely the kind of pass-for-the-wrong-
+    // reason this suite exists to prevent.
+    const rendered = studio.page.locator(".gearbox-catalogue .gbx-diagnostic");
+    const count = await rendered.count();
     test.skip(
       count === 0,
-      "the gear tree loads clean, so no diagnostic was rendered to inspect",
+      "the gear tree loads clean, so the catalogue rendered no diagnostic to inspect",
     );
-    const first = await studio.page.locator(".gbx-diagnostic").first().textContent();
-    expect(first).toMatch(/GBX\d{4}/);
+    expect(await rendered.first().textContent()).toMatch(/GBX\d{4}/);
   });
 
   test.fixme(
