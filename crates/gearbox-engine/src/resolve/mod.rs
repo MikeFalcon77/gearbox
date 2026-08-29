@@ -96,7 +96,7 @@ pub fn resolve_at(
     let scoped = profile::scope(intent, profile, &mut diagnostics);
 
     // Step 2 -- the co-location closure.
-    let closure = closure::expand(catalogue, intent, &mut diagnostics);
+    let closure = closure::expand(catalogue, intent, profile, &mut diagnostics);
 
     // Step 3 -- which edges could carry a boundary.
     let uri = match product_path {
@@ -107,11 +107,9 @@ pub fn resolve_at(
 
     // Step 4 -- processes. An unknown profile is reported rather than assumed,
     // because guessing `embedded` would silently resolve the wrong topology.
-    let selected = intent
-        .selected_gears
-        .iter()
-        .map(|s| s.gear.clone())
-        .collect();
+    // Includes this profile's plugins: a plugin is a gear the description named,
+    // and a process seeded without it leaves it in the product and in no binary.
+    let selected = closure::seeds(intent, profile);
     let input = partition::Inputs {
         catalogue,
         closure: &closure,

@@ -46,6 +46,7 @@ impl Closure {
 pub fn expand(
     catalogue: &Catalogue,
     intent: &ProductIntent,
+    profile: &gearbox_ir::ProfileId,
     diagnostics: &mut Diagnostics,
 ) -> Closure {
     let uri = format!("file://{}", intent.gdl_path.as_str());
@@ -69,6 +70,36 @@ pub fn expand(
             .or_default()
             .push(InclusionReason::Selected);
         queue.push_back(gear.clone());
+    }
+
+    // Plugins are seeds too, and they are the only thing that makes the seed set
+    // depend on the profile: a `plugin(..., profiles = [...])` selection puts a
+    // crate in one profile's binary and not another's. Every selected plugin is
+    // seeded, not only the one that wins the vendor match -- the registry links
+    // them all and the host chooses at runtime, so a losing plugin is still in
+    // the binary and still pulls its own co-location closure in with it.
+    for selection in &intent.selected_gears {
+        for plugin in &selection.plugins {
+            if !applies(&plugin.profiles, profile) {
+                continue;
+            }
+            if !catalogue.gears.contains_key(&plugin.gear) {
+                diagnostics.push(unknown_plugin(&plugin.gear, &selection.gear, &uri));
+                continue;
+            }
+            let reason = InclusionReason::PluginOf {
+                host: selection.gear.clone(),
+                profile: profile.clone(),
+            };
+            let entry = closure.members.entry(plugin.gear.clone()).or_default();
+            let first_visit = entry.is_empty();
+            if !entry.contains(&reason) {
+                entry.push(reason);
+            }
+            if first_visit {
+                queue.push_back(plugin.gear.clone());
+            }
+        }
     }
 
     while let Some(current) = queue.pop_front() {
@@ -103,6 +134,44 @@ pub fn expand(
 
     detect_cycle(catalogue, &closure, &uri, diagnostics);
     closure
+}
+
+/// Every gear the description names for this profile, plugins included.
+///
+/// Shared with the partition rather than computed twice. The two disagreeing is
+/// exactly what produced an orphaned plugin: the closure knew about it and the
+/// process seeds did not, so it was in the product and in no binary.
+#[must_use]
+pub fn seeds(intent: &ProductIntent, profile: &gearbox_ir::ProfileId) -> BTreeSet<GearId> {
+    let mut out: BTreeSet<GearId> = BTreeSet::new();
+    for selection in &intent.selected_gears {
+        out.insert(selection.gear.clone());
+        for plugin in &selection.plugins {
+            if applies(&plugin.profiles, profile) {
+                out.insert(plugin.gear.clone());
+            }
+        }
+    }
+    out
+}
+
+/// Whether a `profiles = [...]` list admits this profile. Empty means all.
+fn applies(
+    profiles: &std::collections::BTreeSet<gearbox_ir::ProfileId>,
+    profile: &gearbox_ir::ProfileId,
+) -> bool {
+    profiles.is_empty() || profiles.contains(profile)
+}
+
+/// A plugin named under a host that the catalogue does not have.
+fn unknown_plugin(plugin: &GearId, host: &GearId, uri: &str) -> Diagnostic {
+    Diagnostic::error(
+        DiagnosticCode::TopologyUnknownGear,
+        format!("`{host}` selects the plugin `{plugin}`, which is not in the catalogue"),
+        "a plugin is an ordinary gear with its own `gear.gdl`; either it has none yet, or its \
+         source root is not open. `gearbox validate --product ...` says which",
+    )
+    .at(Location::file(uri.to_owned()))
 }
 
 fn unknown(gear: &GearId, pulled_by: Option<&GearId>, uri: &str) -> Diagnostic {

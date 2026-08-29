@@ -11,6 +11,7 @@
     reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
 )]
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use gearbox_engine::resolve::{closure, resolve};
@@ -154,16 +155,73 @@ fn resolving_twice_gives_the_same_answer() {
 }
 
 #[test]
-fn the_closure_is_the_same_for_every_profile() {
-    // Co-location is link-time, so no deployment profile can change it. If this
-    // ever fails, either a profile is filtering the selection -- which it must
-    // not -- or the closure has become sensitive to something it should ignore.
+fn only_plugin_selections_make_the_closure_depend_on_the_profile() {
+    // The premise this test used to assert -- that the closure is identical for
+    // every profile -- was wrong, and hid a real bug: plugin selections are
+    // profile-scoped, and the closure did not seed from them at all, so
+    // `static-authn-plugin` was in no product and the generated host ran with no
+    // authn plugin linked.
+    //
+    // The corrected statement is narrower and still worth pinning. Co-location
+    // *edges* are link-time and no profile can change them; only the *seeds*
+    // differ, and only by which plugin each profile chose. Everything else must
+    // match, or something has made placement leak into composition.
     require!(cat, prod);
     let dev = resolve(&cat, &prod, &pid("dev")).closure.ids();
     let local = resolve(&cat, &prod, &pid("local")).closure.ids();
-    let prod_ = resolve(&cat, &prod, &pid("prod")).closure.ids();
-    assert_eq!(dev, local);
-    assert_eq!(dev, prod_);
+    let production = resolve(&cat, &prod, &pid("prod")).closure.ids();
+
+    assert_eq!(
+        local, production,
+        "both non-dev profiles choose the same plugin"
+    );
+
+    let plugins = |ids: &BTreeSet<GearId>| -> BTreeSet<GearId> {
+        ids.iter()
+            .filter(|g| g.as_str().ends_with("-plugin"))
+            .cloned()
+            .collect()
+    };
+    assert_eq!(
+        plugins(&dev),
+        [gid("static-authn-plugin")].into_iter().collect(),
+        "dev selects the static plugin"
+    );
+    assert_eq!(
+        plugins(&local),
+        [gid("oidc-authn-plugin")].into_iter().collect(),
+        "local selects the OIDC plugin"
+    );
+
+    // Strip the plugins and the two must be identical: nothing else about a
+    // profile may change what is in the product.
+    let without_plugins = |ids: BTreeSet<GearId>| -> BTreeSet<GearId> {
+        ids.into_iter()
+            .filter(|g| !g.as_str().ends_with("-plugin"))
+            .collect()
+    };
+    assert_eq!(without_plugins(dev), without_plugins(local));
+}
+
+#[test]
+fn a_plugin_says_which_host_selected_it_and_for_which_profile() {
+    // "Why is this crate in my binary" is answered by the host, not by the
+    // product: the description never named the plugin on its own terms.
+    require!(cat, prod);
+    let r = resolve(&cat, &prod, &pid("dev"));
+    let reasons = r
+        .closure
+        .members
+        .get(&gid("static-authn-plugin"))
+        .expect("the plugin is in the product");
+    assert!(
+        reasons.iter().any(|reason| matches!(
+            reason,
+            InclusionReason::PluginOf { host, profile }
+                if host == &gid("authn-resolver") && profile == &pid("dev")
+        )),
+        "{reasons:?}"
+    );
 }
 
 #[test]
@@ -275,7 +333,7 @@ fn expand_and_resolve_agree() {
     // this pins the two entry points together.
     require!(cat, prod);
     let mut diagnostics = gearbox_ir::Diagnostics::new();
-    let direct = closure::expand(&cat, &prod, &mut diagnostics);
+    let direct = closure::expand(&cat, &prod, &pid("dev"), &mut diagnostics);
     let through = resolve(&cat, &prod, &pid("dev"));
     assert_eq!(direct.members, through.closure.members);
 }

@@ -161,6 +161,22 @@ pub fn explain(resolution: &Resolution) -> ExplanationGraph {
                         ProvenanceEdge::new(id.clone(), to, ProvenanceKind::ConstrainedBy, why)
                     })
                 }
+                // The edge points at the host, not at the profile: "why is this
+                // crate in my binary" is answered by the gear that selected it,
+                // and the profile is a qualifier on that answer rather than the
+                // answer itself.
+                InclusionReason::PluginOf { host, profile: p } => {
+                    node_id(NodeKind::Gear, host.as_str()).map(|to| {
+                        ProvenanceEdge::new(
+                            id.clone(),
+                            to,
+                            ProvenanceKind::SelectedBy,
+                            format!(
+                                "`{gear}` is selected as a plugin of `{host}` for profile `{p}`"
+                            ),
+                        )
+                    })
+                }
             };
             if let Some(edge) = edge {
                 graph.add_edge(edge);

@@ -220,6 +220,15 @@ pub enum InclusionReason {
     ColocatedBy { gear: GearId },
     /// Required to satisfy a structural constraint of the profile.
     RequiredByProfile { profile: ProfileId, why: String },
+    /// Chosen as a plugin of a host gear, for this deployment profile.
+    ///
+    /// A reason of its own rather than `Selected`, because the product did not
+    /// name it on its own terms: it named it *under* a host, and the answer to
+    /// "why is this crate in my binary" is that host. The profile is part of the
+    /// reason because a plugin selection may be scoped to one -- which makes it
+    /// the only thing that can put a gear in one profile's product and not
+    /// another's.
+    PluginOf { host: GearId, profile: ProfileId },
 }
 
 /// One process in the resolved topology.
