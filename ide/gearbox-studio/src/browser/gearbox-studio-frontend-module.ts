@@ -11,6 +11,7 @@ import { LanguageGrammarDefinitionContribution } from "@theia/monaco/lib/browser
 import { GEARBOX_SERVICE_PATH, GearboxClient, GearboxService } from "../common/protocol";
 import { CatalogueStore } from "./catalogue-store";
 import { ProductStore } from "./product-store";
+import { ResolutionMarkers } from "./resolution-markers";
 import { bindWidget } from "./contribution";
 import { MenuNarrowing } from "./theia/core/menu-narrowing";
 import { ReadOnlyLockEditorProvider } from "./theia/monaco/read-only-lock-editor-provider";
@@ -58,6 +59,15 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bind(ProductStore).toSelf().inSingletonScope();
   bind(RevealService).toSelf().inSingletonScope();
   bind(GearboxClient).toService(CatalogueStore);
+
+  // `@theia/markers` has been a declared dependency and unused since the shell
+  // was built. This is what finally uses it: every resolution replaces the
+  // Gearbox markers in the Problems view, which is where
+  // `cpt-gearbox-fr-editor-diagnostics` says a resolution diagnostic has to end
+  // up. Bound as an application contribution because it needs constructing --
+  // nothing injects it -- and `onStart` is where it subscribes.
+  bind(ResolutionMarkers).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(ResolutionMarkers);
 
   bind(GearboxService)
     .toDynamicValue(({ container }) => {

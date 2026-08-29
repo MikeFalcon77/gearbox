@@ -8,7 +8,7 @@
 // `@theia/markers` is a declared dependency of browser-app and gives the Problems
 // view below -- so the destination exists and nothing writes to it.
 
-import { expect, test } from "../fixtures/studio";
+import { expect, openProduct, problems, test } from "../fixtures/studio";
 
 test.describe("diagnostics reach a person", () => {
   test("the Problems view is present to receive markers [PRD cpt-gearbox-fr-editor-diagnostics]", async ({
@@ -40,26 +40,44 @@ test.describe("diagnostics reach a person", () => {
     expect(await rendered.first().textContent()).toMatch(/GBX\d{4}/);
   });
 
-  test.fixme(
-    "resolution diagnostics appear as problem markers [PRD cpt-gearbox-fr-editor-diagnostics]",
-    async ({ studio }) => {
-      // The engine has answered `resolve` with a `diagnostics` array since M4,
-      // and a refused `product/load` carries them in `data.diagnostics`. Nothing
-      // in the frontend turns either into a marker.
-      await studio.page.click("#theia-bottom-content-panel .lm-TabBar-tabLabel:text('Problems')");
-      await expect(studio.page.locator(".theia-marker-container .theia-TreeNode")).toHaveCount(0);
-    },
-  );
+  test("resolution diagnostics appear as problem markers [PRD cpt-gearbox-fr-editor-diagnostics]", async ({
+    studio,
+  }) => {
+    await openProduct(studio.page, "dev");
+    const shown = await studio.page.locator(".gearbox-product .gbx-diagnostic").count();
+    expect(shown, "the dev profile produces no diagnostic to surface").toBeGreaterThan(0);
 
-  test.fixme(
-    "markers are replaced atomically on each resolution [PRD cpt-gearbox-fr-editor-diagnostics]",
-    async ({ studio }) => {
-      // "Stale markers are worse than none." The claim is about the replacement,
-      // so the test has to resolve twice and observe that nothing from the first
-      // run survives -- which needs the product widget to exist first.
-      await expect(studio.page.locator(".theia-marker-container")).toBeVisible();
-    },
-  );
+    const { files, markers } = await problems(studio.page);
+    // Anchored to the product description. The wire type says resolution
+    // diagnostics "often have no location and are anchored by the client", and
+    // the description is the only file the whole resolution is about.
+    expect(files.some((file) => file.includes("product.gdl"))).toBe(true);
+    expect(markers.length).toBe(shown);
+  });
+
+  test("markers are replaced atomically on each resolution [PRD cpt-gearbox-fr-editor-diagnostics]", async ({
+    studio,
+  }) => {
+    // "Stale markers are worse than none." prod produces more diagnostics than
+    // dev, so going prod → dev is the direction that would leave leftovers: a
+    // per-file `setMarkers` replaces one file's markers and says nothing about a
+    // file the new resolution no longer mentions.
+    await openProduct(studio.page, "prod");
+    const prodShown = await studio.page.locator(".gearbox-product .gbx-diagnostic").count();
+    const prod = await problems(studio.page);
+    expect(prod.markers.length).toBe(prodShown);
+
+    await openProduct(studio.page, "dev");
+    const devShown = await studio.page.locator(".gearbox-product .gbx-diagnostic").count();
+    const dev = await problems(studio.page);
+
+    expect(devShown).not.toBe(prodShown);
+    expect(dev.markers.length).toBe(devShown);
+    // And the specific ones are gone, not merely fewer.
+    for (const stale of prod.markers) {
+      expect(dev.markers).not.toContain(stale);
+    }
+  });
 
   test.fixme(
     "description diagnostics arrive over a language-server interface with source ranges [PRD cpt-gearbox-fr-editor-diagnostics]",

@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **80** — 59 built, 19 not built, 0 broken, 2 not observed.
+Claims: **80** — 61 built, 17 not built, 0 broken, 2 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -79,8 +79,8 @@ Rust, and the ADRs' own Confirmation sections say which.
 |---|---|---|---|
 | the Problems view is present to receive markers | `PRD cpt-gearbox-fr-editor-diagnostics` | ✅ built |  |
 | the catalogue panel renders the diagnostics a load produced | `PRD cpt-gearbox-fr-editor-diagnostics` | ⚪ not observed | the gear tree loads clean, so the catalogue rendered no diagnostic to inspect |
-| resolution diagnostics appear as problem markers | `PRD cpt-gearbox-fr-editor-diagnostics` | 🚧 not built |  |
-| markers are replaced atomically on each resolution | `PRD cpt-gearbox-fr-editor-diagnostics` | 🚧 not built |  |
+| resolution diagnostics appear as problem markers | `PRD cpt-gearbox-fr-editor-diagnostics` | ✅ built |  |
+| markers are replaced atomically on each resolution | `PRD cpt-gearbox-fr-editor-diagnostics` | ✅ built |  |
 | description diagnostics arrive over a language-server interface with source ranges | `PRD cpt-gearbox-fr-editor-diagnostics` | 🚧 not built |  |
 
 ## `conformance/prd-explain.spec.ts`

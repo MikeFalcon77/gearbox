@@ -275,6 +275,52 @@ export async function openExplain(page: Page): Promise<void> {
   await revealView(page, "Gearbox Explain", ".gbx-explain");
 }
 
+/**
+ * Open the Problems view and read the Gearbox markers in it.
+ *
+ * Two Theia behaviours to respect. Clicking the *already current* tab of a
+ * bottom-panel view collapses the panel, so the tab is only clicked when
+ * Problems is not already showing. And the marker tree is rebuilt
+ * asynchronously after `setMarkers`, so the node list is read until it stops
+ * changing -- reading once returned a half-updated tree, which looked exactly
+ * like markers that had not been replaced.
+ */
+export async function problems(
+  page: Page,
+): Promise<{ files: string[]; markers: string[] }> {
+  const tab = page.locator("#theia-bottom-content-panel .lm-TabBar-tab", {
+    hasText: "Problems",
+  });
+  const current = await tab.evaluate((e) => e.classList.contains("lm-mod-current"));
+  if (!current) {
+    await tab.click();
+  }
+  await page.locator(".theia-marker-container").waitFor({ state: "visible" });
+
+  const read = () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll(".theia-marker-container .theia-TreeNode")).map((e) =>
+        (e.textContent ?? "").replace(/\s+/g, " ").trim(),
+      ),
+    );
+  let previous = await read();
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await page.waitForTimeout(250);
+    const nodes = await read();
+    if (nodes.length === previous.length && nodes.every((n, i) => n === previous[i])) {
+      // A file node names a path; a marker node is the message. Split on that
+      // rather than on tree depth, which Theia renders with padding rather than
+      // with a class.
+      return {
+        files: nodes.filter((text) => /\.gdl|\.lock|\.rs\b/.test(text)),
+        markers: nodes.filter((text) => !/\.gdl|\.lock|\.rs\b/.test(text)),
+      };
+    }
+    previous = nodes;
+  }
+  throw new Error("the Problems tree never settled");
+}
+
 export async function revealLock(page: Page): Promise<void> {
   await revealView(page, "Gearbox Lock", ".gbx-lock");
   // The text is fetched lazily on first render, so the view being visible is not
