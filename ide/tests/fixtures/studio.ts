@@ -137,6 +137,7 @@ async function open(browser: Browser): Promise<{ studio: Studio; close: () => Pr
         () => (window as unknown as { __gbxSamples?: Sample[] }).__gbxSamples ?? [],
       ) as Promise<Sample[]>,
     detailOf: async (name: string) => {
+      await resetCatalogueView(page);
       await revealDetail(page);
       return page.evaluate(async (wanted) => {
         const row = Array.from(
@@ -351,6 +352,27 @@ export async function revealLeft(page: Page, label: string | RegExp): Promise<vo
 
 export const revealCatalogue = (page: Page): Promise<void> =>
   revealLeft(page, "Gearbox Catalogue");
+
+/**
+ * Put the catalogue back where a row lookup can find anything.
+ *
+ * The catalogue now folds by category and filters by text, and both remove rows
+ * from the DOM -- correctly, that is what they are for. So any test that looks a
+ * gear up by name has to restore the precondition rather than inherit whatever an
+ * earlier test left. Found the hard way: one test folded a category and the next
+ * one's `detailOf("Payments (example provider)")` returned null.
+ */
+export async function resetCatalogueView(page: Page): Promise<void> {
+  const filter = page.locator(".gearbox-catalogue .gbx-filter");
+  if ((await filter.count()) > 0 && (await filter.inputValue()) !== "") {
+    await filter.fill("");
+  }
+  const folded = page.locator('.gearbox-catalogue .gbx-group-label[data-collapsed="true"]');
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    if ((await folded.count()) === 0) return;
+    await folded.first().click();
+  }
+}
 
 /**
  * Expand the Explorer until `file` is visible, and return its node.

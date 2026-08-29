@@ -19,6 +19,11 @@ import React from "@theia/core/shared/react";
 
 import { ProductStore } from "../product-store";
 
+/** `blake3:c4412b91f813…` -> `c4412b91f813`. */
+function shortHash(hash: string): string {
+  return hash.replace(/^[a-z0-9]+:/, "").slice(0, 12);
+}
+
 @injectable()
 export class LockWidget extends ReactWidget {
   static readonly ID = "gearbox.lock";
@@ -71,7 +76,15 @@ export class LockWidget extends ReactWidget {
         <div className="gbx-kv">
           <span>lock hash</span>
           <span>
-            <code data-lock-text-hash={lock.lock_hash}>{lock.lock_hash}</code>
+            {/* Short and without the `blake3:` prefix. The algorithm is not
+                something a reader chooses or checks, and sixty-four hex
+                characters are unreadable at a glance; what a person does with
+                this is compare it to another one, and twelve characters do that.
+                The whole value is in the tooltip, and in the text below, which is
+                what a machine comparison reads. */}
+            <code data-lock-text-hash={lock.lock_hash} title={lock.lock_hash}>
+              {shortHash(lock.lock_hash)}
+            </code>
             {stale && (
               <span className="gbx-badge gbx-downgraded" data-lock-stale="true">
                 does not match the resolution on screen

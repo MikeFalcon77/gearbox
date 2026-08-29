@@ -2160,6 +2160,27 @@ hard co-location edges
 remote-capable contract edges
 ```
 
+## 60.1 As implemented
+
+The Product view is this tree, with three departures, each for a reason worth
+stating rather than leaving to be noticed.
+
+**There is no Deployment branch.** The profile switch *is* the deployment control,
+and it has to stay usable while a resolution is in flight -- a branch of the
+resolved product cannot be, because there is no resolved product yet. So the
+switch, the resolved profile and the link to the description live in the panel's
+header.
+
+**Security is absent** because nothing in the IR models it. Naming an empty branch
+would claim a surface that does not exist.
+
+**Artifacts are absent** because they need `capabilities.generate`, which this
+engine reports as `false`. It returns when the generator does.
+
+Processes, on the other hand, is a branch §60 does not list and the resolver
+computes -- and it is the one that makes co-location legible, since a gear reached
+by two closures appears in both boxes. Added.
+
 ---
 
 # 61. “Why?” in the UI

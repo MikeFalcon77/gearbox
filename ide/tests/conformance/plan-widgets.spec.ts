@@ -15,6 +15,8 @@ import {
   openExplain,
   openGraph,
   openProduct,
+  resetCatalogueView,
+  revealCatalogue,
   revealLock,
   runCommand,
   settled,
@@ -37,6 +39,43 @@ function vocabulary(): Record<string, string[]> {
 }
 
 test.describe("where the views live", () => {
+  test("the Catalogue folds by category and filters [plan §9: Catalogue, foldable and filtered]", async ({
+    studio,
+  }) => {
+    // 62 crates in `gears-rust` carry `#[toolkit::gear]` against the 14 described
+    // today, so this list quadruples as descriptions land. Both halves are tested
+    // because they interact: a filter has to override a fold.
+    await revealCatalogue(studio.page);
+    await resetCatalogueView(studio.page);
+
+    const rows = () => studio.page.locator(".gearbox-catalogue .gbx-row").count();
+    const all = await rows();
+    expect(all).toBeGreaterThan(0);
+
+    const example = studio.page.locator('.gbx-group[data-category="example"] .gbx-group-label');
+    await expect(example).toHaveAttribute("data-collapsed", "false");
+    await example.click();
+    await expect(example).toHaveAttribute("data-collapsed", "true");
+    expect(await rows(), "folding a category removes its rows").toBeLessThan(all);
+
+    // The trap: a match inside a folded category must still show. Otherwise the
+    // reader searches, sees nothing, and concludes the gear is not there.
+    await studio.page.fill(".gearbox-catalogue .gbx-filter", "Payments");
+    const found = await studio.page
+      .locator(".gearbox-catalogue .gbx-row-name")
+      .allTextContents();
+    expect(found.every((name) => name.includes("Payments"))).toBe(true);
+    expect(found.length).toBeGreaterThan(0);
+
+    await studio.page.fill(".gearbox-catalogue .gbx-filter", "no-such-gear-anywhere");
+    await expect(studio.page.locator(".gearbox-catalogue .gbx-empty")).toContainText(
+      "Nothing matches",
+    );
+
+    await resetCatalogueView(studio.page);
+    expect(await rows(), "clearing the filter and the fold restores every row").toBe(all);
+  });
+
   test("the Catalogue is in the left area [plan §9: Catalogue, left]", async ({ studio }) => {
     const tabs = await studio.page.evaluate(() =>
       Array.from(document.querySelectorAll("#theia-left-content-panel .lm-TabBar li")).map((e) =>
@@ -71,6 +110,41 @@ test.describe("where the views live", () => {
       () => document.querySelector("#theia-main-content-panel .gbx-svg") !== null,
     );
     expect(inMain).toBe(true);
+  });
+
+  test("the Product view is a tree of branches [vision §60; plan §9: Product]", async ({
+    studio,
+  }) => {
+    // Vision §60 sketches `Product -> Deployment / Gears / Contracts / Cluster /
+    // Edge / Security / Artifacts`. What is built and why it differs is §60.1:
+    // Processes is added because the resolver computes it and it is what makes
+    // co-location legible; Security and Artifacts are absent because neither
+    // exists to show; Deployment stays in the header because the profile switch
+    // must work while a resolution is in flight.
+    await openProduct(studio.page, "dev");
+    const branches = await studio.page
+      .locator("[data-branch]")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-branch")));
+    expect(branches).toEqual(["gears", "processes", "contracts", "cluster"]);
+
+    // A branch folds, and says so rather than only looking folded.
+    const gears = studio.page.locator('[data-branch="gears"] .gbx-group-label').first();
+    await expect(gears).toHaveAttribute("data-collapsed", "false");
+    await expect(studio.page.locator('[data-asked-for="api-gateway"]')).toBeVisible();
+    await gears.click();
+    await expect(gears).toHaveAttribute("data-collapsed", "true");
+    await expect(studio.page.locator('[data-asked-for="api-gateway"]')).toHaveCount(0);
+    await gears.click();
+
+    // The icon says what a leaf is, and it is chosen from `selected_by` rather
+    // than from the id -- a gear is a plugin because something selected it as
+    // one, and `*-plugin` in a name is a convention.
+    await expect(
+      studio.page.locator('[data-pulled-in="static-authn-plugin"] .codicon-plug'),
+    ).toBeVisible();
+    await expect(
+      studio.page.locator('[data-asked-for="api-gateway"] .codicon-package'),
+    ).toBeVisible();
   });
 
   test("the Product view shows what §9 asks it to [plan §9: Product]", async ({ studio }) => {

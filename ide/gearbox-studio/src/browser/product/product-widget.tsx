@@ -34,6 +34,9 @@ export class ProductWidget extends ReactWidget {
   @inject(ProductStore) protected readonly store!: ProductStore;
   @inject(RevealService) protected readonly reveals!: RevealService;
 
+  /** Which branches are folded away. Widget state; nobody else's business. */
+  protected collapsed = new Set<string>();
+
   @postConstruct()
   protected init(): void {
     this.id = ProductWidget.ID;
@@ -134,49 +137,31 @@ export class ProductWidget extends ReactWidget {
     const pulled = entries
       .filter(([, gear]) => !gear.selected_by.some((reason) => reason.reason === "selected"))
       .map(([id, gear]) => ({ id, why: gear.selected_by.map(describeInclusion).join("; ") }));
+    const bindings = product.bindings ?? [];
+    const cluster = product.cluster ?? [];
+
     return (
       <>
         <div className="gbx-kv">
-          {/* The digest, not a timestamp: "did anything actually change" is meant
-              to be a byte comparison rather than a judgement, and switching the
-              profile above is the fastest way to see that it is. */}
-          <span>lock hash</span>
+          <span>resolved</span>
           {/* The profile is taken from the *resolved header*, not from the switch
               above. They should agree, and stating both is what makes a
               disagreement visible instead of leaving the panel labelled one way
-              and showing another profile's answer. */}
+              and showing another profile's answer.
+              *
+              The lock hash used to be shown here and is not any more: it told a
+              reader nothing they could act on. That the profile matters is already
+              visible in the process count, the binding modes and which plugin was
+              linked -- all of which say *what* differs, where the digest only said
+              *that* something does. It stays on the element as `data-lock-hash`,
+              because "three profiles, three distinct locks" is a fact still worth
+              asserting, and it stays visible in the Lock view, where the lock is
+              the subject rather than a footnote. */}
           <span
             data-resolved-profile={product.product.profile}
             data-lock-hash={product.product.lock_hash}
           >
-            <code>{product.product.lock_hash.slice(0, 16)}</code> ·{" "}
             {product.product.profile} · {product.product.profile_kind}
-          </span>
-        </div>
-
-        {/* Split, not counted. "Why is this even here" is one of the most common
-            questions about a resolved product, and the answer is a field on every
-            gear -- so the panel groups by it rather than making a reader open the
-            lock. The product names four gears; the closure and the plugin
-            selection bring the rest. */}
-        <div className="gbx-kv">
-          <span>asked for</span>
-          <span>
-            {selected.length === 0
-              ? "—"
-              : selected.map((id) => this.renderGear(product, id, { "data-asked-for": id }))}
-          </span>
-        </div>
-        <div className="gbx-kv">
-          <span>pulled in</span>
-          <span className="gbx-pulled-in">
-            {pulled.length === 0
-              ? "—"
-              : pulled.map(({ id, why }) => (
-                  <div key={id} data-pulled-in={id}>
-                    {this.renderGear(product, id)} {why}
-                  </div>
-                ))}
           </span>
         </div>
 
@@ -193,52 +178,188 @@ export class ProductWidget extends ReactWidget {
           </span>
         </div>
 
-        <div className="gbx-section">processes</div>
-        {product.processes.map((process) => this.renderProcess(process))}
-
-        {(product.bindings ?? []).length > 0 && (
+        {/* Vision §60 sketches the product as a tree -- Deployment, Gears,
+            Contracts, Cluster, Edge, Security, Artifacts -- and this is that,
+            with three departures worth naming rather than leaving to be noticed.
+            *
+            There is no Deployment branch: the profile switch above *is* the
+            deployment control, and it has to stay reachable while a resolution is
+            in flight, which a branch of the resolved product cannot be. Security
+            is not modelled in the IR at all. Artifacts need
+            `capabilities.generate`, which this engine reports as `false`. */}
+        {this.renderBranch("gears", "package", "Gears", entries.length, (
           <>
-            <div className="gbx-section">bindings</div>
-            {(product.bindings ?? []).map((binding) => this.renderBinding(binding))}
-          </>
-        )}
-
-        {(product.cluster ?? []).length > 0 && (
-          <>
-            <div className="gbx-section">cluster</div>
-            {(product.cluster ?? []).map((binding) => (
-              <div className="gbx-kv" key={`${binding.scope}/${binding.primitive}`}>
-                <span>
-                  {binding.scope}/{binding.primitive}
-                </span>
-                <span>
-                  {/* Asked-for beside resolved, as §9 requires: the two differ
-                      whenever nothing was declared for this profile, and a panel
-                      showing only the outcome hides that the SDK default is
-                      standing in for a provider nobody chose. */}
-                  asked {describeChoice(binding.selected.selected)} · got{" "}
-                  <code>{describeClusterResolution(binding.resolved)}</code>
-                  {" · for "}
-                  {binding.requesters.join(", ")}
-                  {/* `options` is deliberately not rendered. It carries whatever
-                      the description passed -- connection strings among them --
-                      and a panel that prints it wholesale is one schema change
-                      away from putting a credential on screen
-                      (`cpt-gearbox-fr-no-secrets-in-values`). The reference to
-                      externally managed credentials is safe to name, because it
-                      is a reference and never a credential. */}
-                  {binding.secret_ref !== null && binding.secret_ref !== undefined && (
-                    <>
-                      {" · secret "}
-                      <code>{binding.secret_ref}</code>
-                    </>
-                  )}
-                </span>
-              </div>
+            {this.renderTwig("asked for", selected.length, (
+              <>
+                {selected.length === 0
+                  ? <div className="gbx-empty">—</div>
+                  : selected.map((id) =>
+                      this.renderGearNode(product, id, { "data-asked-for": id }),
+                    )}
+              </>
+            ))}
+            {this.renderTwig("pulled in by the closure", pulled.length, (
+              <>
+                {pulled.length === 0
+                  ? <div className="gbx-empty">—</div>
+                  : pulled.map(({ id, why }) =>
+                      this.renderGearNode(product, id, { "data-pulled-in": id }, why),
+                    )}
+              </>
             ))}
           </>
+        ))}
+
+        {this.renderBranch(
+          "processes",
+          "server-process",
+          "Processes",
+          product.processes.length,
+          <>{product.processes.map((process) => this.renderProcess(process))}</>,
+        )}
+
+        {this.renderBranch(
+          "contracts",
+          "arrow-both",
+          "Contracts",
+          bindings.length,
+          bindings.length === 0 ? (
+            <div className="gbx-empty">No contract binding in this profile.</div>
+          ) : (
+            <>{bindings.map((binding) => this.renderBinding(binding))}</>
+          ),
+        )}
+
+        {this.renderBranch(
+          "cluster",
+          "database",
+          "Cluster",
+          cluster.length,
+          cluster.length === 0 ? (
+            // Said rather than left blank: no gear in this product requests a
+            // cluster scope, which is a fact about the product and not a gap.
+            <div className="gbx-empty">No gear here requests a cluster primitive.</div>
+          ) : (
+            <>
+              {cluster.map((binding) => (
+                <div className="gbx-kv" key={`${binding.scope}/${binding.primitive}`}>
+                  <span>
+                    {binding.scope}/{binding.primitive}
+                  </span>
+                  <span>
+                    {/* Asked-for beside resolved, as §9 requires: the two differ
+                        whenever nothing was declared for this profile, and a panel
+                        showing only the outcome hides that the SDK default is
+                        standing in for a provider nobody chose. */}
+                    asked {describeChoice(binding.selected.selected)} · got{" "}
+                    <code>{describeClusterResolution(binding.resolved)}</code>
+                    {" · for "}
+                    {binding.requesters.join(", ")}
+                    {/* `options` is deliberately not rendered. It carries whatever
+                        the description passed -- connection strings among them --
+                        and a panel that prints it wholesale is one schema change
+                        away from putting a credential on screen
+                        (`cpt-gearbox-fr-no-secrets-in-values`). The reference to
+                        externally managed credentials is safe to name, because it
+                        is a reference and never a credential. */}
+                    {binding.secret_ref !== null && binding.secret_ref !== undefined && (
+                      <>
+                        {" · secret "}
+                        <code>{binding.secret_ref}</code>
+                      </>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </>
+          ),
         )}
       </>
+    );
+  }
+
+  /**
+   * One top-level branch: an icon, a name, a count, and a fold.
+   *
+   * The same fold idiom as the catalogue's categories, deliberately -- two panels
+   * in one application should not invent two ways to collapse a list.
+   */
+  protected renderBranch(
+    id: string,
+    icon: string,
+    title: string,
+    count: number,
+    children: React.ReactNode,
+  ): React.ReactNode {
+    const folded = this.collapsed.has(id);
+    return (
+      <div className="gbx-branch" key={id} data-branch={id}>
+        <div
+          className="gbx-group-label"
+          role="button"
+          tabIndex={0}
+          aria-expanded={!folded}
+          data-collapsed={folded ? "true" : "false"}
+          onClick={() => this.toggle(id)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              this.toggle(id);
+            }
+          }}
+        >
+          <span className={`gbx-twistie codicon codicon-chevron-${folded ? "right" : "down"}`} />
+          <span className={`gbx-branch-icon codicon codicon-${icon}`} />
+          {title}
+          <span className="gbx-group-count">{count}</span>
+        </div>
+        {!folded && <div className="gbx-branch-body">{children}</div>}
+      </div>
+    );
+  }
+
+  /** A second level, without a fold of its own: two twigs do not need chrome. */
+  protected renderTwig(title: string, count: number, children: React.ReactNode): React.ReactNode {
+    return (
+      <div className="gbx-twig" key={title}>
+        <div className="gbx-twig-label">
+          {title}
+          <span className="gbx-group-count">{count}</span>
+        </div>
+        {children}
+      </div>
+    );
+  }
+
+  protected toggle(id: string): void {
+    if (!this.collapsed.delete(id)) {
+      this.collapsed.add(id);
+    }
+    this.update();
+  }
+
+  /**
+   * One gear as a tree leaf: an icon saying what kind it is, a link to its
+   * description, and the reason it is here when that is not "you asked".
+   *
+   * The icon is chosen from `selected_by`, not from the name: a gear is a plugin
+   * because something selected it as one, and `*-plugin` in an id is a convention
+   * rather than a fact.
+   */
+  protected renderGearNode(
+    product: ResolvedProduct,
+    id: string,
+    attributes: Record<string, string>,
+    why?: string,
+  ): React.ReactNode {
+    const gear = product.gears[id];
+    const isPlugin = gear?.selected_by.some((reason) => reason.reason === "plugin_of") ?? false;
+    return (
+      <div className="gbx-leaf" key={id} {...attributes}>
+        <span className={`gbx-leaf-icon codicon codicon-${isPlugin ? "plug" : "package"}`} />
+        {this.renderGear(product, id)}
+        {why !== undefined && <span className="gbx-leaf-why">{why}</span>}
+      </div>
     );
   }
 

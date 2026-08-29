@@ -30,6 +30,18 @@ export class CatalogueWidget extends ReactWidget {
   @inject(CatalogueStore) protected readonly store!: CatalogueStore;
   @inject(RevealService) protected readonly reveals!: RevealService;
 
+  /**
+   * The filter text, and which categories are folded away.
+   *
+   * Widget state rather than store state: neither survives a reload and neither
+   * is anyone else's business. `gears-rust` has 62 crates carrying
+   * `#[toolkit::gear]` against the 14 described today, so this list is going to
+   * quadruple -- which is what makes folding and filtering worth having before
+   * it does.
+   */
+  protected filter = "";
+  protected collapsed = new Set<string>();
+
   @postConstruct()
   protected init(): void {
     this.id = CatalogueWidget.ID;
@@ -44,7 +56,8 @@ export class CatalogueWidget extends ReactWidget {
 
   protected render(): React.ReactNode {
     const state = this.store.current;
-    const groups = groupByCategory(state.rows);
+    const matching = state.rows.filter((row) => matches(row, this.filter));
+    const groups = groupByCategory(matching);
     const loading = state.status === "loading";
     // A row still pending once the load is over did not project. Saying so is
     // the difference between "still working" and "this gear failed, and the
@@ -54,7 +67,8 @@ export class CatalogueWidget extends ReactWidget {
     return (
       <div className="gbx-root">
         <div className="gbx-header">
-          <strong>{state.rows.length}</strong> gear(s)
+          <strong>{matching.length}</strong>
+          {matching.length === state.rows.length ? " gear(s)" : ` of ${state.rows.length} gear(s)`}
           {loading && (
             <span className="gbx-progress">
               {" "}
@@ -69,6 +83,22 @@ export class CatalogueWidget extends ReactWidget {
           )}
         </div>
 
+        {/* A plain substring filter over name, id and category. Not Theia's
+            `fuzzySearch`: on 62 entries fuzziness mostly buys surprising matches,
+            and a predictable filter is easier to trust when what you are looking
+            for is an id you already know. */}
+        <input
+          className="gbx-filter"
+          type="search"
+          placeholder="Filter gears"
+          aria-label="Filter gears"
+          value={this.filter}
+          onChange={(event) => {
+            this.filter = event.target.value;
+            this.update();
+          }}
+        />
+
         {state.status === "error" && (
           <div className="gbx-error" role="alert">
             The catalogue could not be loaded: {state.error}
@@ -81,18 +111,58 @@ export class CatalogueWidget extends ReactWidget {
           <div className="gbx-empty">No gear.gdl found under the source root.</div>
         )}
 
-        {groups.map(([category, rows]) => (
-          <div className="gbx-group" key={category}>
-            <div className="gbx-group-label">{category}</div>
-            <div role="listbox" aria-label={category}>
-              {rows.map((row) => this.renderRow(row, state.status))}
-            </div>
-          </div>
-        ))}
+        {matching.length === 0 && state.rows.length > 0 && (
+          <div className="gbx-empty">Nothing matches “{this.filter}”.</div>
+        )}
+
+        {groups.map(([category, rows]) => this.renderGroup(category, rows, state.status))}
 
         {state.diagnostics.length > 0 && this.renderDiagnostics(state.diagnostics)}
       </div>
     );
+  }
+
+  protected renderGroup(category: string, rows: Row[], status: string): React.ReactNode {
+    // Folded groups are ignored while a filter is active. A match hidden inside a
+    // collapsed category is the one thing a filter must never do: the reader
+    // concludes the gear is not there.
+    const folded = this.filter.length === 0 && this.collapsed.has(category);
+    return (
+      <div className="gbx-group" key={category} data-category={category}>
+        <div
+          className="gbx-group-label"
+          role="button"
+          tabIndex={0}
+          aria-expanded={!folded}
+          data-collapsed={folded ? "true" : "false"}
+          onClick={() => this.toggle(category)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              this.toggle(category);
+            }
+          }}
+        >
+          <span
+            className={`gbx-twistie codicon codicon-chevron-${folded ? "right" : "down"}`}
+          />
+          {category}
+          <span className="gbx-group-count">{rows.length}</span>
+        </div>
+        {!folded && (
+          <div role="listbox" aria-label={category}>
+            {rows.map((row) => this.renderRow(row, status))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  protected toggle(category: string): void {
+    if (!this.collapsed.delete(category)) {
+      this.collapsed.add(category);
+    }
+    this.update();
   }
 
   protected renderRow(row: Row, status: string): React.ReactNode {
@@ -199,6 +269,26 @@ export class CatalogueWidget extends ReactWidget {
       </div>
     );
   }
+}
+
+/**
+ * Whether a row survives the filter.
+ *
+ * Matches the display name, the id and the category, because those are the three
+ * things a person has in hand when they go looking. A pending row has no id yet,
+ * which is why this reads what the row actually carries rather than assuming a
+ * projected one.
+ */
+function matches(row: Row, filter: string): boolean {
+  const needle = filter.trim().toLowerCase();
+  if (needle.length === 0) return true;
+  const haystack = [
+    row.kind === "pending" ? (row.gear.display_name ?? "") : row.gear.display_name,
+    row.kind === "projected" ? row.gear.id : "",
+    row.gear.category ?? "",
+    row.gear.gdl_path,
+  ];
+  return haystack.some((field) => field.toLowerCase().includes(needle));
 }
 
 function isPending(row: Row): boolean {

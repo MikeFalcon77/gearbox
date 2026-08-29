@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **88** — 73 built, 13 not built, 0 broken, 2 not observed.
+Claims: **90** — 75 built, 13 not built, 0 broken, 2 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -73,9 +73,11 @@ Rust, and the ADRs' own Confirmation sections say which.
 
 | Claim | Source | Status | Note |
 |---|---|---|---|
+| the Catalogue folds by category and filters | `plan §9: Catalogue, foldable and filtered` | ✅ built |  |
 | the Catalogue is in the left area | `plan §9: Catalogue, left` | ✅ built |  |
 | the Gear detail is in the bottom area, not the side panel | `plan §9: Gear detail, bottom` | ✅ built |  |
 | the co-location Graph opens in the main area | `plan §9: Graph, main` | ✅ built |  |
+| the Product view is a tree of branches | `vision §60; plan §9: Product` | ✅ built |  |
 | the Product view shows what §9 asks it to | `plan §9: Product` | ✅ built |  |
 | the Explain view is in the bottom area | `plan §9: Explain` | ✅ built |  |
 | the Lock view is in the main area | `plan §9: Lock` | ✅ built |  |

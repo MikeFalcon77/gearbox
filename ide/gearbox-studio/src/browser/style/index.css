@@ -220,3 +220,55 @@
   background: var(--theia-editor-background);
   user-select: text;
 }
+
+/* --- Catalogue: folding and filtering ------------------------------------ */
+
+.gbx-filter {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 2px 0 8px;
+  padding: 3px 6px;
+  font: inherit;
+  color: var(--theia-input-foreground);
+  background: var(--theia-input-background);
+  border: 1px solid var(--theia-input-border, var(--theia-editorGroup-border));
+  border-radius: 3px;
+}
+.gbx-filter:focus { outline: 1px solid var(--theia-focusBorder); outline-offset: -1px; }
+
+/* The label was a caption and is now the fold control, so it needs the
+   affordances of one: a pointer, a hover, and a focus ring for the keyboard. */
+.gbx-group-label {
+  display: flex; align-items: center; gap: 4px;
+  cursor: pointer; user-select: none;
+}
+.gbx-group-label:hover { background: var(--theia-list-hoverBackground); }
+.gbx-group-label:focus-visible {
+  outline: 1px solid var(--theia-focusBorder);
+  outline-offset: -1px;
+}
+.gbx-twistie { font-size: 14px; opacity: 0.7; }
+/* Pushed right and dimmed: the count answers "how many are in here" for a folded
+   group, and must not compete with the name when it is open. */
+.gbx-group-count { margin-left: auto; opacity: 0.5; font-variant-numeric: tabular-nums; }
+
+/* --- Product: the tree --------------------------------------------------- */
+
+.gbx-branch { margin-top: 10px; }
+.gbx-branch-icon { font-size: 14px; opacity: 0.75; }
+/* Indented from the branch label, which is what makes the nesting readable
+   without drawing guide lines nobody asked for. */
+.gbx-branch-body { padding-left: 18px; }
+
+.gbx-twig { margin: 4px 0; }
+.gbx-twig-label {
+  display: flex; align-items: center;
+  font-size: 0.85em; opacity: 0.6;
+  padding: 2px 0;
+}
+
+.gbx-leaf { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; flex-wrap: wrap; }
+.gbx-leaf-icon { font-size: 13px; opacity: 0.7; align-self: center; }
+/* The reason a gear is here, dimmed: it explains the leaf rather than competing
+   with its name. */
+.gbx-leaf-why { opacity: 0.65; font-size: 0.9em; }
