@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **90** — 75 built, 13 not built, 0 broken, 2 not observed.
+Claims: **92** — 77 built, 13 not built, 0 broken, 2 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -33,6 +33,8 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Studio offers a command to scaffold a new gear | `ADR-0010 tier 0` | 🚧 not built |  |
 | a scaffold shows its file plan before writing anything | `ADR-0010 §Consequences: a preview is not optional` | 🚧 not built |  |
 | a generated composition crate carries a header naming its generator | `ADR-0010 tier 2` | 🚧 not built |  |
+| a description edit shows the line before writing it | `ADR-0010 §Consequences: a preview is not optional` | ✅ built |  |
+| adding a gear inserts one line, and removing it restores the file exactly | `ADR-0010 tier 3` | ✅ built |  |
 
 ## `conformance/adr-0011-ide-shell.spec.ts`
 

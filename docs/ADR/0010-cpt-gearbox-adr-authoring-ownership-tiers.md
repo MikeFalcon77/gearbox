@@ -78,7 +78,7 @@ Mapped onto this project:
 | 0. New files | tool writes once, then hands over | **Permitted** — a new gear or plugin crate |
 | 1. Tool metadata | tool, entirely | **Permitted** — `product.lock`, and it is marked read-only in the editor. Built: `ReadOnlyLockEditorProvider` rebinds Theia's `MonacoEditorProvider`, which is the only hook that can say "this file" rather than "this URI scheme". |
 | 2. Generated source | tool, entirely, with a header | **Permitted** — the composition crates under `.gearbox/` |
-| 3. Structured manifests | tool edits surgically | **Permitted** — one `members` entry in the workspace manifest |
+| 3. Structured manifests | tool edits surgically | **Permitted** — one `members` entry in the workspace manifest, and one `use_gear(...)` entry in a `product.gdl` `gears` list ([amendment](#amendment-2026-08-29-a-gdl-description-is-a-structured-manifest)) |
 | 4. Insertion markers in human files | tool owns a point, human owns the file | **Not needed** — see below |
 | 5. Human logic | only under version control | **Forbidden**, unchanged |
 
@@ -286,6 +286,74 @@ good answer to that question already, and the tiers are that answer applied outw
 * If a future feature needs to *change* an existing gear rather than create one, this ADR does not
   cover it and a new decision is required.
 
+## Amendment 2026-08-29: a GDL description is a structured manifest
+
+**Status: accepted. This extends tier 3; it reverses nothing.**
+
+When this ADR was written, tier 3's only instance was `[workspace] members` in `Cargo.toml`, and the
+question of whether a `product.gdl` could be edited was not asked. Studio's catalogue now wants a
+toggle that puts a gear into the open product, so it has to be.
+
+**A GDL description falls under tier 3, and tier 5 does not reach it.** Tier 5 forbids rewriting
+*human logic*, and a GDL description cannot contain logic: `cpt-gearbox-fr-gdl-declarative` refuses
+every branching construct in the dialect — `if`, `for`, `def`, `and`, `or`, comprehensions — and the
+token scan raises `GBX0103` on each. What remains is declarations and literal data. A `use_gear(...)`
+entry in a `gears` list is therefore a data entry in a list, in the same sense and to the same depth
+as the dependency line `cargo add` writes. The tier-3 finding above applies unchanged: no surveyed
+tool forbids this, and it is "the single most universal behaviour in the set".
+
+The boundary in [Scope and boundary](#scope-and-boundary) — creation versus modification, not file
+type — is what makes this an extension rather than a contradiction. That boundary was always about
+ownership of lines, not about which language the file is written in. It said the tool may not edit a
+`.rs` file a human wrote; it did not say the tool may edit only files it owns.
+
+**Three limits come with it, and they are not negotiable separately.**
+
+* **Only list membership.** The edit adds or removes one entry in a list literal. It does not
+  reformat, reorder, normalise or evaluate. Editing `config = {…}`, profile bodies or bindings is
+  outside this amendment and needs its own.
+* **Span-surgical, never re-serialised.** The demo description is 105 lines of which 29 are comments,
+  and the comments carry the reasoning for the decisions in it. A round trip through the interpreter
+  would erase every one, which would breach the one-author invariant of ADR
+  `cpt-gearbox-adr-macro-projected-catalogue` as surely as editing logic would: the author's
+  explanation is part of what they authored. So the editor computes byte offsets from the AST and
+  splices, and takes its indentation from the neighbouring entries. Where there is no span to edit —
+  no `gears` argument, or a list produced by a helper rather than written literally — it refuses and
+  says so, rather than guessing at a shape.
+* **Refusal on an unsaved buffer.** If the description is open in the editor with unsaved changes,
+  the write is refused. Writing would destroy an edit in progress, which is the failure this ADR
+  exists to prevent, and worse than the one it worried about, because the tool would be the author of
+  the loss. Saving on the author's behalf is not the alternative: that commits an edit they had not
+  finished.
+
+**`Ownership` does not apply, and is not stretched to.** The three classes in plan §7 —
+`Generated`, `GeneratedOnce`, `OperatorOwned` — describe, by their own doc comment, who owns a
+*generated* file. A `product.gdl` is an input, not an output. Forcing it into that vocabulary would
+misrepresent both models, so a description edit carries no ownership class; what governs it is this
+amendment and the refusals above.
+
+The existing consequences carry over with one addition. Transactional still holds, by temp file and
+rename in the same directory, so a crash cannot leave a truncated description. Idempotent by content
+still holds: adding a gear the description already names is a no-op. "A preview is not optional"
+still holds, and here it is met by `dry_run` on `product/addGear` and `product/removeGear` plus a
+confirmation showing the exact line. The addition is that **a mutating RPC call is refused unless the
+client declared `allow_writes` at initialize, and any path outside the declared workspace and source
+roots is refused** — `cpt-gearbox-fr-rpc-writes-opt-in`, enforced in the engine rather than in the
+client, because a client is not a security boundary.
+
+### Confirmation of this amendment
+
+* Adding a gear to the real `products/payments-demo/product.gdl` leaves all 29 comments in place and
+  grows the file by exactly one line; removing it again reproduces the file byte for byte. Both in
+  `cargo test -p gearbox-gdl`, and again through the interface in `npm run conformance`, where the
+  assertion is that `git diff --stat` reports one insertion and no deletions. **The inverse being
+  exact is the load-bearing test**: a re-serialising editor could pass the first half and could never
+  pass the second.
+* A `gears` list the editor cannot locate a span in produces a diagnostic, not a rewrite.
+* A mutating call without `allow_writes`, and one with a path outside the roots, are both refused —
+  ten such checks in `ide/scripts/rpc-smoke.mjs`.
+* A dry run writes nothing: asserted by cancelling the confirmation and comparing against `HEAD`.
+
 ## Traceability
 
 * Requirements: `cpt-gearbox-actor-gear-author` gains the use cases this decision unblocks;
@@ -295,3 +363,7 @@ good answer to that question already, and the tiers are that answer applied outw
   tiers 4 and 5 protect, and what `GeneratedOnce` leaves intact.
 * Depends on: ADR `cpt-gearbox-adr-staged-catalogue-loading` — discovery by walking for `gear.gdl` is
   why there is no registry to inject into, which is why tier 4 is not needed.
+* Amended by the 2026-08-29 amendment above: `cpt-gearbox-fr-gdl-declarative` is what places a GDL
+  description in tier 3 rather than tier 5, and `cpt-gearbox-fr-rpc-writes-opt-in` is what gates the
+  write. Implemented in `crates/gearbox-gdl/src/edit.rs`; the four client-side refusals are in
+  `docs/plans/gearbox-builder-prototype.md` §9.2.

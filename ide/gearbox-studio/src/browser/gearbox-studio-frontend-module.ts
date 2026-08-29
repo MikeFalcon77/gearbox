@@ -12,6 +12,7 @@ import { LanguageGrammarDefinitionContribution } from "@theia/monaco/lib/browser
 
 import { GEARBOX_SERVICE_PATH, GearboxClient, GearboxService } from "../common/protocol";
 import { CatalogueStore } from "./catalogue-store";
+import { ProductEditService } from "./product-edit-service";
 import { ProductStore } from "./product-store";
 import { ResolutionMarkers } from "./resolution-markers";
 import { bindWidget } from "./contribution";
@@ -89,6 +90,11 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // subordinate one another, and their lifecycles differ -- the catalogue loads
   // once and streams, a product is re-resolved on every profile switch.
   bind(ProductStore).toSelf().inSingletonScope();
+  // The policy in front of a description edit: a product must be open, its file
+  // must have no unsaved changes, the engine must agree, and the person must
+  // confirm. A service rather than a widget handler, so the next widget that
+  // wants to edit does not reimplement the four checks.
+  bind(ProductEditService).toSelf().inSingletonScope();
   bind(RevealService).toSelf().inSingletonScope();
   bind(GearboxClient).toService(CatalogueStore);
 

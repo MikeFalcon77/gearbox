@@ -8,6 +8,7 @@
 import type { CatalogueChanged } from "./generated/CatalogueChanged";
 import type { CatalogueDiagnostics } from "./generated/CatalogueDiagnostics";
 import type { CatalogueLoadResult } from "./generated/CatalogueLoadResult";
+import type { EditGearResult } from "./generated/EditGearResult";
 import type { LockResult } from "./generated/LockResult";
 import type { ProductLoadResult } from "./generated/ProductLoadResult";
 import type { ResolveResult } from "./generated/ResolveResult";
@@ -116,6 +117,19 @@ export interface GearboxService {
    * question the lock exists to settle byte-for-byte.
    */
   lock(path: string, profile?: string): Promise<LockResult>;
+
+  /**
+   * Add a gear to a product description, or preview the change.
+   *
+   * `dryRun` returns what the file would become and writes nothing, which is
+   * ADR-0010's "a preview is not optional" rather than a convenience. The engine
+   * refuses unless this client declared write capability at initialize and the
+   * path is inside the declared workspace.
+   */
+  addGear(path: string, gear: string, source: string, dryRun: boolean): Promise<EditGearResult>;
+
+  /** Remove a gear from a product description, or preview the removal. */
+  removeGear(path: string, gear: string, dryRun: boolean): Promise<EditGearResult>;
 
   /** Everything checkable without resolving. `product` omitted checks only the
    * catalogue. */

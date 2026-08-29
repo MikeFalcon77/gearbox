@@ -20,6 +20,8 @@ import type { Diagnostic } from "../../common/generated/Diagnostic";
 import type { FailedRoot } from "../../common/generated/FailedRoot";
 import { Row, rowKey } from "../../common/protocol";
 import { CatalogueStore } from "../catalogue-store";
+import { ProductEditService } from "../product-edit-service";
+import { ProductStore } from "../product-store";
 import { RevealService } from "../reveal-service";
 
 @injectable()
@@ -29,6 +31,8 @@ export class CatalogueWidget extends ReactWidget {
 
   @inject(CatalogueStore) protected readonly store!: CatalogueStore;
   @inject(RevealService) protected readonly reveals!: RevealService;
+  @inject(ProductEditService) protected readonly edits!: ProductEditService;
+  @inject(ProductStore) protected readonly product!: ProductStore;
 
   /**
    * The filter text, and which categories are folded away.
@@ -51,6 +55,10 @@ export class CatalogueWidget extends ReactWidget {
     this.addClass("gearbox-catalogue");
     this.node.tabIndex = -1;
     this.toDispose.push(this.store.onChanged(() => this.update()));
+    // And the product's, because each row now shows whether *this product* names
+    // the gear. Without this the toggles would appear only after some unrelated
+    // catalogue change, which is how they failed to appear at all the first time.
+    this.toDispose.push(this.product.onChanged(() => this.update()));
     this.update();
   }
 
@@ -119,6 +127,47 @@ export class CatalogueWidget extends ReactWidget {
 
         {state.diagnostics.length > 0 && this.renderDiagnostics(state.diagnostics)}
       </div>
+    );
+  }
+
+  /**
+   * The "in this product" toggle.
+   *
+   * Only on a projected row: adding a gear needs its id, and a pending row has
+   * none -- `GearId` is projected at S2 (ADR
+   * `cpt-gearbox-adr-staged-catalogue-loading`). And only when a product is open,
+   * because otherwise the control would promise something it cannot do, which is
+   * the mistake the Product view's fake links already made once.
+   *
+   * `stopPropagation`, because the row's own click selects it and this button
+   * sits inside the row: without it, adding a gear would also move the selection.
+   */
+  protected renderInProduct(row: Row): React.ReactNode {
+    if (row.kind !== "projected" || !this.edits.editable) {
+      return undefined;
+    }
+    const id = row.gear.id;
+    const inside = this.edits.inProduct(id);
+    return (
+      <button
+        className={`gbx-in-product ${inside ? "gbx-in-product-on" : ""}`}
+        data-in-product={inside ? "true" : "false"}
+        // `data-toggle-gear` rather than `data-gear`: the graph widget's nodes
+        // carry `data-gear`, and the co-location tests reach them with an
+        // unscoped `querySelector`. Reusing the name here made a click meant for
+        // a graph node land on a catalogue button instead -- and that button
+        // opens a write confirmation, so the collision was worse than a wrong
+        // selection. One attribute, one meaning per document.
+        data-toggle-gear={id}
+        title={inside ? `Remove ${id} from the product` : `Add ${id} to the product`}
+        aria-pressed={inside}
+        onClick={(event) => {
+          event.stopPropagation();
+          void this.edits.toggle(id, row.gear.source);
+        }}
+      >
+        <span className={`codicon codicon-${inside ? "check" : "add"}`} />
+      </button>
     );
   }
 
@@ -197,6 +246,7 @@ export class CatalogueWidget extends ReactWidget {
         onDoubleClick={() => void this.reveals.reveal(row.gear.source, row.gear.gdl_path)}
         title={row.gear.gdl_path}
       >
+        {this.renderInProduct(row)}
         <span className="gbx-row-name">{label}</span>
         {row.kind === "projected" ? (
           <>

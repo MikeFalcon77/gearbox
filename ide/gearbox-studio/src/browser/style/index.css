@@ -272,3 +272,36 @@
 /* The reason a gear is here, dimmed: it explains the leaf rather than competing
    with its name. */
 .gbx-leaf-why { opacity: 0.65; font-size: 0.9em; }
+
+/* --- The "in this product" toggle ---------------------------------------- */
+
+/* Sits inside the row, so it must not look like part of the row's own text and
+   must not steal the row's click -- the handler stops propagation for the second
+   half of that. */
+.gbx-in-product {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0;
+  border: none; border-radius: 3px;
+  cursor: pointer;
+  color: var(--theia-icon-foreground);
+  background: transparent;
+  opacity: 0.45;
+}
+.gbx-row:hover .gbx-in-product { opacity: 0.8; }
+.gbx-in-product:hover { background: var(--theia-toolbar-hoverBackground, var(--theia-list-hoverBackground)); opacity: 1; }
+.gbx-in-product:focus-visible { outline: 1px solid var(--theia-focusBorder); opacity: 1; }
+/* A gear already in the product stays lit whether or not the row is hovered:
+   "what is in my product" should be answerable by looking, not by pointing. */
+.gbx-in-product-on { opacity: 1; color: var(--theia-successBackground); }
+
+.gbx-edit-preview {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  font-family: var(--theia-code-font-family);
+  font-size: var(--theia-code-font-size);
+  white-space: pre;
+  text-align: left;
+  border: 1px solid var(--theia-editorGroup-border);
+  border-radius: 3px;
+  background: var(--theia-editor-background);
+}

@@ -15,6 +15,7 @@ import * as path from "path";
 import type { CatalogueChanged } from "../common/generated/CatalogueChanged";
 import type { CatalogueDiagnostics } from "../common/generated/CatalogueDiagnostics";
 import type { CatalogueLoadResult } from "../common/generated/CatalogueLoadResult";
+import type { EditGearResult } from "../common/generated/EditGearResult";
 import type { InitializeResult } from "../common/generated/InitializeResult";
 import type { LockResult } from "../common/generated/LockResult";
 import type { LogParams } from "../common/generated/LogParams";
@@ -128,7 +129,18 @@ export class GearboxServiceImpl implements GearboxService {
 
     const result = await engine.request<InitializeResult>(
       method.INITIALIZE,
-      { roots: roots_ },
+      {
+        roots: roots_,
+        // Declared, because this client edits descriptions on a person's
+        // instruction (`cpt-gearbox-fr-rpc-writes-opt-in`). The engine refuses
+        // every mutating call until someone claims this, and claiming it is a
+        // statement about the client, not about the engine.
+        allow_writes: true,
+        // And the boundary those writes may not leave. A product description
+        // lives beside the products rather than inside a gear source root, so the
+        // roots alone would refuse every legitimate edit.
+        workspace: findRepoRoot(__dirname),
+      },
       INITIALIZE_TIMEOUT_MS,
     );
     engine.connection.sendNotification(method.INITIALIZED, {});
@@ -194,6 +206,19 @@ export class GearboxServiceImpl implements GearboxService {
 
   async lock(path: string, profile?: string): Promise<LockResult> {
     return this.request("gearbox/product/lock", { path, profile });
+  }
+
+  async addGear(path: string, gear: string, source: string, dryRun: boolean): Promise<EditGearResult> {
+    return this.request("gearbox/product/addGear", {
+      path,
+      gear,
+      source,
+      dry_run: dryRun,
+    });
+  }
+
+  async removeGear(path: string, gear: string, dryRun: boolean): Promise<EditGearResult> {
+    return this.request("gearbox/product/removeGear", { path, gear, dry_run: dryRun });
   }
 
   async validate(product?: string): Promise<ValidateResult> {

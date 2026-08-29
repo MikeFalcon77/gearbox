@@ -258,7 +258,9 @@ test.describe("co-location is a closure, not a partition", () => {
   }) => {
     await openGraph(studio.page);
     const painted = await studio.page.evaluate(async () => {
-      const node = document.querySelector('[data-gear="api-gateway"]');
+      // Scoped to the graph. An unscoped `[data-gear=...]` reaches whichever
+      // widget rendered first, and the catalogue is to the left of this one.
+      const node = document.querySelector('.gearbox-graph [data-gear="api-gateway"]');
       if (node === null) return null;
       node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await new Promise((r) => setTimeout(r, 300));

@@ -835,7 +835,7 @@ per frontend connection, one engine per workspace root) and `BackendApplicationC
 
 | Widget | Shows |
 |---|---|
-| Catalogue | tree by `category` → gear, **with foldable categories and a filter over name, id, category and path**. `gears-rust` carries 62 crates with `#[toolkit::gear]` against the 14 described today, so the list quadruples as descriptions land; a flat list stops being readable well before that. A filter overrides a fold — a match hidden inside a collapsed category is the one thing a filter must never do, because the reader concludes the gear is absent. Badges for `runtime_caps`, chips for `colocated_deps`, provides/consumes counts. Click reveals the `gear.gdl` at its declaring range. Checkbox produces a *proposed* `use_gear(...)` diff, never an auto-edit. **Renders incrementally** (§2.3): the grouping is available at S1 because `category` is declared, while the badges arrive at S2 because `runtime_caps` and `colocated_deps` are projected — so the tree's shape settles first and fills in. Rows are keyed by `gdl_path`, not `id`, because the id does not exist until S2. A `pending` row renders dimmed, and **clicking it still reveals its `gear.gdl`** — that path is known from S0, so a pending row is never inert. |
+| Catalogue | tree by `category` → gear, **with foldable categories and a filter over name, id, category and path**. `gears-rust` carries 62 crates with `#[toolkit::gear]` against the 14 described today, so the list quadruples as descriptions land; a flat list stops being readable well before that. A filter overrides a fold — a match hidden inside a collapsed category is the one thing a filter must never do, because the reader concludes the gear is absent. Badges for `runtime_caps`, chips for `colocated_deps`, provides/consumes counts. Click reveals the `gear.gdl` at its declaring range. A toggle per projected row adds the gear to the open product or takes it out, writing `products/…/product.gdl` after a preview and a confirmation. **This replaces «produces a *proposed* `use_gear(...)` diff, never an auto-edit», which this plan required until M5.** What changed is the reading of ADR-0010, not the appetite for writing: its tier 3 is «structured manifests | tool edits surgically | **Permitted**», and its survey calls manifest editing «the single most universal behaviour in the set». The tier-5 prohibition covers *human logic*, and a GDL description cannot be logic — `cpt-gearbox-fr-gdl-declarative` refuses every branching construct — so a `use_gear(...)` entry is a data entry in a list, exactly like the line `cargo add` writes. What survives from the old wording is the part that mattered: the diff is still shown first and nothing is written until it is accepted. The four refusals in front of the write are in §9.2. **Renders incrementally** (§2.3): the grouping is available at S1 because `category` is declared, while the badges arrive at S2 because `runtime_caps` and `colocated_deps` are projected — so the tree's shape settles first and fills in. Rows are keyed by `gdl_path`, not `id`, because the id does not exist until S2. A `pending` row renders dimmed, and **clicking it still reveals its `gear.gdl`** — that path is known from S0, so a pending row is never inert. |
 | Gear detail | everything projected for the selected gear: capabilities, co-location, extension points with the vendor the host selects on, what the gear fills and under which vendor, contracts with the transports **this provider wires up**, GTS types, and clickable PRD/DESIGN/ADR links. In the bottom area, not the side panel — the side panel clipped exactly the facts it exists to show. Keyed by `gdl_path` like the tree, so a selection made while a row is pending survives projection. |
 | Product | **a tree, as vision §60 sketches it**: foldable branches for Gears (with `asked for` / `pulled in by the closure` beneath), Processes, Contracts and Cluster, each with an icon and a count. The profile switch, the resolved profile and the description-file link stay in the header rather than becoming a Deployment branch: the switch has to be reachable *while* a resolution is in flight, which a branch of the resolved product cannot be. §60's Security and Artifacts are absent — the first is not modelled in the IR, the second needs `capabilities.generate`, which is `false`. Bindings carry mode/transport/mechanism chips; cluster shows `selected` vs `resolved`; diagnostics summarise at the bottom. |
 | Graph | four views. **deps** (solid = co-location), **contracts** (dashed = cuttable, solid = forced local, red = undeclared-hub-edge), **processes** (boxes with gear chips, overlapping gears drawn in *every* box — this is what makes closure-not-partition visible), **cluster** (requirement → capability → provider, unsatisfied in red). Layout: `elkjs` `layered` with a fixed seed → deterministic, so screenshots and "why did this move" are stable. Rendered as hand-written React SVG. |
@@ -929,7 +929,7 @@ rather than from a hard-coded string.
 Also built since this section was written, and not planned here: the `Contribution` base class ADR
 0011 asks for; the menu narrowing that removes Selection and Go and fills a Gearbox submenu;
 resolution diagnostics as Problems markers, which is what finally uses the long-declared
-`@theia/markers`; and four RPC methods -- `product/load`, `resolve`, `validate`, `product/lock`.
+`@theia/markers`; six RPC methods -- `product/load`, `resolve`, `validate`, `product/lock`, `product/addGear` and `product/removeGear`; and the description edit the last two carry, which reverses a prohibition this plan used to state (§9.2).
 
 **The check is `npm run conformance`, and it is organised by document rather than by feature.**
 `ide/tests/conformance/` holds one test per claim in the PRD, the ADRs and §9 of this plan, each
@@ -1007,9 +1007,54 @@ The backend spawns `../target/debug/gearbox`, so the Rust half stays stale and
 the symptom is a client reporting something the engine was already taught to
 send. `npm run verify` builds it first.
 
-Known cosmetic gap: the app has no favicon. `@theia/cli` 1.75 offers no hook for one and its
-generated `index.html` has no `<link rel="icon">`. The UI check tolerates that 404 **by name**, so a
-genuinely missing resource still fails.
+The favicon gap this section used to record is closed. `@theia/cli` 1.75 still offers no hook and
+its generated `index.html` still has no `<link rel="icon">`, so `FabricThemeContribution` injects
+one from `onStart` -- the same contribution that registers the Constructor Fabric colour theme and
+the Geist fonts. The UI check still tolerates a favicon 404 **by name**, which now only matters if
+that injection regresses.
+
+
+### 9.2 Writing to a description, and the four refusals
+
+The catalogue toggle is the only thing in Studio that writes a file a person owns, so the checks in
+front of it are the substance rather than the plumbing. They run in this order, and each one refuses
+instead of guessing:
+
+1. **A product must be open**, or there is nothing to add to.
+2. **The description must have no unsaved changes.** If `product.gdl` is open and modified, writing
+   under the author destroys their edit -- the exact failure ADR-0010 exists to prevent, and worse
+   than the one it worries about, because the tool would be the author of the loss. Saving on their
+   behalf is not the answer either: that commits an edit they had not finished. So this refuses and
+   names the file.
+3. **The engine must agree.** `product/addGear` and `product/removeGear` take `dry_run`, and the
+   preview is that call. The engine declines rather than guessing when there is no span to edit --
+   no `gears` argument, or a list built by a helper instead of written literally.
+4. **The person must agree**, seeing the line that will be written.
+
+Two more refusals live in the engine, not in the client, because a client is not a security
+boundary (`cpt-gearbox-fr-rpc-writes-opt-in`): a mutating call fails unless the client declared
+`allow_writes` at initialize, and any path outside the declared workspace and source roots is
+refused. `writable_path` fails closed. The write itself goes to a temporary file in the same
+directory and is renamed, so a crash cannot leave a truncated `product.gdl`.
+
+**The edit is span-surgical, and this is the constraint that shaped the whole feature.** The demo
+description is 105 lines of which 29 are comments, and those comments carry the reasoning -- why
+`vendor` is better left alone, why the grpc hub is not listed, why profiles are data. Evaluating the
+file and re-serialising it would erase all of them. So `gearbox-gdl`'s editor walks the AST to the
+`gears` list, computes byte offsets from `starlark_syntax::codemap::Pos`, and splices; indentation
+comes from the neighbouring entries rather than from a constant. Adding a gear the description
+already names is a no-op, as `members` is in ADR-0010.
+
+The proof is the inverse: `cargo test -p gearbox-gdl` adds a gear to the real
+`products/payments-demo/product.gdl`, asserts every one of the 29 comments survived and that the
+file grew by exactly one line, then removes it and compares byte for byte. `npm run conformance`
+does the same round trip *through the interface* and checks `git diff --stat` reports one insertion
+and no deletions. A re-serialising editor could pass the first assertion and could never pass the
+last.
+
+**Configuring gears is not part of this.** `config = {…}`, per-profile plugin selection and bindings
+each need their own form and their own edit; the mechanism is worth proving on the simplest case
+first, and add/remove exercises all of it.
 
 ---
 
