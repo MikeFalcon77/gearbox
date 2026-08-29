@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **92** — 77 built, 13 not built, 0 broken, 2 not observed.
+Claims: **96** — 83 built, 10 not built, 0 broken, 3 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -90,6 +90,10 @@ Rust, and the ADRs' own Confirmation sections say which.
 | unconnected gears are set apart, not put in the leaf column | `plan §9: isolated gears` | ✅ built |  |
 | fourteen constructs are forbidden outright | `plan §9: forbidden-keyword colouring` | ✅ built |  |
 | `while` is reserved rather than forbidden | `plan §9: two keyword lists` | ✅ built |  |
+| all four views are reachable from one panel | `plan §9: Graph four views` | ✅ built |  |
+| co-location shows first, and needs no product | `plan §9: Graph four views` | ✅ built |  |
+| a resolution view with no product says what it needs | `plan §9: Graph four views` | ✅ built |  |
+| switching profiles redraws the resolution views | `plan §9: Graph four views` | ✅ built |  |
 
 ## `conformance/prd-diagnostics.spec.ts`
 
@@ -152,9 +156,9 @@ Rust, and the ADRs' own Confirmation sections say which.
 | it browses the catalogue | `PRD cpt-gearbox-fr-studio: browses the catalogue` | ✅ built |  |
 | it renders the dependency graph | `PRD cpt-gearbox-fr-studio: renders the dependency graph` | ✅ built |  |
 | it resolves a product across profiles | `PRD cpt-gearbox-fr-studio: edits and resolves a product` | ✅ built |  |
-| it renders the contract graph | `PRD cpt-gearbox-fr-studio: renders the contract graph` | 🚧 not built |  |
-| it renders the process graph | `PRD cpt-gearbox-fr-studio: renders the process graph` | 🚧 not built |  |
-| it renders the cluster graph | `PRD cpt-gearbox-fr-studio: renders the cluster graph` | 🚧 not built |  |
+| it renders the contract graph | `PRD cpt-gearbox-fr-studio: renders the contract graph` | ✅ built |  |
+| it renders the process graph | `PRD cpt-gearbox-fr-studio: renders the process graph` | ✅ built |  |
+| it renders the cluster graph | `PRD cpt-gearbox-fr-studio: renders the cluster graph` | ⚪ not observed | no gear in the corpus requires a cluster primitive, so the resolution carries no cluster binding to draw; the view explains the absence |
 | it answers why for a selected decision | `PRD cpt-gearbox-fr-studio: answers why` | ✅ built |  |
 | it previews and applies generation | `PRD cpt-gearbox-fr-generate-preview` | 🚧 not built |  |
 | the resolver notice is gone, and gone because the engine says so | `PRD cpt-gearbox-fr-rpc-api` | ✅ built |  |

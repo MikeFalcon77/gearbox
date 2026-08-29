@@ -14,6 +14,7 @@ import {
   expect,
   openExplain,
   openGraph,
+  openGraphView,
   openProduct,
   resetCatalogueView,
   revealCatalogue,
@@ -332,5 +333,62 @@ test.describe("the .gdl grammar's generated half", () => {
     const lists = vocabulary();
     expect(lists.RESERVED_KEYWORDS).toContain("while");
     expect(lists.FORBIDDEN_KEYWORDS).not.toContain("while");
+  });
+});
+
+test.describe("the graph is four views of one product", () => {
+  // Plan §9 specifies "Graph | four views. **deps** ... **contracts** ...
+  // **processes** ... **cluster**". One widget hosting four, rather than four
+  // widgets, is the shape that claim describes -- and the switch is the only part
+  // of it a reader can see, so it is the part worth checking.
+
+  test("all four views are reachable from one panel [plan §9: Graph four views]", async ({
+    studio,
+  }) => {
+    await openGraph(studio.page);
+    const tabs = studio.page.locator(".gearbox-graph .gbx-view-tab");
+    await expect(tabs).toHaveCount(4);
+    await expect(tabs).toHaveText(["co-location", "contracts", "processes", "cluster"]);
+  });
+
+  test("co-location shows first, and needs no product [plan §9: Graph four views]", async ({
+    studio,
+  }) => {
+    // The default matters. Co-location reads the catalogue, so it draws something
+    // the moment the panel opens; the other three are answers about a profile, and
+    // opening onto one of them would present an empty frame as the first
+    // impression of the whole panel.
+    await openGraph(studio.page);
+    await expect(
+      studio.page.locator(".gearbox-graph .gbx-view-tab[data-view='deps']"),
+    ).toHaveAttribute("aria-selected", "true");
+    await expect(studio.page.locator("[data-graph='deps']")).toBeVisible();
+  });
+
+  test("a resolution view with no product says what it needs [plan §9: Graph four views]", async ({
+    freshStudio,
+  }) => {
+    // A fresh app, so no product has been opened. The three resolution views have
+    // nothing to draw, and the check is that they explain that rather than render
+    // an empty frame -- an empty frame and a broken view look identical.
+    await openGraphView(freshStudio.page, "contracts");
+    const empty = freshStudio.page.locator(".gearbox-graph .gbx-empty");
+    await expect(empty).toBeVisible();
+    await expect(empty).toContainText("needs a product and a profile");
+  });
+
+  test("switching profiles redraws the resolution views [plan §9: Graph four views]", async ({
+    studio,
+  }) => {
+    // The three resolution views are per profile, so the profile switch has to
+    // reach them. It does not reach them by being wired to them: the widget
+    // subscribes to `ProductStore.onChanged`, which is the same edge that made the
+    // catalogue's in-product toggles appear.
+    await openProduct(studio.page, "dev");
+    await openGraphView(studio.page, "processes");
+    await expect(studio.page.locator("[data-graph='processes'] .gbx-binary")).toHaveCount(1);
+
+    await openProduct(studio.page, "prod");
+    await expect(studio.page.locator("[data-graph='processes'] .gbx-binary")).toHaveCount(3);
   });
 });

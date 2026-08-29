@@ -276,6 +276,25 @@ export async function openGraph(page: Page): Promise<void> {
   await revealView(page, "Gearbox Graph", ".gbx-svg");
 }
 
+/**
+ * Open the Graph panel and switch it to one of its four views.
+ *
+ * The switch is a button rather than a Theia tab, so this clicks it and then
+ * waits for that view's own root -- waiting on `.gbx-svg` alone would pass
+ * against the view that was already showing.
+ */
+export async function openGraphView(
+  page: Page,
+  view: "deps" | "contracts" | "processes" | "cluster",
+): Promise<void> {
+  await openGraph(page);
+  await page.locator(`.gearbox-graph .gbx-view-tab[data-view="${view}"]`).click();
+  await page
+    .locator(`.gearbox-graph [data-graph="${view}"], .gearbox-graph .gbx-empty`)
+    .first()
+    .waitFor({ state: "visible" });
+}
+
 export async function openExplain(page: Page): Promise<void> {
   await revealView(page, "Gearbox Explain", ".gbx-explain");
 }

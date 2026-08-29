@@ -16,15 +16,20 @@ import { expect, openProduct, test } from "../fixtures/studio";
 /** Everything the panel renders about the resolution now on screen. */
 async function shown(page: import("@playwright/test").Page) {
   return page.evaluate(() => {
+    // Scoped to the Product panel. These selectors used to run over the whole
+    // document, which held only as long as no other widget rendered a
+    // resolution -- and the graph panel now renders three of them. An unscoped
+    // `[data-process]` is how a test starts passing for the wrong reason.
+    const root = document.querySelector(".gearbox-product") ?? document;
     const attrs = (selector: string, attribute: string) =>
-      Array.from(document.querySelectorAll(selector)).map(
+      Array.from(root.querySelectorAll(selector)).map(
         (e) => e.getAttribute(attribute) ?? "",
       );
     return {
-      profile: document.querySelector("[data-resolved-profile]")?.getAttribute("data-resolved-profile") ?? "",
-      lock: document.querySelector("[data-lock-hash]")?.getAttribute("data-lock-hash") ?? "",
+      profile: root.querySelector("[data-resolved-profile]")?.getAttribute("data-resolved-profile") ?? "",
+      lock: root.querySelector("[data-lock-hash]")?.getAttribute("data-lock-hash") ?? "",
       processes: attrs("[data-process]", "data-process"),
-      processGears: Array.from(document.querySelectorAll(".gbx-process")).map((row) => ({
+      processGears: Array.from(root.querySelectorAll(".gbx-process")).map((row) => ({
         name: row.getAttribute("data-process") ?? "",
         gears: (row.querySelector(".gbx-process-gears")?.textContent ?? "")
           .split(",")
@@ -34,7 +39,7 @@ async function shown(page: import("@playwright/test").Page) {
       modes: attrs(".gbx-binding [data-mode]", "data-mode"),
       mechanisms: attrs(".gbx-binding [data-mechanism]", "data-mechanism"),
       askedFor: attrs("[data-asked-for]", "data-asked-for"),
-      pulledIn: Array.from(document.querySelectorAll("[data-pulled-in]")).map((e) => ({
+      pulledIn: Array.from(root.querySelectorAll("[data-pulled-in]")).map((e) => ({
         id: e.getAttribute("data-pulled-in") ?? "",
         why: (e.textContent ?? "").replace(/\s+/g, " ").trim(),
       })),

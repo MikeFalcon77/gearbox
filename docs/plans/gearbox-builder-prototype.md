@@ -920,7 +920,7 @@ the join key, so completing it prevents a GBX0508 rather than reporting one); in
 ### 9.1 What is built, and where the implementation diverged from this plan
 
 Six widgets exist against the real engine: **Catalogue** (tree by category, staged), **Gear
-detail**, **Graph (co-location)**, **Product**, **Explain** and **Lock**. Only **Generate** is
+detail**, **Graph** (all four views), **Product**, **Explain** and **Lock**. Only **Generate** is
 missing, and it is the one still blocked by the engine -- `capabilities.generate` is `false`, while
 `resolve` has been `true` since M4. The notice that used to explain the absence of the other three
 removed itself when M4 landed, which was the point of driving it from the engine's own capabilities
@@ -1013,6 +1013,54 @@ one from `onStart` -- the same contribution that registers the Constructor Fabri
 the Geist fonts. The UI check still tolerates a favicon 404 **by name**, which now only matters if
 that injection regresses.
 
+
+#### The graph's four views, and what the corpus can and cannot show
+
+The Graph panel hosts the four views §9 asks for behind a tab strip, rather than four widgets:
+they share a coordinate system, a set of arrowhead markers and the layered layout, and four
+registrations would have added four more entries to a Gearbox menu that had just been cleared of
+duplicates. The widget id changed from `gearbox.graph.deps` to `gearbox.graph` with the rename.
+
+The views split by where their data comes from, and that split is visible in the interface.
+**Co-location** reads the catalogue and needs no product, because a `deps` edge is a declared fact
+that no resolution changes. **Contracts, processes and cluster** read a resolution: they are answers
+about one profile, so with no product open each says so and says how to get one, rather than
+rendering an empty frame that is indistinguishable from a broken view.
+
+Three things the implementation learned from the data, none of them in §9:
+
+* **The interesting profile is `prod`, not the default `dev`.** On `dev` the demo product resolves
+  to two local bindings, one process of eight gears and no cluster at all -- every view would render
+  truthfully and show nothing that could have made it wrong. So the conformance tests for these
+  views resolve `prod`, where the same description severs a contract edge and splits into three
+  processes.
+* **A contract edge merges per gear pair, and that loses nothing.** `ResolvedBinding.mode` is
+  "derived from placement, never configured", so two gears are either in one process or in two and
+  every binding between them agrees about `mode`. `PaymentApi@v1` and `@v2` therefore travel one
+  arrow, labelled with both. The demonstration §9 was reaching for -- one pair carrying a solid and
+  a dashed edge at once -- **cannot exist**, and the honest substitute is stronger: the *same* edge
+  is solid in `dev` and dashed in `prod`, which is what makes a contract edge a resolver decision
+  rather than a declared fact.
+* **Severability is looked up, never inferred.** The three edge states come from `mode` and from the
+  engine's own `cuttable_if_declared`; note that `CutCandidate` is "an edge the resolver would sever
+  but cannot", so its entries are forced *local* and red marks the one blocker source can remove.
+  No `BindingMechanism` literal appears in the frontend, which
+  `prd-studio.spec.ts` enforces -- rendering a mechanism is consuming a projected fact, while
+  branching on one would be taking over a resolver decision.
+
+Two claims stay honest rather than green, and both are corpus limits:
+
+* **The cluster view is built and cannot be observed.** A `ResolvedClusterBinding` exists only where
+  a gear requires a primitive, and no `gear.gdl` in the corpus declares `cluster.cache`,
+  `cluster.lock` or `cluster.leader_election` -- in any profile. The product does declare a provider
+  for its `event-broker` scope, so the empty state says exactly that: the provider is waiting for a
+  requester. The requester arrives with `payments-audit` (§10). The conformance row is
+  **not observed**, and the observable half -- that the absence is explained -- is asserted before
+  the skip.
+* **Processes do not overlap on this corpus, in any profile.** `prod`'s extra anchors declare no
+  `deps`, so their closures are singletons and its three boxes hold 6 + 1 + 1 of the same eight
+  gears `dev` puts in one. The view states this in words instead of letting an absent repeated chip
+  imply that a partition is what the model produces.
 
 ### 9.2 Writing to a description, and the four refusals
 

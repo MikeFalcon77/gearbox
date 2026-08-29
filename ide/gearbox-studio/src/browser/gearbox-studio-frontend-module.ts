@@ -33,7 +33,7 @@ import {
   ProductViewContribution,
 } from "./view-contributions";
 import { GearDetailWidget } from "./detail/gear-detail-widget";
-import { DepsGraphWidget } from "./graph/deps-graph-widget";
+import { GraphWidget } from "./graph/graph-widget";
 import { ExplainWidget } from "./explain/explain-widget";
 import { LockWidget } from "./lock/lock-widget";
 import { ProductWidget } from "./product/product-widget";
@@ -132,6 +132,7 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
           container.get(CatalogueStore).onCatalogueDiagnostics(event),
         onProgress: (event) => container.get(CatalogueStore).onProgress(event),
         onLog: (message) => container.get(CatalogueStore).onLog(message),
+        onEngineExit: (reason) => container.get(CatalogueStore).onEngineExit(reason),
       };
       return provider.createProxy<GearboxService>(GEARBOX_SERVICE_PATH, forwarder);
     })
@@ -145,7 +146,7 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
 
   bindWidget(bind, CatalogueWidget);
   bindWidget(bind, GearDetailWidget);
-  bindWidget(bind, DepsGraphWidget);
+  bindWidget(bind, GraphWidget);
   bindWidget(bind, ProductWidget);
   bindWidget(bind, ExplainWidget);
   bindWidget(bind, LockWidget);

@@ -11,7 +11,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { expect, openExplain, openGraph, openProduct, test } from "../fixtures/studio";
+import { expect, openExplain, openGraph, openGraphView, openProduct, test } from "../fixtures/studio";
 
 const STUDIO_SRC = join(__dirname, "../../gearbox-studio/src");
 
@@ -60,26 +60,116 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
     await expect(studio.page.locator("[data-resolved-profile='dev']")).toBeVisible();
   });
 
-  test.fixme(
-    "it renders the contract graph [PRD cpt-gearbox-fr-studio: renders the contract graph]",
-    async ({ studio }) => {
-      await expect(studio.page.locator(".gbx-svg[data-graph='contracts']")).toBeVisible();
-    },
-  );
+  // The three resolution graphs are checked on the **`prod`** profile, not the
+  // default `dev`, and that is not incidental. On `dev` the demo product resolves
+  // to two local bindings, one process and no cluster at all, so each of these
+  // views would render truthfully and show nothing that could have made it wrong.
+  // On `prod` the same description resolves to a severed contract edge beside a
+  // local one, and to two processes instead of one.
+  //
+  // What `prod` still cannot show is a gear in two binaries: its extra anchors
+  // declare no `deps`, so their closures are singletons. `prd-product.spec.ts`
+  // reports that claim as "not observed" and this file does not pretend otherwise.
 
-  test.fixme(
-    "it renders the process graph [PRD cpt-gearbox-fr-studio: renders the process graph]",
-    async ({ studio }) => {
-      await expect(studio.page.locator(".gbx-svg[data-graph='processes']")).toBeVisible();
-    },
-  );
+  test("it renders the contract graph [PRD cpt-gearbox-fr-studio: renders the contract graph]", async ({
+    studio,
+  }) => {
+    await openProduct(studio.page, "prod");
+    await openGraphView(studio.page, "contracts");
 
-  test.fixme(
-    "it renders the cluster graph [PRD cpt-gearbox-fr-studio: renders the cluster graph]",
-    async ({ studio }) => {
-      await expect(studio.page.locator(".gbx-svg[data-graph='cluster']")).toBeVisible();
-    },
-  );
+    const graph = studio.page.locator("[data-graph='contracts']");
+    await expect(graph).toBeVisible();
+
+    // `PaymentApi@v1` is bound remote for `local` and `prod` while `@v2` stays
+    // local, between the same pair of gears. So this profile must show a severed
+    // edge -- the picture that distinguishes a contract edge from a co-location
+    // edge, which can never be severed.
+    const severed = graph.locator(".gbx-edge[data-remote='true']");
+    await expect(severed).toHaveCount(1);
+    await expect(severed).toHaveAttribute("data-from", "api-contracts-consumer");
+    await expect(severed).toHaveAttribute("data-to", "api-contracts");
+    await expect(severed).toHaveClass(/gbx-edge-remote/);
+    // Both contracts between this pair travel it. `mode` is derived from
+    // placement, never configured, so two bindings between the same pair of gears
+    // always agree about it -- which is why one arrow per pair loses nothing.
+    await expect(severed).toHaveAttribute(
+      "data-contract",
+      "api-contracts/PaymentApi@v1 api-contracts/PaymentApi@v2",
+    );
+
+    // The same edge, the same description, the other profile: local. That contrast
+    // is the claim -- a contract edge is a resolver decision, not a declared fact,
+    // and the co-location graph has no equivalent because a `deps` edge cannot
+    // change with the profile.
+    await openProduct(studio.page, "dev");
+    await openGraphView(studio.page, "contracts");
+    const local = studio.page.locator("[data-graph='contracts'] .gbx-edge");
+    await expect(local).toHaveCount(1);
+    await expect(local).toHaveAttribute("data-remote", "false");
+    await expect(local).toHaveClass(/gbx-edge-local/);
+  });
+
+  test("it renders the process graph [PRD cpt-gearbox-fr-studio: renders the process graph]", async ({
+    studio,
+  }) => {
+    await openProduct(studio.page, "prod");
+    await openGraphView(studio.page, "processes");
+
+    // Boxes with gear chips, as plan §9 specifies, rather than the `.gbx-svg` this
+    // test guessed at before the view existed: a node-link drawing cannot show one
+    // gear inside two boxes, which is the whole content of the view.
+    const graph = studio.page.locator("[data-graph='processes']");
+    await expect(graph).toBeVisible();
+    // Three, not two: `audit` is declared in the description, and `api-contracts`
+    // becomes a process of its own because the remote binding needs it reachable
+    // across a boundary. A process the resolver *derived* is exactly the kind of
+    // thing this view exists to make visible.
+    await expect(graph.locator(".gbx-binary")).toHaveCount(3);
+    for (const name of ["api-gateway", "audit", "api-contracts"]) {
+      await expect(graph.locator(`[data-binary='${name}']`)).toBeVisible();
+    }
+    // 6 + 1 + 1 = 8, the same eight gears `dev` puts in one binary. On this corpus
+    // the split happens to be a partition, and the view says so in words rather
+    // than letting the absence of a repeated chip imply that partitions are what
+    // the model produces.
+    await expect(graph.locator("[data-binary='api-gateway'] [data-gear]")).toHaveCount(6);
+    await expect(graph.locator("[data-shared='true']")).toHaveCount(0);
+  });
+
+  test("it renders the cluster graph [PRD cpt-gearbox-fr-studio: renders the cluster graph]", async ({
+    studio,
+  }) => {
+    await openProduct(studio.page, "prod");
+    await openGraphView(studio.page, "cluster");
+
+    // Reported as "not observed", not as a pass, for the same reason two other
+    // rows in this table are: nothing in the corpus can reach this view yet. A
+    // `ResolvedClusterBinding` exists only where a gear requires a primitive --
+    // `cluster.cache`, `cluster.lock`, `cluster.leader_election` -- and no
+    // `gear.gdl` in the corpus declares one, in any profile. The requester arrives
+    // with `payments-audit` (plan §10), which reconciles through `LeaderElectionV1`
+    // and `ClusterCacheV1`.
+    //
+    // Before skipping, this does assert the part that *is* observable: that the
+    // absence is explained rather than blank. A view rendering an empty frame here
+    // would be indistinguishable from a broken one, and that is the failure worth
+    // guarding against while the data is missing.
+    const drawn = studio.page.locator("[data-graph='cluster']");
+    if ((await drawn.count()) === 0) {
+      const empty = studio.page.locator(".gearbox-graph .gbx-cluster-empty");
+      await expect(empty).toBeVisible();
+      await expect(empty).toContainText("no gear in the catalogue currently requires it");
+      test.skip(
+        true,
+        "no gear in the corpus requires a cluster primitive, so the resolution " +
+          "carries no cluster binding to draw; the view explains the absence",
+      );
+    }
+
+    await expect(drawn).toBeVisible();
+    await expect(drawn.locator("[data-cluster-requirement]").first()).toBeVisible();
+    await expect(drawn.locator("[data-cluster-provider]").first()).toBeVisible();
+  });
 
   test("it answers why for a selected decision [PRD cpt-gearbox-fr-studio: answers why]", async ({
     studio,

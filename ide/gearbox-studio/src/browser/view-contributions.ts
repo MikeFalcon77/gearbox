@@ -7,7 +7,7 @@ import { inject, injectable } from "@theia/core/shared/inversify";
 import { CatalogueStore } from "./catalogue-store";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import { GearDetailWidget } from "./detail/gear-detail-widget";
-import { DepsGraphWidget } from "./graph/deps-graph-widget";
+import { GraphWidget } from "./graph/graph-widget";
 import { ExplainWidget } from "./explain/explain-widget";
 import { LockWidget } from "./lock/lock-widget";
 import { GearboxMenus } from "./menus";
@@ -103,13 +103,13 @@ export class CatalogueViewContribution
 }
 
 @injectable()
-export class GraphViewContribution extends AbstractViewContribution<DepsGraphWidget> {
+export class GraphViewContribution extends AbstractViewContribution<GraphWidget> {
   constructor() {
     super({
-      widgetId: DepsGraphWidget.ID,
-      widgetName: DepsGraphWidget.LABEL,
+      widgetId: GraphWidget.ID,
+      widgetName: GraphWidget.LABEL,
       defaultWidgetOptions: { area: "main" },
-      toggleCommandId: "gearbox.graph.deps.toggle",
+      toggleCommandId: "gearbox.graph.toggle",
     });
   }
 }
