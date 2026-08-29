@@ -54,7 +54,7 @@ test.describe("why the resolution is the way it is", () => {
     await openProduct(studio.page, "prod");
     const { explaining, steps } = await explain(
       studio.page,
-      '[data-pulled-in="types-registry"] > code',
+      '[data-pulled-in="types-registry"] a',
     );
     expect(explaining).toBe("gear:types-registry");
     // `types-registry` is named nowhere in the product. The chain has to reach
@@ -70,7 +70,7 @@ test.describe("why the resolution is the way it is", () => {
     await openProduct(studio.page, "prod");
     const { steps } = await explain(
       studio.page,
-      '[data-pulled-in="oidc-authn-plugin"] > code',
+      '[data-pulled-in="oidc-authn-plugin"] a',
     );
     expect(
       steps.some((s) => /selected as a plugin of `authn-resolver` for profile `prod`/.test(s.because)),
@@ -87,7 +87,7 @@ test.describe("why the resolution is the way it is", () => {
     // missing from its graph" is a defect. Sharing one alarming message for both
     // trains people to ignore the one that matters.
     await openProduct(studio.page, "prod");
-    await explain(studio.page, '[data-pulled-in="oidc-authn-plugin"] > code');
+    await explain(studio.page, '[data-pulled-in="oidc-authn-plugin"] a');
 
     await openProduct(studio.page, "dev");
     await expect(

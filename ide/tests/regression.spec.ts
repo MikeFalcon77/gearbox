@@ -80,6 +80,57 @@ test.describe("the graph draws what it says it draws", () => {
   });
 });
 
+test.describe("contributions are registered once", () => {
+  // Both of these catch the same class of mistake from two sides, and it is a
+  // mistake this application made: `bindViewContribution` already binds
+  // `CommandContribution`, `KeybindingContribution` and `MenuContribution`, and
+  // binding any of them again next to it runs the contribution twice.
+
+  test("no menu contains the same entry twice", async ({ studio }) => {
+    // Stated as an invariant over every menu rather than as a list of expected
+    // entries. A test naming the entries would have to be updated by the same
+    // person who added the duplicate, and `MenuModelRegistry.registerMenuAction`
+    // does not deduplicate -- it makes a node and appends it, so a double
+    // binding shows up here first.
+    const menus = await studio.page
+      .locator(".lm-MenuBar-itemLabel")
+      .allTextContents()
+      .then((all) => all.map((one) => one.trim()).filter((one) => one.length > 0));
+    expect(menus.length).toBeGreaterThan(0);
+
+    for (const menu of menus) {
+      await studio.page.click(`.lm-MenuBar-itemLabel:text-is("${menu}")`);
+      const items = await studio.page
+        .locator(".lm-Menu-itemLabel")
+        .allTextContents()
+        .then((all) => all.map((one) => one.trim()).filter((one) => one.length > 0));
+      await studio.page.keyboard.press("Escape");
+
+      // `indexOf`, not `Set.add`. The first version of this line was
+      // `items.filter((item) => !seen.add(item))`, and `Set.prototype.add`
+      // returns the *set*, which is always truthy -- so the filter never matched
+      // and the test passed against a menu with `Product` in it twice. Verified
+      // the other way round this time: the bug was reintroduced and this failed.
+      const duplicated = items.filter((item, at) => items.indexOf(item) !== at);
+      expect(duplicated, `${menu} lists these twice`).toEqual([]);
+    }
+  });
+
+  test("nothing is registered twice", async ({ studio }) => {
+    // The command side of the same bug, and the quieter side:
+    // `CommandRegistry.registerCommand` on an existing id warns and returns a
+    // no-op disposable, so the *second* handler is silently discarded. Six of
+    // these sat in the console unnoticed -- the fixture collects warnings and
+    // only the grammar check ever read them.
+    //
+    // Narrow on purpose. Theia warns legitimately about slow startup steps and
+    // about plugin candidates it cannot unpack, so "no warnings at all" would
+    // fail every run and teach everyone to ignore it.
+    const doubled = studio.consoleWarnings.filter((w) => /is already registered/.test(w));
+    expect(doubled, `duplicate registrations:\n${doubled.join("\n")}`).toEqual([]);
+  });
+});
+
 test.describe("nothing failed quietly", () => {
   test("the Fabric favicon is installed", async ({ studio }) => {
     // `@theia/cli` 1.75 has no favicon hook; FabricThemeContribution injects one.

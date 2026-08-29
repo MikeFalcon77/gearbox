@@ -63,6 +63,28 @@ export class RevealService {
     }
   }
 
+  /**
+   * The `file://` URI for an already-absolute path.
+   *
+   * Separate from [`uriFor`] because the two inputs are genuinely different: a
+   * catalogue path is relative to a source root only the engine knows, while a
+   * product path arrives absolute from `listProducts`. Collapsing them would mean
+   * one of the callers passing something the other's contract forbids.
+   */
+  uriForPath(absolute: string): string {
+    return URI.fromFilePath(absolute).toString();
+  }
+
+  /** Open an already-absolute path. */
+  async revealPath(absolute: string): Promise<void> {
+    try {
+      await open(this.openerService, URI.fromFilePath(absolute));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.messages.error(`Cannot open ${absolute}: ${reason}`);
+    }
+  }
+
   async reveal(source: string, relative: string): Promise<void> {
     const absolute = this.store.absolutePath(source, relative);
     if (absolute === undefined) {

@@ -13,6 +13,7 @@ import React from "@theia/core/shared/react";
 
 import type { GearDescriptor } from "../../common/generated/GearDescriptor";
 import { CatalogueStore } from "../catalogue-store";
+import { RevealLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
 
 @injectable()
@@ -232,19 +233,10 @@ export class GearDetailWidget extends ReactWidget {
    * it. Without the href these were divs that only answered a mouse.
    */
   protected renderLink(source: string, target: string, label: string): React.ReactNode {
-    const href = this.reveals.uriFor(source, target);
+    // Shared with the Product view. The reasoning for a real `href` rather than a
+    // div with an `onClick` lives with the component.
     return (
-      <a
-        key={target}
-        href={href ?? "#"}
-        title={target}
-        onClick={(event) => {
-          event.preventDefault();
-          void this.reveals.reveal(source, target);
-        }}
-      >
-        {label}
-      </a>
+      <RevealLink key={target} reveals={this.reveals} source={source} target={target} label={label} />
     );
   }
 }

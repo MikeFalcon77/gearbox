@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { expect, test } from "../fixtures/studio";
+import { expect, openProduct, test } from "../fixtures/studio";
 
 const IDE = join(__dirname, "../..");
 
@@ -213,6 +213,47 @@ test.describe("the editor Studio came for", () => {
     }, before);
 
     expect(opened.ok, opened.error ?? "no tab and no error -- a silent failure").toBe(true);
+  });
+
+  test("a gear in the Product view opens its description [ADR-0011 §Confirmation: a clicked link must open a tab]", async ({
+    studio,
+  }) => {
+    // The Product view had no links at all: the gear ids were `<code>` elements
+    // that only moved the Explain focus, while the stylesheet gave them a pointer
+    // cursor and a hover underline. So they promised navigation and delivered
+    // nothing visible unless Explain happened to be open.
+    //
+    // Asserted by a tab opening, not by an `<a>` existing -- the same reason the
+    // catalogue's link test is written that way, and the reason those links once
+    // shipped dead.
+    await openProduct(studio.page, "dev");
+    const link = studio.page.locator('[data-asked-for="api-gateway"] a').first();
+    await expect(link).toBeVisible();
+    await link.click();
+
+    await expect(
+      studio.page.locator("#theia-main-content-panel .lm-TabBar-tabLabel", {
+        hasText: "gear.gdl",
+      }).first(),
+    ).toBeVisible();
+  });
+
+  test("the Product view opens its own description [ADR-0011 §Confirmation: a clicked link must open a tab]", async ({
+    studio,
+  }) => {
+    // The panel is about one product and had no way to open it. The path arrives
+    // absolute from `listProducts`, which is why `RevealService` grew a
+    // separate opener rather than reusing the catalogue-relative one.
+    await openProduct(studio.page, "dev");
+    const link = studio.page.locator(".gbx-product .gbx-links a").first();
+    await expect(link).toBeVisible();
+    await link.click();
+
+    await expect(
+      studio.page.locator("#theia-main-content-panel .lm-TabBar-tabLabel", {
+        hasText: "product.gdl",
+      }).first(),
+    ).toBeVisible();
   });
 
   test("the .gdl editor is tokenized, not plaintext [ADR-0011 §Confirmation]", async ({

@@ -2,7 +2,6 @@
 
 import { FrontendApplicationContribution, bindViewContribution } from "@theia/core/lib/browser";
 import { WebSocketConnectionProvider } from "@theia/core/lib/browser/messaging";
-import { CommandContribution } from "@theia/core/lib/common";
 import { MenuContribution } from "@theia/core/lib/common/menu";
 import { ContainerModule } from "@theia/core/shared/inversify";
 import { DebugFrontendApplicationContribution } from "@theia/debug/lib/browser/debug-frontend-application-contribution";
@@ -145,31 +144,32 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bindWidget(bind, ExplainWidget);
   bindWidget(bind, LockWidget);
 
+  // `bindViewContribution` already binds `CommandContribution`,
+  // `KeybindingContribution` *and* `MenuContribution` -- see
+  // `@theia/core/lib/browser/shell/view-contribution.js`. Binding any of them
+  // again runs the contribution twice, and `MenuModelRegistry.registerMenuAction`
+  // does not deduplicate: it makes a node and appends it. That is what put every
+  // Gearbox entry, and every toggle under View > Views, in the menu twice.
+  //
+  // The command side failed more quietly. `CommandRegistry.registerCommand` on an
+  // existing id logs "A command ... is already registered." and returns a no-op
+  // disposable, so the *second* handler is discarded. Behaviour survived only
+  // because the first registration wins.
+  //
+  // What still needs binding by hand is `FrontendApplicationContribution`, which
+  // `bindViewContribution` does not touch -- and only for the two views that
+  // implement something from it.
   bindViewContribution(bind, CatalogueViewContribution);
   bind(FrontendApplicationContribution).toService(CatalogueViewContribution);
-  bind(CommandContribution).toService(CatalogueViewContribution);
-  bind(MenuContribution).toService(CatalogueViewContribution);
 
   bindViewContribution(bind, DetailViewContribution);
   bind(FrontendApplicationContribution).toService(DetailViewContribution);
-  bind(CommandContribution).toService(DetailViewContribution);
 
   bindViewContribution(bind, GraphViewContribution);
-  bind(CommandContribution).toService(GraphViewContribution);
 
-  // No `FrontendApplicationContribution` here: the Product view opens on
-  // request, so it has no `initializeLayout` to run. `MenuContribution` is what
-  // finally puts commands under the Gearbox menu, which until now rendered as an
-  // empty dropdown.
+  // No `FrontendApplicationContribution` here: the Product view opens on request,
+  // so it has nothing of that interface to implement.
   bindViewContribution(bind, ProductViewContribution);
-  bind(CommandContribution).toService(ProductViewContribution);
-  bind(MenuContribution).toService(ProductViewContribution);
-
   bindViewContribution(bind, ExplainViewContribution);
-  bind(CommandContribution).toService(ExplainViewContribution);
-  bind(MenuContribution).toService(ExplainViewContribution);
-
   bindViewContribution(bind, LockViewContribution);
-  bind(CommandContribution).toService(LockViewContribution);
-  bind(MenuContribution).toService(LockViewContribution);
 });

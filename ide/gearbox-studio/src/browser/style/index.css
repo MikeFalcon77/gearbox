@@ -190,11 +190,13 @@
   font-weight: 600;
 }
 
-/* Clickable gear ids in the Product view. Underlined on hover only: a permanent
-   underline on every id turns the closure list into a wall of links. */
-.gbx-product code[data-asked-for], .gbx-product [data-pulled-in] > code { cursor: pointer; }
-.gbx-product code[data-asked-for]:hover, .gbx-product [data-pulled-in] > code:hover {
-  text-decoration: underline;
+/* Gear ids in the Product view are real links now, so they need no pointer or
+   hover rules of their own -- those rules were the false promise: they made a
+   `<code>` look navigable while the click only moved the Explain focus. What is
+   left is the monospace, because an id is code. */
+.gbx-gear-link a {
+  font-family: var(--theia-code-font-family);
+  font-size: 0.9em;
 }
 
 /* --- Lock ---------------------------------------------------------------- */

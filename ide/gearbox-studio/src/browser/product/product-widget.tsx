@@ -23,6 +23,8 @@ import type { ResolvedBinding } from "../../common/generated/ResolvedBinding";
 import type { ResolvedProcess } from "../../common/generated/ResolvedProcess";
 import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
 import { ProductStore } from "../product-store";
+import { RevealLink, RevealPathLink } from "../reveal-link";
+import { RevealService } from "../reveal-service";
 
 @injectable()
 export class ProductWidget extends ReactWidget {
@@ -30,6 +32,7 @@ export class ProductWidget extends ReactWidget {
   static readonly LABEL = "Gearbox Product";
 
   @inject(ProductStore) protected readonly store!: ProductStore;
+  @inject(RevealService) protected readonly reveals!: RevealService;
 
   @postConstruct()
   protected init(): void {
@@ -161,11 +164,7 @@ export class ProductWidget extends ReactWidget {
           <span>
             {selected.length === 0
               ? "—"
-              : selected.map((id) => (
-                  <code key={id} data-asked-for={id} onClick={() => this.focusGear(id)}>
-                    {id}
-                  </code>
-                ))}
+              : selected.map((id) => this.renderGear(product, id, { "data-asked-for": id }))}
           </span>
         </div>
         <div className="gbx-kv">
@@ -175,9 +174,22 @@ export class ProductWidget extends ReactWidget {
               ? "—"
               : pulled.map(({ id, why }) => (
                   <div key={id} data-pulled-in={id}>
-                    <code onClick={() => this.focusGear(id)}>{id}</code> {why}
+                    {this.renderGear(product, id)} {why}
                   </div>
                 ))}
+          </span>
+        </div>
+
+        {/* The panel is about this product and had no way to open it. Same row
+            and same shape as the Gear detail panel's, so the two read alike. */}
+        <div className="gbx-kv">
+          <span>description file</span>
+          <span className="gbx-links">
+            <RevealPathLink
+              reveals={this.reveals}
+              path={this.store.current.open?.path ?? ""}
+              label={this.store.current.open?.label ?? "—"}
+            />
           </span>
         </div>
 
@@ -230,9 +242,45 @@ export class ProductWidget extends ReactWidget {
     );
   }
 
-  /** Ask Explain about a gear. Every clickable gear id goes through here. */
-  protected focusGear(id: string): void {
-    this.store.setFocus({ kind: "gear", id });
+  /**
+   * A gear id, as a link to its own description.
+   *
+   * The id used to be a `<code>` that only moved the Explain focus, while the
+   * stylesheet gave it a pointer cursor and an underline on hover -- so it
+   * promised navigation and delivered nothing visible unless Explain happened to
+   * be open. It now opens the gear's `gear.gdl` *and* points Explain at it: both
+   * answers to one click, and neither is a surprise.
+   *
+   * `source` and `gdl_path` come from the resolution itself
+   * (`ResolvedGear`), so this needs nothing from the catalogue -- and they agree
+   * with the catalogue's, which is what lets one `RevealService` serve both.
+   */
+  protected renderGear(
+    product: ResolvedProduct,
+    id: string,
+    attributes: Record<string, string> = {},
+  ): React.ReactNode {
+    const gear = product.gears[id];
+    if (gear === undefined) {
+      // In the closure and absent from the gear table would be a resolver fault.
+      // Rendered plainly rather than as a dead link.
+      return (
+        <code key={id} {...attributes}>
+          {id}
+        </code>
+      );
+    }
+    return (
+      <span key={id} className="gbx-gear-link" {...attributes}>
+        <RevealLink
+          reveals={this.reveals}
+          source={gear.source}
+          target={gear.gdl_path}
+          label={id}
+          onActivate={() => this.store.setFocus({ kind: "gear", id })}
+        />
+      </span>
+    );
   }
 
   protected renderProcess(process: ResolvedProcess): React.ReactNode {

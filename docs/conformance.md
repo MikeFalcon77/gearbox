@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **86** — 71 built, 13 not built, 0 broken, 2 not observed.
+Claims: **88** — 73 built, 13 not built, 0 broken, 2 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -51,6 +51,8 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the toolbar hosts the perspective switch | `ADR-0011 §The two perspectives` | 🚧 not built |  |
 | a product perspective exists beside the catalogue | `ADR-0011 §The two perspectives` | 🚧 not built |  |
 | a clicked link opens the file | `ADR-0011 §Confirmation: a clicked link must open a tab` | ✅ built |  |
+| a gear in the Product view opens its description | `ADR-0011 §Confirmation: a clicked link must open a tab` | ✅ built |  |
+| the Product view opens its own description | `ADR-0011 §Confirmation: a clicked link must open a tab` | ✅ built |  |
 | the .gdl editor is tokenized, not plaintext | `ADR-0011 §Confirmation` | ✅ built |  |
 | no grammar failed to load | `ADR-0011 §the .gdl grammar is native` | ✅ built |  |
 | exactly one @theia/core is installed | `ADR-0011 §Confirmation` | ✅ built |  |
