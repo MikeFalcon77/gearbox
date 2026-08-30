@@ -1,45 +1,53 @@
-// The shell-level toolbar: perspective switch plus the two domain actions.
+// The shell header: what you are working on, and the two verbs that act on it.
 //
-// Each action is looked up in `CommandRegistry` -- label, icon, enablement --
-// so this panel cannot name a command that does not exist and cannot drift
-// from the Gearbox menu. The only thing duplicated is the list of ids, and
-// that list is what the regression test reads.
+// This was a perspective switch -- `Catalogue` and `Product` buttons beside the
+// menu bar -- and it was the wrong control. The words duplicated two entries in
+// the Gearbox menu while meaning something else entirely: switch a whole layout,
+// not toggle a view. Navigation does not belong in a header.
 //
-// Actions are scoped to the active perspective, which is the honest reading
-// of §9's `isVisible` on a panel that has no "own widget". There is no
-// profile switch here: §9 keeps that in the Product header so it stays
-// reachable while a resolution is in flight.
+// What does belong is **current state you need at a glance and can change from
+// anywhere**, which is the distinction Arduino IDE draws by putting the selected
+// board in both its toolbar and its Tools menu. Here that is the product, its
+// profile, and whether it resolved. The profile selector stays in the Product
+// panel's own header, where plan §9 put it deliberately -- it has to be reachable
+// *while* a resolution is in flight, and a header row rendered from the resolved
+// product cannot be. So this shows the profile; it does not offer to change it.
+//
+// Actions come from `CommandRegistry` -- label, icon, enablement -- so the header
+// cannot name a command that does not exist and cannot drift from the menu. The
+// only thing duplicated is the list of ids, and that list is what the regression
+// test reads.
 
 import { ReactWidget } from "@theia/core/lib/browser";
-import { PerspectiveService } from "@theia/core/lib/browser/perspective-service";
 import { CommandRegistry } from "@theia/core/lib/common";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
 import { ProductStore } from "../product-store";
 import { RELOAD_CATALOGUE, RESOLVE_PRODUCT } from "../view-contributions";
-import { CATALOGUE_PERSPECTIVE, PRODUCT_PERSPECTIVE } from "./gearbox-perspectives";
+import { StudioContextService } from "./studio-context-service";
 
 /**
- * Command ids the toolbar may invoke. Quoted here so the regression test can
- * read them the same way it reads codicon names -- from the source, not from
- * a running registry.
+ * Command ids the header may invoke. Quoted here so the regression test can read
+ * them from the source rather than from a running registry.
  */
 export const TOOLBAR_COMMAND_IDS = [
   "gearbox.catalogue.reload",
   "gearbox.product.resolve",
 ] as const;
 
+/** Which actions each context offers. */
 const ACTIONS: Readonly<Record<string, readonly string[]>> = {
-  [CATALOGUE_PERSPECTIVE]: [RELOAD_CATALOGUE.id],
-  [PRODUCT_PERSPECTIVE]: [RESOLVE_PRODUCT.id],
+  home: [RELOAD_CATALOGUE.id],
+  product: [RESOLVE_PRODUCT.id, RELOAD_CATALOGUE.id],
+  gear: [],
 };
 
 @injectable()
 export class ToolbarWidget extends ReactWidget {
   static readonly ID = "gearbox.toolbar";
 
-  @inject(PerspectiveService) protected readonly perspectives!: PerspectiveService;
+  @inject(StudioContextService) protected readonly context!: StudioContextService;
   @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
   @inject(ProductStore) protected readonly products!: ProductStore;
 
@@ -48,59 +56,114 @@ export class ToolbarWidget extends ReactWidget {
     this.id = ToolbarWidget.ID;
     this.title.closable = false;
     this.addClass("gearbox-toolbar");
-    this.toDispose.push(this.perspectives.onDidChangePerspective(() => this.update()));
+    this.toDispose.push(this.context.onDidChange(() => this.update()));
     this.toDispose.push(this.commands.onCommandsChanged(() => this.update()));
-    // Resolve's enablement depends on a product being open, and that handler
-    // does not fire `onDidChangeEnabled`. The store is the fact the handler
-    // reads, so a change here is a change of the button.
+    // Resolve's enablement depends on a product being open, and its handler does
+    // not fire `onDidChangeEnabled`. The store is the fact the handler reads, so a
+    // change here is a change of the button -- and of the status text beside it.
     this.toDispose.push(this.products.onChanged(() => this.update()));
     this.update();
   }
 
   protected render(): React.ReactNode {
-    const active = this.perspectives.getActivePerspectiveId();
-    const actions = ACTIONS[active] ?? [];
+    const context = this.context.current;
+    const actions = ACTIONS[context.kind] ?? [];
     return (
-      <div className="gbx-toolbar" data-active-perspective={active}>
-        <div className="gbx-toolbar-switch" role="group" aria-label="Perspective">
-          {this.perspectiveButton(CATALOGUE_PERSPECTIVE, "Catalogue", active)}
-          {this.perspectiveButton(PRODUCT_PERSPECTIVE, "Product", active)}
+      <div className="gbx-toolbar" data-context={context.kind}>
+        <div className="gbx-toolbar-subject">
+          {context.kind === "product" ? this.renderProduct() : this.renderHome()}
         </div>
         <div className="gbx-toolbar-actions">
-          {actions.map((id) => this.actionButton(id, id))}
+          {actions.map((id) => this.actionButton(id))}
         </div>
       </div>
     );
   }
 
-  protected perspectiveButton(
-    id: string,
-    label: string,
-    active: string,
-  ): React.ReactNode {
-    const on = active === id;
-    const klass =
-      id === PRODUCT_PERSPECTIVE ? "gbx-perspective-product" : "gbx-perspective-catalogue";
+  /**
+   * No product: say so, rather than showing an empty bar.
+   *
+   * An empty header reads as a rendering failure. Naming the state is what makes
+   * the Start screen's absence a decision rather than a gap.
+   */
+  protected renderHome(): React.ReactNode {
+    return <span className="gbx-toolbar-empty">No product open</span>;
+  }
+
+  protected renderProduct(): React.ReactNode {
+    const state = this.products.current;
+    const product = state.resolution?.product?.product;
     return (
-      <button
-        type="button"
-        className={`gbx-choice ${on ? "gbx-choice-on" : ""} ${klass}`}
-        data-perspective={id}
-        aria-pressed={on}
-        onClick={() => void this.perspectives.switchPerspective(id)}
-      >
-        {label}
-      </button>
+      <>
+        <span className="gbx-toolbar-name" data-product={state.open?.label ?? ""}>
+          {state.open?.label ?? ""}
+        </span>
+        {state.profile !== undefined && (
+          // `data-header-profile`, not `data-profile`: the Product view's own
+          // switch already owns that attribute and means "a profile you may
+          // select", and `openProduct` clicks it. Reusing the name made one
+          // locator match two elements -- the fifth time in this shell that a
+          // shared attribute has crossed two widgets. One name, one meaning.
+          <span
+            className="gbx-badge"
+            data-header-profile={state.profile}
+            title="deployment profile"
+          >
+            {state.profile}
+          </span>
+        )}
+        {this.renderStatus(state.status, product?.lock_hash !== undefined)}
+      </>
     );
   }
 
-  protected actionButton(id: string, key: string): React.ReactNode {
+  /**
+   * Resolved, resolving, or the count of errors -- in the product's own terms.
+   *
+   * Errors are counted rather than listed: a header is read at a glance, and the
+   * list belongs where a person can act on each one. That the count is a link to
+   * that place is the next step, not this one.
+   */
+  protected renderStatus(status: string, resolved: boolean): React.ReactNode {
+    const errors = (this.products.current.resolution?.diagnostics ?? []).filter(
+      (d) => d.severity === "error",
+    ).length;
+
+    if (status === "loading" || status === "resolving") {
+      return (
+        <span className="gbx-toolbar-status" data-status="working">
+          resolving…
+        </span>
+      );
+    }
+    if (errors > 0) {
+      return (
+        <span
+          className="gbx-badge gbx-downgraded gbx-toolbar-status"
+          data-status="conflicts"
+          data-conflicts={errors}
+        >
+          {errors} {errors === 1 ? "conflict" : "conflicts"}
+        </span>
+      );
+    }
+    if (resolved) {
+      return (
+        <span className="gbx-badge gbx-toolbar-status" data-status="resolved">
+          resolved
+        </span>
+      );
+    }
+    return undefined;
+  }
+
+  protected actionButton(id: string): React.ReactNode {
     const command = this.commands.getCommand(id);
     if (command === undefined) return undefined;
     const enabled = this.commands.isEnabled(id);
     return (
       <button
-        key={key}
+        key={id}
         type="button"
         className="gbx-choice"
         data-command={id}

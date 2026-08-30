@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { expect, openProduct, switchPerspective, test } from "../fixtures/studio";
+import { expect, expectContext, openProduct, test } from "../fixtures/studio";
 
 const IDE = join(__dirname, "../..");
 
@@ -24,11 +24,47 @@ test.describe("the narrowed shell", () => {
         (e) => (e.textContent ?? "").trim(),
       ),
     );
-    // Terminal is here on purpose and Run is not. Both arrive with the plugin
-    // host rather than by choice; a person wants a shell to build a generated
-    // crate in, and nothing here is debuggable -- a product resolves, it does not
-    // execute.
-    expect(menus).toEqual(["File", "Edit", "Gearbox", "View", "Terminal", "Help"]);
+    // **Exactly the declared set, in order.** This is the assertion that turns a
+    // whitelist into a fact: `ShellPolicy.ALLOWED_TOP_LEVEL` names five menus, and
+    // anything a Theia upgrade or a transitive package adds shows up here as a
+    // failure rather than as a menu nobody chose.
+    //
+    // Terminal used to be in this list, argued for as "a person wants a shell to
+    // build a generated crate in". The shell is still there -- ADR-0011 keeps the
+    // editor stack on purpose -- but a terminal is a tool, not one of the two
+    // things this application is about, so it stops competing with `Product` for
+    // the menu bar. Its commands are kept; see `KEPT_COMMAND_PREFIXES`.
+    expect(menus).toEqual(["File", "Edit", "Gearbox", "View", "Help"]);
+  });
+
+  test("the View menu offers nothing from a language IDE [ADR-0011 §Confirmation: a removed entry must be asserted absent]", async ({
+    studio,
+  }) => {
+    // The surface a menu-bar prune cannot reach on its own. `View` is where the
+    // toggles for Debug, Testing, the two hierarchies, Notebook and Outline land,
+    // all of them arriving with `@theia/plugin-ext` rather than by choice -- and a
+    // toggle is not cosmetic: it is one entry in the palette and one saved
+    // keybinding away from opening a panel this application has no use for.
+    //
+    // Read from the rendered menu, because that is what a person sees. The
+    // source-level half -- that the families are declared forbidden rather than
+    // forgotten -- is asserted in `regression.spec.ts`.
+    // Scoped to the menu that is actually open. Theia keeps hidden `.lm-Menu`
+    // templates in the DOM -- 241 of these labels exist before anything is
+    // clicked -- so an unscoped read describes a menu nobody opened.
+    await studio.page.locator(".lm-MenuBar-itemLabel", { hasText: /^View$/ }).click();
+    const open = studio.page.locator(".lm-Menu").locator("visible=true").first();
+    await open.waitFor({ state: "visible" });
+    const items = (await open.locator(".lm-Menu-itemLabel").allTextContents()).map((t) => t.trim());
+    await studio.page.keyboard.press("Escape");
+
+    expect(items.length, "the View menu rendered nothing, so this proved nothing").toBeGreaterThan(
+      0,
+    );
+    const offenders = items.filter((item) =>
+      /Debug|Testing|Call Hierarchy|Type Hierarchy|Notebook/.test(item),
+    );
+    expect(offenders).toEqual([]);
   });
 
   test("Selection is absent [ADR-0011 §Confirmation: a removed entry must be asserted absent]", async ({
@@ -171,30 +207,35 @@ test.describe("the narrowed shell", () => {
     await studio.page.keyboard.press("Escape");
   });
 
-  test("the toolbar hosts the perspective switch [ADR-0011 §The two perspectives]", async ({
+  test("the header names what is being worked on [ADR-0011 §The two contexts]", async ({
     studio,
   }) => {
-    // "The decision is to make them two switchable perspectives rather than to
-    // pick one, with the switch in the toolbar." The top panel is already the
-    // menu's in the browser target -- nothing hid it -- so the widget sits
-    // beside File / Edit / Gearbox rather than replacing them.
+    // Was "the toolbar hosts the perspective switch". The switch is gone: its two
+    // buttons repeated two Gearbox menu entries while meaning something else, and
+    // ADR-0011's own revisit clause asked for the collapse. What a header should
+    // carry is current state -- the distinction Arduino draws by putting the
+    // selected board in both its toolbar and its menu -- so the claim is now about
+    // the subject, not about navigation.
     await expect(studio.page.locator(".gbx-toolbar")).toBeVisible();
-    await expect(studio.page.locator(".gbx-perspective-catalogue")).toBeVisible();
-    await expect(studio.page.locator(".gbx-perspective-product")).toBeVisible();
+    await openProduct(studio.page, "dev");
+    await expect(studio.page.locator(".gbx-toolbar-name")).not.toBeEmpty();
+    await expect(studio.page.locator("[data-header-profile]")).toBeVisible();
   });
 
-  test("a product perspective exists beside the catalogue [ADR-0011 §The two perspectives]", async ({
+  test("a product context exists, and only with a product [ADR-0011 §The two contexts]", async ({
     studio,
   }) => {
-    await expect(studio.page.locator(".gbx-perspective-product")).toBeVisible();
-    await switchPerspective(studio.page, "gearbox.product");
+    // Was "a product perspective exists beside the catalogue". Beside is wrong:
+    // the catalogue is a source of components, not a peer mode. And "exists" was
+    // too weak -- a perspective restored from a snapshot exists with nothing
+    // behind it, which is the defect this rework removes. The claim is that the
+    // context cannot disagree with what is open.
+    await openProduct(studio.page, "dev");
+    await expectContext(studio.page, "product");
     await expect(studio.page.locator(".gbx-product")).toBeVisible();
-    await expect(studio.page.locator(".gbx-toolbar")).toHaveAttribute(
-      "data-active-perspective",
-      "gearbox.product",
-    );
-    // `applyViewPlacements` only adds. Explorer is kept on purpose and must
-    // survive the switch, not be a casualty of `detachStrayWidgets`.
+
+    // Explorer is kept on purpose and must survive the layout change, not be a
+    // casualty of `detachStrayWidgets`.
     const left = await studio.page.evaluate(() =>
       Array.from(document.querySelectorAll("#theia-left-content-panel .lm-TabBar li")).map((e) =>
         (e.textContent ?? "").trim(),

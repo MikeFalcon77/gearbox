@@ -19,7 +19,7 @@ import { ProductStore } from "./product-store";
 import { ResolutionMarkers } from "./resolution-markers";
 import { bindWidget } from "./contribution";
 import { HiddenDebugView } from "./theia/debug/hidden-debug-view";
-import { MenuNarrowing } from "./theia/core/menu-narrowing";
+import { ShellPolicy } from "./theia/core/shell-policy";
 import { ReadOnlyLockEditorProvider } from "./theia/monaco/read-only-lock-editor-provider";
 import { DomainWorkspace } from "./theia/workspace/domain-workspace";
 import { StudioWorkspaceTrustService } from "./theia/workspace/studio-workspace-trust-service";
@@ -44,6 +44,7 @@ import { ProductWidget } from "./product/product-widget";
 import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
 import { FabricThemeContribution } from "./theme/fabric-theme-contribution";
 import { GearboxPerspectives } from "./shell/gearbox-perspectives";
+import { StudioContextService } from "./shell/studio-context-service";
 import { ToolbarContribution } from "./shell/toolbar-contribution";
 import { ToolbarWidget } from "./shell/toolbar-widget";
 
@@ -124,12 +125,17 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bind(DomainWorkspace).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(DomainWorkspace);
 
-  // Why: ADR-0011 decided on two switchable perspectives and left the carrier
-  // open. Theia 1.75 already binds `PerspectiveContribution` on
-  // `PerspectiveService`; this is that contribution, not a second mechanism.
+  // Why: what Studio is working on drives the shell, and it has to be derived
+  // from what is actually open rather than from a restored layout -- a
+  // perspective can come back from a saved snapshot with no product behind it,
+  // and a Product menu keyed off that would offer actions with nothing to act
+  // on. `StudioContextService` owns the context; perspectives only arrange
+  // panels. ADR-0011's own revisit clause asked for this collapse.
+  bind(StudioContextService).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(StudioContextService);
+
   bind(GearboxPerspectives).toSelf().inSingletonScope();
   bind(PerspectiveContribution).toService(GearboxPerspectives);
-  bind(FrontendApplicationContribution).toService(GearboxPerspectives);
 
   // Why: the switch and the two domain actions belong on the shell, not on a
   // view. `@theia/toolbar` is a user-configurable bar with its own JSON, which
@@ -164,10 +170,12 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
     .inSingletonScope();
 
   // Bound before the view contributions so it runs last among menu
-  // contributions: removal only works on a tree the contributors have already
-  // filled.
-  bind(MenuNarrowing).toSelf().inSingletonScope();
-  bind(MenuContribution).toService(MenuNarrowing);
+  // contributions: pruning only works on a tree the contributors have already
+  // filled. It also re-prunes on `onDidChange`, because plugin contributions
+  // arrive after startup and a one-shot prune is correct only until the first
+  // extension activates.
+  bind(ShellPolicy).toSelf().inSingletonScope();
+  bind(MenuContribution).toService(ShellPolicy);
 
   bindWidget(bind, CatalogueWidget);
   bindWidget(bind, GearDetailWidget);

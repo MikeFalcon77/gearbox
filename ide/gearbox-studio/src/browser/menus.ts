@@ -5,7 +5,7 @@
 // removal silently stops matching. Arduino IDE keeps one `arduino-menus.ts` for
 // exactly this reason.
 
-import { MAIN_MENU_BAR, MenuModelRegistry } from "@theia/core/lib/common/menu";
+import { MAIN_MENU_BAR } from "@theia/core/lib/common/menu";
 import type { MenuPath } from "@theia/core/lib/common/menu";
 
 export namespace GearboxMenus {
@@ -29,42 +29,12 @@ export namespace GearboxMenus {
 }
 
 /**
- * Top-level menus this application removes, by node id.
+ * Where a terminal, the Explorer, Search and git live once they stop being
+ * top-level concerns.
  *
- * Both come from packages the editor needs, which is why removing the package
- * is not an option: Selection is contributed by `@theia/monaco` and Go by
- * `@theia/editor`. Neither has anything to do with composing gears.
- *
- * The ids are the last path segment, verified against the contributing source:
- * `monaco-menu.js` registers `[...MAIN_MENU_BAR, '3_selection']`,
- * `editor-menu.js` registers `[...MAIN_MENU_BAR, '5_go']`, and
- * `debug-commands.js` registers `[...MAIN_MENU_BAR, '6_debug']` -- which the menu
- * bar labels "Run".
+ * Kept, not removed -- ADR-0011 keeps the editor stack on purpose, because the
+ * work ends in generated crates a person will want to read, diff and build. But
+ * they are tools, not one of the two things this application is about, so they
+ * sit one level down instead of competing with `Product` for the menu bar.
  */
-export const REMOVED_TOP_LEVEL_MENUS: readonly string[] = [
-  "3_selection",
-  "5_go",
-  // Rendered as "Run". Contributed by `@theia/debug`, which arrives with
-  // `@theia/plugin-ext` rather than by choice, and there is nothing here to run
-  // or debug: a product resolves, it does not execute. The package stays -- the
-  // plugin host needs it for the VS Code debug API -- and only its presentation
-  // goes, which is the same trade as `HiddenDebugView`.
-  "6_debug",
-];
-
-/**
- * Remove a node from a menu, by id.
- *
- * Theia 1.75 has no `unregisterSubmenu`. `unregisterMenuAction` reaches a
- * submenu anyway, because removal matches on node id regardless of node kind --
- * but **the path argument is not optional in practice**: it defaults to the
- * root and then removes every match in the entire tree, which for a common id
- * would take unrelated entries with it.
- */
-export function removeMenuNode(
-  registry: MenuModelRegistry,
-  parent: MenuPath,
-  id: string,
-): void {
-  registry.unregisterMenuAction(id, parent);
-}
+export const VIEW_ADVANCED: MenuPath = [...MAIN_MENU_BAR, "4_view", "9_advanced"];

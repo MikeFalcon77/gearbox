@@ -1,45 +1,47 @@
-// Two switchable perspectives, carried by Theia 1.75's PerspectiveService.
+// Three layouts, and nothing more. Which one is active is decided elsewhere.
 //
-// ADR-0011 left the mechanism open (`PERSPECTIVE_LAYOUTS_STORAGE_KEY` or
-// `ApplicationShell.createLayout`). The installed 1.75 already binds
-// `PerspectiveContribution` -- see `@theia/core/lib/browser/perspective-service`
-// and `frontend-application-module.js` -- so this file is one contribution,
-// not a homemade switch.
+// This file used to also *be* the context: two perspectives, Catalogue and
+// Product, switched by buttons in the toolbar. ADR-0011's own revisit clause
+// called that a cheap mistake to correct, and it was made: the words duplicated
+// two Gearbox menu entries while meaning something else. Perspectives now only
+// arrange panels, and `StudioContextService` decides which arrangement applies --
+// because a perspective can be restored from a saved layout with no domain object
+// behind it, and a menu keyed off that would offer product actions with no product.
 //
-// Lock, Generate and Graph are deliberately absent from the maps. Belonging
-// is the saved layout, not a forced open: a switch that fires four requests
-// to show two panels nobody asked for is worse than one that opens the two
-// the perspective is for.
+// Home keeps the catalogue visible. Without a product there is exactly one useful
+// thing to do -- look at what could go into one -- and an empty main area at boot
+// would be worse than what it replaced. The Start screen takes that place later.
+//
+// Lock, Generate and Graph are deliberately absent from the maps. Belonging is
+// the saved layout, not a forced open: a switch that fires four requests to show
+// two panels nobody asked for is worse than one that opens the two the context
+// is for.
 
-import { ApplicationShell, FrontendApplicationContribution } from "@theia/core/lib/browser";
-import { FrontendApplicationStateService } from "@theia/core/lib/browser/frontend-application-state";
+import { ApplicationShell } from "@theia/core/lib/browser";
 import {
   PerspectiveContribution,
   PerspectiveService,
-  PerspectiveServiceImpl,
 } from "@theia/core/lib/browser/perspective-service";
-import { inject, injectable } from "@theia/core/shared/inversify";
+import { injectable } from "@theia/core/shared/inversify";
 
+import {
+  GEAR_PERSPECTIVE,
+  HOME_PERSPECTIVE,
+  PRODUCT_PERSPECTIVE,
+} from "./studio-context-service";
 import { CatalogueWidget } from "../catalogue/catalogue-widget";
 import { GearDetailWidget } from "../detail/gear-detail-widget";
 import { ExplainWidget } from "../explain/explain-widget";
 import { ProductWidget } from "../product/product-widget";
 
-export const CATALOGUE_PERSPECTIVE = "gearbox.catalogue";
-export const PRODUCT_PERSPECTIVE = "gearbox.product";
 
 @injectable()
-export class GearboxPerspectives
-  implements PerspectiveContribution, FrontendApplicationContribution
-{
-  @inject(PerspectiveService) protected readonly perspectives!: PerspectiveService;
-  @inject(FrontendApplicationStateService)
-  protected readonly appState!: FrontendApplicationStateService;
+export class GearboxPerspectives implements PerspectiveContribution {
 
   registerPerspectives(service: PerspectiveService): void {
     service.registerPerspective({
-      id: CATALOGUE_PERSPECTIVE,
-      label: "Catalogue",
+      id: HOME_PERSPECTIVE,
+      label: "Home",
       viewPlacements: new Map<string, ApplicationShell.Area>([
         [CatalogueWidget.ID, "left"],
         [GearDetailWidget.ID, "bottom"],
@@ -66,25 +68,18 @@ export class GearboxPerspectives
         void shell.activateWidget(ProductWidget.ID);
       },
     });
-  }
 
-  /**
-   * `PerspectiveServiceImpl.initialize` registers `default` and makes it
-   * active before contributions run. Landing on Catalogue means the switch
-   * always shows one of the two sides, never a third unnamed state.
-   *
-   * The switch waits for `ready`. `onStart` itself runs before the shell is
-   * attached; opening widgets then left them collapsed in the DOM -- queryable
-   * and invisible -- which this project has already paid for once.
-   */
-  onStart(): void {
-    void this.appState.reachedState("ready").then(() => {
-      if (
-        this.perspectives.getActivePerspectiveId() ===
-        PerspectiveServiceImpl.DEFAULT_PERSPECTIVE_ID
-      ) {
-        void this.perspectives.switchPerspective(CATALOGUE_PERSPECTIVE);
-      }
+    // Registered empty, and nothing enters it until gear authoring lands.
+    //
+    // Declared anyway so that `perspectiveFor` is a total mapping rather than a
+    // claim: `switchPerspective` on an unregistered id returns silently, so the
+    // alternative is a context whose layout never applies and never says why.
+    service.registerPerspective({
+      id: GEAR_PERSPECTIVE,
+      label: "Gear",
+      viewPlacements: new Map<string, ApplicationShell.Area>(),
     });
   }
+
+
 }

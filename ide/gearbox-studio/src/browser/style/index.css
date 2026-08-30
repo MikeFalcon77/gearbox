@@ -498,12 +498,24 @@
   padding: 0 8px;
   box-sizing: border-box;
 }
-.gbx-toolbar-switch, .gbx-toolbar-actions {
+.gbx-toolbar-subject, .gbx-toolbar-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  min-width: 0;
 }
-.gbx-toolbar-actions { margin-left: auto; }
+.gbx-toolbar-actions { margin-left: auto; flex: 0 0 auto; }
+
+/* The product's name is the subject of the sentence, so it carries the weight;
+   everything beside it is a qualifier. Truncated rather than wrapped: the header
+   is one row and a long label must not push the actions off it. */
+.gbx-toolbar-name {
+  font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gbx-toolbar-empty { opacity: 0.6; font-style: italic; }
+.gbx-toolbar-status { flex: 0 0 auto; }
+.gbx-toolbar-status[data-status="working"] { opacity: 0.7; }
 .gbx-toolbar .gbx-choice {
   display: inline-flex;
   align-items: center;

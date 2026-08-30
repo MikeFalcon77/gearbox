@@ -1124,6 +1124,61 @@ control in every state, and an automatic refresh after the Generate view applies
 true until this landed and is now corrected in place.
 
 
+#### Two working contexts, and a whitelist instead of exceptions
+
+The shell was Theia with Gearbox panels bolted on, and it showed: `Catalogue` and `Product` buttons
+beside the menu bar repeating two Gearbox menu entries while meaning something else, `Type Hierarchy`
+in the bottom panel, `Workspace` and `Terminal` as top-level concerns. ADR-0011 had left the door
+open for exactly this correction -- "If the two perspectives turn out to be one... collapse them" --
+and the condition was met.
+
+**A context is not a perspective.** `StudioContextService` owns what Studio is working on and derives
+it from what is actually open; `PerspectiveService` only arranges panels. The direction is one-way,
+and it has to be: a perspective can be restored from a saved snapshot with no product behind it, so a
+Product menu keyed off `activePerspectiveId` would offer actions with nothing to act on. The contexts
+are named after the PRD's actors -- integrator, gear author -- not after the application's own panels.
+`gear` is declared in the type although nothing enters it yet, so every `switch` is already exhaustive
+and the compiler finds the branches to add rather than leaving them to a wrong default.
+
+The toolbar became the header it should always have been: the product, its profile, and whether it
+resolved. The profile is *shown*, not switched -- §9 keeps that control in the Product panel because
+it must be reachable while a resolution is in flight, and a row rendered from the resolved product
+cannot be. This is the line Arduino draws by putting the selected board in both its toolbar and its
+menu: current state may repeat, navigation may not.
+
+**The menu is a whitelist, and it has to be.** The old version removed three top-level menus by id
+and left the rest as a general editor built them. `typehierarchy`, `callhierarchy`, `notebook`,
+`timeline`, `bulk-edit`, `console` and `outline-view` all arrive through `@theia/plugin-ext`, which is
+present so the VS Code git extension can run -- so half of ADR-0011's strategy, narrowing by
+dependency set, cannot reach them at all. `ShellPolicy` prunes the bar to `ALLOWED_TOP_LEVEL`, removes
+forbidden families from **every** menu including the editor's context menu, and re-prunes on
+`onDidChange`, because plugin contributions arrive after startup and a one-shot prune is correct only
+until the first extension activates. The menu bar is now asserted by *equality*, so anything an
+upgrade adds fails a claim instead of appearing unannounced.
+
+Three mistakes in this work are worth keeping, because each was found by a test rather than by
+reading:
+
+* A `protected key = this.contextKeys.createKey(...)` **field initializer** runs in the constructor,
+  before inversify has injected anything, so it threw on `undefined` and took the container down. The
+  symptom was the catalogue never settling and ninety seconds of nothing -- no hint that a context key
+  was to blame. The comment warning about it was written before the code that ignored it.
+* The header reused `data-profile`, which the Product view already owns and means "a profile you may
+  select". One locator matched two elements. That was the fifth shared-selector collision in this
+  shell, and it happened after checking every *other* attribute the header introduced.
+* `FORBIDDEN_COMMAND_PREFIXES` said `typeHierarchy` and `callHierarchy` in camelCase. The real ids are
+  `typehierarchy:toggle` and `callhierarchy:open`, lowercase, so the list matched **nothing** and the
+  menu would have looked cleaned. The claim that reads the rendered View menu is what caught it; every
+  prefix was then read out of the installed packages instead of guessed.
+
+**What is left of this, precisely.** Explorer, Search and Source Control toggles already sit under
+`View -> Views`, because `AbstractViewContribution` registers every toggle there -- including ours. So
+"Advanced Tools" is a *regrouping* of that submenu into domain views and tool views, and it needs each
+tool's toggle command id. `fileNavigator:toggle` and `scmView:toggle` are confirmed; search's and the
+terminal's are not, and guessing them is the mistake made twice above. A terminal tab also opens at
+the bottom on boot, which the same regrouping should stop.
+
+
 #### Re-reading the catalogue, and what is not watched
 
 **`Reload Catalogue` re-reads the sources, and it does so more strongly than "drop a cache":**

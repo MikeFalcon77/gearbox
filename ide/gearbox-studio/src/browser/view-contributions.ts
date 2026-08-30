@@ -3,11 +3,8 @@
 import {
   AbstractViewContribution,
   FrontendApplicationContribution,
-  OpenViewArguments,
   codicon,
 } from "@theia/core/lib/browser";
-import { PerspectiveService } from "@theia/core/lib/browser/perspective-service";
-import { PRODUCT_PERSPECTIVE } from "./shell/gearbox-perspectives";
 import {
   ConnectionStatus,
   ConnectionStatusService,
@@ -216,7 +213,6 @@ export class DetailViewContribution
 @injectable()
 export class ProductViewContribution extends AbstractViewContribution<ProductWidget> {
   @inject(ProductStore) protected readonly store!: ProductStore;
-  @inject(PerspectiveService) protected readonly perspectives!: PerspectiveService;
 
   constructor() {
     super({
@@ -229,21 +225,6 @@ export class ProductViewContribution extends AbstractViewContribution<ProductWid
       defaultWidgetOptions: { area: "main" },
       toggleCommandId: "gearbox.product.toggle",
     });
-  }
-
-  /**
-   * Opening Product from Catalogue is asking for the other object of work.
-   * Theia 1.75's `WidgetAreaResolver` only places widgets that the active
-   * perspective maps, so a toggle while Catalogue is active leaves the
-   * panel attached and hidden. Switching first is the honest reading of
-   * "two perspectives" and is what makes `Gearbox: Product` work from either
-   * side.
-   */
-  override async openView(args?: Partial<OpenViewArguments>): Promise<ProductWidget> {
-    if (this.perspectives.getActivePerspectiveId() !== PRODUCT_PERSPECTIVE) {
-      await this.perspectives.switchPerspective(PRODUCT_PERSPECTIVE);
-    }
-    return super.openView(args);
   }
 
   override registerCommands(commands: CommandRegistry): void {

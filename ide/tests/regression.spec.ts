@@ -14,7 +14,7 @@ import {
   openPalette,
   openProduct,
   runCommand,
-  switchPerspective,
+  expectContext,
   test,
 } from "./fixtures/studio";
 
@@ -26,9 +26,6 @@ test.describe("the panel is operable without a mouse", () => {
   // shape would pass here while a keyboard would not.
 
   test("a catalogue row can take focus", async ({ studio }) => {
-    if ((await studio.page.locator(".gbx-toolbar").count()) > 0) {
-      await switchPerspective(studio.page, "gearbox.catalogue");
-    }
     await studio.page.locator(".gearbox-catalogue .gbx-row").first().focus();
     const focused = await studio.page.evaluate(() =>
       document.activeElement?.classList.contains("gbx-row"),
@@ -372,15 +369,27 @@ test.describe("the toolbar names only registered commands", () => {
       ].map((m) => m[1]),
     );
 
-    const rendered = new Set<string>();
-    for (const id of ["gearbox.catalogue", "gearbox.product"] as const) {
-      await switchPerspective(studio.page, id);
-      const ids = await studio.page
+    // A context is not switchable by a control -- it follows what is open -- so
+    // this reads whatever the shell reports, then opens a product and reads again.
+    //
+    // It does not assert that `home` is reachable, because on this corpus it is
+    // not: `ProductStore.discover()` opens the product when it is the only one, so
+    // the shell passes through `home` and lands in `product` before a test can
+    // look. That is the behaviour, not a defect, and the Start screen is where it
+    // changes.
+    const actions = () =>
+      studio.page
         .locator(".gbx-toolbar-actions [data-command]")
         .evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-command") ?? ""));
-      expect(ids.length, `${id} renders no action`).toBeGreaterThan(0);
-      for (const command of ids) rendered.add(command);
-    }
+
+    const rendered = new Set<string>();
+    for (const id of await actions()) rendered.add(id);
+
+    await openProduct(studio.page, "dev");
+    await expectContext(studio.page, "product");
+    const inProduct = await actions();
+    expect(inProduct.length, "the product context renders no action").toBeGreaterThan(0);
+    for (const id of inProduct) rendered.add(id);
 
     expect([...rendered].sort()).toEqual([...declared].sort());
   });
@@ -400,7 +409,6 @@ test.describe("the toolbar names only registered commands", () => {
     // context tabs, so repairing this would be work on code that is going away.
     // It stays named so the claim is not lost with the mechanism -- whatever
     // replaces it has to reveal a hidden panel from a menu.
-    await switchPerspective(studio.page, "gearbox.product");
     await openProduct(studio.page, "dev");
     await expect(studio.page.locator(".gbx-product")).toBeVisible();
 
@@ -413,27 +421,16 @@ test.describe("the toolbar names only registered commands", () => {
     await expect(studio.page.locator(".gbx-product")).toBeVisible({ timeout: 30_000 });
   });
 
-  test("switching perspective updates the active id and opens Product", async ({
+  test("the header reports the context, and the context follows what is open", async ({
     studio,
   }) => {
-    // `data-active-perspective` is the same id `PerspectiveService` writes to
-    // `ACTIVE_PERSPECTIVE_CONTEXT_KEY`. The key itself is not on the DOM.
-    // Start from Catalogue: a earlier test in this worker may have left Product
-    // active, and asserting the boot default here would test leftover state.
-    await switchPerspective(studio.page, "gearbox.catalogue");
-    await expect(studio.page.locator(".gbx-toolbar")).toHaveAttribute(
-      "data-active-perspective",
-      "gearbox.catalogue",
-    );
-    await switchPerspective(studio.page, "gearbox.product");
-    await expect(studio.page.locator(".gbx-toolbar")).toHaveAttribute(
-      "data-active-perspective",
-      "gearbox.product",
-    );
+    // The property that made this rework necessary: a shell state can no longer
+    // disagree with reality. `data-context` is written by `StudioContextService`
+    // from `ProductStore`, not from a restored perspective -- so there is no way
+    // to be in the product context with no product.
+    await openProduct(studio.page, "dev");
+    await expectContext(studio.page, "product");
     await expect(studio.page.locator(".gbx-product")).toBeVisible();
-    await expect(studio.page.locator(".gbx-perspective-product")).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await expect(studio.page.locator(".gbx-toolbar-name")).not.toBeEmpty();
   });
 });

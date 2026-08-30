@@ -560,28 +560,25 @@ export async function openGenerate(page: Page): Promise<void> {
 }
 
 /**
- * Switch the shell perspective from the toolbar.
+ * Wait for the shell to report the context it is in.
  *
- * Clicks the named button and waits for `aria-pressed`, which is what
- * `PerspectiveService.onDidChangePerspective` drives. Waiting on a view
- * instead would pass against a panel that was already open from a previous
- * test, which is the normal case once Product has been visited.
+ * There is no control that sets a context: it is derived from what is open, which
+ * is the whole point of `StudioContextService`. So a test does not *switch* a
+ * context -- it opens something and waits for the shell to agree. This replaced a
+ * `switchPerspective` helper that clicked buttons which no longer exist, and it
+ * asserts the same property more honestly: the header's `data-context` is set from
+ * the service, not from whatever layout happened to be restored.
  */
-export async function switchPerspective(
+export async function expectContext(
   page: Page,
-  id: "gearbox.catalogue" | "gearbox.product",
+  kind: "home" | "product" | "gear",
 ): Promise<void> {
-  const button = page.locator(`.gbx-toolbar [data-perspective="${id}"]`);
-  await button.click();
-  // The switch is async (`applyViewPlacements` / a saved snapshot). Reading
-  // `aria-pressed` on the next line loses the race against the first activation.
-  await expect(button).toHaveAttribute("aria-pressed", "true", { timeout: 30_000 });
+  await expect(page.locator(".gbx-toolbar")).toHaveAttribute("data-context", kind, {
+    timeout: 30_000,
+  });
 }
 
 export async function openProduct(page: Page, profile: string): Promise<void> {
-  if ((await page.locator(".gbx-toolbar").count()) > 0) {
-    await switchPerspective(page, "gearbox.product");
-  }
   await revealView(page, "Gearbox Product", ".gbx-product");
   await page.locator("[data-resolved-profile]").waitFor({ state: "visible", timeout: 60_000 });
   await page.locator(`[data-profile="${profile}"]`).click();
