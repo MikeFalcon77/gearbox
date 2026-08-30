@@ -40,6 +40,21 @@ function diffOfProduct(): string {
   }).trim();
 }
 
+/**
+ * Accept the edit dialog, and only the edit dialog.
+ *
+ * `.theia-button.main` is every Theia dialog's default button, so an unscoped
+ * click accepts whatever happens to be open. That matters here more than
+ * elsewhere: the dialog this file accepts *writes to a description*, so
+ * confirming a stranger's dialog would write something no test asked for. The
+ * preview pane is what makes it ours.
+ */
+async function acceptEdit(page: import("@playwright/test").Page): Promise<void> {
+  const dialog = page.locator(".dialogBlock", { has: page.locator(".gbx-edit-preview") });
+  await expect(dialog, "the edit dialog is not open, so there is nothing to accept").toBeVisible();
+  await dialog.locator(".theia-button.main").click();
+}
+
 test.describe("what the tool may write", () => {
 
   test.fixme(
@@ -139,7 +154,12 @@ test.describe("tier 3: a description edited surgically", () => {
     );
     expect(diffOfProduct(), "the dry run must not have written anything").toBe("");
 
-    await studio.page.locator(".theia-button.secondary").click();
+    // Scoped for the same reason `acceptEdit` is: cancelling a stranger's dialog
+    // would leave this one open and the next click would land somewhere unrelated.
+    await studio.page
+      .locator(".dialogBlock", { has: studio.page.locator(".gbx-edit-preview") })
+      .locator(".theia-button.secondary")
+      .click();
     await expect(studio.page.locator(".gbx-edit-preview")).toHaveCount(0);
     expect(diffOfProduct(), "cancelling must leave the file alone").toBe("");
     await expect(toggle).toHaveAttribute("data-in-product", "false");
@@ -161,7 +181,7 @@ test.describe("tier 3: a description edited surgically", () => {
 
       const toggle = studio.page.locator('[data-toggle-gear="cluster"]');
       await toggle.click();
-      await studio.page.locator(".theia-button.main").click();
+      await acceptEdit(studio.page);
       // The product is re-read and re-resolved before the toggle can change, so
       // this waits on the whole cycle and not just on the write.
       await expect(toggle).toHaveAttribute("data-in-product", "true", { timeout: 30_000 });
@@ -175,7 +195,7 @@ test.describe("tier 3: a description edited surgically", () => {
       ).not.toContain("deletion");
 
       await toggle.click();
-      await studio.page.locator(".theia-button.main").click();
+      await acceptEdit(studio.page);
       await expect(toggle).toHaveAttribute("data-in-product", "false", { timeout: 30_000 });
 
       expect(diffOfProduct(), "add then remove did not return the file to what it was").toBe("");

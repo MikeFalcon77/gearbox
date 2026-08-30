@@ -8,7 +8,15 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { expect, openGraph, openPalette, test } from "./fixtures/studio";
+import {
+  expect,
+  openGraph,
+  openPalette,
+  openProduct,
+  runCommand,
+  switchPerspective,
+  test,
+} from "./fixtures/studio";
 
 test.describe("the panel is operable without a mouse", () => {
   // Every interaction in the catalogue was a bare `onClick` on a div once. A
@@ -18,6 +26,9 @@ test.describe("the panel is operable without a mouse", () => {
   // shape would pass here while a keyboard would not.
 
   test("a catalogue row can take focus", async ({ studio }) => {
+    if ((await studio.page.locator(".gbx-toolbar").count()) > 0) {
+      await switchPerspective(studio.page, "gearbox.catalogue");
+    }
     await studio.page.locator(".gearbox-catalogue .gbx-row").first().focus();
     const focused = await studio.page.evaluate(() =>
       document.activeElement?.classList.contains("gbx-row"),
@@ -308,5 +319,121 @@ test.describe("every view has an icon, and the icon exists", () => {
     // is a button with nothing in it.
     expect(icons["gearbox.catalogue"]).toContain("codicon-library");
     expect(icons["gearbox.detail"]).toContain("codicon-info");
+  });
+});
+
+test.describe("the toolbar names only registered commands", () => {
+  const STUDIO_SRC = join(__dirname, "../gearbox-studio/src/browser");
+
+  function sources(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return sources(path);
+      return /\.tsx?$/.test(entry.name) ? [path] : [];
+    });
+  }
+
+  test("every command id the toolbar names is registered", () => {
+    // Same form as the codicon check: the source is the contract, not a running
+    // registry. A toolbar that invents an id compiles and fails at click time.
+    const toolbar = readFileSync(
+      join(STUDIO_SRC, "shell/toolbar-widget.tsx"),
+      "utf8",
+    );
+    const block = toolbar.match(/TOOLBAR_COMMAND_IDS = \[([\s\S]*?)\]/);
+    expect(block, "TOOLBAR_COMMAND_IDS is missing").not.toBeNull();
+    const ids = [...(block?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    expect(ids.length).toBeGreaterThan(0);
+
+    const registered = sources(STUDIO_SRC).flatMap((file) => {
+      const text = readFileSync(file, "utf8");
+      return [...text.matchAll(/\bid:\s*"([^"]+)"/g)].map((m) => m[1]);
+    });
+    const unknown = ids.filter((id) => !registered.includes(id));
+    expect(unknown, `toolbar names unregistered commands: ${unknown.join(", ")}`).toEqual(
+      [],
+    );
+  });
+
+  test("the toolbar renders exactly the commands it declares", async ({ studio }) => {
+    // The declared list and the rendered one are two different things:
+    // `TOOLBAR_COMMAND_IDS` is string literals, while the buttons come from an
+    // `ACTIONS` map built out of imported `Command` constants. The test above
+    // guards the literals against the registry; without this one, a third action
+    // could be added to the map and the declared list would quietly stop
+    // describing the toolbar.
+    const declared = new Set(
+      [
+        ...(
+          readFileSync(join(STUDIO_SRC, "shell/toolbar-widget.tsx"), "utf8").match(
+            /TOOLBAR_COMMAND_IDS = \[([\s\S]*?)\]/,
+          )?.[1] ?? ""
+        ).matchAll(/"([^"]+)"/g),
+      ].map((m) => m[1]),
+    );
+
+    const rendered = new Set<string>();
+    for (const id of ["gearbox.catalogue", "gearbox.product"] as const) {
+      await switchPerspective(studio.page, id);
+      const ids = await studio.page
+        .locator(".gbx-toolbar-actions [data-command]")
+        .evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-command") ?? ""));
+      expect(ids.length, `${id} renders no action`).toBeGreaterThan(0);
+      for (const command of ids) rendered.add(command);
+    }
+
+    expect([...rendered].sort()).toEqual([...declared].sort());
+  });
+
+  test.fixme("the toggle command reveals a view hidden behind another tab", async ({ studio }) => {
+    // **Measured as broken, and deliberately not fixed here.**
+    //
+    // This asserts the path a person takes -- Gearbox > Product, or the palette --
+    // as opposed to the path `revealView` takes, which clicks the shell tab
+    // because that proved reliable across the suite. It passes in isolation with
+    // the Graph over Product, and fails inside the suite; the toggle semantics of
+    // `AbstractViewContribution` plus the palette are two stateful things and one
+    // of them loses.
+    //
+    // A fixme rather than a fix because the mechanism is being removed: view
+    // toggles through a generic menu are what the shell rework replaces with
+    // context tabs, so repairing this would be work on code that is going away.
+    // It stays named so the claim is not lost with the mechanism -- whatever
+    // replaces it has to reveal a hidden panel from a menu.
+    await switchPerspective(studio.page, "gearbox.product");
+    await openProduct(studio.page, "dev");
+    await expect(studio.page.locator(".gbx-product")).toBeVisible();
+
+    // Put the Graph on top of it in the same area.
+    await openGraph(studio.page);
+    const covered = !(await studio.page.locator(".gbx-product").first().isVisible());
+    test.skip(!covered, "the graph did not cover Product, so there is nothing hidden to reveal");
+
+    await runCommand(studio.page, "Gearbox Product");
+    await expect(studio.page.locator(".gbx-product")).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("switching perspective updates the active id and opens Product", async ({
+    studio,
+  }) => {
+    // `data-active-perspective` is the same id `PerspectiveService` writes to
+    // `ACTIVE_PERSPECTIVE_CONTEXT_KEY`. The key itself is not on the DOM.
+    // Start from Catalogue: a earlier test in this worker may have left Product
+    // active, and asserting the boot default here would test leftover state.
+    await switchPerspective(studio.page, "gearbox.catalogue");
+    await expect(studio.page.locator(".gbx-toolbar")).toHaveAttribute(
+      "data-active-perspective",
+      "gearbox.catalogue",
+    );
+    await switchPerspective(studio.page, "gearbox.product");
+    await expect(studio.page.locator(".gbx-toolbar")).toHaveAttribute(
+      "data-active-perspective",
+      "gearbox.product",
+    );
+    await expect(studio.page.locator(".gbx-product")).toBeVisible();
+    await expect(studio.page.locator(".gbx-perspective-product")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });

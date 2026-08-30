@@ -95,10 +95,9 @@ work needs `unregisterMenuAction` anyway. Reserved for a contribution that must 
 
 Studio has two objects of work — the gear **catalogue** and a **product** — and neither subordinates
 the other. Arduino has only one (the sketch), so it offers no guidance here. The decision is to make
-them two switchable perspectives rather than to pick one, with the switch in the toolbar. Which
-mechanism carries a perspective is left open: Theia 1.75 has a `PERSPECTIVE_LAYOUTS_STORAGE_KEY` in
-`ShellLayoutRestorer`, and if it does not fit, `ApplicationShell.createLayout` is the documented
-override point.
+them two switchable perspectives rather than to pick one, with the switch in the toolbar. The
+mechanism that carries a perspective is Theia 1.75's `PerspectiveService` — see
+[Amendment 2026-08-30](#amendment-2026-08-30-perspectiveservice-is-the-carrier).
 
 ### Packaging
 
@@ -286,6 +285,47 @@ Verified against the installed packages, not assumed:
 * `--plugins=local-dir:../plugins`, which the browser application currently passes, does nothing:
   `@theia/plugin-ext` is not installed and the backend's argument parser is not strict, so the flag
   is accepted and ignored. The directory does not exist either.
+
+## Amendment 2026-08-30: PerspectiveService is the carrier
+
+**Status: accepted. This closes an open question; it reverses nothing.**
+
+When this ADR was written, Theia 1.75 appeared to offer only a storage key
+(`PERSPECTIVE_LAYOUTS_STORAGE_KEY` on `ShellLayoutRestorer`) and, failing that,
+`ApplicationShell.createLayout`. That was an incomplete reading of the installed
+packages. `@theia/core/lib/browser/perspective-service` already exports
+`PerspectiveDescriptor`, `PerspectiveService` (`switchPerspective`,
+`onDidChangePerspective`), `PerspectiveContribution.registerPerspectives`, the
+context key `ACTIVE_PERSPECTIVE_CONTEXT_KEY`, and the commands
+`SWITCH_PERSPECTIVE_COMMAND` / `RESET_PERSPECTIVE_COMMAND`.
+`frontend-application-module.js` binds the contribution provider. Layout
+snapshots per perspective are `ShellLayoutRestorer`'s job.
+
+This is not a choice between the two options the ADR named. It is the API that
+was already there.
+
+**The top panel does not need un-hiding in the browser target.** The earlier
+consequence — "override the method that hides it" — described Electron, where
+`ElectronMenuContribution.hideTopPanel` runs, and the compact/hidden values of
+`window.menuBarVisibility`. The browser target keeps the panel visible because
+the menu lives there (`BrowserMenuBarContribution.appendMenu` does
+`shell.addWidget(menu, { area: "top" })`). The toolbar is a third widget in that
+area. `@theia/toolbar` is not used: it is a user-configurable bar, which is the
+opposite of the narrowing this ADR is for.
+
+**What the maps contain, and what they do not.** Catalogue places `gearbox.catalogue`
+left and `gearbox.detail` bottom. Product places `gearbox.product` in main and
+`gearbox.explain` bottom. Lock, Generate and Graph are omitted on purpose:
+`applyViewPlacements` only adds, and a switch that opens four panels to satisfy
+a table is worse than one that opens the two the perspective is for. Belonging
+of the rest is the saved layout. `primaryViews` is applied only on first
+activation; each descriptor's `onActivate` then raises the primary widget so
+a later restore does not leave an editor covering Product.
+
+Registration does not switch. `PerspectiveServiceImpl.initialize` creates
+`default` and makes it active, then calls contributions. Studio switches from
+`default` to Catalogue once the shell is ready, so the toolbar never shows a
+third unnamed state.
 
 ### When to revisit
 

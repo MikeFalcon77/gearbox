@@ -479,3 +479,33 @@
 .gbx-lock-changes li[data-lock-change="+"] { color: var(--theia-successBackground); }
 .gbx-lock-changes li[data-lock-change="-"] { color: var(--theia-editorError-foreground); }
 .gbx-lock-changes li[data-lock-change="~"] { color: var(--theia-editorWarning-foreground); }
+
+/* --- Shell toolbar ------------------------------------------------------- */
+
+/* Shares the top row with the menu. Theia already shows that panel in the
+   browser target (`window.menuBarVisibility` is classic); we grow to fill the
+   rest of the row so the actions can sit on the right without overlapping
+   File / Edit / Gearbox. */
+.gearbox-toolbar {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.gbx-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0 8px;
+  box-sizing: border-box;
+}
+.gbx-toolbar-switch, .gbx-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.gbx-toolbar-actions { margin-left: auto; }
+.gbx-toolbar .gbx-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

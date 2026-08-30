@@ -13,7 +13,9 @@
 // reusing a profile. Reusing one would collapse the panels and fail half the
 // claims here for a reason that has nothing to do with the claims.
 
-import { test as base, type Browser, type Locator, type Page } from "@playwright/test";
+import { join } from "node:path";
+
+import { expect, test as base, type Browser, type Locator, type Page } from "@playwright/test";
 
 /** One sample of the catalogue's DOM, taken while a load is in flight. */
 export interface Sample {
@@ -261,7 +263,34 @@ export async function runCommand(page: Page, label: string): Promise<void> {
 async function revealView(page: Page, command: string, selector: string): Promise<void> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (await page.locator(selector).first().isVisible()) return;
-    await runCommand(page, command);
+    // Attached-but-hidden: the widget is in the DOM behind another tab. Click its
+    // shell tab; fall back to the command only when the widget does not exist yet.
+    //
+    // This was briefly reverted to always use the command, on the argument that a
+    // tab click moves the tests off the path a person takes. Measured both ways:
+    // the command reveals Product when the Graph is on top of it, but across the
+    // whole suite it produced widespread `toBeVisible` failures and took 19.6
+    // minutes against 3.3. Whatever the mechanism -- a toggle is a toggle, and
+    // `runCommand` drives the palette, which is a second stateful thing to get
+    // wrong -- the tab click is what Theia reliably listens to.
+    //
+    // The user's path is not left uncovered by this: `regression.spec.ts` asserts
+    // that the toggle *command* reveals an open-but-hidden view, which is the
+    // claim a tab click would otherwise hide.
+    const tabId = await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      let n: HTMLElement | null = el instanceof HTMLElement ? el : null;
+      while (n) {
+        if (n.id && document.getElementById(`shell-tab-${n.id}`)) return n.id;
+        n = n.parentElement;
+      }
+      return "";
+    }, selector);
+    if (tabId !== "") {
+      await page.locator(`[id="shell-tab-${tabId}"]`).click();
+    } else {
+      await runCommand(page, command);
+    }
     const shown = await page
       .locator(selector)
       .first()
@@ -271,6 +300,42 @@ async function revealView(page: Page, command: string, selector: string): Promis
   }
   await page.locator(selector).first().waitFor({ state: "visible" });
 }
+
+/**
+ * No test may leave a product description changed.
+ *
+ * `global-setup` checks this once, before the run; this checks it after every
+ * test, and the difference is attribution. A description that goes dirty
+ * mid-run poisons every later claim that depends on the resolution -- observed
+ * twice, as a stray `use_gear("grpc-hub")` and a stray `use_gear("types-registry")`
+ * -- and the failures land in files that have nothing to do with the write.
+ *
+ * The cause has not been found: it did not reproduce across three full runs with
+ * a stack trace armed on the only code path that writes. So this does the next
+ * best thing rather than pretending otherwise -- it **fails the test that did
+ * it**, prints the diff naming the gear, and restores the tree so the rest of the
+ * run is still worth reading. Silently restoring would have hidden it again.
+ */
+base.afterEach(async ({}, testInfo) => {
+  const { execFileSync } = await import("node:child_process");
+  const repo = join(__dirname, "../..");
+  const dirty = execFileSync("git", ["status", "--porcelain", "--", "products"], {
+    cwd: repo,
+    encoding: "utf8",
+  }).trim();
+  if (dirty === "") return;
+
+  const diff = execFileSync("git", ["diff", "--", "products"], {
+    cwd: repo,
+    encoding: "utf8",
+  });
+  execFileSync("git", ["checkout", "--", "products"], { cwd: repo });
+  throw new Error(
+    `"${testInfo.title}" left a product description changed:\n${dirty}\n\n${diff}\n` +
+      `The tree has been restored. Two claims edit a description on purpose and put ` +
+      `it back; anything else writing there is the defect this guard exists to name.`,
+  );
+});
 
 export async function openGraph(page: Page): Promise<void> {
   await revealView(page, "Gearbox Graph", ".gbx-svg");
@@ -494,7 +559,29 @@ export async function openGenerate(page: Page): Promise<void> {
   await revealView(page, "Gearbox Generate", ".gbx-generate");
 }
 
+/**
+ * Switch the shell perspective from the toolbar.
+ *
+ * Clicks the named button and waits for `aria-pressed`, which is what
+ * `PerspectiveService.onDidChangePerspective` drives. Waiting on a view
+ * instead would pass against a panel that was already open from a previous
+ * test, which is the normal case once Product has been visited.
+ */
+export async function switchPerspective(
+  page: Page,
+  id: "gearbox.catalogue" | "gearbox.product",
+): Promise<void> {
+  const button = page.locator(`.gbx-toolbar [data-perspective="${id}"]`);
+  await button.click();
+  // The switch is async (`applyViewPlacements` / a saved snapshot). Reading
+  // `aria-pressed` on the next line loses the race against the first activation.
+  await expect(button).toHaveAttribute("aria-pressed", "true", { timeout: 30_000 });
+}
+
 export async function openProduct(page: Page, profile: string): Promise<void> {
+  if ((await page.locator(".gbx-toolbar").count()) > 0) {
+    await switchPerspective(page, "gearbox.product");
+  }
   await revealView(page, "Gearbox Product", ".gbx-product");
   await page.locator("[data-resolved-profile]").waitFor({ state: "visible", timeout: 60_000 });
   await page.locator(`[data-profile="${profile}"]`).click();

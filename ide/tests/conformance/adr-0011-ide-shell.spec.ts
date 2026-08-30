@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { expect, openProduct, test } from "../fixtures/studio";
+import { expect, openProduct, switchPerspective, test } from "../fixtures/studio";
 
 const IDE = join(__dirname, "../..");
 
@@ -125,9 +125,12 @@ test.describe("the narrowed shell", () => {
       ).map((e) => (e.textContent ?? "").trim()),
     );
     // Named for the shell it started, not "Terminal": Theia labels the tab with
-    // `$SHELL`, so the assertion is on there being a third bottom tab beside
-    // Problems and Gearbox Gear rather than on a fixed label.
-    const shell = tabs.find((tab) => tab !== "Problems" && tab !== "Gearbox Gear");
+    // `$SHELL`. Problems grows a `(N)` badge, and Product's map adds Explain,
+    // so the third tab is whatever is left after those, not a string-equal
+    // against the unbadged names.
+    const chrome = (tab: string) =>
+      /^(Problems|Gearbox Gear|Gearbox Explain)(\s+\(\d+\))?$/.test(tab);
+    const shell = tabs.find((tab) => !chrome(tab));
     expect(shell, `only found ${tabs.join(", ")}`).toBeTruthy();
 
     // Activated first: the xterm canvas is created when the tab becomes current,
@@ -168,20 +171,36 @@ test.describe("the narrowed shell", () => {
     await studio.page.keyboard.press("Escape");
   });
 
-  test.fixme("the toolbar hosts the perspective switch [ADR-0011 §The two perspectives]", async ({
+  test("the toolbar hosts the perspective switch [ADR-0011 §The two perspectives]", async ({
     studio,
   }) => {
     // "The decision is to make them two switchable perspectives rather than to
-    // pick one, with the switch in the toolbar." No toolbar widget exists yet,
-    // and `hideTopPanel` is not overridden -- the top panel is currently the
-    // menu bar's, not ours.
+    // pick one, with the switch in the toolbar." The top panel is already the
+    // menu's in the browser target -- nothing hid it -- so the widget sits
+    // beside File / Edit / Gearbox rather than replacing them.
     await expect(studio.page.locator(".gbx-toolbar")).toBeVisible();
+    await expect(studio.page.locator(".gbx-perspective-catalogue")).toBeVisible();
+    await expect(studio.page.locator(".gbx-perspective-product")).toBeVisible();
   });
 
-  test.fixme("a product perspective exists beside the catalogue [ADR-0011 §The two perspectives]", async ({
+  test("a product perspective exists beside the catalogue [ADR-0011 §The two perspectives]", async ({
     studio,
   }) => {
     await expect(studio.page.locator(".gbx-perspective-product")).toBeVisible();
+    await switchPerspective(studio.page, "gearbox.product");
+    await expect(studio.page.locator(".gbx-product")).toBeVisible();
+    await expect(studio.page.locator(".gbx-toolbar")).toHaveAttribute(
+      "data-active-perspective",
+      "gearbox.product",
+    );
+    // `applyViewPlacements` only adds. Explorer is kept on purpose and must
+    // survive the switch, not be a casualty of `detachStrayWidgets`.
+    const left = await studio.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#theia-left-content-panel .lm-TabBar li")).map((e) =>
+        (e.textContent ?? "").trim(),
+      ),
+    );
+    expect(left).toContain("Explorer");
   });
 });
 

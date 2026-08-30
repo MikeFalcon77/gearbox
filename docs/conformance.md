@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **98** — 89 built, 6 not built, 0 broken, 3 not observed.
+Claims: **98** — 91 built, 4 not built, 0 broken, 3 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -50,8 +50,8 @@ Rust, and the ADRs' own Confirmation sections say which.
 | a terminal opens | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
 | the Source Control view is present | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
 | the Gearbox menu offers the domain's commands | `ADR-0011 §Scope: what the menu bar contains` | ✅ built |  |
-| the toolbar hosts the perspective switch | `ADR-0011 §The two perspectives` | 🚧 not built |  |
-| a product perspective exists beside the catalogue | `ADR-0011 §The two perspectives` | 🚧 not built |  |
+| the toolbar hosts the perspective switch | `ADR-0011 §The two perspectives` | ✅ built |  |
+| a product perspective exists beside the catalogue | `ADR-0011 §The two perspectives` | ✅ built |  |
 | a clicked link opens the file | `ADR-0011 §Confirmation: a clicked link must open a tab` | ✅ built |  |
 | a gear in the Product view opens its description | `ADR-0011 §Confirmation: a clicked link must open a tab` | ✅ built |  |
 | the Product view opens its own description | `ADR-0011 §Confirmation: a clicked link must open a tab` | ✅ built |  |

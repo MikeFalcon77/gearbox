@@ -1,6 +1,7 @@
 // Frontend wiring: the views, two stores, one proxied service.
 
 import { FrontendApplicationContribution, bindViewContribution } from "@theia/core/lib/browser";
+import { PerspectiveContribution } from "@theia/core/lib/browser/perspective-service";
 import { WebSocketConnectionProvider } from "@theia/core/lib/browser/messaging";
 import { MenuContribution } from "@theia/core/lib/common/menu";
 import { ContainerModule } from "@theia/core/shared/inversify";
@@ -42,6 +43,9 @@ import { LockWidget } from "./lock/lock-widget";
 import { ProductWidget } from "./product/product-widget";
 import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
 import { FabricThemeContribution } from "./theme/fabric-theme-contribution";
+import { GearboxPerspectives } from "./shell/gearbox-perspectives";
+import { ToolbarContribution } from "./shell/toolbar-contribution";
+import { ToolbarWidget } from "./shell/toolbar-widget";
 
 import "../../src/browser/style/index.css";
 import "../../src/browser/theme/fabric-fonts.css";
@@ -119,6 +123,21 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // none of them look like "no workspace".
   bind(DomainWorkspace).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(DomainWorkspace);
+
+  // Why: ADR-0011 decided on two switchable perspectives and left the carrier
+  // open. Theia 1.75 already binds `PerspectiveContribution` on
+  // `PerspectiveService`; this is that contribution, not a second mechanism.
+  bind(GearboxPerspectives).toSelf().inSingletonScope();
+  bind(PerspectiveContribution).toService(GearboxPerspectives);
+  bind(FrontendApplicationContribution).toService(GearboxPerspectives);
+
+  // Why: the switch and the two domain actions belong on the shell, not on a
+  // view. `@theia/toolbar` is a user-configurable bar with its own JSON, which
+  // is the opposite of the narrowing ADR-0011 is for. A widget in `top` is
+  // what `BrowserMenuBarContribution` already does for the menu.
+  bind(ToolbarWidget).toSelf().inSingletonScope();
+  bind(ToolbarContribution).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(ToolbarContribution);
 
   bind(GearboxService)
     .toDynamicValue(({ container }) => {

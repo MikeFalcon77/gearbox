@@ -880,15 +880,22 @@ wholesale and cannot strip a single menu item.
 Two things come first, before any individual view. A `Contribution` base class implementing the five
 contribution interfaces with the common services pre-injected, plus a one-line `configure` binder, so
 a feature costs a file rather than six lines of shared boilerplate. And a toolbar: a plain widget in
-the shell's `top` area, populated from `TabBarToolbarRegistry` with `isVisible` scoping each item to
-its widget, which requires overriding the method that hides the top panel.
+the shell's `top` area, added the same way the menu is (`shell.addWidget(..., { area: "top" })`).
+The browser target does not hide that panel — `setTopPanelVisibility` only collapses it when
+`window.menuBarVisibility` is `compact` or `hidden`, and we have a menu — so there is nothing to
+override. Actions are scoped to the active perspective, not to a widget: the toolbar is a shell
+panel and has no "own widget" for `TabBarToolbarRegistry.isVisible` to key on.
 
 **Kept visible on purpose**, diverging from Arduino IDE, which hides more: the editor, Explorer,
 Terminal and Git. The workflow ends in generated crates a person will want to build, inspect and
 diff, and `.gearbox/<product>/` is a directory like any other.
 
-**Two perspectives**, Catalogue and Product, switched from the toolbar. Arduino has one object of
-work and offers no guidance; here neither the gear registry nor the product subordinates the other.
+**Two perspectives**, Catalogue and Product, switched from the toolbar and carried by Theia 1.75's
+`PerspectiveService` (`PerspectiveContribution`, not a homemade `createLayout`). Catalogue places
+the catalogue left and gear-detail bottom; Product places the product in main and Explain bottom.
+Lock, Generate and Graph are not in the maps: belonging is the saved layout, not a forced open on
+every switch. Arduino has one object of work and offers no guidance; here neither the gear registry
+nor the product subordinates the other.
 
 **`.gdl` language** is contributed **natively** — `LanguageGrammarDefinitionContribution` plus
 `TextmateRegistry` from `@theia/monaco`, in `src/browser/gdl/` — not as a bundled VS Code extension.
@@ -932,7 +939,12 @@ resolution diagnostics as Problems markers, which is what finally uses the long-
 `@theia/markers`; nine RPC methods -- `product/load`, `resolve`, `validate`, `product/lock`,
 `product/addGear`, `product/removeGear`, `generate/plan`, `generate/apply` and `generate/file`; and
 the description edit the add/remove pair carry, which reverses a prohibition this plan used to
-state (§9.2).
+state (§9.2); and the two perspectives plus the toolbar, carried by Theia 1.75's
+`PerspectiveService` rather than by `createLayout` or a homemade switch. Catalogue places the
+catalogue and gear-detail; Product places the product and Explain. Lock, Generate and Graph stay
+off the maps so a switch does not open panels nobody asked for. `primaryViews` is first-activation
+only; each descriptor's `onActivate` raises the primary widget after a snapshot restore so an
+editor left in main does not hide Product.
 
 **Two write gates, and they are not the same.** `writable_path` is for description edits: the path
 must exist, must be `.gdl`, and must sit inside the declared workspace or a source root -- "this
@@ -955,7 +967,9 @@ named for the claim and carrying its source; `test.fixme` marks a documented cla
 implemented. The run writes `docs/conformance.md`, which is the authoritative version of this
 section. A hand-maintained count in prose is what drifted here in five places, so it is not
 maintained by hand any more. What the table cannot say: there is no Electron shell; M6, M7 and M9
-are not started; the toolbar and the two perspectives ADR-0011 asked for are still `test.fixme`.
+are not started. The toolbar and the two perspectives ADR-0011 asked for are built: Theia 1.75's
+`PerspectiveService` carries them, the switch sits in `.gbx-toolbar` beside the menu, and the
+browser target never needed a `hideTopPanel` override.
 
 The staged-loading tests are deliberately a *timeline* rather than a final state: a snapshot taken
 after loading would pass even if the tree had appeared all at once, which is exactly the claim
@@ -1110,6 +1124,55 @@ control in every state, and an automatic refresh after the Generate view applies
 true until this landed and is now corrected in place.
 
 
+#### Re-reading the catalogue, and what is not watched
+
+**`Reload Catalogue` re-reads the sources, and it does so more strongly than "drop a cache":**
+`CatalogueStore.load()` calls `initialize()`, and the backend's `initialize()` disposes the engine and
+spawns a fresh process. A new process has no cache at all, so a corpus edited outside Studio is
+certainly picked up. The cost is a process restart per reload, which is the existing contract -- the
+reconnect path depends on the same call.
+
+**Nothing detects an external change, and that is stated rather than implied.** The engine caches
+`state.catalogue` and drops it only on `initialize`; there is no filesystem watch on the source roots.
+So a running Studio holds the catalogue it scanned. This was observed the hard way: a `gear.gdl` in
+`gears-rust` acquired two typographic quotes before its `#`, the engine correctly refused it with
+`GBX0101`, the catalogue fell to 13 gears, and four claims that name `api-gateway` failed -- while the
+file on disk had already been repaired. The repair was invisible until the catalogue was reloaded.
+
+An automatic staleness indicator is therefore **out of scope**: it needs a watcher, a digest or a known
+write event, and showing one without a detector would claim that Studio notices external edits when it
+does not. When a *Studio* operation is the writer -- scaffolding, generation -- the indicator becomes
+possible and honest, and that is where it belongs.
+
+#### No test may leave a product description changed
+
+Two claims edit `products/payments-demo/product.gdl` on purpose and put it back. Twice, something else
+also wrote to it mid-run -- a stray `use_gear("grpc-hub")` once and a stray `use_gear("types-registry")`
+another time -- and the consequence was failures in unrelated files, because every claim about the
+resolution is a claim about that description. Neither failure named the cause.
+
+**The cause has not been found.** It did not reproduce across three full runs with a stack trace armed
+on `ProductEditService`, the only code path that writes, and the mechanism that seemed most likely was
+checked and ruled out: the catalogue's in-product toggle is the first focusable child of each row, so
+`Enter` on a focused toggle would open a write dialog -- but no test presses `Tab`, the only `Enter`
+presses land on a row or in the command palette, and a modal dialog would have prevented the palette
+from opening at all.
+
+So the guard does the next best thing instead of pretending the problem is solved. `global-setup`
+refuses to start a run against a modified description; a hook in the fixture checks after **every**
+test and **fails the test that did it**, printing the diff that names the gear, then restores the tree
+so the rest of the run is still worth reading. Silently restoring -- which the first version did --
+would have hidden it a third time.
+
+Two hazards were closed while looking. The dialog clicks in `adr-0010-ownership-tiers.spec.ts` were
+unscoped `.theia-button.main`, which is every Theia dialog's default button: a click would have
+accepted whichever dialog happened to be open, and *this* dialog writes to a description. They are now
+scoped by the preview pane that makes the dialog theirs. And moving the mutating tests onto a copy of
+the workspace, which would remove the hazard class entirely, is blocked until a product can be opened
+from outside `products/*/` -- the picker globs that directory, and a second product there changes the
+"open it if it is the only one" behaviour. That belongs with the product session.
+
+
 #### The lock records what was read, not who asked
 
 `ResolvedSource.digest` was `path:<declared location>` -- the caller's own spelling of the source
@@ -1246,7 +1309,7 @@ workspace-member entries. Nothing else in that repo changes.
 | **M6** | Host-workers | new gear lands and passes its own test *by hand first*; then generated worker crate; host spawns worker; remote REST binding resolves via directory | M7 |
 | **M7** | Docker + Helm + `values.schema.json` | acceptance §12 step 4 in full | M6 |
 | **M8a** — **done** | JSON-RPC + TS types | `node ide/scripts/rpc-smoke.mjs` drives initialize → catalogue over real framing, 15/15; `cargo test -p gearbox-rpc`; stdout carries nothing but JSON-RPC | from M1 |
-| **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Gear detail, Graph, Product, Explain, Lock and Generate are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Toolbar, perspectives and Electron are still open | after M4 + M8a |
+| **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Gear detail, Graph, Product, Explain, Lock, Generate, the toolbar and the two perspectives are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Electron is still open | after M4 + M8a |
 | **M9** | **DESIGN + ADRs** (§14) — written *after* the prototype runs | reviewed against `docs/checklists/{DESIGN,ADR}.md`; every claim cites either a `gearbox-builder` symbol or a `gears-rust` `file:line`; every §13 gap has a home | — |
 
 **Three things M5 left behind, recorded here because nothing else covers them.**

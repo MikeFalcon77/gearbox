@@ -1,6 +1,13 @@
 // Where the two views live in the shell, and the commands that open them.
 
-import { AbstractViewContribution, FrontendApplicationContribution } from "@theia/core/lib/browser";
+import {
+  AbstractViewContribution,
+  FrontendApplicationContribution,
+  OpenViewArguments,
+  codicon,
+} from "@theia/core/lib/browser";
+import { PerspectiveService } from "@theia/core/lib/browser/perspective-service";
+import { PRODUCT_PERSPECTIVE } from "./shell/gearbox-perspectives";
 import {
   ConnectionStatus,
   ConnectionStatusService,
@@ -22,11 +29,15 @@ import { ProductWidget } from "./product/product-widget";
 export const RELOAD_CATALOGUE: Command = {
   id: "gearbox.catalogue.reload",
   label: "Gearbox: Reload Catalogue",
+  shortTitle: "Reload Catalogue",
+  iconClass: codicon("refresh"),
 };
 
 export const RESOLVE_PRODUCT: Command = {
   id: "gearbox.product.resolve",
   label: "Gearbox: Resolve Product",
+  shortTitle: "Resolve",
+  iconClass: codicon("sync"),
 };
 
 @injectable()
@@ -205,19 +216,34 @@ export class DetailViewContribution
 @injectable()
 export class ProductViewContribution extends AbstractViewContribution<ProductWidget> {
   @inject(ProductStore) protected readonly store!: ProductStore;
+  @inject(PerspectiveService) protected readonly perspectives!: PerspectiveService;
 
   constructor() {
     super({
       widgetId: ProductWidget.ID,
       widgetName: ProductWidget.LABEL,
       // The main area: a product is an object of work in its own right, not a
-      // detail of the catalogue. ADR 0011 puts it in a second perspective, and
-      // until the perspective switch exists this is the honest placement -- it
-      // opens on request rather than on startup, so it does not compete with the
-      // catalogue for the first thing a person sees.
+      // detail of the catalogue. The Product perspective opens it; the toggle
+      // still opens it on request from Catalogue, so a person is not forced
+      // through the switch to look at one description.
       defaultWidgetOptions: { area: "main" },
       toggleCommandId: "gearbox.product.toggle",
     });
+  }
+
+  /**
+   * Opening Product from Catalogue is asking for the other object of work.
+   * Theia 1.75's `WidgetAreaResolver` only places widgets that the active
+   * perspective maps, so a toggle while Catalogue is active leaves the
+   * panel attached and hidden. Switching first is the honest reading of
+   * "two perspectives" and is what makes `Gearbox: Product` work from either
+   * side.
+   */
+  override async openView(args?: Partial<OpenViewArguments>): Promise<ProductWidget> {
+    if (this.perspectives.getActivePerspectiveId() !== PRODUCT_PERSPECTIVE) {
+      await this.perspectives.switchPerspective(PRODUCT_PERSPECTIVE);
+    }
+    return super.openView(args);
   }
 
   override registerCommands(commands: CommandRegistry): void {
