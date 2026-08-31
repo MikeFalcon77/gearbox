@@ -12,6 +12,7 @@ import { join } from "node:path";
 
 import {
   expect,
+  openConflicts,
   openExplain,
   openGenerate,
   openGraph,
@@ -19,6 +20,8 @@ import {
   openProduct,
   resetCatalogueView,
   revealCatalogue,
+  revealDetail,
+  revealLeft,
   revealLock,
   runCommand,
   settled,
@@ -87,7 +90,7 @@ test.describe("where the views live", () => {
     expect(tabs).toContain("Gearbox Catalogue");
   });
 
-  test("the Gear detail is in the bottom area, not the side panel [plan §9: Gear detail, bottom]", async ({
+  test("the Inspector is in the bottom area, not the side panel [plan §9: Inspector, bottom]", async ({
     studio,
   }) => {
     // "In the side panel this content was clipped, which hid exactly the
@@ -97,11 +100,48 @@ test.describe("where the views live", () => {
         document.querySelectorAll("#theia-bottom-content-panel .lm-TabBar-tabLabel"),
       ).map((e) => (e.textContent ?? "").trim()),
     );
-    expect(tabs).toContain("Gearbox Gear");
+    expect(tabs).toContain("Gearbox Inspector");
+    // `.gbx-inspector`, not `.gbx-detail`: the detail is one *section* of the
+    // panel and it renders only once something is selected, so asserting it here
+    // would be asserting a selection this claim is not about.
     const inBottom = await studio.page.evaluate(
-      () => document.querySelector("#theia-bottom-content-panel .gbx-detail") !== null,
+      () => document.querySelector("#theia-bottom-content-panel .gbx-inspector") !== null,
     );
     expect(inBottom).toBe(true);
+  });
+
+  test("one selection answers both questions at once [plan §9: Inspector, one selection]", async ({
+    studio,
+  }) => {
+    // The claim that could not be made before, and the reason the two panels were
+    // merged. `Gearbox Gear` rendered from a catalogue row and `Gearbox Explain`
+    // from a product focus, so choosing a gear in the *product* tree -- the
+    // ordinary thing to do -- filled the second and left the first saying "select
+    // a gear in the catalogue". One `SelectionService` later, both are about the
+    // same gear.
+    await openProduct(studio.page, "dev");
+    await studio.page.locator('[data-asked-for="api-gateway"] a').click();
+    await revealDetail(studio.page);
+
+    // What it is: projected facts, which only the catalogue knows.
+    await expect(
+      studio.page.locator(".gbx-inspector .gbx-detail .gbx-detail-title"),
+    ).toContainText("api-gateway");
+    // Why it is here: a because-sentence, which only the resolution knows.
+    await expect(
+      studio.page.locator('.gbx-inspector .gbx-explain[data-explaining="gear:api-gateway"]'),
+    ).toBeVisible();
+    await expect(studio.page.locator(".gbx-inspector .gbx-step").first()).toBeVisible();
+
+    // And the same selection lights up in the catalogue, because it is the same
+    // selection rather than a copy of one.
+    // By `data-row-key`, which is `source:gdl_path` -- the catalogue keys rows by
+    // path rather than by id, because a pending row has no id yet.
+    await revealLeft(studio.page, "Gearbox Catalogue");
+    await expect(studio.page.locator(".gearbox-catalogue .gbx-row.gbx-selected")).toHaveAttribute(
+      "data-row-key",
+      /api-gateway/,
+    );
   });
 
   test("the co-location Graph opens in the main area [plan §9: Graph, main]", async ({
@@ -164,14 +204,78 @@ test.describe("where the views live", () => {
     await expect(studio.page.locator(".gbx-diagnostics")).toBeVisible();
   });
 
-  test("the Explain view is in the bottom area [plan §9: Explain]", async ({ studio }) => {
+  test("the Conflicts screen lists what the resolution reported [plan §9: Conflicts]", async ({
+    studio,
+  }) => {
+    // eCos's Config Tool makes conflicts a screen rather than a status line, and
+    // the reason is what this asserts: each one carries its code, and the screen
+    // says which profile it is about. The Product view keeps only a summary, so
+    // the two do not print the same list twice.
+    await openProduct(studio.page, "dev");
+    const summary = await studio.page.locator(".gbx-diagnostics-label").innerText();
+    const reported = Number(/^(\d+)/.exec(summary)?.[1] ?? "0");
+    expect(reported, "this product resolves with at least one diagnostic to show").toBeGreaterThan(
+      0,
+    );
+
+    // From the summary, the way a person gets there.
+    await studio.page.locator("[data-show-conflicts]").click();
+    const screen = studio.page.locator(".gbx-conflicts");
+    await expect(screen).toBeVisible();
+
+    // The same diagnostics, not a different set: one array in `ProductStore`, two
+    // renderers, so a disagreement here would mean one of them is inventing.
+    await expect(screen).toHaveAttribute("data-conflicts-count", String(reported));
+    expect(await screen.locator(".gbx-conflict").count()).toBe(reported);
+    await expect(screen.locator("[data-conflicts-profile]")).toHaveAttribute(
+      "data-conflicts-profile",
+      "dev",
+    );
+    // Every row names its code. A diagnostic without one cannot be looked up.
+    const codes = await screen
+      .locator(".gbx-conflict")
+      .evaluateAll((rows) => rows.map((r) => r.getAttribute("data-conflict-code")));
+    expect(codes.every((code) => code !== null && code.length > 0)).toBe(true);
+  });
+
+  test("a conflict points the Inspector at its subject [PRD cpt-gearbox-fr-explain: subject]", async ({
+    studio,
+  }) => {
+    // `Diagnostic.subject` is documented as "the graph node this concerns, so a
+    // client can select it". This is the client doing that -- which is also the
+    // only way to tell whether the field carries a node the graph actually has.
+    // `prod`, not `dev`: the diagnostic with an unambiguous subject is GBX0409,
+    // "the endpoint override for X on Y cannot come from an environment variable",
+    // and it only arises where the consumer and the provider end up in different
+    // processes. In `dev` everything is one process, so nothing is remote and there
+    // is no override to complain about.
+    await openProduct(studio.page, "prod");
+    await openConflicts(studio.page);
+
+    const explain = studio.page.locator("[data-conflict-explain]").first();
+    test.skip(
+      (await explain.count()) === 0,
+      "no diagnostic in this resolution names a gear, process or binding as its subject",
+    );
+
+    const subject = await explain.getAttribute("data-conflict-explain");
+    await explain.click();
+    await revealDetail(studio.page);
+    await expect(studio.page.locator(".gbx-inspector")).toHaveAttribute(
+      "data-inspecting",
+      String(subject),
+    );
+  });
+
+  test("the explanation is in the bottom area [plan §9: Explain]", async ({ studio }) => {
     await openExplain(studio.page);
     const inBottom = await studio.page.evaluate(
       () => document.querySelector("#theia-bottom-content-panel .gbx-explain") !== null,
     );
-    // Beside Gear detail, and for the same reason: it answers about a selection
-    // made elsewhere, so it has to be readable *while* the Product view is on
-    // screen rather than instead of it.
+    // A section of the Inspector rather than a panel of its own now, and in the
+    // bottom area for the reason it always was: it answers about a selection made
+    // elsewhere, so it has to be readable *while* the Product view is on screen
+    // rather than instead of it.
     expect(inBottom).toBe(true);
   });
 

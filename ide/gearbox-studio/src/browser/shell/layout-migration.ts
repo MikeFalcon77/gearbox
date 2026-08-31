@@ -41,6 +41,13 @@ export const CLOSED_ON_MIGRATION: readonly string[] = [
   "debug",
   "test-",
   "testing",
+  // The two panels the Inspector replaced. Their widget factories are gone, so a
+  // restored layout that still names them logs a construction failure and leaves
+  // an empty tab -- which is exactly the shape of thing this migration exists to
+  // remove. Version 2 is what makes the sweep run again for a person who already
+  // ran version 1.
+  "gearbox.detail",
+  "gearbox.explain",
   // **No `terminal-` here, and that was learned the hard way.** Closing the boot
   // terminal broke the capability: `widget.close()` disposes the widget while
   // `WidgetManager` keeps its entry under the same id, so the next
@@ -54,7 +61,7 @@ export const CLOSED_ON_MIGRATION: readonly string[] = [
 const MIGRATION_KEY = "gearbox.layoutMigration";
 
 /** Bump when `CLOSED_ON_MIGRATION` changes, so the sweep runs again -- once. */
-const MIGRATION_VERSION = 1;
+const MIGRATION_VERSION = 2;
 
 @injectable()
 export class LayoutMigration implements FrontendApplicationContribution {

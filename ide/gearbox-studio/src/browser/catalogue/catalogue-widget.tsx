@@ -188,6 +188,7 @@ export class CatalogueWidget extends ReactWidget {
 
   protected renderGroup(category: string, rows: Row[], status: string): React.ReactNode {
     const folded = this.isFolded(category);
+    const selectedKey = this.store.selected;
     return (
       <div className="gbx-group" key={category} data-category={category}>
         <div
@@ -212,7 +213,11 @@ export class CatalogueWidget extends ReactWidget {
         </div>
         {!folded && (
           <div role="listbox" aria-label={category}>
-            {rows.map((row) => this.renderRow(row, status))}
+            {/* `selected` read once for the group rather than once per row: it
+                resolves a gear selection by scanning the rows, so asking per row
+                made the render quadratic in the catalogue's size. Fourteen gears
+                today, sixty-two crates carrying `#[toolkit::gear]` in the corpus. */}
+            {rows.map((row) => this.renderRow(row, status, selectedKey))}
           </div>
         )}
       </div>
@@ -237,9 +242,9 @@ export class CatalogueWidget extends ReactWidget {
     this.update();
   }
 
-  protected renderRow(row: Row, status: string): React.ReactNode {
+  protected renderRow(row: Row, status: string, selectedKey: string | undefined): React.ReactNode {
     const key = rowKey(row);
-    const selected = this.store.selected === key;
+    const selected = selectedKey === key;
     const label =
       row.kind === "pending"
         ? (row.gear.display_name ?? row.gear.gdl_path)

@@ -8,9 +8,11 @@
 // because a perspective can be restored from a saved layout with no domain object
 // behind it, and a menu keyed off that would offer product actions with no product.
 //
-// Home keeps the catalogue visible. Without a product there is exactly one useful
-// thing to do -- look at what could go into one -- and an empty main area at boot
-// would be worse than what it replaced. The Start screen takes that place later.
+// Home is the Start screen in the main area with the catalogue beside it. Without
+// a product there are two useful things: choose one to work on, and look at what a
+// product could be made of. It used to be the catalogue and an *empty* main area,
+// which reads as an application that failed to load rather than as a tool waiting
+// to be told what to work on.
 //
 // Lock, Generate and Graph are deliberately absent from the maps. Belonging is
 // the saved layout, not a forced open: a switch that fires four requests to show
@@ -22,7 +24,7 @@ import {
   PerspectiveContribution,
   PerspectiveService,
 } from "@theia/core/lib/browser/perspective-service";
-import { injectable } from "@theia/core/shared/inversify";
+import { inject, injectable } from "@theia/core/shared/inversify";
 
 import {
   GEAR_PERSPECTIVE,
@@ -31,21 +33,44 @@ import {
 } from "./studio-context-service";
 import { CatalogueWidget } from "../catalogue/catalogue-widget";
 import { ProductWidget } from "../product/product-widget";
+import { StartWidget } from "../start/start-widget";
+import { StartViewContribution } from "../view-contributions";
 
 
 @injectable()
 export class GearboxPerspectives implements PerspectiveContribution {
+  // Reached for one reason: `onActivate` gets a shell, and a shell can activate a
+  // widget but not create one. Coming back to Home after closing a product has to
+  // *open* the Start screen, because `applyViewPlacements` runs on a perspective's
+  // first activation only -- so on the second visit the placement is a no-op and
+  // an `activateWidget` on a widget nobody built does nothing at all, silently.
+  @inject(StartViewContribution) protected readonly start!: StartViewContribution;
 
   registerPerspectives(service: PerspectiveService): void {
     service.registerPerspective({
       id: HOME_PERSPECTIVE,
       label: "Home",
-      viewPlacements: new Map<string, ApplicationShell.Area>([[CatalogueWidget.ID, "left"]]),
-      primaryViews: { left: CatalogueWidget.ID },
-      // `primaryViews` runs only on first activation. A later switch restores
-      // the snapshot, which may leave Explorer as the current left tab.
+      // The Start screen in the main area, the catalogue beside it. Home used to
+      // be the catalogue and an empty main area, which read as an application
+      // that had failed to load something rather than as a tool waiting to be
+      // told what to work on.
+      viewPlacements: new Map<string, ApplicationShell.Area>([
+        [StartWidget.ID, "main"],
+        [CatalogueWidget.ID, "left"],
+      ]),
+      primaryViews: { main: StartWidget.ID, left: CatalogueWidget.ID },
       onActivate: (shell) => {
-        void shell.activateWidget(CatalogueWidget.ID);
+        // Sequenced, not fired together: the catalogue is brought to the front of
+        // the left panel -- a restored snapshot may have left Explorer there --
+        // and *then* the Start screen takes the focus, because its first action is
+        // the one a person came here for. The other order leaves the caret in the
+        // catalogue's filter box.
+        //
+        // Opened, not merely activated -- see the field above. `openView` is
+        // idempotent, so the ordinary case costs one lookup.
+        void shell
+          .activateWidget(CatalogueWidget.ID)
+          .then(() => this.start.openView({ activate: true, reveal: true }));
       },
     });
     service.registerPerspective({

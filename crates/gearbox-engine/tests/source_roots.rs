@@ -1,0 +1,157 @@
+//! Several source roots, and what happens when two of them claim one gear.
+//!
+//! Multiple roots stopped being hypothetical when the Studio began deriving them
+//! from a product's own `sources` list: a product that names two checkouts gets
+//! two roots, and nobody had to decide anything for that to happen. The question
+//! this file pins down is the one that decision created -- if both roots declare
+//! the same `GearId`, which one is in the catalogue, and does anyone say so?
+//!
+//! See ADR `cpt-gearbox-adr-multiple-source-roots`.
+
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
+)]
+
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use gearbox_engine::{SourceRoot, load_catalogue};
+use gearbox_ir::{GearId, SourceId};
+
+/// The same gear id from two different descriptions.
+///
+/// Only `description` differs, so the assertion below can tell which root's copy
+/// ended up in the catalogue without depending on anything derived.
+fn gear_gdl(description: &str) -> String {
+    format!(
+        r#"
+gear(
+    name = "Demo",
+    description = "{description}",
+    category = "platform",
+    visibility = "internal",
+    package = cargo(crate_name = "demo", lib = "demo", path = "."),
+)
+"#
+    )
+}
+
+const GEAR_RS: &str = r#"
+#[toolkit::gear(
+    name = "demo",
+    capabilities = [stateless],
+    lifecycle(entry = "serve")
+)]
+pub struct DemoGear;
+"#;
+
+/// A counter, not a timestamp.
+///
+/// Two calls inside one clock tick produced the same directory name when this was
+/// `SystemTime::now().as_nanos()`, so one test read a neighbour's doctored files.
+/// That bug existed in `validate.rs` for a while and only surfaced when an
+/// unrelated change altered the timing, which is the argument for never naming a
+/// fixture after the clock.
+static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+/// One root holding one gear whose description is `description`.
+fn root(description: &str) -> PathBuf {
+    let nth = NEXT.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!("gbx-source-roots-{}-{nth}", std::process::id()));
+    drop(std::fs::remove_dir_all(&root));
+    let crate_dir = root.join("demo");
+    std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+    std::fs::write(crate_dir.join("gear.gdl"), gear_gdl(description)).unwrap();
+    std::fs::write(crate_dir.join("src/lib.rs"), GEAR_RS).unwrap();
+    root
+}
+
+fn open(id: &str, path: &Path) -> SourceRoot {
+    SourceRoot::open(SourceId::new(id).unwrap(), path).unwrap()
+}
+
+#[test]
+fn two_roots_declaring_one_gear_keep_the_first_and_say_so() {
+    let first = root("from the first root");
+    let second = root("from the second root");
+    let scan = load_catalogue(&[open("alpha", &first), open("beta", &second)]);
+
+    // One entry, not two: the id is the identity, and two entries under one id is
+    // not a state the rest of the engine has a meaning for.
+    let id = GearId::new("demo").unwrap();
+    let kept = scan
+        .catalogue
+        .gear(&id)
+        .expect("the gear is in the catalogue");
+    assert_eq!(
+        kept.description.as_deref(),
+        Some("from the first root"),
+        "the first root declared it, so the first root's copy is the one kept"
+    );
+    assert_eq!(
+        kept.source.as_str(),
+        "alpha",
+        "and it is recorded as coming from the root it was read from"
+    );
+
+    // And the collision is reported rather than resolved silently. A catalogue that
+    // picked a side without saying so was the previous behaviour, and it disagreed
+    // with its own diagnostic, which claimed both were declared and kept neither
+    // in particular.
+    let complaint = scan
+        .catalogue
+        .diagnostics
+        .iter()
+        .find(|d| d.code.as_str() == "GBX0105")
+        .expect("a duplicate gear id is an error");
+    let message = &complaint.message;
+    assert!(
+        message.contains("alpha") && message.contains("beta"),
+        "the message has to name both sources, or it cannot be acted on: {message}"
+    );
+    assert!(
+        message.contains("the first is the one in the catalogue"),
+        "and it has to say which one won: {message}"
+    );
+}
+
+#[test]
+fn two_roots_with_distinct_gears_both_load() {
+    // The ordinary case, asserted so the rule above cannot be implemented as
+    // "ignore every root after the first".
+    let first = root("only in the first");
+    let second = root("only in the second");
+    // Rename the second root's gear so the ids differ.
+    let renamed = second.join("other");
+    std::fs::create_dir_all(renamed.join("src")).unwrap();
+    std::fs::write(
+        renamed.join("gear.gdl"),
+        gear_gdl("only in the second")
+            .replace("crate_name = \"demo\"", "crate_name = \"other\"")
+            .replace("lib = \"demo\"", "lib = \"other\""),
+    )
+    .unwrap();
+    std::fs::write(
+        renamed.join("src/lib.rs"),
+        GEAR_RS
+            .replace("name = \"demo\"", "name = \"other\"")
+            .replace("DemoGear", "OtherGear"),
+    )
+    .unwrap();
+    drop(std::fs::remove_dir_all(second.join("demo")));
+
+    let scan = load_catalogue(&[open("alpha", &first), open("beta", &second)]);
+    assert!(
+        scan.catalogue.gear(&GearId::new("demo").unwrap()).is_some(),
+        "the first root's gear is missing"
+    );
+    assert!(
+        scan.catalogue
+            .gear(&GearId::new("other").unwrap())
+            .is_some(),
+        "the second root's gear is missing; got {:?}",
+        scan.catalogue.gears.keys().collect::<Vec<_>>()
+    );
+}

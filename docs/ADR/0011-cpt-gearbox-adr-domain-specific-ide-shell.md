@@ -327,6 +327,111 @@ Registration does not switch. `PerspectiveServiceImpl.initialize` creates
 `default` to Catalogue once the shell is ready, so the toolbar never shows a
 third unnamed state.
 
+## Amendment 2026-08-31: two working contexts, not two perspectives
+
+**Status: accepted. This reverses the two-perspective decision, withdraws the terminal, and demotes
+the catalogue.** The revisit clause below asked for exactly this, and its condition was met word for
+word: nobody uses the catalogue except while composing a product.
+
+### A context is not a perspective
+
+The original decision made Catalogue and Product two switchable perspectives of equal standing, and
+the implementation grew two buttons beside the menu bar to switch them. Both were wrong, and in a way
+worth naming precisely.
+
+The buttons duplicated two entries in the Gearbox menu while meaning something else: `Catalogue` in
+the menu toggled a view, `Catalogue` in the toolbar rearranged the whole shell. Navigation in a header
+is what a header is not for.
+
+And a perspective cannot carry the meaning that was asked of it. `PerspectiveService` stores and
+restores layouts; it will happily restore one with no domain object behind it, so after a reload its
+`activePerspectiveId` can say `gearbox.product` when no product is open. A `Product` menu keyed off
+that would offer verbs for a subject that is not there.
+
+So the shell now has one source of truth, `StudioContextService`, which **derives** what is being
+worked on from what is actually open, and one direction of flow:
+
+```text
+StudioContextService --> PerspectiveService  (layout)
+                     --> context keys        (menus, actions)
+                     --> header              (name, profile, state)
+```
+
+Not the reverse. A perspective cannot promote itself into a context. The contexts are named after the
+PRD's actors rather than after this application's panels: `home`, `product`
+(`cpt-gearbox-actor-integrator`) and `gear` (`cpt-gearbox-actor-gear-author`), the last declared in
+the type and deliberately not reachable until gear authoring exists.
+
+### The catalogue is a source of components
+
+Demoted, not removed: a panel in Home, where looking at what a product could be made of is the only
+thing there is to do, and a **picker** (`Find Gear…`) in the product context, where the panel had been
+taking the whole left side while the product itself sat in a secondary tab. The picker selects into the
+Inspector; adding a gear remains the panel's own toggle, with its preview and its confirmation.
+
+### Suppression has to be a whitelist
+
+The first implementation removed three top-level menus by id and left the rest. That is a blacklist,
+and a blacklist loses: `Type Hierarchy` in the bottom panel is what it looks like when one does.
+
+The reason it *must* be a whitelist is that half of this ADR's own strategy cannot reach the offenders.
+`typehierarchy`, `callhierarchy`, `notebook`, `timeline`, `bulk-edit`, `console` and `outline-view` all
+arrive through `@theia/plugin-ext`, which is present so the VS Code git extension can run. "Subtract by
+dependency set" cannot touch them; only rebinding and unregistering can.
+
+Three surfaces, because a menu entry is not the only way in: the menu bar, **every other menu**
+(Call Hierarchy lives in the editor's context menu, where a top-level removal does nothing), and the
+**command palette with its keybindings**. The third was claimed in the first implementation and not
+done -- the policy removed menu nodes, and `QuickCommandService` reads
+`CommandRegistry.getAllCommands()`, not menus. A suppressed view was one `Ctrl+Shift+P` away for the
+whole life of that code, and the assertion that only read the View menu could not see it. Commands are
+now unregistered outright, and the sweep runs again on `onCommandsChanged` because plugins register
+late.
+
+`Explorer` and `Source Control` are kept and **demoted** into `View > Advanced Tools`: the work ends in
+generated crates someone will read and diff, so they stay -- one level down, instead of competing with
+the domain's views in a flat list.
+
+### The terminal promise is withdrawn
+
+This ADR's Consequences kept "a live shell in the bottom panel" on purpose. That is no longer claimed,
+and the measurement is why.
+
+The claim that checked it asserted a `zsh` tab was **already there** on a fresh shell. It was, because
+Theia's terminal contribution opens one from `initializeLayout` -- so the claim passed and nothing ever
+exercised *creating* a terminal. Suppressing the boot terminal (a shell nobody asked for, holding a
+slot in the bottom bar, is part of what made this read as an IDE with panels) made the real claim
+testable for the first time, and it failed: `Terminal: Create New Terminal` creates nothing, by command
+and by keybinding, with no error and no notification.
+
+Measured before concluding, twice: on a build with the suppression removed the boot terminal returns
+and creating one *still* does nothing, so this is not a regression from the suppression; and
+`node-pty`'s binary is present while the boot terminal did attach a pty, so the install is not broken
+either. The only terminal that ever worked in this application was the one nobody requested.
+
+So the terminal joins the suppressed families. The package stays -- `@theia/plugin-ext`, `@theia/task`
+and `@theia/debug` all depend on `@theia/terminal`, which is the same reason the whitelist exists --
+and the conformance suite asserts the **absence**: no shell tab at startup, no `Terminal:` command in
+the palette. An absence nobody checks is an absence that comes back on the next upgrade.
+
+Reopening this is a decision about the Electron target, where a terminal has a reason to exist beyond
+tidiness. It is not a decision about the browser shell, where it never worked.
+
+### The editor stays, its status bar does not
+
+`Ln 12, Col 4`, `Spaces: 4`, `UTF-8` and `LF` are the controls of a tool for *fixing* files. This
+editor exists to read what a resolution points at, so all four are suppressed by rebinding
+`EditorContribution` and `MonacoStatusBarContribution` -- both are `WidgetStatusBarContribution`s that
+re-set their elements on every cursor move, so anything that removed the elements afterwards would be
+racing what puts them back. The language indicator stays: whether `.gdl` was recognised as GDL rather
+than falling back to plaintext is a real failure mode, and a TextMate grammar that fails to load is a
+`logger.warn` and nothing else.
+
+### What this does not change
+
+The editor stack, the Explorer, git, the `.gdl` grammar decision, the packaging decision, and every
+`rebind`-carries-a-comment rule stand as written.
+
 ### When to revisit
 
 * If Studio ever needs to host third-party extensions, `@theia/plugin-ext` arrives and the `.gdl`

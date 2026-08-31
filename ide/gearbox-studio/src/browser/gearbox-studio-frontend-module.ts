@@ -25,30 +25,41 @@ import { ShellPolicy } from "./theia/core/shell-policy";
 import { ReadOnlyLockEditorProvider } from "./theia/monaco/read-only-lock-editor-provider";
 import { DomainWorkspace } from "./theia/workspace/domain-workspace";
 import { StudioWorkspaceTrustService } from "./theia/workspace/studio-workspace-trust-service";
+import { EditorContribution } from "@theia/editor/lib/browser/editor-contribution";
+import { MonacoStatusBarContribution } from "@theia/monaco/lib/browser/monaco-status-bar-contribution";
+
+import {
+  QuietEditorContribution,
+  QuietMonacoStatusBarContribution,
+} from "./theia/editor/quiet-status-bar";
 import { HiddenTerminal } from "./theia/terminal/hidden-terminal";
 import { HiddenTestView } from "./theia/test/hidden-test-view";
 import { RevealService } from "./reveal-service";
+import { CataloguePicker } from "./catalogue/catalogue-picker";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
+import { ConflictsWidget } from "./conflicts/conflicts-widget";
 import {
   CatalogueViewContribution,
-  DetailViewContribution,
-  ExplainViewContribution,
+  ConflictsViewContribution,
   GenerateViewContribution,
   GraphViewContribution,
+  InspectorViewContribution,
   LockViewContribution,
   ProductViewContribution,
+  StartViewContribution,
 } from "./view-contributions";
-import { GearDetailWidget } from "./detail/gear-detail-widget";
 import { GraphWidget } from "./graph/graph-widget";
-import { ExplainWidget } from "./explain/explain-widget";
+import { InspectorWidget } from "./inspector/inspector-widget";
 import { GenerateWidget } from "./generate/generate-widget";
 import { LockWidget } from "./lock/lock-widget";
 import { ProductWidget } from "./product/product-widget";
+import { StartWidget } from "./start/start-widget";
 import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
 import { FabricThemeContribution } from "./theme/fabric-theme-contribution";
 import { GearboxPerspectives } from "./shell/gearbox-perspectives";
 import { LayoutMigration } from "./shell/layout-migration";
 import { ProductSessionService } from "./shell/product-session-service";
+import { SelectionService } from "./shell/selection-service";
 import { SessionCommands } from "./shell/session-commands";
 import { StudioContextService } from "./shell/studio-context-service";
 import { ToolbarContribution } from "./shell/toolbar-contribution";
@@ -104,6 +115,20 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // dismiss. The subclass drops Theia's own bookkeeping file from the set and
   // leaves the folder rules alone.
   rebind(WorkspaceTrustService).to(StudioWorkspaceTrustService).inSingletonScope();
+
+  // The editor's status bar, cut to the language indicator. `Ln`, `Col`, `UTF-8`,
+  // `LF` and `Spaces` are the controls of a tool for fixing files; this editor
+  // exists to read what a resolution points at. Both classes are bound
+  // `toSelf().inSingletonScope()` upstream and reached through `toService`, so
+  // rebinding the class is enough to reach every interface they are bound as.
+  rebind(EditorContribution).to(QuietEditorContribution).inSingletonScope();
+  rebind(MonacoStatusBarContribution).to(QuietMonacoStatusBarContribution).inSingletonScope();
+
+  // Bound before both stores because both inject it. One selection, not one per
+  // store: a gear chosen in the catalogue and the same gear chosen in the product
+  // tree used to be two selections, which is why the panel answering "why" was
+  // empty in the ordinary case.
+  bind(SelectionService).toSelf().inSingletonScope();
 
   bind(CatalogueStore).toSelf().inSingletonScope();
   // Its own store, not a slice of the catalogue's: the two objects of work do not
@@ -211,11 +236,20 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bind(ShellPolicy).toSelf().inSingletonScope();
   bind(MenuContribution).toService(ShellPolicy);
 
+  // The catalogue, called rather than browsed: `Find Gear…` selects into the
+  // Inspector, which is how the catalogue serves the product context now that its
+  // panel is collapsed there. Read-only -- adding a gear is still the panel's
+  // toggle, with its preview and confirmation.
+  bind(CataloguePicker).toSelf().inSingletonScope();
+  bind(CommandContribution).toService(CataloguePicker);
+  bind(MenuContribution).toService(CataloguePicker);
+
   bindWidget(bind, CatalogueWidget);
-  bindWidget(bind, GearDetailWidget);
   bindWidget(bind, GraphWidget);
   bindWidget(bind, ProductWidget);
-  bindWidget(bind, ExplainWidget);
+  bindWidget(bind, InspectorWidget);
+  bindWidget(bind, ConflictsWidget);
+  bindWidget(bind, StartWidget);
   bindWidget(bind, LockWidget);
   bindWidget(bind, GenerateWidget);
 
@@ -237,15 +271,16 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bindViewContribution(bind, CatalogueViewContribution);
   bind(FrontendApplicationContribution).toService(CatalogueViewContribution);
 
-  bindViewContribution(bind, DetailViewContribution);
-  bind(FrontendApplicationContribution).toService(DetailViewContribution);
+  bindViewContribution(bind, InspectorViewContribution);
+  bind(FrontendApplicationContribution).toService(InspectorViewContribution);
 
   bindViewContribution(bind, GraphViewContribution);
 
   // No `FrontendApplicationContribution` here: the Product view opens on request,
   // so it has nothing of that interface to implement.
   bindViewContribution(bind, ProductViewContribution);
-  bindViewContribution(bind, ExplainViewContribution);
+  bindViewContribution(bind, StartViewContribution);
+  bindViewContribution(bind, ConflictsViewContribution);
   bindViewContribution(bind, LockViewContribution);
   bindViewContribution(bind, GenerateViewContribution);
 });

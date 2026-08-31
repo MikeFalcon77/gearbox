@@ -272,19 +272,35 @@ pub fn load_catalogue_staged(
             let Some(merged) = merged else { continue };
 
             let id = merged.gear.id.clone();
-            if let Some(previous) = catalogue.gears.insert(id.clone(), merged.gear) {
+            // **The first declaration wins, and the second is an error.**
+            //
+            // This used to `insert` unconditionally, so the diagnostic below said
+            // "declared twice" while the catalogue quietly kept the *second* one.
+            // Deterministic -- discovery is sorted -- but arbitrary, and it meant
+            // the tree disagreed with its own complaint: the gear a reader was
+            // told about was not the gear that resolution would use.
+            //
+            // Keeping the first is the choice that can be stated in one sentence
+            // ("the earliest declared root wins"), and with roots now derived from
+            // a product's own `sources` list, "earliest" is an order the person
+            // wrote down. See ADR `cpt-gearbox-adr-multiple-source-roots`.
+            if let Some(previous) = catalogue.gears.get(&id) {
                 diagnostics.push(
                     Diagnostic::error(
                         DiagnosticCode::GdlCardinality,
                         format!(
-                            "gear `{id}` is declared twice: `{}` and `{}`",
-                            previous.gdl_path, identity.gdl_path
+                            "gear `{id}` is declared twice: `{}` in source `{}` and `{}` in \
+                             source `{}`; the first is the one in the catalogue",
+                            previous.gdl_path, previous.source, identity.gdl_path, identity.source
                         ),
                         "one of the descriptions points at the wrong crate, or names the wrong \
-                         attribute with `attr = \"...\"`",
+                         attribute with `attr = \"...\"`; if both are wanted, they need distinct \
+                         gear ids",
                     )
                     .at(Location::file(identity.uri.clone())),
                 );
+            } else {
+                catalogue.gears.insert(id.clone(), merged.gear);
             }
             merge_contracts(&mut catalogue.contracts, merged.contracts, &id);
 

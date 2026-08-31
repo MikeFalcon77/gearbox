@@ -79,15 +79,69 @@
 }
 .gbx-stalled .gbx-waiting { color: var(--theia-editorError-foreground); opacity: 0.85; }
 
-.gbx-diagnostics { margin-top: 12px; }
+/* The Product view's summary: one row, count on the left and the way to the
+   detail on the right. It stopped being a list when the Conflicts screen took
+   that job, so the bottom border that separated list items would now be a line
+   under a single row. */
+.gbx-diagnostics {
+  margin-top: 12px; display: flex; gap: 12px; align-items: center;
+  padding: 4px 6px; border-radius: 3px;
+  background: var(--theia-editorWidget-background);
+}
+.gbx-diagnostics-error { border-left: 3px solid var(--theia-editorError-foreground); }
+.gbx-diagnostics-warning { border-left: 3px solid var(--theia-editorWarning-foreground); }
 .gbx-diagnostics-label {
   text-transform: uppercase;
   font-size: 0.85em;
   letter-spacing: 0.05em;
   opacity: 0.65;
   padding: 2px 0;
+  flex: 1 1 auto;
+}
+
+/* --- Conflicts: the screen the summary leads to --------------------------- */
+
+.gbx-conflicts { padding: 6px 10px; overflow: auto; height: 100%; }
+.gbx-conflicts-head {
+  display: flex; gap: 10px; align-items: center;
+  padding-bottom: 6px; margin-bottom: 6px;
   border-bottom: 1px solid var(--theia-editorGroup-border);
 }
+.gbx-conflicts-summary { font-weight: 600; flex: 1 1 auto; }
+.gbx-conflicts-list { list-style: none; margin: 0; padding: 0; }
+.gbx-conflict {
+  padding: 6px 4px 8px;
+  border-bottom: 1px solid var(--theia-editorGroup-border);
+}
+/* The severity carries on the left edge rather than in the text colour: the
+   message has to stay readable, and a coloured sentence is harder to read than a
+   black one next to a coloured bar. */
+.gbx-conflict-error { border-left: 3px solid var(--theia-editorError-foreground); padding-left: 8px; }
+.gbx-conflict-warning { border-left: 3px solid var(--theia-editorWarning-foreground); padding-left: 8px; }
+.gbx-conflict-info,
+.gbx-conflict-hint { border-left: 3px solid var(--theia-editorGroup-border); padding-left: 8px; }
+.gbx-conflict-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.gbx-conflict-message { flex: 1 1 240px; word-break: break-word; }
+.gbx-conflict-error .gbx-conflict-icon { color: var(--theia-editorError-foreground); }
+.gbx-conflict-warning .gbx-conflict-icon { color: var(--theia-editorWarning-foreground); }
+/* The help sentence is the actionable half of a diagnostic
+   (`cpt-gearbox-nfr-actionable-diagnostics`), so it is indented under the message
+   rather than dimmed into a footnote. */
+.gbx-conflict-help { margin: 3px 0 0 22px; opacity: 0.85; line-height: 1.35; }
+.gbx-conflict-links {
+  display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: baseline;
+  margin: 4px 0 0 22px; font-size: 0.9em;
+}
+.gbx-conflict-where { font-family: var(--theia-code-font-family); }
+.gbx-conflict-related { opacity: 0.8; }
+.gbx-conflict-evidence {
+  font-family: var(--theia-code-font-family); opacity: 0.6;
+}
+.gbx-conflict-explain {
+  background: none; border: none; padding: 0;
+  color: var(--theia-textLink-foreground); cursor: pointer; font: inherit;
+}
+.gbx-conflict-explain:hover { text-decoration: underline; }
 .gbx-diagnostic {
   display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline;
   padding: 3px 4px; border-bottom: 1px solid var(--theia-editorGroup-border);
@@ -282,9 +336,36 @@
   color: var(--theia-editorWarning-foreground);
 }
 
+/* --- Inspector: what it is, beside why it is here ------------------------- */
+
+/* Two columns rather than two stacked sections, and the bottom panel's shape is
+   the reason: it is wide and short, so stacking would put "why" below the fold
+   for anything but a two-line gear -- and reading both at once is the whole
+   point of merging the two panels that used to answer separately. Wraps to one
+   column when the panel is narrow, which is what `flex-wrap` with a min-width
+   does without a media query. */
+.gbx-inspector {
+  display: flex; flex-wrap: wrap; gap: 4px 24px;
+  align-items: flex-start;
+  height: 100%; overflow: auto; padding: 6px 10px;
+}
+.gbx-inspector > .gbx-detail,
+.gbx-inspector > .gbx-explain {
+  flex: 1 1 380px; min-width: 0;
+}
+/* No rule between the columns, and that is a decision. A border would have to
+   disappear when the panel wraps to one column -- where a vertical line at the
+   left of a full-width block reads as a quote, not a divider -- and a container
+   query cannot ask about the element that declares the containment, so it would
+   need a wrapper element to hold the query. The two sections already begin with
+   their own headings, which is the separation this needs. */
+
 /* --- Explain ------------------------------------------------------------- */
 
-.gbx-explain { padding: 6px 10px; overflow: auto; height: 100%; }
+/* No `height: 100%` here any more: this is a section of the Inspector rather
+   than a panel of its own, and filling the height pushed the other section off
+   the bottom of the panel. */
+.gbx-explain { padding: 6px 0; overflow: visible; }
 
 /* An <ol> because the steps are ordered -- nearest reason first -- and the
    numbering is information, not decoration. Markers are outside so the indent
@@ -520,4 +601,47 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+/* --- Start: the Home screen ---------------------------------------------- */
+
+/* Centred with a maximum width rather than filling the main area. A column of
+   text and two short lists stretched across 1600px is unreadable, and the empty
+   space to either side is what says "choose something" rather than "something
+   failed to load". */
+.gbx-start {
+  max-width: 720px; margin: 0 auto; padding: 48px 24px;
+  height: 100%; overflow: auto;
+}
+.gbx-start-head { margin-bottom: 28px; }
+.gbx-start-title { font-size: 1.9em; font-weight: 300; letter-spacing: -0.01em; }
+.gbx-start-subtitle { margin-top: 6px; opacity: 0.7; line-height: 1.4; }
+.gbx-start-primary {
+  font: inherit; cursor: pointer;
+  padding: 7px 16px; border-radius: 3px; border: none;
+  color: var(--theia-button-foreground);
+  background: var(--theia-button-background);
+}
+.gbx-start-primary:hover { background: var(--theia-button-hoverBackground); }
+.gbx-start-section { margin-top: 28px; }
+.gbx-start-label {
+  text-transform: uppercase; font-size: 0.8em; letter-spacing: 0.06em; opacity: 0.6;
+  padding-bottom: 4px; border-bottom: 1px solid var(--theia-editorGroup-border);
+}
+.gbx-start-items { list-style: none; margin: 0; padding: 0; }
+/* A button, not a link with an href: opening a product is not navigation, and
+   there is no URL for it that would survive a reload. */
+.gbx-start-item {
+  display: flex; gap: 12px; align-items: baseline; width: 100%;
+  font: inherit; text-align: left; cursor: pointer;
+  background: none; border: none; padding: 6px 4px;
+  color: var(--theia-foreground);
+  border-bottom: 1px solid var(--theia-editorGroup-border);
+}
+.gbx-start-item:hover { background: var(--theia-list-hoverBackground); }
+.gbx-start-item-name { flex: 0 0 auto; }
+.gbx-start-item-path {
+  flex: 1 1 auto; opacity: 0.55; font-size: 0.85em;
+  font-family: var(--theia-code-font-family);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl;
 }

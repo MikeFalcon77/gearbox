@@ -8,7 +8,7 @@
 // `@theia/markers` is a declared dependency of browser-app and gives the Problems
 // view below -- so the destination exists and nothing writes to it.
 
-import { expect, openProduct, problems, test } from "../fixtures/studio";
+import { expect, openConflicts, openProduct, problems, test } from "../fixtures/studio";
 
 test.describe("diagnostics reach a person", () => {
   test("the Problems view is present to receive markers [PRD cpt-gearbox-fr-editor-diagnostics]", async ({
@@ -43,8 +43,15 @@ test.describe("diagnostics reach a person", () => {
   test("resolution diagnostics appear as problem markers [PRD cpt-gearbox-fr-editor-diagnostics]", async ({
     studio,
   }) => {
+    // Counted on the **Conflicts screen**, which is where the resolution's
+    // diagnostics are listed now. The Product view used to print them under its
+    // tree and keeps only a summary: two full lists of the same array was
+    // duplication, and the one squeezed under a tree was the one nobody could act
+    // on. Both renderers read `ProductStore.diagnostics`, so this still compares
+    // the markers against what a person is shown.
     await openProduct(studio.page, "dev");
-    const shown = await studio.page.locator(".gearbox-product .gbx-diagnostic").count();
+    await openConflicts(studio.page);
+    const shown = await studio.page.locator(".gbx-conflicts .gbx-conflict").count();
     expect(shown, "the dev profile produces no diagnostic to surface").toBeGreaterThan(0);
 
     const { files, markers } = await problems(studio.page);
@@ -63,12 +70,14 @@ test.describe("diagnostics reach a person", () => {
     // per-file `setMarkers` replaces one file's markers and says nothing about a
     // file the new resolution no longer mentions.
     await openProduct(studio.page, "prod");
-    const prodShown = await studio.page.locator(".gearbox-product .gbx-diagnostic").count();
+    await openConflicts(studio.page);
+    const prodShown = await studio.page.locator(".gbx-conflicts .gbx-conflict").count();
     const prod = await problems(studio.page);
     expect(prod.markers.length).toBe(prodShown);
 
     await openProduct(studio.page, "dev");
-    const devShown = await studio.page.locator(".gearbox-product .gbx-diagnostic").count();
+    await openConflicts(studio.page);
+    const devShown = await studio.page.locator(".gbx-conflicts .gbx-conflict").count();
     const dev = await problems(studio.page);
 
     expect(devShown).not.toBe(prodShown);

@@ -836,16 +836,21 @@ per frontend connection, one engine per workspace root) and `BackendApplicationC
 | Widget | Shows |
 |---|---|
 | Catalogue | tree by `category` → gear, **with foldable categories and a filter over name, id, category and path**. `gears-rust` carries 62 crates with `#[toolkit::gear]` against the 14 described today, so the list quadruples as descriptions land; a flat list stops being readable well before that. A filter overrides a fold — a match hidden inside a collapsed category is the one thing a filter must never do, because the reader concludes the gear is absent. Badges for `runtime_caps`, chips for `colocated_deps`, provides/consumes counts. Click reveals the `gear.gdl` at its declaring range. A toggle per projected row adds the gear to the open product or takes it out, writing `products/…/product.gdl` after a preview and a confirmation. **This replaces «produces a *proposed* `use_gear(...)` diff, never an auto-edit», which this plan required until M5.** What changed is the reading of ADR-0010, not the appetite for writing: its tier 3 is «structured manifests | tool edits surgically | **Permitted**», and its survey calls manifest editing «the single most universal behaviour in the set». The tier-5 prohibition covers *human logic*, and a GDL description cannot be logic — `cpt-gearbox-fr-gdl-declarative` refuses every branching construct — so a `use_gear(...)` entry is a data entry in a list, exactly like the line `cargo add` writes. What survives from the old wording is the part that mattered: the diff is still shown first and nothing is written until it is accepted. The four refusals in front of the write are in §9.2. **Renders incrementally** (§2.3): the grouping is available at S1 because `category` is declared, while the badges arrive at S2 because `runtime_caps` and `colocated_deps` are projected — so the tree's shape settles first and fills in. Rows are keyed by `gdl_path`, not `id`, because the id does not exist until S2. A `pending` row renders dimmed, and **clicking it still reveals its `gear.gdl`** — that path is known from S0, so a pending row is never inert. |
-| Gear detail | everything projected for the selected gear: capabilities, co-location, extension points with the vendor the host selects on, what the gear fills and under which vendor, contracts with the transports **this provider wires up**, GTS types, and clickable PRD/DESIGN/ADR links. In the bottom area, not the side panel — the side panel clipped exactly the facts it exists to show. Keyed by `gdl_path` like the tree, so a selection made while a row is pending survives projection. |
+| Inspector | **one panel, two sections, one selection.** *What it is*: everything projected for the selected gear -- capabilities, co-location, extension points with the vendor the host selects on, what the gear fills and under which vendor, contracts with the transports **this provider wires up**, GTS types, and clickable PRD/DESIGN/ADR links. *Why it is here*: the resolver's `because` sentence per edge, nearest reason first, each linking to its `origin`, with `DowngradedBy` steps marked. This was two panels -- `Gear detail` keyed off a catalogue row and `Explain` off a product focus -- which meant the ordinary act of clicking a gear in the product tree filled one and left the other asking to be given a catalogue selection. In the bottom area, not the side panel, because the side panel clipped exactly the facts it exists to show. |
 | Product | **a tree, as vision §60 sketches it**: foldable branches for Gears (with `asked for` / `pulled in by the closure` beneath), Processes, Contracts and Cluster, each with an icon and a count. The profile switch, the resolved profile and the description-file link stay in the header rather than becoming a Deployment branch: the switch has to be reachable *while* a resolution is in flight, which a branch of the resolved product cannot be. §60's Security is absent — it is not modelled in the IR. Artifacts live in the Generate view, which exists now that `capabilities.generate` is `true`. Bindings carry mode/transport/mechanism chips; cluster shows `selected` vs `resolved`; diagnostics summarise at the bottom. |
 | Graph | four views. **deps** (solid = co-location), **contracts** (dashed = cuttable, solid = forced local, red = undeclared-hub-edge), **processes** (boxes with gear chips, overlapping gears drawn in *every* box — this is what makes closure-not-partition visible), **cluster** (requirement → capability → provider, unsatisfied in red). Layout: `elkjs` `layered` with a fixed seed → deterministic, so screenshots and "why did this move" are stable. Rendered as hand-written React SVG. |
-| Explain | `gearbox/product/explain` for the current selection: `narrative: string[]` as an ordered list, each step linking to its `origin`, plus the subgraph inline. Every `DowngradedBy` edge renders "you asked X → you got Y → because GBXnnnn" with a link to the evidence `file:line`. |
+| Conflicts | the resolution's diagnostics as a domain screen, not a list under a tree: code, message, the `help` sentence that says what to do, the location and every `related` location as links, the `evidence` `file:line` in `gears-rust` where a claim asserts a runtime limitation, and -- where the engine names a `subject` -- a link that points the Inspector at the thing being complained about. `Resolve again` means re-resolve after an edit; there is no automatic resolver and none is promised. A second consumer of `ProductStore.diagnostics`, beside the Problems markers, so the two cannot disagree. The Product view keeps a one-line summary that opens this. |
+| Start | what there is to do with no product open: `Open Product…`, the products found in the workspace, and the ones opened before. `Create Product` is absent because it needs a skeleton and is a new write path. Replaces an empty main area, which read as an application that had failed to load rather than as a tool waiting to be told what to work on. |
 | Lock | read-only Monaco view of canonical `product.lock`, diff toggle vs disk, `lock_hash` badge that goes stale-yellow when resolve ≠ disk. |
 | Generate | `FilePlan[]` as a directory tree with create/update/unchanged/conflict icons, per-file Monaco diff preview, ownership badge, Apply disabled unless `allowWrites` and no Errors and no conflicts. |
 
-The Catalogue and Gear-detail widgets belong to the **Catalogue** perspective; Product, Explain, Lock
-and Generate to the **Product** perspective. Graph belongs to both — the `deps` and `contracts` views
-answer a catalogue question, `processes` and `cluster` a product one.
+**Which widget belongs where is decided by the working context, not by a perspective the reader
+switches.** Home places Start in main and the catalogue left; Product places the Product view in main
+and collapses the left panel, because the catalogue is a source of components there rather than the
+subject. The Inspector, Conflicts, Lock, Generate and the Graph are one command away and are remembered
+per context once opened -- belonging is the saved layout, not a forced open on every switch. The
+reasoning, and why the two switchable perspectives were a mistake, is in §9.1 and in ADR-0011's
+amendment of 2026-08-31.
 
 **Engine supervision** (`src/node/gearbox-engine-process.ts`): one engine per workspace root;
 `child_process.spawn(enginePath, ['rpc','--stdio','--root',root,…])`;
@@ -890,12 +895,14 @@ panel and has no "own widget" for `TabBarToolbarRegistry.isVisible` to key on.
 Terminal and Git. The workflow ends in generated crates a person will want to build, inspect and
 diff, and `.gearbox/<product>/` is a directory like any other.
 
-**Two perspectives**, Catalogue and Product, switched from the toolbar and carried by Theia 1.75's
-`PerspectiveService` (`PerspectiveContribution`, not a homemade `createLayout`). Catalogue places
-the catalogue left and gear-detail bottom; Product places the product in main and Explain bottom.
-Lock, Generate and Graph are not in the maps: belonging is the saved layout, not a forced open on
-every switch. Arduino has one object of work and offers no guidance; here neither the gear registry
-nor the product subordinates the other.
+**Two working contexts**, Home and Product, derived from what is open rather than switched by hand,
+and laid out by Theia 1.75's `PerspectiveService` (`PerspectiveContribution`, not a homemade
+`createLayout`). `StudioContextService` owns the context and drives the layout, the context keys the
+menus read, and the header -- one direction only, because a perspective can be restored from a saved
+layout with no domain object behind it, and a `Product` menu keyed off that would offer verbs for a
+subject that is not there. A third context, `gear`, is in the type and deliberately unreachable until
+gear authoring exists. This replaced two *switchable* perspectives with toolbar buttons whose words
+duplicated two menu entries while meaning something else; §9.1 records why that was wrong.
 
 **`.gdl` language** is contributed **natively** — `LanguageGrammarDefinitionContribution` plus
 `TextmateRegistry` from `@theia/monaco`, in `src/browser/gdl/` — not as a bundled VS Code extension.
@@ -926,8 +933,9 @@ the join key, so completing it prevents a GBX0508 rather than reporting one); in
 
 ### 9.1 What is built, and where the implementation diverged from this plan
 
-Seven widgets exist against the real engine: **Catalogue** (tree by category, staged), **Gear
-detail**, **Graph** (all four views), **Product**, **Explain**, **Lock** and **Generate**.
+Eight widgets exist against the real engine: **Catalogue** (tree by category, staged), **Inspector**
+(what a thing is, beside why it is here), **Graph** (all four views), **Product**, **Conflicts**,
+**Lock**, **Generate** and **Start**.
 `capabilities.generate` is `true` now that M5 is on the wire; the view appeared the same way the
 resolver notice disappeared -- driven from the engine's own capability, not from a hard-coded
 string. Worker entry points (M6) and Docker/Helm (M7) are still missing and arrive as `skipped` on
@@ -1352,6 +1360,222 @@ Proved two ways: `cargo test -p gearbox-engine --test source_digest` holds the p
 individually, and generating the same product twice -- once with a relative root and a relative
 description, once with both absolute -- produces byte-identical trees, `product.lock` included.
 
+#### One selection, and the two panels that could not share it
+
+`Gear detail` rendered a `GearDescriptor` from a catalogue row. `Explain` rendered the resolver's
+`because` sentences from a product focus. They sat side by side in the bottom bar, and the ordinary
+act -- click a gear in the product tree -- filled the second and left the first saying "select a gear
+in the catalogue". Two panels, one of them always apologising, and no way to tell from either which
+selection it was about.
+
+The fix is not wiring: it is that there was one selection all along and two places holding it. So the
+value moved out of both stores into `SelectionService`, and `CatalogueStore.selected` and
+`ProductStore.focus` became views onto it. A **projected** catalogue row is normalised to
+`{kind: "gear", id}` at the moment it is chosen, so picking `cluster` in the catalogue and picking it
+in the product tree are the same selection and both views highlight it. `catalogue-row` survives only
+for a row with no `GearId` yet, which under ADR-0009 is every row until S2 has run on it.
+
+The two panels then became sections of one **Inspector**, and the merge bought a claim that could not
+be written before: selecting `api-gateway` in the product tree says *both* what it is and why it is
+there. The sections keep their old class names -- they are still the detail and the explanation -- so
+every assertion written against their markup still tests the same thing.
+
+Two columns rather than stacked, because the bottom panel is wide and short: stacking put "why" below
+the fold for anything longer than a two-line gear, which would have reproduced the original problem in
+a single panel.
+
+#### Conflicts as a screen, and a `subject` that nothing had ever set
+
+The diagnostics used to print under the product tree, where nobody could act on them, and
+`ResolutionMarkers` put the same array into Problems. eCos's Config Tool makes conflicts a domain
+screen; this now does too, and the Product view keeps a one-line summary that opens it -- one array in
+`ProductStore`, two renderers, so they cannot disagree about what the resolution said.
+
+What the screen can show that a marker cannot is the `help` sentence, the `related` locations, the
+`evidence` citation, and the `subject`: "the graph node this concerns, **so a client can select it**".
+Building the screen was how it emerged that `Diagnostic::about` -- the builder that sets `subject` --
+**had no callers anywhere in the engine**. The field had been on the wire, documented, and always
+`None`.
+
+So the claim would have been permanently unobservable, and the honest fix was upstream of the UI. One
+diagnostic now sets it: GBX0409, "the endpoint override for X on Y cannot come from an environment
+variable", whose subject is unambiguous -- exactly one binding, named by consumer and contract, and the
+explanation graph holds a node for every resolved binding. Deliberately only that one: most
+diagnostics concern a resolution as a whole ("two severable edges stay local because the profile is
+single-process" names no node), and inventing a subject for those would send a reader to a node that
+does not explain them.
+
+That also produced a smaller correction worth keeping. The binding node key -- `{consumer}|{contract}`
+-- was formatted inline in the graph builder, and a diagnostic naming the same node would have had to
+format it again. Two format strings for one wire convention is how a client ends up asking about a
+node that is not there, silently, because a missing node reads as "no provenance recorded". It is
+`gearbox_ir::binding_key` now, used by both.
+
+#### Home is a screen, not an empty area
+
+The Home context was the catalogue and an empty main area, which reads as an application that failed
+to load something. STM32CubeMX opens on New / Load / Recent and only then shows domain views; the
+**Start** screen is that, minus the one that is not built.
+
+`Create Product` is absent rather than disabled. It needs a skeleton -- which sources, which profiles,
+what the first `product.gdl` says -- and it is a new write path, which the stray-write investigation
+below has not cleared. A disabled button with a tooltip is the same promise in a quieter voice.
+
+One mechanical trap, and it is the second time this shape of thing has cost a debugging session:
+`applyViewPlacements` runs on a perspective's **first** activation only, so on the second visit to Home
+the placement is a no-op -- and `shell.activateWidget` on a widget nobody has built does nothing at
+all, silently. Coming back to Home after closing a product therefore has to *open* the Start screen,
+not activate it, which is why `GearboxPerspectives` reaches for the view contribution rather than
+making do with the shell it is handed.
+
+#### The catalogue, called instead of browsed
+
+ADR-0011 made the catalogue a perspective equal to the product, and its own revisit clause named the
+condition for collapsing that: "if in practice nobody uses the catalogue except while editing a
+product". Which is the case. So it is a **source of components** now -- a panel in Home, where looking
+at what a product could be made of is the only thing there is to do, and `Find Gear…` in the product
+context, where the panel had been taking the whole left side while the product sat in a secondary tab.
+
+Read-only, and that is the whole of it for now: finding a gear selects it, which fills the Inspector.
+Adding one is a write, and the write path stays closed until the P0 below clears -- the panel's toggle
+remains the one way in, with its preview and its confirmation.
+
+#### The palette was never narrowed, and the file said it was
+
+`ShellPolicy`'s own header claimed three surfaces: the menu bar, every other menu, and "the command
+palette and keybindings -- reached by unregistering the command itself". The code did the first two.
+It called `unregisterMenuAction`, which removes menu nodes; the palette does not read menus. It reads
+`CommandRegistry.getAllCommands()` filtered by `isVisible && isEnabled`
+(`quick-command-service.js:191`).
+
+So every suppressed view was one `Ctrl+Shift+P` away, and a saved keybinding still opened it, for the
+whole life of that code. The assertion that read the rendered View menu -- the one that caught the
+camelCase mistake in the prefix list -- could not see this, because the palette is not a menu.
+
+Commands are now unregistered outright, and the sweep runs again on `onCommandsChanged` under its own
+guard, because plugins register late and `unregisterCommand` itself fires that event. A conformance
+claim reads the palette per family. The lesson is the narrow one: *a whitelist has to be checked on
+every surface it claims*, and the check has to use that surface's own mechanism.
+
+`Explorer` and `Source Control` moved into `View > Advanced Tools` in the same pass -- kept, because
+the work ends in generated crates someone will read and diff, and demoted, because they are tools
+rather than one of the two things this application is about. Search has no entry: the package is not
+installed, and a menu item for an absent package is a rule about nothing.
+
+#### A confirmation that any Enter could answer
+
+The stray `use_gear(...)` write into `products/payments-demo/product.gdl` -- three occurrences, no
+reproduction across four instrumented runs -- has a mechanism now, found by reading Theia rather than
+by another run.
+
+`DialogOverlayService` adds its Enter listener to **`document.body`**
+(`@theia/core/lib/browser/dialogs.js:82`), and `AbstractDialog.handleEnter` accepts unless the event
+came from a textarea. `onActivateRequest` focuses the accept button. So while an edit confirmation is
+open, **any** Enter anywhere in the application writes to the description -- and the test fixture's
+`runCommand` pressed Enter blind whenever no palette entry matched what it typed. The page is
+worker-scoped and the suite runs one worker serially, so a dialog left open by any earlier test
+outlives it and waits for a keystroke meant for something else.
+
+Four changes, in order of how much they matter:
+
+1. **The write dialog no longer accepts on ambient Enter.** `EditPreviewDialog.handleEnter` does not
+   accept, and the *cancel* button takes the initial focus. A focused accept button still activates on
+   Enter, natively, so the keyboard path to Yes survives -- only the ambient one is gone. That is the
+   right default for a dialog whose Yes edits a file, and the wrong one for "do you want to reload?",
+   which is why it is a subclass rather than a change to `ConfirmDialog`.
+2. **Every fact is re-established after the dialog returns.** The four checks used to run *before* it
+   and the write happened *after*, with nothing keeping the world still in between. `stillTrue` now
+   re-checks the store's revision, the open product's path and the buffer's cleanliness, and re-runs
+   the dry run and compares it byte for byte -- so an answer about a state that has gone is refused
+   with a message saying so, instead of being applied to whatever is there now. This is a real defect
+   independent of the P0.
+3. **The fixture throws instead of pressing Enter**, listing what the palette actually offered. It
+   also refuses to drive the application while a dialog is open, at the two doors every test goes
+   through. A leftover dialog is not untidy, it is armed.
+4. **A stack trace is logged at the moment of the write**, so if it happens again the cause is named
+   rather than inferred.
+
+What was *not* done, and the reason: the plan called for moving the mutating tests onto a temporary
+copy of the workspace. That would have protected the two tests that already restore the file and left
+the actual exposure untouched -- the stray write lands in tests that never edit anything, because the
+shared session has the real product open. Containing it properly means moving the whole suite's engine
+workspace, which breaks the claim that reads generated output through the Explorer and every assertion
+about a path under `.gearbox/`. So the mechanism was removed instead of the blast radius, and the three
+guards stay as a net rather than as the defence.
+
+#### The product session that had never once opened a product
+
+`ProductSessionService` was written to own the engine's roots and its write
+boundary, and its documented first step is: initialize with no roots at all, because
+evaluating a description needs no catalogue. The engine disagrees. Drive
+`gearbox rpc --stdio`, send `initialize({roots: []})` and then `product/load`, and
+the answer is:
+
+```text
+no source root is open; pass `roots` to `initialize` or `--root` to the CLI
+```
+
+So step 2 threw, the open returned false, and the session never reached the steps
+that derive the roots from the product's `sources`. Every product opened in this
+application was opened by the *fallback* engine -- the one the backend spawns with
+its built-in roots and the repository as workspace -- and the session's whole
+purpose, "the roots and the write boundary come from the product", had never once
+run to completion.
+
+Nothing noticed because the fallback is correct for this repository: one product,
+one corpus, the neighbour path the backend hard-codes. The suite passed on the
+engine the session had failed to replace.
+
+It surfaced only when serialising the catalogue's loads removed the race that used
+to leave a *different* engine running by the time step 2 ran. The lesson is the
+one this plan keeps relearning: **a step whose failure is recovered by an accident
+elsewhere is a step nobody has tested.** The refusal is now what step 1 avoids --
+it carries the roots already open, which at boot are the backend's defaults and
+after a previous product are that product's, and step 4 replaces them with the ones
+the description declares.
+
+Two smaller defects fell out of the same investigation, both mine:
+
+**The load queue read its session too late.** Serialising `CatalogueStore.load` --
+necessary, because `initialize` respawns the engine and two in the air mean one
+dies under the other's request -- was written to read `this.session` when the load
+*ran*. The boot load is queued first and a product session opening in the same tick
+sets that field to its own no-roots session, so the boot load initialized with no
+roots and the catalogue reported "no source root is open" before anything had gone
+wrong. The session is captured when the load is *asked for* now, and remembered for
+later bare calls, which are two different jobs that one field was doing.
+
+**The write boundary was the product's own folder**, so the engine's output root
+became `products/payments-demo/.gearbox/payments-demo/dev` -- inside the
+descriptions directory, and not the tree `gearbox generate` writes from the
+repository root. One product, two trees: exactly the divergence that removing
+Studio's private output tree had closed. The boundary is the **workspace folder
+containing the product** now: it contains the description, so an edit is inside it;
+it is the root the CLI is run from, so both clients write one tree; and it is the
+folder the person opened rather than one derived behind their back.
+
+#### A native module built for the wrong Node, and a bundle that kept a copy
+
+Restarting the application produced `Process from config.webServer exited early` and a backend log that
+stopped after `loading modules...`. Worth recording because none of it was in this project's code.
+
+The backend was segfaulting in `dlopen`. `drivelist` -- required by `@theia/core`'s
+`env-variables-server` -- had been built on 2026-08-29 against **Node 24 headers, N-API 10**
+(`build/config.gypi` names the nodedir), while the installed Node is **20.20.1, N-API 9**. Loading an
+N-API-10 binary in an N-API-9 runtime is an immediate SIGSEGV, which `theia start` reports as a child
+that exited. `npm rebuild drivelist` fixes it.
+
+The second half took longer and is the part worth remembering: **the webpack backend build copies
+native modules into `browser-app/lib/backend/native/`**, so rebuilding the package is not enough --
+`lib/backend/native/drivelist.node` was still the Node-24 binary, and `theia start` uses the bundled
+backend rather than `src-gen`. `npm run build --workspace browser-app` after the rebuild is what
+actually fixes the startup.
+
+It also explains why nobody noticed: a process that has already loaded the module keeps running, so the
+application worked for days and only a *fresh* start failed. Any Node major-version change in this
+repository needs `npm rebuild` followed by a bundle rebuild, and a backend that dies at
+`loading modules...` with no error is the signature.
+
 #### A terminal that was never openable, and a claim that passed for the wrong reason
 
 The shell stopped opening a `zsh` at the bottom of a fresh window. That was asked for: a shell nobody
@@ -1485,7 +1709,7 @@ workspace-member entries. Nothing else in that repo changes.
 | **M6** | Host-workers | new gear lands and passes its own test *by hand first*; then generated worker crate; host spawns worker; remote REST binding resolves via directory | M7 |
 | **M7** | Docker + Helm + `values.schema.json` | acceptance §12 step 4 in full | M6 |
 | **M8a** — **done** | JSON-RPC + TS types | `node ide/scripts/rpc-smoke.mjs` drives initialize → catalogue over real framing, 15/15; `cargo test -p gearbox-rpc`; stdout carries nothing but JSON-RPC | from M1 |
-| **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Gear detail, Graph, Product, Explain, Lock, Generate, the toolbar and the two perspectives are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Electron is still open | after M4 + M8a |
+| **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Inspector, Graph, Product, Conflicts, Lock, Generate, Start, the product header and the two working contexts are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Electron is still open | after M4 + M8a |
 | **M9** | **DESIGN + ADRs** (§14) — written *after* the prototype runs | reviewed against `docs/checklists/{DESIGN,ADR}.md`; every claim cites either a `gearbox-builder` symbol or a `gears-rust` `file:line`; every §13 gap has a home | — |
 
 **Three things M5 left behind, recorded here because nothing else covers them.**

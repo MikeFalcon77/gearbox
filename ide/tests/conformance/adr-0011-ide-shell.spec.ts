@@ -11,7 +11,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { expect, expectContext, openProduct, runCommand, test } from "../fixtures/studio";
+import {
+  expect,
+  expectContext,
+  openProduct,
+  paletteOffers,
+  runCommand,
+  test,
+} from "../fixtures/studio";
 
 const IDE = join(__dirname, "../..");
 
@@ -153,33 +160,87 @@ test.describe("the narrowed shell", () => {
     expect(tabs).toContain("Gearbox Catalogue");
   });
 
-  test.fixme("a terminal can be opened [ADR-0011 §Consequences: some Theia surface stays on purpose]", async ({
+  test("no terminal is offered, anywhere [ADR-0011 §Amendment: the terminal promise is withdrawn]", async ({
     studio,
   }) => {
-    // **Measured as broken, and the measurement is the point.**
+    // **The inverse of a claim that used to pass for the wrong reason.**
     //
-    // This claim used to pass, and it passed for the wrong reason: it asserted that
-    // a `zsh` tab was *already at the bottom* of a fresh shell and that clicking it
-    // rendered an xterm. Both were true, because Theia's terminal contribution
-    // opens one from `initializeLayout`. Nothing ever exercised *creating* one.
+    // ADR-0011 kept "a live shell in the bottom panel" on purpose, and the claim
+    // that checked it asserted a `zsh` tab was *already there* on a fresh shell.
+    // That was true because Theia's contribution opened one from
+    // `initializeLayout`; nothing ever exercised *creating* one. With the boot
+    // terminal suppressed the real claim became testable and failed:
+    // `Terminal: Create New Terminal` creates nothing, by command and by
+    // keybinding, silently. Measured against a build without the suppression (the
+    // boot terminal returns, creating still does nothing) and against `node-pty`
+    // (present, and the boot terminal did attach a pty), so it is neither a
+    // regression from the suppression nor a broken install.
     //
-    // `HiddenTerminal` stops the boot terminal, because a shell nobody asked for
-    // taking room in the bottom bar is part of what made this application read as
-    // an IDE with panels. With it suppressed the claim became testable for the
-    // first time -- and failed: `Terminal: Create New Terminal` creates nothing, by
-    // command and by keybinding alike, with no error and no notification. Verified
-    // against a build with the suppression removed, where the boot terminal returns
-    // and creating one *still* does nothing, so this is not a regression from the
-    // suppression. `node-pty`'s binary is present and the boot terminal attached a
-    // pty, so it is not a broken install either.
+    // The ADR's amendment withdraws the promise, and this asserts the withdrawal
+    // rather than deleting the claim: an absence nobody checks is an absence that
+    // comes back on the next upgrade.
+    const bottom = await studio.page.evaluate(() =>
+      Array.from(
+        document.querySelectorAll("#theia-bottom-content-panel .lm-TabBar-tabLabel"),
+      ).map((e) => (e.textContent ?? "").trim()),
+    );
+    expect(bottom.some((label) => /zsh|bash|terminal/i.test(label))).toBe(false);
+    expect(await studio.page.locator(".xterm").count()).toBe(0);
+
+    // And not one keystroke away either. The palette reads
+    // `CommandRegistry.getAllCommands()`, so a command still registered is a
+    // command still offered -- which is why the policy unregisters them rather
+    // than only removing their menu entries.
+    const offered = await paletteOffers(studio.page, "Terminal");
+    expect(offered.filter((label) => /^Terminal:/.test(label))).toEqual([]);
+  });
+
+  test("the command palette offers nothing from a forbidden family [ADR-0011 §Decision Outcome: unregister what remains]", async ({
+    studio,
+  }) => {
+    // The half of the strategy that was claimed and not done. `ShellPolicy` removed
+    // forbidden commands from every *menu*, and its own header said the palette and
+    // any saved keybinding went with them -- but the palette does not read menus, it
+    // reads `CommandRegistry.getAllCommands()`. So every suppressed view was one
+    // `Ctrl+Shift+P` away, and the assertion that only looked at the View menu could
+    // not tell.
     //
-    // So ADR-0011's consequence -- "a live shell in the bottom panel" is kept on
-    // purpose -- is currently **not true**: the only terminal that ever worked was
-    // the one nobody asked for. Named rather than quietly deleted, because the
-    // choice belongs to whoever reads this: either creating a terminal is fixed, or
-    // the ADR stops claiming a terminal.
-    await runCommand(studio.page, "Terminal: Create New Terminal");
-    await expect(studio.page.locator(".xterm").first()).toBeVisible({ timeout: 30_000 });
+    // Queried by family rather than in one search, because the palette's fuzzy
+    // matcher will happily match a word inside an unrelated label.
+    for (const family of ["Type Hierarchy", "Call Hierarchy", "Debug:", "Notebook"]) {
+      const offered = await paletteOffers(studio.page, family);
+      expect(
+        offered.filter((label) => label.toLowerCase().startsWith(family.toLowerCase())),
+        `the palette still offers ${family}`,
+      ).toEqual([]);
+    }
+  });
+
+  test("the Explorer and git are one level down, under Advanced Tools [ADR-0011 §Consequences: some Theia surface stays on purpose]", async ({
+    studio,
+  }) => {
+    // Kept, and demoted. They are tools rather than one of the two things this
+    // application is about, so they stop competing with the domain's own views in a
+    // flat `View` list -- which is the arrangement that made this read as a general
+    // editor with Gearbox panels bolted on.
+    await studio.page.locator(".lm-MenuBar-itemLabel", { hasText: /^View$/ }).click();
+    const submenu = studio.page.locator(".lm-Menu-itemLabel", { hasText: "Advanced Tools" });
+    await expect(submenu).toBeVisible();
+
+    // The **child** menu, not every `.lm-Menu` on screen. Hovering a submenu leaves
+    // the parent open beside it, so reading all of them returns View's own items --
+    // which is what the first version of this did, and it reported "Explorer is
+    // missing" while Explorer was sitting one menu to the right.
+    await submenu.hover();
+    const menus = studio.page.locator(".lm-Menu");
+    await expect(menus).toHaveCount(2);
+    const items = (await menus.last().locator(".lm-Menu-itemLabel").allInnerTexts()).map((text) =>
+      text.trim(),
+    );
+    expect(items).toContain("Explorer");
+    expect(items).toContain("Source Control");
+    await studio.page.keyboard.press("Escape");
+    await studio.page.keyboard.press("Escape");
   });
 
   test("the Source Control view is present [ADR-0011 §Consequences: some Theia surface stays on purpose]", async ({

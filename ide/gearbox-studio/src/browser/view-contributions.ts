@@ -14,14 +14,15 @@ import { inject, injectable } from "@theia/core/shared/inversify";
 
 import { CatalogueStore } from "./catalogue-store";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
-import { GearDetailWidget } from "./detail/gear-detail-widget";
+import { ConflictsWidget } from "./conflicts/conflicts-widget";
 import { GraphWidget } from "./graph/graph-widget";
-import { ExplainWidget } from "./explain/explain-widget";
+import { InspectorWidget } from "./inspector/inspector-widget";
 import { GenerateWidget } from "./generate/generate-widget";
 import { LockWidget } from "./lock/lock-widget";
 import { GearboxMenus } from "./menus";
 import { ProductStore } from "./product-store";
 import { ProductWidget } from "./product/product-widget";
+import { StartWidget } from "./start/start-widget";
 
 export const RELOAD_CATALOGUE: Command = {
   id: "gearbox.catalogue.reload",
@@ -131,20 +132,17 @@ export class CatalogueViewContribution
   }
 
   /**
-   * Put the catalogue commands under Gearbox.
+   * `Reload Catalogue` under Product, and **not** the panel toggle.
    *
-   * `menus.ts` has declared the submenu since the shell was narrowed, and until
-   * now nothing registered into it -- so the menu bar carried a "Gearbox" label
-   * with an empty dropdown. Theia 1.75 renders an empty submenu, so that was
-   * visible rather than merely latent.
+   * The toggle used to be here as well, labelled `Catalogue`, and it was one half
+   * of the duplication in this menu: `AbstractViewContribution.registerMenus`
+   * already puts every toggle under `View > Views`, so the same command appeared
+   * twice under two different words. The rule now is that **View lists panels and
+   * Product lists things to do** -- so a panel toggle belongs in View, and
+   * reloading the catalogue, which is an act with an effect, belongs here.
    */
   override registerMenus(menus: MenuModelRegistry): void {
     super.registerMenus(menus);
-    menus.registerMenuAction(GearboxMenus.GEARBOX_INSPECT, {
-      commandId: this.toggleCommand?.id ?? "",
-      label: "Catalogue",
-      order: "1",
-    });
     menus.registerMenuAction(GearboxMenus.GEARBOX_INSPECT, {
       commandId: RELOAD_CATALOGUE.id,
       label: "Reload Catalogue",
@@ -166,6 +164,27 @@ export class CatalogueViewContribution
   }
 }
 
+/**
+ * The Home screen.
+ *
+ * Not a `FrontendApplicationContribution`, so it does not open itself at startup:
+ * the Home perspective opens it, because whether it belongs on screen is a
+ * question about the context rather than about the application starting. Opening
+ * it here as well would put it in the main area behind a product that a saved
+ * layout had already restored.
+ */
+@injectable()
+export class StartViewContribution extends AbstractViewContribution<StartWidget> {
+  constructor() {
+    super({
+      widgetId: StartWidget.ID,
+      widgetName: StartWidget.LABEL,
+      defaultWidgetOptions: { area: "main" },
+      toggleCommandId: "gearbox.start.toggle",
+    });
+  }
+}
+
 @injectable()
 export class GraphViewContribution extends AbstractViewContribution<GraphWidget> {
   constructor() {
@@ -178,26 +197,34 @@ export class GraphViewContribution extends AbstractViewContribution<GraphWidget>
   }
 }
 
+/**
+ * The one panel that answers about a selection.
+ *
+ * Replaces `DetailViewContribution` and `ExplainViewContribution`. They opened
+ * two bottom tabs that answered about two different selections, so the second one
+ * was empty in the ordinary case -- see `InspectorWidget` for why that was worth
+ * merging rather than wiring together.
+ */
 @injectable()
-export class DetailViewContribution
-  extends AbstractViewContribution<GearDetailWidget>
+export class InspectorViewContribution
+  extends AbstractViewContribution<InspectorWidget>
   implements FrontendApplicationContribution
 {
   constructor() {
     super({
-      widgetId: GearDetailWidget.ID,
-      widgetName: GearDetailWidget.LABEL,
-      // The bottom area, so the tree, the graph and the detail are all readable
-      // at once. In the side panel this content was clipped, which hid exactly
-      // the projected facts it exists to show.
+      widgetId: InspectorWidget.ID,
+      widgetName: InspectorWidget.LABEL,
+      // The bottom area, so the tree, the graph and the answer are all readable at
+      // once. In the side panel this content was clipped, which hid exactly the
+      // projected facts it exists to show.
       defaultWidgetOptions: { area: "bottom" },
-      toggleCommandId: "gearbox.detail.toggle",
+      toggleCommandId: "gearbox.inspector.toggle",
     });
   }
 
   async initializeLayout(): Promise<void> {
-    // Not activated: the catalogue keeps focus, because selecting a gear there
-    // is the first thing anyone does.
+    // Not activated: whatever the person is choosing from keeps focus, because
+    // making a selection is what fills this panel.
     await this.openView({ activate: false, reveal: true });
   }
 }
@@ -238,13 +265,13 @@ export class ProductViewContribution extends AbstractViewContribution<ProductWid
     });
   }
 
+  /**
+   * `Resolve Product`, and not the panel toggle -- see `CatalogueViewContribution`
+   * for the rule. The Product view is reached from `View`, or by opening a product,
+   * which is what the Product perspective is for.
+   */
   override registerMenus(menus: MenuModelRegistry): void {
     super.registerMenus(menus);
-    menus.registerMenuAction(GearboxMenus.GEARBOX_RESOLVE, {
-      commandId: this.toggleCommand?.id ?? "",
-      label: "Product",
-      order: "1",
-    });
     menus.registerMenuAction(GearboxMenus.GEARBOX_RESOLVE, {
       commandId: RESOLVE_PRODUCT.id,
       label: "Resolve Product",
@@ -253,25 +280,35 @@ export class ProductViewContribution extends AbstractViewContribution<ProductWid
   }
 }
 
+/**
+ * Conflicts, in the bottom area beside the Inspector.
+ *
+ * Bottom rather than main: it is read *while* looking at the tree that caused the
+ * complaint, and a conflict list that replaces the product is a list you cannot
+ * act on. Not opened by `initializeLayout` either -- a panel that appears at
+ * startup to say "no conflicts" is a panel that says nothing.
+ */
 @injectable()
-export class ExplainViewContribution extends AbstractViewContribution<ExplainWidget> {
+export class ConflictsViewContribution extends AbstractViewContribution<ConflictsWidget> {
   constructor() {
     super({
-      widgetId: ExplainWidget.ID,
-      widgetName: ExplainWidget.LABEL,
-      // The bottom area, beside Gear detail, and for the same reason: it answers
-      // about a selection made elsewhere, so it has to be readable *while* the
-      // Product view is on screen rather than instead of it.
+      widgetId: ConflictsWidget.ID,
+      widgetName: ConflictsWidget.LABEL,
       defaultWidgetOptions: { area: "bottom" },
-      toggleCommandId: "gearbox.explain.toggle",
+      toggleCommandId: "gearbox.conflicts.toggle",
     });
   }
 
+  /**
+   * In the Product menu, because looking at what the resolution could not decide
+   * is one of the few things there is to *do* to a product -- the exception to
+   * "View lists panels" that the rule was written to allow.
+   */
   override registerMenus(menus: MenuModelRegistry): void {
     super.registerMenus(menus);
     menus.registerMenuAction(GearboxMenus.GEARBOX_RESOLVE, {
       commandId: this.toggleCommand?.id ?? "",
-      label: "Explain",
+      label: "Conflicts",
       order: "3",
     });
   }

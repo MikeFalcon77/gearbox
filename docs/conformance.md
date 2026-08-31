@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **99** — 91 built, 5 not built, 0 broken, 3 not observed.
+Claims: **104** — 97 built, 4 not built, 0 broken, 3 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -48,7 +48,9 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the Debug and Testing views do not open themselves | `ADR-0011 §initializeLayout NOOP` | ✅ built |  |
 | a catalogue row has a client rectangle | `ADR-0011 §Confirmation` | ✅ built |  |
 | Explorer stays visible | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
-| a terminal can be opened | `ADR-0011 §Consequences: some Theia surface stays on purpose` | 🚧 not built |  |
+| no terminal is offered, anywhere | `ADR-0011 §Amendment: the terminal promise is withdrawn` | ✅ built |  |
+| the command palette offers nothing from a forbidden family | `ADR-0011 §Decision Outcome: unregister what remains` | ✅ built |  |
+| the Explorer and git are one level down, under Advanced Tools | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
 | the Source Control view is present | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
 | the Product menu offers the product's verbs, and only with a product | `ADR-0011 §Scope: what the menu bar contains` | ✅ built |  |
 | the header names what is being worked on | `ADR-0011 §The two contexts` | ✅ built |  |
@@ -78,11 +80,14 @@ Rust, and the ADRs' own Confirmation sections say which.
 |---|---|---|---|
 | the Catalogue folds by category and filters | `plan §9: Catalogue, foldable and filtered` | ✅ built |  |
 | the Catalogue is in the left area | `plan §9: Catalogue, left` | ✅ built |  |
-| the Gear detail is in the bottom area, not the side panel | `plan §9: Gear detail, bottom` | ✅ built |  |
+| the Inspector is in the bottom area, not the side panel | `plan §9: Inspector, bottom` | ✅ built |  |
+| one selection answers both questions at once | `plan §9: Inspector, one selection` | ✅ built |  |
 | the co-location Graph opens in the main area | `plan §9: Graph, main` | ✅ built |  |
 | the Product view is a tree of branches | `vision §60; plan §9: Product` | ✅ built |  |
 | the Product view shows what §9 asks it to | `plan §9: Product` | ✅ built |  |
-| the Explain view is in the bottom area | `plan §9: Explain` | ✅ built |  |
+| the Conflicts screen lists what the resolution reported | `plan §9: Conflicts` | ✅ built |  |
+| a conflict points the Inspector at its subject | `PRD cpt-gearbox-fr-explain: subject` | ✅ built |  |
+| the explanation is in the bottom area | `plan §9: Explain` | ✅ built |  |
 | the Lock view is in the main area | `plan §9: Lock` | ✅ built |  |
 | a Generate view exists | `plan §9: Generate` | ✅ built |  |
 | the layout is the same after a reload | `plan §9: deterministic layout` | ✅ built |  |

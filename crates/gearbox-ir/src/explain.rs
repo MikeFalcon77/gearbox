@@ -58,6 +58,38 @@ impl NodeKind {
             Self::Profile => "profile",
         }
     }
+
+    /// The node id for a thing of this kind, named by `key`.
+    ///
+    /// One definition, because there were two: the graph builder formatted
+    /// `{prefix}:{key}` inline, and a diagnostic that wanted to name the same node
+    /// in its `subject` field would have had to format it again. Two format
+    /// strings for one wire convention is how a client ends up asking about a node
+    /// that does not exist -- silently, since a missing node reads as "no
+    /// explanation recorded".
+    ///
+    /// `None` only for a key that cannot make a valid id, which no caller
+    /// produces: every key comes from an already-validated id. Returning an
+    /// `Option` rather than asserting keeps this total -- an unnameable node is
+    /// simply absent from the graph, which degrades an explanation instead of
+    /// aborting a resolution.
+    #[must_use]
+    pub fn id_for(self, key: &str) -> Option<NodeId> {
+        // A colon separates the two parts, so one inside the key would make a
+        // third and `NodeId` would reject it.
+        NodeId::new(format!("{}:{}", self.prefix(), key.replace(':', "_"))).ok()
+    }
+}
+
+/// The key a binding is named by: `{consumer}|{contract}`.
+///
+/// A pipe rather than an arrow, and it matters that this is written down once: the
+/// Studio builds the same string in TypeScript to ask "why is this binding here",
+/// so the two have to agree exactly. The `->` seen in `ids.rs` doc comments is an
+/// example of what the *payload grammar* permits, not this convention.
+#[must_use]
+pub fn binding_key(consumer: &str, contract: &str) -> String {
+    format!("{consumer}|{contract}")
 }
 
 /// One thing in the graph.

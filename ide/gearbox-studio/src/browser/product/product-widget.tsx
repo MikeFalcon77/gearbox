@@ -12,6 +12,7 @@
 // is the property `profiles = [...]` as a data field exists to buy.
 
 import { codicon, ReactWidget } from "@theia/core/lib/browser";
+import { CommandRegistry } from "@theia/core/lib/common";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
@@ -37,6 +38,7 @@ export class ProductWidget extends ReactWidget {
   // write boundary, which is what makes a product outside this checkout editable.
   @inject(ProductSessionService) protected readonly session!: ProductSessionService;
   @inject(RevealService) protected readonly reveals!: RevealService;
+  @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
 
   /** Which branches are folded away. Widget state; nobody else's business. */
   protected collapsed = new Set<string>();
@@ -54,6 +56,11 @@ export class ProductWidget extends ReactWidget {
     this.update();
   }
 
+  /** The Conflicts screen, by command, so the panel does not have to be injected. */
+  protected showConflicts(): void {
+    void this.commands.executeCommand("gearbox.conflicts.toggle");
+  }
+
   protected render(): React.ReactNode {
     const state = this.store.current;
 
@@ -63,7 +70,7 @@ export class ProductWidget extends ReactWidget {
           <div className="gbx-error" role="alert">
             {state.error}
           </div>
-          {renderDiagnostics(state.diagnostics)}
+          {renderDiagnosticsSummary(state.diagnostics, () => this.showConflicts())}
         </div>
       );
     }
@@ -129,7 +136,7 @@ export class ProductWidget extends ReactWidget {
         {state.status === "resolving" && <div className="gbx-progress">resolving…</div>}
 
         {product && this.renderResolved(product)}
-        {renderDiagnostics(state.diagnostics)}
+        {renderDiagnosticsSummary(state.diagnostics, () => this.showConflicts())}
       </div>
     );
   }
@@ -541,20 +548,35 @@ function describeInclusion(reason: InclusionReason): string {
   }
 }
 
-function renderDiagnostics(diagnostics: readonly Diagnostic[]): React.ReactNode {
+/**
+ * A summary that leads to the conflicts, rather than the conflicts themselves.
+ *
+ * This used to print every diagnostic under the tree, and the Conflicts screen now
+ * prints the same ones with the parts that matter for acting on them -- the help
+ * sentence, the related locations, the evidence, the subject to explain. Two full
+ * lists is duplication, and the version squeezed under a tree was the one nobody
+ * could act on. eCos's Config Tool makes conflicts a screen for exactly this
+ * reason.
+ *
+ * §9 asks the Product view for "a diagnostics summary", which is what this is: a
+ * count, the worst severity, and the way to the detail.
+ */
+function renderDiagnosticsSummary(
+  diagnostics: readonly Diagnostic[],
+  show: () => void,
+): React.ReactNode {
   if (diagnostics.length === 0) return undefined;
+  const errors = diagnostics.filter((d) => d.severity === "error").length;
+  const worst = errors > 0 ? "error" : (diagnostics[0]?.severity ?? "info");
   return (
-    <div className="gbx-diagnostics">
-      <div className="gbx-diagnostics-label">{diagnostics.length} diagnostic(s)</div>
-      {diagnostics.map((diagnostic, index) => (
-        <div
-          className={`gbx-diagnostic gbx-diagnostic-${String(diagnostic.severity).toLowerCase()}`}
-          key={`${diagnostic.code}-${index}`}
-        >
-          <span className="gbx-id">{diagnostic.code}</span>
-          <span className="gbx-diagnostic-message">{diagnostic.message}</span>
-        </div>
-      ))}
+    <div className={`gbx-diagnostics gbx-diagnostics-${String(worst).toLowerCase()}`}>
+      <div className="gbx-diagnostics-label">
+        {diagnostics.length} diagnostic(s)
+        {errors > 0 && `, ${errors} blocking`}
+      </div>
+      <button type="button" className="gbx-choice" data-show-conflicts onClick={show}>
+        Show conflicts
+      </button>
     </div>
   );
 }

@@ -132,8 +132,8 @@ export class ToolbarWidget extends ReactWidget {
    * Resolved, resolving, or the count of errors -- in the product's own terms.
    *
    * Errors are counted rather than listed: a header is read at a glance, and the
-   * list belongs where a person can act on each one. That the count is a link to
-   * that place is the next step, not this one.
+   * list belongs where a person can act on each one -- which is the Conflicts
+   * screen, and the count opens it.
    */
   protected renderStatus(status: string, resolved: boolean): React.ReactNode {
     const errors = (this.products.current.resolution?.diagnostics ?? []).filter(
@@ -148,14 +148,21 @@ export class ToolbarWidget extends ReactWidget {
       );
     }
     if (errors > 0) {
+      // A button, not a label. The count is only useful if it leads somewhere, and
+      // the place it leads to -- the Conflicts screen -- is where each one can be
+      // read and acted on. A number with nowhere to go is a number that trains
+      // people to ignore it.
       return (
-        <span
+        <button
+          type="button"
           className="gbx-badge gbx-downgraded gbx-toolbar-status"
           data-status="conflicts"
           data-conflicts={errors}
+          title="Show the conflicts"
+          onClick={() => void this.commands.executeCommand("gearbox.conflicts.toggle")}
         >
           {errors} {errors === 1 ? "conflict" : "conflicts"}
-        </span>
+        </button>
       );
     }
     if (resolved) {

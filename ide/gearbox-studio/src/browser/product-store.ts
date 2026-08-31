@@ -16,13 +16,18 @@
 //     one wins -- so the panel would show a profile the switch does not say.
 
 import { Emitter, Event } from "@theia/core/lib/common/event";
-import { inject, injectable } from "@theia/core/shared/inversify";
+import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 
 import type { Diagnostic } from "../common/generated/Diagnostic";
 import type { LockResult } from "../common/generated/LockResult";
 import type { ProductIntent } from "../common/generated/ProductIntent";
 import type { ResolveResult } from "../common/generated/ResolveResult";
 import { GearboxService, ProductRef } from "../common/protocol";
+import {
+  isProductSelection,
+  type ProductSelection,
+  SelectionService,
+} from "./shell/selection-service";
 
 export type ProductStatus = "idle" | "loading" | "resolving" | "ready" | "error";
 
@@ -76,11 +81,16 @@ const EMPTY: ProductState = {
   error: undefined,
 };
 
-/** What the Explain view is currently answering "why" about. */
-export type Focus =
-  | { readonly kind: "gear"; readonly id: string }
-  | { readonly kind: "process"; readonly id: string }
-  | { readonly kind: "binding"; readonly consumer: string; readonly contract: string };
+/**
+ * What the Inspector is currently answering "why" about.
+ *
+ * An alias rather than a second declaration: this used to be its own union here
+ * while the catalogue held a row key, and one gear selected two ways was two
+ * selections. `SelectionService` owns the value now; `Focus` is the name the
+ * product side already used for it, kept so the tree and the markers did not have
+ * to be rewritten to say the same thing.
+ */
+export type Focus = ProductSelection;
 
 @injectable()
 export class ProductStore {
@@ -91,7 +101,19 @@ export class ProductStore {
 
   protected state: ProductState = EMPTY;
   protected epoch = 0;
-  protected focused: Focus | undefined;
+
+  /** The discovery in flight, if one is. See `ensureDiscovered`. */
+  protected discovering: Promise<void> | undefined;
+
+  /**
+   * The selection lives in `SelectionService`, not here.
+   *
+   * `focus` and `setFocus` are kept because the tree, the markers and the
+   * Inspector all speak in them -- but they are a view onto one shared value now,
+   * so a gear chosen in the catalogue is the same choice as the same gear chosen
+   * in the product tree.
+   */
+  @inject(SelectionService) protected readonly selection!: SelectionService;
   /**
    * Guards the lazy lock fetch against the render that triggers it.
    *
@@ -100,17 +122,41 @@ export class ProductStore {
    */
   protected lockInFlight = false;
 
+  @postConstruct()
+  protected init(): void {
+    this.selection.onDidChange(() => this.onChangedEmitter.fire());
+  }
+
   get current(): ProductState {
     return this.state;
   }
 
+  /**
+   * Bumped every time the store starts a new piece of work.
+   *
+   * Exposed so a caller that computed something from the state can tell whether
+   * that state is still the one on screen. `ProductEditService` needs exactly
+   * this: it previews a write, waits for a person to agree, and must not write
+   * against a preview computed from a product that has since been re-read,
+   * re-resolved, switched to another profile or closed.
+   *
+   * The epoch is the right value rather than a new counter: it already changes on
+   * precisely those events, because it is what abandons a resolution in flight.
+   */
+  get revision(): number {
+    return this.epoch;
+  }
+
   get focus(): Focus | undefined {
-    return this.focused;
+    const selection = this.selection.current;
+    // A pending catalogue row is not something a resolution can be asked about:
+    // it has no `GearId` until S2 has run, and the explanation graph is keyed by
+    // id. So it reads as "nothing focused" here, and the Inspector says why.
+    return isProductSelection(selection) ? selection : undefined;
   }
 
   setFocus(focus: Focus | undefined): void {
-    this.focused = focus;
-    this.onChangedEmitter.fire();
+    this.selection.select(focus);
   }
 
   /**
@@ -133,6 +179,22 @@ export class ProductStore {
    * RPCs and open a product for a panel that may never be looked at.
    */
   async ensureDiscovered(): Promise<void> {
+    // **One discovery at a time, and concurrent callers wait for the same one.**
+    //
+    // Not a nicety: `discover()` bumps the epoch, which is what abandons work in
+    // flight, so a second discovery started while the first was in the air made
+    // the first one's answer arrive too late to be installed. The Start screen
+    // asking on every store change and the session's `ensureOpen` asking once
+    // were exactly that pair -- and the symptom was a product that never resolved,
+    // sixty seconds of `[data-resolved-profile]` never appearing, with nothing in
+    // the console. The same non-reentrancy `ProductSessionService.open` has, and
+    // for the same reason.
+    const pending = this.discovering;
+    if (pending !== undefined) {
+      await pending;
+      return;
+    }
+
     // Nothing in flight to abandon, and nothing already found to discard.
     if (this.state.status === "loading" || this.state.status === "resolving") {
       return;
@@ -140,7 +202,15 @@ export class ProductStore {
     if (this.state.open !== undefined || this.state.products.length > 0) {
       return;
     }
-    await this.discover();
+    const started = this.discover();
+    this.discovering = started;
+    try {
+      await started;
+    } finally {
+      if (this.discovering === started) {
+        this.discovering = undefined;
+      }
+    }
   }
 
   async discover(): Promise<void> {
@@ -206,8 +276,15 @@ export class ProductStore {
    */
   clear(): void {
     this.epoch += 1;
-    this.focused = undefined;
+    // State first, then the selection. `SelectionService.select` fires an event that
+    // this store forwards as its own `onChanged`, so clearing the selection first
+    // published a change while `state` still held the product being closed -- one
+    // render of a panel about a product that was on its way out. Converges either
+    // way; only one of the two orders never shows the intermediate.
     this.state = EMPTY;
+    // The selection goes with the product: a gear still selected behind a closed
+    // product would leave the Inspector explaining a resolution nobody has.
+    this.selection.select(undefined);
     this.onChangedEmitter.fire();
   }
 

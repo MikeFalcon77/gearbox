@@ -29,7 +29,9 @@ pub use diagnostics::{
     Diagnostic, DiagnosticCode, DiagnosticDomain, Diagnostics, Location, Position, Range,
     RelatedLocation, Severity, UnknownDiagnosticCode, file_uri,
 };
-pub use explain::{ExplanationGraph, ExplanationNode, NodeKind, ProvenanceEdge, ProvenanceKind};
+pub use explain::{
+    ExplanationGraph, ExplanationNode, NodeKind, ProvenanceEdge, ProvenanceKind, binding_key,
+};
 pub use fileset::{FileAction, FileEntry, FileKind, FilePlan, FileSet, Ownership};
 pub use ids::{
     CapabilityId, ContractId, GearId, IdError, NodeId, ProcessId, ProfileId, ProviderId, RelPath,

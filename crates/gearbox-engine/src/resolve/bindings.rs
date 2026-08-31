@@ -16,7 +16,7 @@
 use gearbox_ir::{
     BindingMechanism, BindingMode, BindingRequest, Catalogue, ContractDescriptor, ContractId,
     DeploymentProfileDecl, Diagnostic, DiagnosticCode, Diagnostics, Discovery, GearId, Location,
-    ProcessId, ResolvedBinding, ResolvedBindingMode, Selected, Transport,
+    NodeKind, ProcessId, ResolvedBinding, ResolvedBindingMode, Selected, Transport, binding_key,
 };
 
 use super::cuts::Cuts;
@@ -256,22 +256,43 @@ pub fn report_env_limits(
         if !key.contains('_') {
             continue;
         }
-        diagnostics.push(
-            Diagnostic::new(
-                DiagnosticCode::BindingEnvCannotExpressWiring,
-                format!(
-                    "the endpoint override for `{}` on `{}` cannot come from an environment \
-                     variable",
-                    binding.consumer, binding.contract
-                ),
-            )
-            .with_help(format!(
-                "the key is `consumer_wiring.{key}`, and the runtime's environment remapping \
-                 converts underscores to hyphens only in the segment right after the gears \
-                 prefix, so a nested key with an underscore never matches; the generator writes \
-                 it into the configuration file instead"
-            ))
-            .at(Location::file(uri.to_owned())),
-        );
+        let mut diagnostic = Diagnostic::new(
+            DiagnosticCode::BindingEnvCannotExpressWiring,
+            format!(
+                "the endpoint override for `{}` on `{}` cannot come from an environment variable",
+                binding.consumer, binding.contract
+            ),
+        )
+        .with_help(format!(
+            "the key is `consumer_wiring.{key}`, and the runtime's environment remapping \
+             converts underscores to hyphens only in the segment right after the gears prefix, \
+             so a nested key with an underscore never matches; the generator writes it into the \
+             configuration file instead"
+        ))
+        .at(Location::file(uri.to_owned()));
+        // `subject` is documented as "the graph node this concerns, so a client can
+        // select it", and until now nothing set it on any diagnostic --
+        // `Diagnostic::about` existed with no callers at all, so Studio's Conflicts
+        // screen had no node to offer an explanation for.
+        //
+        // This diagnostic because its subject is unambiguous: the complaint is
+        // about exactly one binding, named by consumer and contract, and the
+        // explanation graph holds a node for every resolved binding under the same
+        // key -- `binding_key`, which is now written down once for both. Most other
+        // diagnostics are about a resolution as a whole ("two severable edges stay
+        // local because the profile is single-process" concerns no single node), and
+        // inventing a subject for those would send a reader to a node that does not
+        // explain them.
+        //
+        // The `if let` rather than an `about(...)` that takes an `Option`: an id
+        // that cannot be constructed is not an error here, it is a diagnostic
+        // without a subject, which is the ordinary case everywhere else.
+        if let Some(node) = NodeKind::Binding.id_for(&binding_key(
+            binding.consumer.as_str(),
+            binding.contract.as_str(),
+        )) {
+            diagnostic = diagnostic.about(node);
+        }
+        diagnostics.push(diagnostic);
     }
 }

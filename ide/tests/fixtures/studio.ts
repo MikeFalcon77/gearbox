@@ -206,9 +206,13 @@ export async function settled(page: Page): Promise<void> {
     { timeout: 90_000, polling: SAMPLE_MS },
   );
   // Theia's bottom area attaches later than the side panel -- measured at about
-  // 3.3s against 1.1s for the tree -- so the detail widget has to be waited for
+  // 3.3s against 1.1s for the tree -- so the Inspector has to be waited for
   // rather than assumed present the moment a row is clickable.
-  await page.waitForSelector(".gbx-detail", { timeout: 60_000 });
+  //
+  // `.gbx-inspector` and not `.gbx-detail`: the detail is a *section*, and it only
+  // renders once something is selected. Waiting on it here waited for a selection
+  // nobody had made yet.
+  await page.waitForSelector(".gbx-inspector", { timeout: 60_000 });
 }
 
 /**
@@ -234,7 +238,66 @@ export async function openPalette(page: Page): Promise<void> {
   await page.locator(".quick-input-widget").waitFor({ state: "visible" });
 }
 
+/**
+ * Refuse to drive the application while a modal dialog is up.
+ *
+ * A leftover dialog is not untidy, it is armed. Theia binds Enter on
+ * **`document.body`** while one is open (`@theia/core/lib/browser/dialogs.js:82`)
+ * and `handleEnter` accepts unless the event came from a textarea, so the next
+ * keystroke any test sends -- to the palette, to an editor, to nothing in
+ * particular -- answers it. When the dialog is a description-edit confirmation,
+ * that keystroke writes to `product.gdl`. The `studio` page is worker-scoped, so a
+ * leftover outlives the test that made it and lands on a stranger.
+ *
+ * Checked here rather than in an `afterEach`, and the reason is mechanical: this
+ * suite's page belongs to the worker-scoped `studio` fixture, and a hook that
+ * asked for a page fixture would get a *different*, freshly created one. So the
+ * check sits at the two doors every test goes through, which is also where the
+ * damage would be done.
+ */
+async function refuseIfDialogOpen(page: Page, doing: string): Promise<void> {
+  const dialogs = page.locator(".dialogBlock");
+  if ((await dialogs.count()) === 0) return;
+  const titles = await page.locator(".dialogBlock .dialogTitle").allInnerTexts();
+  await page.keyboard.press("Escape");
+  throw new Error(
+    `a modal dialog was open before ${doing}: ${JSON.stringify(titles)}. ` +
+      `An earlier test left it, and Enter is bound on document.body while it is up, ` +
+      `so the next keystroke would have answered it. It has been dismissed.`,
+  );
+}
+
+/**
+ * What the command palette offers for a query, as labels.
+ *
+ * Reads rather than runs, because "this command is not reachable" is a claim about
+ * the palette itself: `QuickCommandService` filters
+ * `CommandRegistry.getAllCommands()` by `isVisible && isEnabled`, so a command
+ * that is still registered is still offered no matter what the menus say. Asserting
+ * on menus alone missed that for the whole life of the shell policy.
+ *
+ * Closes the palette on the way out. A palette left open swallows the next test's
+ * keystrokes, and the dialog guard above exists because that class of leftover has
+ * already cost this suite a stray write.
+ */
+export async function paletteOffers(page: Page, query: string): Promise<string[]> {
+  await openPalette(page);
+  await page.keyboard.type(query, { delay: 10 });
+  const options = page.locator(`.quick-input-list [role="option"]`);
+  // Either something matched or the list is empty; both are answers, and waiting
+  // for the first option would turn "nothing is offered" into a timeout.
+  await page
+    .locator(".quick-input-widget")
+    .waitFor({ state: "visible" })
+    .catch(() => undefined);
+  const labels = (await options.allInnerTexts()).map((text) => text.replace(/\s+/g, " ").trim());
+  await page.keyboard.press("Escape");
+  await page.locator(".quick-input-widget").waitFor({ state: "hidden" });
+  return labels;
+}
+
 export async function runCommand(page: Page, label: string): Promise<void> {
+  await refuseIfDialogOpen(page, `running "${label}"`);
   await openPalette(page);
   await page.keyboard.type(label, { delay: 20 });
   // Wait for the filtered list to settle on a match before committing, rather
@@ -259,7 +322,25 @@ export async function runCommand(page: Page, label: string): Promise<void> {
     await matching.first().click();
     return;
   }
-  await page.keyboard.press("Enter");
+
+  // **Not `Enter`.** Pressing it here used to be the fallback, on the theory that
+  // the fuzzy matcher had probably ranked the right thing first. Two problems, and
+  // the second is why this throws instead.
+  //
+  // It hides a broken test: a command whose label changed, or one that was never
+  // registered, ran *something else* and the failure surfaced sixty seconds later
+  // as a panel that never appeared.
+  //
+  // And it can write to a file. `DialogOverlayService` binds Enter on
+  // `document.body` (`@theia/core/lib/browser/dialogs.js:82`), so while any dialog
+  // is open an Enter anywhere accepts it -- including a description-edit
+  // confirmation left over from an earlier test in this worker-scoped page. That
+  // is a candidate mechanism for the stray `use_gear(...)` writes this suite has
+  // guarded against three times, and it costs nothing to take away.
+  const offered = await options.allInnerTexts();
+  throw new Error(
+    `no command in the palette contains "${label}". Offered: ${JSON.stringify(offered)}`,
+  );
 }
 
 /**
@@ -280,6 +361,7 @@ export async function runCommand(page: Page, label: string): Promise<void> {
  * exactly what is wanted here.
  */
 async function revealView(page: Page, command: string, selector: string): Promise<void> {
+  await refuseIfDialogOpen(page, `revealing ${command}`);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (await page.locator(selector).first().isVisible()) return;
     // Attached-but-hidden: the widget is in the DOM behind another tab. Click its
@@ -379,8 +461,16 @@ export async function openGraphView(
     .waitFor({ state: "visible" });
 }
 
+/**
+ * Bring the Inspector to the front, and wait for its "why" section.
+ *
+ * `Gearbox Explain` was a panel of its own until the two bottom panels became one
+ * Inspector. The section kept its class, so everything asserted about the
+ * explanation still asserts the same markup -- only the tab it lives behind
+ * changed.
+ */
 export async function openExplain(page: Page): Promise<void> {
-  await revealView(page, "Gearbox Explain", ".gbx-explain");
+  await revealInspector(page);
 }
 
 /**
@@ -548,15 +638,51 @@ function escapeForRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export async function revealDetail(page: Page): Promise<void> {
+/**
+ * Bring the Inspector to the front, by tab.
+ *
+ * Waits for the **panel**, not for either of its sections. That distinction cost a
+ * whole suite run: `.gbx-detail` and `.gbx-explain` render only once something is
+ * selected, so waiting for one here waited thirty seconds for a selection the
+ * caller had not made yet -- and `detailOf` reveals the panel *before* clicking a
+ * row, which is every gear-facts claim in the suite.
+ *
+ * By tab rather than by command for the reason `revealView` records: the tab is
+ * what Theia reliably listens to, and the toggle command on an already-current
+ * view closes it. Returns silently when the tab does not exist, because a caller
+ * that then waits on a section gets a better failure than this could produce.
+ */
+export async function revealInspector(page: Page): Promise<void> {
+  await refuseIfDialogOpen(page, "revealing the Inspector");
   const tab = page.locator("#theia-bottom-content-panel .lm-TabBar-tab", {
-    hasText: "Gearbox Gear",
+    hasText: "Gearbox Inspector",
   });
   if ((await tab.count()) === 0) return;
   if (!(await tab.evaluate((e) => e.classList.contains("lm-mod-current")))) {
     await tab.click();
   }
-  await page.locator(".gbx-detail").waitFor({ state: "visible" });
+  await page.locator(".gbx-inspector").waitFor({ state: "visible" });
+}
+
+/**
+ * The Inspector, by its old name.
+ *
+ * Kept as an alias because the callers ask for "the panel with the gear facts in
+ * it", which is what this is -- one panel now, two sections.
+ */
+export async function revealDetail(page: Page): Promise<void> {
+  await revealInspector(page);
+}
+
+/**
+ * Open the Conflicts screen.
+ *
+ * By command, because unlike the Inspector this panel is not opened at startup --
+ * a panel that appears to say "no conflicts" says nothing -- so there is no tab to
+ * click until something has asked for one.
+ */
+export async function openConflicts(page: Page): Promise<void> {
+  await revealView(page, "Gearbox Conflicts", ".gbx-conflicts");
 }
 
 export async function revealLock(page: Page): Promise<void> {

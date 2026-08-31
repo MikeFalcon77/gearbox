@@ -29,7 +29,7 @@ import type {
  * a failure, because a claim that stopped being collected proved nothing and
  * said nothing.
  */
-const EXPECTED_TESTS = 99;
+const EXPECTED_TESTS = 104;
 
 
 type Status = "built" | "broken" | "not-built" | "unobserved";

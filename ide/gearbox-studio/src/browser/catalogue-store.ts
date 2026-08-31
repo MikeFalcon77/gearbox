@@ -14,7 +14,9 @@
 // instead of leaving `loading` set forever.
 
 import { Emitter, Event } from "@theia/core/lib/common/event";
-import { inject, injectable } from "@theia/core/shared/inversify";
+import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
+
+import { SelectionService } from "./shell/selection-service";
 
 import type { CatalogueChanged } from "../common/generated/CatalogueChanged";
 import type { CatalogueDiagnostics } from "../common/generated/CatalogueDiagnostics";
@@ -101,14 +103,27 @@ export class CatalogueStore implements GearboxClient {
   protected streaming: number | undefined;
 
   /**
-   * The selected row, keyed the way rows are keyed.
+   * Where the selection lives now.
    *
-   * In the store rather than in the tree widget because the detail panel is a
-   * separate widget in the bottom area, and a key that survives the
-   * pending-to-projected transition is exactly what a selection needs: choosing
-   * a row before it is parsed must not lose the choice when it finishes.
+   * It used to be a `selectedKey` field here, and a second selection lived in
+   * `ProductStore`. One gear chosen two ways was two selections, and the panel
+   * that answered "what is it" could not see the one made in the product tree.
+   * `SelectionService` owns the value; this store translates between it and the
+   * row key the tree renders with, and still fires its own change event so the
+   * highlight follows a selection made anywhere.
    */
-  protected selectedKey: string | undefined;
+  @inject(SelectionService) protected readonly selection!: SelectionService;
+
+  /** Set once, in `@postConstruct` -- never in a field initializer, which runs before injection. */
+  protected selectionSubscribed = false;
+
+  /** The load in flight, if one is. See `load`. */
+  protected loading: Promise<void> | undefined;
+
+  @postConstruct()
+  protected init(): void {
+    this.watchSelection();
+  }
 
   get current(): CatalogueState {
     return this.state;
@@ -122,12 +137,46 @@ export class CatalogueStore implements GearboxClient {
     return this.logLines;
   }
 
+  /**
+   * The selected row's key, for whatever is selected anywhere.
+   *
+   * A `gear` selection is resolved to the row that projected it, so choosing a
+   * gear in the product tree lights up the same gear in the catalogue. That
+   * lookup is a scan of the rows and the catalogue is fourteen of them; a map
+   * from id to key would be a second index to keep correct across the
+   * pending-to-projected replacement, for no measurable gain.
+   */
   get selected(): string | undefined {
-    return this.selectedKey;
+    const selection = this.selection.current;
+    if (selection === undefined) return undefined;
+    if (selection.kind === "catalogue-row") return selection.key;
+    if (selection.kind !== "gear") return undefined;
+    for (const [key, row] of this.rowsByKey) {
+      if (row.kind === "projected" && row.gear.id === selection.id) return key;
+    }
+    return undefined;
   }
 
   get selectedRow(): Row | undefined {
-    return this.selectedKey === undefined ? undefined : this.rowsByKey.get(this.selectedKey);
+    const key = this.selected;
+    return key === undefined ? undefined : this.rowsByKey.get(key);
+  }
+
+  /**
+   * The source roots the engine currently has open.
+   *
+   * For `ProductSessionService`, which has to re-initialize with a new workspace
+   * *before* it can read a description and learn the roots that description wants.
+   * The engine refuses `product/load` when no root is open, so "keep what is
+   * already there" is the only honest thing to pass at that point.
+   */
+  rootPaths(): string[] {
+    return [...this.rootsById.values()];
+  }
+
+  /** One row by key, for a widget that resolves a selection rather than holding one. */
+  row(key: string): Row | undefined {
+    return this.rowsByKey.get(key);
   }
 
   /**
@@ -147,9 +196,36 @@ export class CatalogueStore implements GearboxClient {
     return join(root, relative);
   }
 
+  /**
+   * Select a row, as a selection the rest of the application can act on.
+   *
+   * Normalised here rather than by the caller: a **projected** row becomes a
+   * `gear` selection, because at that point the row is a gear with an id and
+   * everything else -- the explanation graph, the product tree, the markers --
+   * speaks in ids. A **pending** row has no id to speak of yet, so it stays a row
+   * key, and the Inspector renders what S0/S1 knows.
+   */
   select(key: string | undefined): void {
-    this.selectedKey = key;
-    this.onChangedEmitter.fire();
+    if (key === undefined) {
+      this.selection.select(undefined);
+      return;
+    }
+    const row = this.rowsByKey.get(key);
+    this.selection.select(
+      row?.kind === "projected" ? { kind: "gear", id: row.gear.id } : { kind: "catalogue-row", key },
+    );
+  }
+
+  /**
+   * Re-render when the selection changes anywhere.
+   *
+   * Called from `@postConstruct`, and guarded: `load()` does not reset it, and
+   * subscribing twice would fire this store's change event twice per selection.
+   */
+  protected watchSelection(): void {
+    if (this.selectionSubscribed) return;
+    this.selectionSubscribed = true;
+    this.selection.onDidChange(() => this.onChangedEmitter.fire());
   }
 
   /**
@@ -161,13 +237,57 @@ export class CatalogueStore implements GearboxClient {
    * claiming it is still projecting.
    */
   async load(session?: StudioSession): Promise<void> {
-    // Remembered, because `Reload Catalogue` and the reconnect path both call
-    // `load()` with nothing: without this they would quietly re-initialize with
-    // the built-in roots and the product's own sources would disappear from the
-    // catalogue while the product stayed open.
+    // **One load at a time, and the second waits rather than replacing it.**
+    //
+    // `initialize` disposes the engine and spawns a new one, so two loads in the
+    // air mean two respawns -- and the second one's spawn can land while the
+    // first's `loadProduct` is mid-flight, which the first sees as an engine that
+    // died under it. That is a race the boot sequence walks straight into: the
+    // application starts one load at `onStart`, and a product session opening in
+    // the same tick starts another with the product's own roots.
+    //
+    // Queued, not deduplicated: `Reload Catalogue` after a load in flight has to
+    // actually re-read, so a second call cannot be answered with the first one's
+    // promise. It waits, then runs. The epoch guard still decides which load's
+    // answers are installed.
+    // Remembered here, and **captured here**, which are two different things.
+    //
+    // `Reload Catalogue` and the reconnect path call `load()` with nothing and
+    // must reuse the product session's roots, so the field is set at call time.
+    // But the load itself now runs later, and reading the field *then* was a bug
+    // this queue introduced: the application's boot load is queued first, a
+    // product session opening in the same tick sets the field to its own
+    // `{roots: [], workspace}` -- the deliberate no-roots step that lets a
+    // description be evaluated -- and the boot load, when its turn came, read that
+    // and initialized with no roots at all. The catalogue then said "no source
+    // root is open" and the product never finished opening.
     if (session !== undefined) {
       this.session = session;
     }
+    const forThisLoad = this.session;
+
+    const previous = this.loading;
+    const started = (async () => {
+      // The previous load never rejects -- a failure is a state -- but `catch`
+      // rather than trusting that, because one throw here would strand every load
+      // queued behind it.
+      if (previous !== undefined) {
+        await previous.catch(() => undefined);
+      }
+      await this.doLoad(forThisLoad);
+    })();
+    this.loading = started;
+    try {
+      await started;
+    } finally {
+      if (this.loading === started) {
+        this.loading = undefined;
+      }
+    }
+  }
+
+  /** One load, against the session decided when it was asked for. */
+  protected async doLoad(session: StudioSession | undefined): Promise<void> {
     const epoch = ++this.epoch;
     this.streaming = undefined;
     this.rowsByKey.clear();
@@ -178,7 +298,7 @@ export class CatalogueStore implements GearboxClient {
       // The session, when a product session drives the load. `initialize`
       // disposes and respawns the engine, so this is also what makes the roots
       // and the write boundary change wholesale rather than drift.
-      const init = await this.service.initialize(this.session);
+      const init = await this.service.initialize(session);
       if (epoch !== this.epoch) {
         return;
       }

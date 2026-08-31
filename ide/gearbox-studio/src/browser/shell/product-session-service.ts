@@ -37,6 +37,8 @@ import { inject, injectable } from "@theia/core/shared/inversify";
 
 import type { SourceDecl } from "../../common/generated/SourceDecl";
 import { GearboxService, type ProductRef, type StudioSession } from "../../common/protocol";
+import { WorkspaceService } from "@theia/workspace/lib/browser/workspace-service";
+
 import { CatalogueStore } from "../catalogue-store";
 import { ProductStore } from "../product-store";
 
@@ -59,6 +61,7 @@ export class ProductSessionService {
   @inject(MessageService) protected readonly messages!: MessageService;
   @inject(MonacoTextModelService) protected readonly models!: MonacoTextModelService;
   @inject(StorageService) protected readonly storage!: StorageService;
+  @inject(WorkspaceService) protected readonly workspace!: WorkspaceService;
 
   /**
    * The open in flight, if any.
@@ -178,6 +181,36 @@ export class ProductSessionService {
   }
 
   /**
+   * The write boundary for a product: the workspace folder that contains it.
+   *
+   * **Not the product's own directory**, and the difference is a generated tree in
+   * the wrong place. The engine derives its output root from the workspace, so a
+   * workspace of `products/payments-demo` put the generated crates in
+   * `products/payments-demo/.gearbox/payments-demo/dev` -- inside the descriptions
+   * folder, and *not* the tree the CLI writes when it is run from the repository
+   * root. One product, two trees, which is exactly the divergence removed when
+   * Studio stopped generating into a tree of its own (plan 9.1).
+   *
+   * The containing workspace folder is the honest boundary: it contains the
+   * description, so an edit is inside it; it is the root the CLI would be run
+   * from, so both write the same `.gearbox/<product>/<profile>`; and it is what
+   * the person opened, so it is a boundary they chose rather than one derived.
+   *
+   * The longest containing root wins, because Theia allows several and they may
+   * nest. A product outside every root falls back to its own directory -- a
+   * narrower boundary than the person expects is safe, and refusing to open it
+   * would be worse.
+   */
+  protected workspaceFor(path: string, directory: string): string {
+    const containing = this.workspace
+      .tryGetRoots()
+      .map((stat) => stat.resource.path.fsPath())
+      .filter((root) => path.startsWith(`${root}/`))
+      .sort((a, b) => b.length - a.length);
+    return containing[0] ?? directory;
+  }
+
+  /**
    * Open `ref` as the session's product.
    *
    * Returns whether it opened. A refusal is reported to the person rather than
@@ -200,10 +233,24 @@ export class ProductSessionService {
 
   protected async doOpen(ref: ProductRef): Promise<boolean> {
     const directory = parentOf(ref.path);
+    const workspace = this.workspaceFor(ref.path, directory);
 
-    // Step 1: an engine that can evaluate a description and nothing more. The
-    // workspace is already the product's, so a later edit is inside the boundary.
-    await this.catalogue.load({ roots: [], workspace: directory });
+    // Step 1: an engine whose workspace is the product's, so a later edit is
+    // inside the write boundary before anything reads the description.
+    //
+    // **Keeping the roots already open, not asking for none.** This asked for
+    // `roots: []` on the theory that evaluating a description needs no catalogue,
+    // and the engine disagrees: `gearbox/product/load` answers
+    // `no source root is open; pass roots to initialize or --root to the CLI`
+    // (measured -- drive `gearbox rpc --stdio` with `initialize({roots: []})` and
+    // then `product/load` to see it). The step therefore left an engine that
+    // refused step 2, and the open ended there.
+    //
+    // Whatever is open now is the right set to carry: at boot it is the backend's
+    // defaults, and after a previous product it is that product's -- either way a
+    // description can be evaluated, and step 4 replaces them with the ones this
+    // product actually declares.
+    await this.catalogue.load({ roots: this.catalogue.rootPaths(), workspace });
 
     // Step 2: read what the description declares. `loadProduct` is evaluation
     // only -- nothing is joined against the catalogue -- which is exactly why it
@@ -245,7 +292,7 @@ export class ProductSessionService {
     }
 
     // Step 3 and 4: the real session, then the catalogue and the product.
-    const session: StudioSession = { roots, workspace: directory };
+    const session: StudioSession = { roots, workspace };
     await this.catalogue.load(session);
     await this.products.open(ref);
     const opened = this.products.current.open !== undefined;

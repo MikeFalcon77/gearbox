@@ -20,6 +20,7 @@ use gearbox_ir::{
     Catalogue, Choice, ExplanationGraph, ExplanationNode, GearId, InclusionReason,
     KubernetesSettings, LOCK_SCHEMA_VERSION, NodeId, NodeKind, ProductIntent, ProvenanceEdge,
     ProvenanceKind, ResolvedGear, ResolvedProduct, ResolvedProductHeader, ResolvedSource, SourceId,
+    binding_key,
 };
 
 use super::Resolution;
@@ -208,7 +209,7 @@ pub fn explain(resolution: &Resolution) -> ExplanationGraph {
     }
 
     for binding in &resolution.bindings {
-        let key = format!("{}|{}", binding.consumer, binding.contract);
+        let key = binding_key(binding.consumer.as_str(), binding.contract.as_str());
         let (Some(id), Some(consumer_process)) = (
             node_id(NodeKind::Binding, &key),
             node_id(NodeKind::Process, binding.consumer_process.as_str()),
@@ -306,12 +307,10 @@ pub fn explain(resolution: &Resolution) -> ExplanationGraph {
 
 /// A node id derived from what it names, so the graph is byte-stable.
 ///
-/// `None` only for an empty key, which no caller produces: every key comes from
-/// an already-validated id. Returning an `Option` rather than asserting that is
-/// what keeps the function total -- an unnameable node is simply absent from the
-/// graph, which degrades the explanation instead of aborting the resolution.
+/// Delegates to `NodeKind::id_for`, which is where the `{prefix}:{key}` convention
+/// now lives -- a diagnostic naming the same node in its `subject` has to produce
+/// the identical string, and two format strings for one wire convention is how a
+/// client ends up asking about a node that is not there.
 fn node_id(kind: NodeKind, key: &str) -> Option<NodeId> {
-    // A colon separates the two parts, so one inside the key would make a third.
-    let sanitized = key.replace(':', "_");
-    NodeId::new(format!("{}:{sanitized}", kind.prefix())).ok()
+    kind.id_for(key)
 }

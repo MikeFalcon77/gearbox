@@ -311,7 +311,7 @@ test.describe("every view has an icon, and the icon exists", () => {
     // this checkable without depending on a label the activity bar does not show.
     const icons = await studio.page.evaluate(() =>
       Object.fromEntries(
-        ["gearbox.catalogue", "gearbox.detail"].map((id) => {
+        ["gearbox.catalogue", "gearbox.inspector"].map((id) => {
           const tab = document.querySelector(`#shell-tab-${CSS.escape(id)}`);
           const icon = tab?.querySelector(".lm-TabBar-tabIcon");
           return [id, icon?.className ?? ""];
@@ -321,7 +321,7 @@ test.describe("every view has an icon, and the icon exists", () => {
     // The catalogue is the reported case: left bar, icon only, so an empty class
     // is a button with nothing in it.
     expect(icons["gearbox.catalogue"]).toContain("codicon-library");
-    expect(icons["gearbox.detail"]).toContain("codicon-info");
+    expect(icons["gearbox.inspector"]).toContain("codicon-info");
   });
 });
 
