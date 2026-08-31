@@ -14,12 +14,37 @@
 // worked.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { expect, revealInExplorer, revealLeft, test } from "../fixtures/studio";
 
 const IDE = join(__dirname, "../..");
+
+/**
+ * A file that makes the repository dirty, for as long as the claim needs it.
+ *
+ * **The two Git claims below used to depend on the developer's working tree.**
+ * They asserted "the badge is greater than zero" and "some node carries a letter",
+ * which is true whenever someone has uncommitted work and false the moment they
+ * commit -- so the suite went red on a clean checkout and green again after any
+ * edit. A conformance run that reports the state of somebody's editor is not
+ * reporting on the application.
+ *
+ * So the claim makes its own change: one untracked file, asserted on, then removed.
+ * That is also a stronger statement than the old one -- the provider is not merely
+ * non-zero, it *noticed something appear* -- and it holds on a clean checkout,
+ * which is where a conformance suite has to hold.
+ *
+ * Outside `products/`, because the three guards on the descriptions exist to catch
+ * exactly this kind of write, and rightly.
+ */
+function withDirtyRepo<T>(repo: string, run: (marker: string) => Promise<T>): Promise<T> {
+  const name = `.scm-probe-${process.pid}`;
+  const file = join(repo, "ide", name);
+  writeFileSync(file, "A file one conformance claim makes and removes. Safe to delete.\n");
+  return run(name).finally(() => rmSync(file, { force: true }));
+}
 
 /** `git status` counted the way an SCM view counts it: untracked files, not directories. */
 function changeCount(repo: string): number {
@@ -85,11 +110,31 @@ test.describe("Git, from the VS Code extension", () => {
     // A provider that registered but read nothing would still render a name and a
     // zero. Comparing against `git status` in the real checkout is what tells
     // "wired up" from "present".
+    await withDirtyRepo(join(IDE, ".."), async () => {
+      await revealLeft(studio.page, /^Source Control/);
+      // Polled: the extension learns about the new file from a watcher, so the
+      // badge is a moment behind the write rather than wrong.
+      await expect
+        .poll(async () =>
+          Number.parseInt(
+            (
+              (await studio.page
+                .locator("#shell-tab-scm-view-container .theia-badge-decorator-sidebar")
+                .textContent()
+                .catch(() => "0")) ?? "0"
+            ).trim(),
+            10,
+          ),
+        )
+        .toBeGreaterThan(0);
+    });
+
     await revealLeft(studio.page, /^Source Control/);
     const badge = await studio.page
       .locator("#shell-tab-scm-view-container .theia-badge-decorator-sidebar")
-      .textContent();
-    const shown = Number.parseInt((badge ?? "").trim(), 10);
+      .textContent()
+      .catch(() => "0");
+    const shown = Number.parseInt((badge ?? "0").trim(), 10);
     expect(Number.isNaN(shown)).toBe(false);
     // A floor, and the floor is what was measured rather than what was assumed.
     //
@@ -103,7 +148,9 @@ test.describe("Git, from the VS Code extension", () => {
     // The claim is that the provider actually read a repository, which the floor
     // still holds: a provider that registered and read nothing renders zero, and
     // one reading a *different* repository cannot reach the builder's count.
-    expect(shown).toBeGreaterThan(0);
+    // A floor against what git reports *now*, after the probe file is gone. On a
+    // clean checkout both are zero, and the claim above is the one that proved the
+    // provider is live.
     expect(shown).toBeGreaterThanOrEqual(changeCount(join(IDE, "..")));
   });
 
@@ -115,16 +162,22 @@ test.describe("Git, from the VS Code extension", () => {
     // Expand the builder root first. After a perspective switch Theia restores a
     // snapshot that may have had the folders collapsed, and a collapsed tree
     // has no letters to find.
-    await revealInExplorer(studio.page, "gearbox-builder", "docs", "ADR");
-    await expect
-      .poll(async () =>
-        studio.page.evaluate(() =>
-          Array.from(document.querySelectorAll(".theia-TreeNode"))
-            .map((node) => (node.textContent ?? "").trim())
-            .filter((text) => /[MUAD]$/.test(text)).length,
-        ),
-      )
-      .toBeGreaterThan(0);
+    await withDirtyRepo(join(IDE, ".."), async (marker) => {
+      // The probe file is in `ide/`, so that is the folder to expand: a collapsed
+      // tree has no letters to find, and after a perspective switch Theia may have
+      // restored a snapshot with the folders closed. Expanding by naming the probe
+      // file itself also waits for the tree to have noticed it.
+      await revealInExplorer(studio.page, "gearbox-builder", "ide", marker);
+      await expect
+        .poll(async () =>
+          studio.page.evaluate(() =>
+            Array.from(document.querySelectorAll(".theia-TreeNode"))
+              .map((node) => (node.textContent ?? "").trim())
+              .filter((text) => /[MUAD]$/.test(text)).length,
+          ),
+        )
+        .toBeGreaterThan(0);
+    });
   });
 });
 
