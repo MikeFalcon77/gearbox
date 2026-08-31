@@ -30,8 +30,6 @@ import {
   PRODUCT_PERSPECTIVE,
 } from "./studio-context-service";
 import { CatalogueWidget } from "../catalogue/catalogue-widget";
-import { GearDetailWidget } from "../detail/gear-detail-widget";
-import { ExplainWidget } from "../explain/explain-widget";
 import { ProductWidget } from "../product/product-widget";
 
 
@@ -42,10 +40,7 @@ export class GearboxPerspectives implements PerspectiveContribution {
     service.registerPerspective({
       id: HOME_PERSPECTIVE,
       label: "Home",
-      viewPlacements: new Map<string, ApplicationShell.Area>([
-        [CatalogueWidget.ID, "left"],
-        [GearDetailWidget.ID, "bottom"],
-      ]),
+      viewPlacements: new Map<string, ApplicationShell.Area>([[CatalogueWidget.ID, "left"]]),
       primaryViews: { left: CatalogueWidget.ID },
       // `primaryViews` runs only on first activation. A later switch restores
       // the snapshot, which may leave Explorer as the current left tab.
@@ -56,14 +51,24 @@ export class GearboxPerspectives implements PerspectiveContribution {
     service.registerPerspective({
       id: PRODUCT_PERSPECTIVE,
       label: "Product",
-      viewPlacements: new Map<string, ApplicationShell.Area>([
-        [ProductWidget.ID, "main"],
-        [ExplainWidget.ID, "bottom"],
-      ]),
+      // **The product, and nothing else.** Explain used to be placed here and it
+      // opened empty -- "Select a process..." -- which is a panel asking to be
+      // given a job. An empty domain panel is worse than an absent one: it takes
+      // room in the bottom bar and teaches the reader that panels here are
+      // decorative. Explain, Lock, Generate and the Graph are all one command
+      // away and are remembered per context once opened.
+      viewPlacements: new Map<string, ApplicationShell.Area>([[ProductWidget.ID, "main"]]),
       primaryViews: { main: ProductWidget.ID },
-      // Same gap on the other side: opening a file parks an editor on top of
-      // Product, and restoring that snapshot would hide the view the switch
-      // is for. `onActivate` is the hook Theia calls after either path.
+      // The catalogue is a source of components, not the subject of this context,
+      // and it had been dominating the left while the product sat in a secondary
+      // tab. Collapsing rather than closing: it is still one click away, the
+      // Explorer and git go with it into the same fold, and the person can reopen
+      // any of them freely -- `collapseAreas` applies on first activation only.
+      chromeOptions: { collapseAreas: ["left"] },
+      // `primaryViews` runs only on first activation. A later switch restores the
+      // snapshot, which may have parked an editor on top of Product -- opening a
+      // gear's source from the product tree does exactly that -- and restoring
+      // that would hide the view the context is for.
       onActivate: (shell) => {
         void shell.activateWidget(ProductWidget.ID);
       },

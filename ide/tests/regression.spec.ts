@@ -13,6 +13,7 @@ import {
   openGraph,
   openPalette,
   openProduct,
+  revealCatalogue,
   runCommand,
   expectContext,
   test,
@@ -26,6 +27,11 @@ test.describe("the panel is operable without a mouse", () => {
   // shape would pass here while a keyboard would not.
 
   test("a catalogue row can take focus", async ({ studio }) => {
+    // Revealed first. The Product context collapses the left panel -- the catalogue
+    // is a source of components, not the subject of that context -- so its rows are
+    // not on screen until asked for. Before the rework the catalogue was always
+    // there, and this test relied on that without saying so.
+    await revealCatalogue(studio.page);
     await studio.page.locator(".gearbox-catalogue .gbx-row").first().focus();
     const focused = await studio.page.evaluate(() =>
       document.activeElement?.classList.contains("gbx-row"),
@@ -342,9 +348,17 @@ test.describe("the toolbar names only registered commands", () => {
     const ids = [...(block?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
     expect(ids.length).toBeGreaterThan(0);
 
+    // Both spellings a command id is declared in. `id: "..."` covers a `Command`
+    // literal; `toggleCommandId: "..."` covers the one every
+    // `AbstractViewContribution` registers for its view -- which is how the
+    // header's Generate entry is declared, and which this test missed at first,
+    // reporting a registered command as unregistered.
     const registered = sources(STUDIO_SRC).flatMap((file) => {
       const text = readFileSync(file, "utf8");
-      return [...text.matchAll(/\bid:\s*"([^"]+)"/g)].map((m) => m[1]);
+      return [
+        ...[...text.matchAll(/\bid:\s*"([^"]+)"/g)],
+        ...[...text.matchAll(/\btoggleCommandId:\s*"([^"]+)"/g)],
+      ].map((m) => m[1]);
     });
     const unknown = ids.filter((id) => !registered.includes(id));
     expect(unknown, `toolbar names unregistered commands: ${unknown.join(", ")}`).toEqual(

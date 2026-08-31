@@ -24,7 +24,7 @@ import { inject, injectable, postConstruct } from "@theia/core/shared/inversify"
 import React from "@theia/core/shared/react";
 
 import { ProductStore } from "../product-store";
-import { RELOAD_CATALOGUE, RESOLVE_PRODUCT } from "../view-contributions";
+import { RESOLVE_PRODUCT } from "../view-contributions";
 import { StudioContextService } from "./studio-context-service";
 
 /**
@@ -32,14 +32,25 @@ import { StudioContextService } from "./studio-context-service";
  * them from the source rather than from a running registry.
  */
 export const TOOLBAR_COMMAND_IDS = [
-  "gearbox.catalogue.reload",
   "gearbox.product.resolve",
+  "gearbox.generate.toggle",
 ] as const;
 
-/** Which actions each context offers. */
+/**
+ * Which actions each context offers.
+ *
+ * `Reload Catalogue` used to be here and is not any more: it is catalogue
+ * maintenance, not something a person does *to a product*, and a header is the
+ * two or three verbs that act on the subject beside it. It stays in the menu and
+ * the palette.
+ *
+ * `home` offers nothing. With no product there is no subject to act on, and a
+ * header full of buttons for something that is not open is the shape of interface
+ * this rework exists to remove. The Start screen is what belongs there.
+ */
 const ACTIONS: Readonly<Record<string, readonly string[]>> = {
-  home: [RELOAD_CATALOGUE.id],
-  product: [RESOLVE_PRODUCT.id, RELOAD_CATALOGUE.id],
+  home: [],
+  product: [RESOLVE_PRODUCT.id, "gearbox.generate.toggle"],
   gear: [],
 };
 

@@ -36,6 +36,7 @@ import {
 import { injectable, inject } from "@theia/core/shared/inversify";
 
 import { GearboxMenus } from "../../menus";
+import { STUDIO_CONTEXT_KEY } from "../../shell/studio-context-service";
 
 /**
  * Top-level menus this application has.
@@ -125,9 +126,19 @@ export class ShellPolicy implements MenuContribution {
   protected pruning = false;
 
   registerMenus(registry: MenuModelRegistry): void {
+    // **Named after the task, not after the application.** `Gearbox` described
+    // the tool; `Product` describes what the person is doing, which is the whole
+    // point of the two contexts. And it is scoped: with nothing open there is no
+    // Product menu, so the top level never offers verbs for a subject that is not
+    // there. A `Gear` menu belongs beside it and is deliberately not registered
+    // until the gear context works -- a menu promising what does not exist is
+    // worse than a missing one.
+    //
     // Registered here rather than beside the commands that fill it, so the menu
     // exists even when a feature that would populate it does not.
-    registry.registerSubmenu(GearboxMenus.GEARBOX, "Gearbox");
+    registry.registerSubmenu(GearboxMenus.GEARBOX, "Product", {
+      when: `${STUDIO_CONTEXT_KEY} == 'product'`,
+    });
 
     this.prune(registry);
 

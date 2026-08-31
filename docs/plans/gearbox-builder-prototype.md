@@ -1352,6 +1352,40 @@ Proved two ways: `cargo test -p gearbox-engine --test source_digest` holds the p
 individually, and generating the same product twice -- once with a relative root and a relative
 description, once with both absolute -- produces byte-identical trees, `product.lock` included.
 
+#### A terminal that was never openable, and a claim that passed for the wrong reason
+
+The shell stopped opening a `zsh` at the bottom of a fresh window. That was asked for: a shell nobody
+requested, holding a slot in the bottom bar, is part of what made this application read as an IDE with
+panels rather than a tool for building products.
+
+Suppressing it is done where it is opened -- `HiddenTerminal` overrides
+`TerminalFrontendContribution.initializeLayout` with a NOOP -- which is the mechanism ADR-0011 already
+names for Debug and Test. It is emphatically **not** done by closing the widget, and that distinction
+was learned by doing it wrong first: `LayoutMigration` closed `terminal-0` along with Type Hierarchy,
+and `widget.close()` disposes the widget while `WidgetManager` keeps its entry under the same id, so
+the next request returned the disposed instance and nothing appeared. *Not opening* and *closing* are
+different acts, and only the first is reversible.
+
+Which surfaced something worse. The claim "a terminal can be opened" had been passing, and it had been
+passing for the wrong reason: it asserted that a `zsh` tab was **already** at the bottom of a fresh
+shell, and that clicking it rendered an xterm. Both were true -- because Theia opened it. Nothing ever
+exercised *creating* one. With the boot terminal gone the claim became testable for the first time, and
+failed: `Terminal: Create New Terminal` creates nothing, by command and by keybinding alike, with no
+error and no notification.
+
+Two measurements were taken before writing that down, to avoid both claiming a regression that was not
+one and disowning one that was. Built with the suppression removed: the boot terminal returns, and
+creating one **still** does nothing -- so the suppression did not cause it. And `node-pty`'s binary is
+present while the boot terminal did attach a pty -- so the install is not broken either. A third
+detail explains why nobody noticed: `.xterm` is absent even when an inactive `zsh` tab exists, because
+the canvas materialises on activation, and the old test activated it with a click.
+
+So ADR-0011's consequence -- a live shell in the bottom panel, kept on purpose -- is **currently not
+true**. The only terminal that ever worked was the one nobody asked for. The claim is `test.fixme`
+carrying these measurements rather than deleted, because the choice is not the implementer's: either
+creating a terminal is fixed, or the ADR stops promising a terminal. What is *not* acceptable is the
+state this replaced, where a green claim implied a capability that had never been exercised.
+
 ### 9.2 Writing to a description, and the four refusals
 
 The catalogue toggle is the only thing in Studio that writes a file a person owns, so the checks in

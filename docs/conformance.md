@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **99** — 92 built, 4 not built, 0 broken, 3 not observed.
+Claims: **99** — 91 built, 5 not built, 0 broken, 3 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -48,9 +48,9 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the Debug and Testing views do not open themselves | `ADR-0011 §initializeLayout NOOP` | ✅ built |  |
 | a catalogue row has a client rectangle | `ADR-0011 §Confirmation` | ✅ built |  |
 | Explorer stays visible | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
-| a terminal opens | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
+| a terminal can be opened | `ADR-0011 §Consequences: some Theia surface stays on purpose` | 🚧 not built |  |
 | the Source Control view is present | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
-| the Gearbox menu offers the domain's commands | `ADR-0011 §Scope: what the menu bar contains` | ✅ built |  |
+| the Product menu offers the product's verbs, and only with a product | `ADR-0011 §Scope: what the menu bar contains` | ✅ built |  |
 | the header names what is being worked on | `ADR-0011 §The two contexts` | ✅ built |  |
 | a product context exists, and only with a product | `ADR-0011 §The two contexts` | ✅ built |  |
 | a clicked link opens the file | `ADR-0011 §Confirmation: a clicked link must open a tab` | ✅ built |  |

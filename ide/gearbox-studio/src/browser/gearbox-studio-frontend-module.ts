@@ -8,6 +8,7 @@ import { MenuContribution } from "@theia/core/lib/common/menu";
 import { ContainerModule } from "@theia/core/shared/inversify";
 import { DebugFrontendApplicationContribution } from "@theia/debug/lib/browser/debug-frontend-application-contribution";
 import { MonacoEditorProvider } from "@theia/monaco/lib/browser/monaco-editor-provider";
+import { TerminalFrontendContribution } from "@theia/terminal/lib/browser/terminal-frontend-contribution";
 import { TestViewContribution } from "@theia/test/lib/browser/view/test-view-contribution";
 import { WorkspaceTrustService } from "@theia/workspace/lib/browser/workspace-trust-service";
 import { LanguageGrammarDefinitionContribution } from "@theia/monaco/lib/browser/textmate/textmate-contribution";
@@ -24,6 +25,7 @@ import { ShellPolicy } from "./theia/core/shell-policy";
 import { ReadOnlyLockEditorProvider } from "./theia/monaco/read-only-lock-editor-provider";
 import { DomainWorkspace } from "./theia/workspace/domain-workspace";
 import { StudioWorkspaceTrustService } from "./theia/workspace/studio-workspace-trust-service";
+import { HiddenTerminal } from "./theia/terminal/hidden-terminal";
 import { HiddenTestView } from "./theia/test/hidden-test-view";
 import { RevealService } from "./reveal-service";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
@@ -45,6 +47,7 @@ import { ProductWidget } from "./product/product-widget";
 import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
 import { FabricThemeContribution } from "./theme/fabric-theme-contribution";
 import { GearboxPerspectives } from "./shell/gearbox-perspectives";
+import { LayoutMigration } from "./shell/layout-migration";
 import { ProductSessionService } from "./shell/product-session-service";
 import { SessionCommands } from "./shell/session-commands";
 import { StudioContextService } from "./shell/studio-context-service";
@@ -87,6 +90,12 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // saved layout is still respected and the view is one command away.
   rebind(DebugFrontendApplicationContribution).to(HiddenDebugView).inSingletonScope();
   rebind(TestViewContribution).to(HiddenTestView).inSingletonScope();
+
+  // Why: the same trade, one package further. A shell is a tool this application
+  // offers, not one of the two things it is about, so it appears when asked for
+  // rather than at startup. Closing it afterwards was tried and broke creation --
+  // see `HiddenTerminal`.
+  rebind(TerminalFrontendContribution).to(HiddenTerminal).inSingletonScope();
 
   // Why: opening a multi-root workspace makes Theia generate
   // `~/.theia/workspaces/Untitled-NN.theia-workspace`, and its own trust check
@@ -147,6 +156,14 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bind(SessionCommands).toSelf().inSingletonScope();
   bind(CommandContribution).toService(SessionCommands);
   bind(MenuContribution).toService(SessionCommands);
+
+  // Why: suppressing a menu and a command does not close a panel already in a
+  // saved layout. `Type Hierarchy` and a `zsh` terminal kept returning at the
+  // bottom after the shell stopped offering either, because the restorer restores
+  // what was there before the rules changed. Once, not every start: a terminal
+  // someone opened on purpose must survive a reload.
+  bind(LayoutMigration).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(LayoutMigration);
 
   bind(StudioContextService).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(StudioContextService);
