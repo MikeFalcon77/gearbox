@@ -48,6 +48,14 @@ export const CLOSED_ON_MIGRATION: readonly string[] = [
   // ran version 1.
   "gearbox.detail",
   "gearbox.explain",
+  // The `Plugins` view. It never opened itself -- `@theia/plugin-ext` binds the
+  // contribution and nothing else -- so anyone seeing it in the left bar is seeing
+  // their own saved layout, which is precisely what this sweep is for. Version 3
+  // makes it run again for someone who already ran version 2.
+  //
+  // Safe as a prefix: views contributed *by* extensions are `plugin-view*`, and
+  // this matches only `plugins`.
+  "plugins",
   // **No `terminal-` here, and that was learned the hard way.** Closing the boot
   // terminal broke the capability: `widget.close()` disposes the widget while
   // `WidgetManager` keeps its entry under the same id, so the next
@@ -61,7 +69,7 @@ export const CLOSED_ON_MIGRATION: readonly string[] = [
 const MIGRATION_KEY = "gearbox.layoutMigration";
 
 /** Bump when `CLOSED_ON_MIGRATION` changes, so the sweep runs again -- once. */
-const MIGRATION_VERSION = 2;
+const MIGRATION_VERSION = 3;
 
 @injectable()
 export class LayoutMigration implements FrontendApplicationContribution {

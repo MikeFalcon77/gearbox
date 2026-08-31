@@ -388,9 +388,57 @@ whole life of that code, and the assertion that only read the View menu could no
 now unregistered outright, and the sweep runs again on `onCommandsChanged` because plugins register
 late.
 
-`Explorer` and `Source Control` are kept and **demoted** into `View > Advanced Tools`: the work ends in
-generated crates someone will read and diff, so they stay -- one level down, instead of competing with
-the domain's views in a flat list.
+`Explorer`, `Search`, `Source Control` and `Output` are kept and **demoted** into
+`View > Advanced Tools`: the work ends in generated crates someone will read, search and diff, so they
+stay -- one level down, instead of competing with the domain's views in a flat list.
+
+## Amendment 2026-09-01: the menu bar is trimmed by group, and the fourth surface
+
+**Status: accepted. It continues the amendment above rather than reversing anything.**
+
+Removing the top-level menus nobody chose left the ones that remain full of a general editor's verbs.
+Two of them were not merely noise.
+
+**`File` is the product's.** It offered `New Text File`, `New Window`, `Open…`, `Open Folder`,
+`Open Workspace`, `Open Recent Workspace`, `Save All`, `Auto Save`, `Save As…` and `Close Workspace`.
+The workspace entries are worse than clutter: the Theia workspace is an internal set of source roots
+that `ProductSessionService` derives from the open product and owns, so a menu offering to change it
+offers to move the ground the product stands on, behind the session's back. `File` now holds
+`Open Product…`, `Close Product` (with a product), `Save`, `Preferences` and `Close Editor`. `Save`
+stays because a description is edited in the editor and the write gate refuses an unsaved buffer --
+without it, that refusal is a dead end.
+
+**`View` is the domain's.** Its first level is the command palette, `Open View…`, the Gearbox views,
+`Problems` and `Advanced Tools`. `Appearance` and `Editor Layout` moved into the submenu whole; the
+toggles of views this application does not have are gone.
+
+**Trimmed by group, not by command id.** Menus are built from the groups declared once in
+`common-menus.js` (`1_new`, `2_open`, `3_save`, …), and those are stable across upgrades, while command
+ids are not -- three of them in `ShellPolicy` had to be read out of the packages after a guess was
+wrong, and a fourth (`outlineView:toggle` against a prefix written `outlineView.`) was found while
+writing this. Keeping a group keeps whatever Theia puts in it next year, which is right for `Save` and
+wrong for `Open Workspace`; those are separate groups, so the distinction is expressible.
+
+**`Open View…` is the fourth surface.** After the menu bar, every other menu, and the command palette,
+there is `QuickViewService` -- filled by every `AbstractViewContribution` and reading neither menus nor
+commands (`view-contribution.js:114`). A view suppressed everywhere else was still one `Open View…`
+away, which is how the `Plugins` view survived its own removal in the first draft of this change. It is
+hidden there by label now.
+
+The pattern is worth stating plainly, because it has repeated four times: **a suppression is only as
+good as the surfaces it was checked against, and every surface has been found by something surviving
+on it.** That is the argument for claims that read what is rendered rather than what was declared.
+
+**The `Plugins` view goes.** It listed the VS Code extensions the plugin host has deployed; there is
+one, and it is git. The host stays -- the Explorer needs it -- and its shop window does not. It never
+opened itself, so anyone seeing it in the left bar was seeing a saved layout, which `LayoutMigration`
+now sweeps.
+
+**A correction to the amendment above.** It said Search had no entry because
+`@theia/search-in-workspace` was not installed. That is wrong: the frontend loads it, along with
+twenty-nine other Theia modules (`browser-app/src-gen/frontend/index.js`, which is the only list that
+says what this application actually loads -- `node_modules` says what npm resolved). Search is in
+`Advanced Tools` with the other tools.
 
 ### The terminal promise is withdrawn
 

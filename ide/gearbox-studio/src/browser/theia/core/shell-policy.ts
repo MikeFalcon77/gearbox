@@ -26,12 +26,17 @@
 // the frontend has started: a one-shot prune during `registerMenus` is correct
 // only until the first extension activates.
 
+import { CommonMenus } from "@theia/core/lib/browser/common-menus";
+import { QuickViewService } from "@theia/core/lib/browser/quick-input/quick-view-service";
 import { CommandRegistry } from "@theia/core/lib/common/command";
 import {
   CompoundMenuNode,
   MAIN_MENU_BAR,
   MenuContribution,
   MenuModelRegistry,
+  MenuNode,
+  MenuPath,
+  RenderedMenuNode,
 } from "@theia/core/lib/common/menu";
 import { injectable, inject } from "@theia/core/shared/inversify";
 
@@ -113,7 +118,13 @@ export const FORBIDDEN_COMMAND_PREFIXES: readonly string[] = [
   "bulk-edit",
   "bulkEdit.",
   "outline-view",
-  "outlineView.",
+  // `outlineView`, and **not** `outlineView.`: the commands are
+  // `outlineView.collapse.all` but the toggle is `outlineView:toggle`, so the dot
+  // matched the two that did not matter and missed the one that did. Third time a
+  // separator has been guessed in this list; read them out of the package.
+  "outlineView",
+  // `@theia/console`, which is the debug console's widget and arrives with it.
+  "console.",
   // **The terminal, and this one is a withdrawal rather than a tidy-up.**
   // ADR-0011 kept a live shell in the bottom panel on purpose. It turned out that
   // the only terminal that ever worked was the one nobody asked for: with the boot
@@ -128,6 +139,13 @@ export const FORBIDDEN_COMMAND_PREFIXES: readonly string[] = [
   // dependency set -- the same reason the whitelist exists at all.
   "terminal:",
   "terminal.",
+  // The `Plugins` view: a list of the VS Code extensions the plugin host has
+  // deployed. There is exactly one, and it is git, which is here so the Explorer
+  // can show what changed. A window onto the machinery is not one of the two
+  // things this application is about, and it was taking a slot in the left bar.
+  //
+  // The host stays -- git needs it. Only its shop window goes.
+  "pluginsView",
 ];
 
 /**
@@ -138,9 +156,14 @@ export const FORBIDDEN_COMMAND_PREFIXES: readonly string[] = [
  * "kept" is a decision on the page next to "removed", rather than the accident of
  * not having written a prefix down.
  *
- * The terminal used to be on this list and has moved to the other one. Search is
- * absent from both because `@theia/search-in-workspace` is not installed, and a
- * prefix for a package that is not there would be a rule about nothing.
+ * The terminal used to be on this list and has moved to the other one.
+ *
+ * `search` is on it, and yesterday a comment here said the opposite -- that
+ * `@theia/search-in-workspace` was not installed. It is: the frontend loads it
+ * (`browser-app/src-gen/frontend/index.js`), along with twenty-nine other Theia
+ * modules. The mistake came from checking `node_modules` for one file rather than
+ * the generated module list, which is the only place that says what this
+ * application actually loads. Search stays, one level down with the Explorer.
  */
 export const KEPT_COMMAND_PREFIXES: readonly string[] = [
   "core.",
@@ -168,17 +191,119 @@ export const KEPT_COMMAND_PREFIXES: readonly string[] = [
  *
  * `AbstractViewContribution.registerMenus` puts every toggle in
  * `CommonMenus.VIEW_VIEWS`, so this is a move: unregister there, register here.
- * Search is not in the list because `@theia/search-in-workspace` is not installed
- * -- an entry for a package that is absent would be worse than no submenu.
  */
 export const ADVANCED_VIEWS: readonly { readonly id: string; readonly label: string }[] = [
   { id: "fileNavigator:toggle", label: "Explorer" },
+  { id: "search-in-workspace.toggle", label: "Search" },
   { id: "scmView:toggle", label: "Source Control" },
+  // Where a generated build prints, and where the engine's own log would go if it
+  // were wired to one. A tool, and a rarely opened one.
+  { id: "output:toggle", label: "Output" },
+];
+
+/**
+ * The groups each top-level menu keeps, by **group id** rather than by command.
+ *
+ * Groups, because a command id is a moving target -- three of them in this file
+ * had to be read out of the packages after a guess was wrong -- while the groups
+ * are declared once in `@theia/core/lib/browser/common-menus.js` and are what the
+ * menu is actually built from. Keeping a group keeps whatever Theia decides
+ * belongs in it next year, which is the right default for `Save` and the wrong one
+ * for `Open Workspace`; those live in groups of their own, so the distinction is
+ * expressible.
+ *
+ * **File is the product's.** What a person opens here is a *product*, and the
+ * workspace is an internal set of source roots that `ProductSessionService` owns
+ * (ADR-0011, amendment). `Open Folder`, `Open Workspace` and `Open Recent
+ * Workspace` therefore do not merely clutter: they offer to change something the
+ * session decides, behind the session's back.
+ *
+ * `3_save` stays because a description is edited in the editor and
+ * `ProductEditService` refuses to write under an unsaved buffer -- without `Save`
+ * that refusal is a dead end. `5_settings` stays: themes and preferences are about
+ * the tool. `6_close` stays: an editor that opened has to close.
+ */
+export const MENU_KEEP: readonly { readonly path: MenuPath; readonly groups: readonly string[] }[] = [
+  {
+    path: CommonMenus.FILE,
+    groups: ["0_product", "3_save", "5_settings", "6_close"],
+  },
+  {
+    // `0_primary` is the command palette and `Open View…`; `2_views` holds the
+    // toggles, trimmed to the domain's below; `9_advanced` is where the tools went.
+    path: CommonMenus.VIEW,
+    groups: ["0_primary", "2_views", "9_advanced"],
+  },
+];
+
+/**
+ * Commands that stay in the menu bar even though their whole group does not, and
+ * ones that go even though their group stays.
+ *
+ * Two exceptions, both worth the extra line. `Save All` sits in `3_save` beside
+ * `Save`, and saving everything is a general-editor habit -- there is one
+ * description open, and "all" invites the question of what else there was.
+ * `New File…`'s submenu is registered at `['file','newFile']`, outside `1_file`
+ * entirely, so trimming groups cannot reach it.
+ */
+export const MENU_DROP: readonly { readonly path: MenuPath; readonly id: string }[] = [
+  { path: CommonMenus.FILE, id: "core.saveAll" },
+  // `Save As...` shares `3_save` with `Save`. Saving a description under another
+  // name makes a second description that no product names -- a file, not a
+  // product, and the tool has nothing to say about it afterwards.
+  { path: CommonMenus.FILE, id: "file.saveAs" },
+  // `Close Workspace` shares `6_close` with `Close Editor`, and it is the same
+  // mistake as `Open Workspace` in the other direction: the workspace is the
+  // session's, and closing it behind the session's back leaves an engine pointing
+  // at roots nobody can see.
+  { path: CommonMenus.FILE, id: "workspace:close" },
+];
+
+/** A submenu that moves whole, label and all, into `View > Advanced Tools`. */
+export const RELOCATED: readonly { readonly from: MenuPath; readonly label: string }[] = [
+  // `Appearance` (toggle the bottom panel, the status bar, the menu bar,
+  // maximise) and `Editor Layout` (four ways to split). Both are real, and both
+  // are about the window rather than about the product.
+  { from: CommonMenus.VIEW_APPEARANCE, label: "Appearance" },
+];
+
+/**
+ * Views hidden from `Open View…`.
+ *
+ * The **fourth** surface, after the menu bar, every other menu, and the palette.
+ * `AbstractViewContribution.registerCommands` registers each view with
+ * `QuickViewService` (`view-contribution.js:114`), and that list is not built from
+ * menus or from commands -- so a view removed from both was still one
+ * `Open View…` away. `hideItem` takes a label, which is why these are labels.
+ *
+ * The pattern by now is unmistakable: every time a surface is discovered, it is
+ * discovered because something suppressed everywhere else still showed up. There
+ * is no reason to believe this is the last one, which is why the claims read what
+ * is rendered rather than what was declared.
+ */
+export const HIDDEN_QUICK_VIEWS: readonly string[] = [
+  "Plugins",
+  // The Start screen. `AbstractViewContribution` registers a quick-view item for
+  // every view whether or not it has a toggle command, so dropping the toggle left
+  // it here -- the one place that reads neither menus nor commands, demonstrating
+  // its own point.
+  "Gearbox Studio",
+  "Debug",
+  "Debug Console",
+  "Testing",
+  "Test Runs",
+  "Outline",
+  "Timeline",
+  "Notebook",
+  "Call Hierarchy",
+  "Type Hierarchy",
+  "Bulk Edit",
 ];
 
 @injectable()
 export class ShellPolicy implements MenuContribution {
   @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
+  @inject(QuickViewService) protected readonly quickViews!: QuickViewService;
 
   /** Guards the re-prune against the change event its own removals emit. */
   protected pruning = false;
@@ -210,6 +335,7 @@ export class ShellPolicy implements MenuContribution {
 
     this.prune(registry);
     this.sweepCommands();
+    this.hideQuickViews();
 
     // Plugin contributions arrive after startup. Without this, the first VS Code
     // extension to activate can put back anything the prune removed, and the
@@ -285,6 +411,116 @@ export class ShellPolicy implements MenuContribution {
     }
 
     this.demote(registry);
+    this.relocate(registry);
+    this.trim(registry);
+  }
+
+  /**
+   * Keep the declared groups of each top-level menu, and nothing else.
+   *
+   * A whitelist again, and for the reason the head of this file gives: every Theia
+   * upgrade and every transitive package adds entries nobody chose, and `File`
+   * offering `Open Workspace` is what that looks like in a tool whose documents are
+   * products.
+   *
+   * Scoped removals -- `unregisterMenuAction(id, path)` searches only that menu's
+   * subtree (`menu-model-registry.js:197`). That matters here in a way it did not
+   * for the forbidden families: `Save` is in `File` *and* in the editor's context
+   * menu, and only the first is this method's business.
+   *
+   * Runs after `relocate`, so a group that has moved is already gone from its old
+   * home and its removal here is a no-op rather than a race between the two.
+   */
+  protected trim(registry: MenuModelRegistry): void {
+    for (const { path, groups } of MENU_KEEP) {
+      const menu = registry.getMenu(path);
+      if (menu === undefined) continue;
+      for (const child of [...menu.children]) {
+        const id = child.id;
+        if (id !== undefined && !groups.includes(id)) {
+          registry.unregisterMenuAction(id, path);
+        }
+      }
+    }
+    for (const { path, id } of MENU_DROP) {
+      registry.unregisterMenuAction(id, path);
+    }
+  }
+
+  /**
+   * Move a submenu, whole, into `View > Advanced Tools`.
+   *
+   * Theia has no "move": a menu node belongs to the parent that registered it. So
+   * this takes a **snapshot** of the subtree, removes the original, and registers
+   * the snapshot one level down -- in that order, and the order is the whole
+   * difference between working and not.
+   *
+   * Copying first and removing second is what the obvious version does, and it
+   * silently undid itself: `unregisterMenuAction(id, path)` removes every node
+   * with that id **anywhere in that path's subtree**
+   * (`menu-model-registry.js:202`), and `Advanced Tools` is inside `View`. So
+   * removing `1_appearance` from `View` also removed the `1_appearance` that had
+   * just been registered under `View > Advanced Tools`. The probe said the source
+   * had two children and the destination stayed empty, which is what that looks
+   * like from outside.
+   *
+   * A snapshot is plain data, so nothing the registry does afterwards can reach
+   * it. What it carries is what `MenuNode` exposes -- label, icon, `when`, order --
+   * and nothing else; anything else a node knows is lost in the move, which is why
+   * only declared submenus travel and why a claim reads the result.
+   */
+  protected relocate(registry: MenuModelRegistry): void {
+    for (const { from } of RELOCATED) {
+      const source = registry.getMenu(from);
+      const id = from[from.length - 1];
+      if (source === undefined || id === undefined) continue;
+
+      const taken = snapshot(source);
+      registry.unregisterMenuAction(id, from.slice(0, -1));
+      this.replant(registry, taken, [...VIEW_ADVANCED, id]);
+    }
+  }
+
+  /**
+   * Register a snapshot under `target`.
+   *
+   * A **group** -- a compound node with no label -- becomes a path segment and
+   * nothing more, which is what a group is: `registerSubmenu` on one would turn
+   * `3_appearance_submenu_bar` into a menu item spelling its own id. A **submenu**
+   * -- a compound node that has a label -- is registered as one.
+   */
+  protected replant(registry: MenuModelRegistry, node: Snapshot, target: MenuPath): void {
+    if (node.children !== undefined) {
+      if (node.label !== undefined) {
+        registry.registerSubmenu(target, node.label);
+      }
+      for (const child of node.children) {
+        this.replant(registry, child, [...target, child.id]);
+      }
+      return;
+    }
+    registry.registerMenuAction(target.slice(0, -1), {
+      commandId: node.id,
+      label: node.label,
+      icon: node.icon,
+      when: node.when,
+      order: node.order,
+    });
+  }
+
+  /**
+   * Hide from `Open View…` what the menus and the palette no longer offer.
+   *
+   * `QuickViewService` is its own registry, filled by every
+   * `AbstractViewContribution` (`view-contribution.js:114`), and it reads neither
+   * menus nor commands. Suppressing a view everywhere else and leaving this list
+   * alone is how `Plugins` would have stayed one `Open View…` away -- the same
+   * shape of miss as the palette, one surface further along.
+   */
+  protected hideQuickViews(): void {
+    for (const label of HIDDEN_QUICK_VIEWS) {
+      this.quickViews.hideItem(label);
+    }
   }
 
   /**
@@ -322,6 +558,37 @@ export class ShellPolicy implements MenuContribution {
 export function isForbidden(id: string): boolean {
   if (KEPT_COMMAND_PREFIXES.some((prefix) => id.startsWith(prefix))) return false;
   return FORBIDDEN_COMMAND_PREFIXES.some((prefix) => id.startsWith(prefix));
+}
+
+/**
+ * A menu subtree as plain data.
+ *
+ * Plain because the registry is about to be told to forget the nodes this came
+ * from, and a live node would go with them. `children` is what distinguishes a
+ * compound node from an action: `undefined` means an action, present means a group
+ * or a submenu, and `label` then distinguishes those two.
+ */
+interface Snapshot {
+  readonly id: string;
+  readonly label?: string;
+  readonly icon?: string;
+  readonly when?: string;
+  readonly order: string;
+  readonly children?: readonly Snapshot[];
+}
+
+function snapshot(node: MenuNode): Snapshot {
+  const rendered = RenderedMenuNode.is(node) ? node : undefined;
+  const base = {
+    id: node.id,
+    label: rendered?.label,
+    icon: rendered?.icon,
+    when: node.when,
+    order: node.sortString,
+  };
+  return CompoundMenuNode.is(node)
+    ? { ...base, children: node.children.map(snapshot) }
+    : base;
 }
 
 /** The ids of the menu bar's direct children. */

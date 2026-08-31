@@ -1503,6 +1503,48 @@ workspace, which breaks the claim that reads generated output through the Explor
 about a path under `.gearbox/`. So the mechanism was removed instead of the blast radius, and the three
 guards stay as a net rather than as the defence.
 
+#### The fourth surface, and a menu trimmed by group
+
+The menu bar had been narrowed to five names, and the names still held a general editor's verbs:
+`File` offered `Open Workspace` and `New Window`, `View` offered `Editor Layout` and the toggles of
+views this application does not have. Two of those were not clutter but a contradiction: the Theia
+workspace is an internal set of source roots that `ProductSessionService` derives from the open
+product, so `Open Folder` and `Close Workspace` offered to move the ground the product stands on,
+behind the session's back.
+
+**Trimmed by group.** `File` keeps `0_product`, `3_save`, `5_settings` and `6_close`; `View` keeps
+`0_primary`, `2_views` and `9_advanced`. Groups rather than command ids because groups are declared
+once in `common-menus.js` and survive upgrades, while ids do not: three in `ShellPolicy` had to be read
+out of the packages after a guess was wrong, and a fourth turned up while writing this --
+`outlineView:toggle` never matched a prefix spelled `outlineView.`, so the Outline toggle had been
+sitting in `View` the whole time, one dot away from removal. Two exceptions are named individually,
+`Save As…` and `Close Workspace`, because they share groups with entries that stay.
+
+**`Open View…` is a fourth surface, and it was found the same way as the third.** After the menu bar,
+every other menu, and the palette, there is `QuickViewService` -- filled by every
+`AbstractViewContribution` (`view-contribution.js:114`) and reading neither menus nor commands. The
+`Plugins` view had been removed from the left bar, from `View`, and from the palette, and `Open View…`
+still offered it. Hidden there by label now.
+
+Four surfaces, and each one was discovered because something suppressed everywhere else showed up on
+it. There is no reason to think this is the last, which is the whole argument for claims that read
+what is rendered.
+
+**Moving a submenu taught something about the API.** `Appearance` and `Editor Layout` had to travel
+into `Advanced Tools`, and Theia has no move -- a node belongs to whoever registered it. The obvious
+version, copy then remove, silently undid itself: `unregisterMenuAction(id, path)` removes every node
+with that id **anywhere in that path's subtree** (`menu-model-registry.js:202`), and `Advanced Tools`
+is inside `View`, so removing `1_appearance` from `View` also removed the copy just made underneath it.
+The probe said the source had two children and the destination was empty, which is exactly what that
+looks like from outside. It takes a snapshot -- plain data, which nothing the registry does afterwards
+can reach -- then removes, then replants.
+
+**The `Plugins` view.** A window onto the plugin host, listing the one VS Code extension there is,
+which is git. It never opened itself: `@theia/plugin-ext` binds the contribution and nothing more. So
+everyone who saw it in the left bar saw their own saved layout -- the same shape as `Type Hierarchy`
+and the boot `zsh`, and invisible to the suite for the same reason, because every run starts with a
+clean profile. `LayoutMigration` version 3 closes it.
+
 #### The product session that had never once opened a product
 
 `ProductSessionService` was written to own the engine's roots and its write

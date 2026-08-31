@@ -22,6 +22,25 @@ import {
 
 const IDE = join(__dirname, "../..");
 
+/**
+ * The labels a top-level menu renders, with the menu closed again afterwards.
+ *
+ * Scoped to the menu that is actually open. Theia keeps hidden `.lm-Menu`
+ * templates in the DOM -- hundreds of labels exist before anything is clicked --
+ * so an unscoped read describes a menu nobody opened.
+ */
+async function menuItems(page: import("@playwright/test").Page, name: string): Promise<string[]> {
+  await page.locator(".lm-MenuBar-itemLabel", { hasText: new RegExp(`^${name}$`) }).click();
+  const open = page.locator(".lm-Menu").locator("visible=true").first();
+  await open.waitFor({ state: "visible" });
+  const items = (await open.locator(".lm-Menu-itemLabel").allTextContents()).map((t) => t.trim());
+  await page.keyboard.press("Escape");
+  expect(items.length, `the ${name} menu rendered nothing, so this proved nothing`).toBeGreaterThan(
+    0,
+  );
+  return items;
+}
+
 test.describe("the narrowed shell", () => {
   test("the menu bar is the domain's, not a general editor's [ADR-0011 §Confirmation]", async ({
     studio,
@@ -237,10 +256,90 @@ test.describe("the narrowed shell", () => {
     const items = (await menus.last().locator(".lm-Menu-itemLabel").allInnerTexts()).map((text) =>
       text.trim(),
     );
-    expect(items).toContain("Explorer");
-    expect(items).toContain("Source Control");
+    // All six, because the submenu is now where the window's own controls live as
+    // well as the file tools -- and because a relocation that dropped one would look
+    // exactly like a relocation that worked.
+    for (const tool of [
+      "Explorer",
+      "Search",
+      "Source Control",
+      "Output",
+      "Appearance",
+      "Editor Layout",
+    ]) {
+      expect(items, `${tool} is not under Advanced Tools`).toContain(tool);
+    }
     await studio.page.keyboard.press("Escape");
     await studio.page.keyboard.press("Escape");
+  });
+
+  test("File offers the product's verbs and nothing about a workspace [ADR-0011 §Amendment: File is the product's]", async ({
+    studio,
+  }) => {
+    // `File` came with the shell's other half: New Text File, New Window, Open
+    // Folder, Open Workspace, Open Recent Workspace, Save All, Auto Save, Close
+    // Workspace. Most of that is noise, but the workspace entries are worse than
+    // noise -- the Theia workspace is an internal set of source roots that
+    // `ProductSessionService` owns, so a menu offering to change it offers to move
+    // the ground the open product stands on, behind the session's back.
+    //
+    // What a person opens here is a product. `Save` stays because a description is
+    // edited in the editor and the write gate refuses an unsaved buffer; without it
+    // that refusal is a dead end.
+    const items = await menuItems(studio.page, "File");
+    expect(items).toContain("Open Product…");
+    expect(items).toContain("Save");
+
+    const offenders = items.filter((item) =>
+      /Workspace|Folder|New (Text )?File|New Window|Save All|Auto Save|Save As/i.test(item),
+    );
+    expect(offenders, "File still offers a general editor's verbs").toEqual([]);
+  });
+
+  test("the first level of View is the domain's [ADR-0011 §Amendment: View is the domain's]", async ({
+    studio,
+  }) => {
+    // Everything a person opens *about the product* at the top, everything about the
+    // window one level down. The tools are asserted present under Advanced Tools by
+    // the claim above; this one asserts they are not *also* at the top, which is the
+    // half that makes the menu shorter rather than merely differently arranged.
+    const items = (await menuItems(studio.page, "View")).filter((item) => item.length > 0);
+    expect(items).toContain("Command Palette...");
+    expect(items).toContain("Advanced Tools");
+    expect(items.filter((item) => item.startsWith("Gearbox")).length).toBeGreaterThan(4);
+
+    const offenders = items.filter((item) =>
+      /Appearance|Editor Layout|Explorer|Source Control|Output|Plugins|Timeline|Outline|Testing|Notebook/.test(
+        item,
+      ),
+    );
+    expect(offenders, "View's first level still holds a general editor's views").toEqual([]);
+  });
+
+  test("the Plugins view is gone from the shell [ADR-0011 §Amendment: the plugin host is not a view]", async ({
+    studio,
+  }) => {
+    // The plugin host stays -- git runs on it -- and its shop window goes. It never
+    // opened itself, so anyone who had it in the left bar had it from a saved
+    // layout, which is what `LayoutMigration` is for.
+    //
+    // Three surfaces, because two were not enough the last three times: the left
+    // bar, the palette, and `Open View…` -- which reads neither menus nor commands
+    // but `QuickViewService`, and would have kept offering it after the other two
+    // were clean.
+    const tabs = await studio.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#theia-left-content-panel .lm-TabBar li")).map((e) =>
+        (e.textContent ?? "").trim(),
+      ),
+    );
+    expect(tabs.filter((tab) => /Plugins/.test(tab))).toEqual([]);
+    expect(await paletteOffers(studio.page, "Plugins")).toEqual([]);
+
+    await runCommand(studio.page, "Open View...");
+    const offered = (await studio.page.locator('.quick-input-list [role="option"]').allInnerTexts())
+      .map((text) => text.split("\n")[0]?.trim() ?? "");
+    await studio.page.keyboard.press("Escape");
+    expect(offered.filter((label) => /Plugins/.test(label))).toEqual([]);
   });
 
   test("the Source Control view is present [ADR-0011 §Consequences: some Theia surface stays on purpose]", async ({

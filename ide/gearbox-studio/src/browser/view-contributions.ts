@@ -180,7 +180,12 @@ export class StartViewContribution extends AbstractViewContribution<StartWidget>
       widgetId: StartWidget.ID,
       widgetName: StartWidget.LABEL,
       defaultWidgetOptions: { area: "main" },
-      toggleCommandId: "gearbox.start.toggle",
+      // **No toggle command, and therefore no entry in `View`.** Every other view
+      // is something a person chooses to look at; this one is what the shell shows
+      // when there is nothing open, and it arrives by closing a product rather than
+      // by being picked from a list. A toggle would also have read as
+      // `Gearbox Studio` among seven `Gearbox <noun>` views -- the application's
+      // own name sitting in a list of its panels.
     });
   }
 }
