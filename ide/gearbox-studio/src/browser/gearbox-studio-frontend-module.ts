@@ -44,6 +44,7 @@ import { ProductWidget } from "./product/product-widget";
 import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
 import { FabricThemeContribution } from "./theme/fabric-theme-contribution";
 import { GearboxPerspectives } from "./shell/gearbox-perspectives";
+import { ProductSessionService } from "./shell/product-session-service";
 import { StudioContextService } from "./shell/studio-context-service";
 import { ToolbarContribution } from "./shell/toolbar-contribution";
 import { ToolbarWidget } from "./shell/toolbar-widget";
@@ -131,6 +132,12 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // and a Product menu keyed off that would offer actions with nothing to act
   // on. `StudioContextService` owns the context; perspectives only arrange
   // panels. ADR-0011's own revisit clause asked for this collapse.
+  // Why: opening a product decides where the engine looks and where it may
+  // write. The backend used to fix both, which made "open a product" mean "open
+  // one of the products in this checkout" -- readable anywhere, editable nowhere
+  // else, because both write gates measure from the declared workspace.
+  bind(ProductSessionService).toSelf().inSingletonScope();
+
   bind(StudioContextService).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(StudioContextService);
 

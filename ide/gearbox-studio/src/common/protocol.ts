@@ -71,10 +71,33 @@ export interface ProductRef {
   readonly label: string;
 }
 
+/**
+ * Where a session may read and where it may write.
+ *
+ * Declared by the client because the engine cannot judge it: `writable_path` and
+ * `writable_out_root` both measure from `workspace`, so a product outside it can
+ * be *read* and never edited or generated. Until this existed the backend fixed
+ * both values -- `../gears-rust` and the repository root -- which made "open a
+ * product" mean "open one of the products in this checkout".
+ */
+export interface StudioSession {
+  /** Source roots to scan for `gear.gdl`. Absolute. */
+  readonly roots: readonly string[];
+  /** The directory writes are confined to. Absolute. */
+  readonly workspace: string;
+}
+
 export const GearboxService = Symbol("GearboxService");
 export interface GearboxService {
-  /** Start the engine and hand back what it can do. */
-  initialize(): Promise<InitializeResult>;
+  /**
+   * Start the engine and hand back what it can do.
+   *
+   * Omitting the session keeps the built-in defaults, which is what the
+   * catalogue's own reload does when no product has been opened yet. A session
+   * replaces both values, and because `initialize` disposes and respawns the
+   * engine, it takes effect wholesale rather than merging with what was there.
+   */
+  initialize(session?: StudioSession): Promise<InitializeResult>;
 
   /**
    * Begin a staged load. Resolves at the boundary between the two passes: the

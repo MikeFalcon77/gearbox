@@ -20,7 +20,14 @@ import type { CatalogueChanged } from "../common/generated/CatalogueChanged";
 import type { CatalogueDiagnostics } from "../common/generated/CatalogueDiagnostics";
 import type { InitializeResult } from "../common/generated/InitializeResult";
 import type { ProgressParams } from "../common/generated/ProgressParams";
-import { CatalogueState, GearboxClient, GearboxService, Row, keyFor } from "../common/protocol";
+import {
+  CatalogueState,
+  GearboxClient,
+  GearboxService,
+  Row,
+  type StudioSession,
+  keyFor,
+} from "../common/protocol";
 
 /**
  * How many engine log lines are kept.
@@ -71,6 +78,9 @@ export class CatalogueStore implements GearboxClient {
    * land on top of the second load's already-projected rows, and those
    * projections are not resent.
    */
+  /** The session the last load ran under, reused by a bare `load()`. */
+  protected session: StudioSession | undefined;
+
   protected epoch = 0;
 
   /**
@@ -150,7 +160,14 @@ export class CatalogueStore implements GearboxClient {
    * either becomes an unhandled rejection in the console while the panel keeps
    * claiming it is still projecting.
    */
-  async load(): Promise<void> {
+  async load(session?: StudioSession): Promise<void> {
+    // Remembered, because `Reload Catalogue` and the reconnect path both call
+    // `load()` with nothing: without this they would quietly re-initialize with
+    // the built-in roots and the product's own sources would disappear from the
+    // catalogue while the product stayed open.
+    if (session !== undefined) {
+      this.session = session;
+    }
     const epoch = ++this.epoch;
     this.streaming = undefined;
     this.rowsByKey.clear();
@@ -158,7 +175,10 @@ export class CatalogueStore implements GearboxClient {
     this.onChangedEmitter.fire();
 
     try {
-      const init = await this.service.initialize();
+      // The session, when a product session drives the load. `initialize`
+      // disposes and respawns the engine, so this is also what makes the roots
+      // and the write boundary change wholesale rather than drift.
+      const init = await this.service.initialize(this.session);
       if (epoch !== this.epoch) {
         return;
       }

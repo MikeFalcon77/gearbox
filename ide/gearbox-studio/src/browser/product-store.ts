@@ -155,10 +155,11 @@ export class ProductStore {
     }
     if (epoch !== this.epoch) return;
     this.update({ status: "idle", products });
-    const [only] = products;
-    if (products.length === 1 && only !== undefined) {
-      await this.open(only);
-    }
+    // Listing only. Opening is `ProductSessionService`'s: it re-initializes the
+    // engine with the product's own source roots and write boundary, and a store
+    // that opened on its own would do it with whatever roots the last session
+    // left. The "open it if it is the only one" convenience lives there too, so
+    // there is one path in.
   }
 
   /** Evaluate a product and resolve it for its own default profile. */

@@ -33,6 +33,10 @@ export default defineConfig({
   reporter: [["list"], ["./tests/report/conformance-reporter.ts"]],
 
   globalSetup: "./tests/global-setup.ts",
+  // Checked at both ends: a write that lands after the last per-test hook is
+  // invisible to it and would otherwise surface as a refusal to start the *next*
+  // run, a day later and in a different file.
+  globalTeardown: "./tests/global-teardown.ts",
 
   use: {
     baseURL: URL,

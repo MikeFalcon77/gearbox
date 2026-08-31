@@ -23,6 +23,7 @@ import type { ResolvedBinding } from "../../common/generated/ResolvedBinding";
 import type { ResolvedProcess } from "../../common/generated/ResolvedProcess";
 import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
 import { ProductStore } from "../product-store";
+import { ProductSessionService } from "../shell/product-session-service";
 import { RevealLink, RevealPathLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
 
@@ -32,6 +33,9 @@ export class ProductWidget extends ReactWidget {
   static readonly LABEL = "Gearbox Product";
 
   @inject(ProductStore) protected readonly store!: ProductStore;
+  // Opening is the session's, not the store's: it decides the engine's roots and
+  // write boundary, which is what makes a product outside this checkout editable.
+  @inject(ProductSessionService) protected readonly session!: ProductSessionService;
   @inject(RevealService) protected readonly reveals!: RevealService;
 
   /** Which branches are folded away. Widget state; nobody else's business. */
@@ -46,7 +50,7 @@ export class ProductWidget extends ReactWidget {
     this.title.closable = true;
     this.addClass("gearbox-product");
     this.toDispose.push(this.store.onChanged(() => this.update()));
-    void this.store.ensureDiscovered();
+    void this.session.ensureOpen();
     this.update();
   }
 
@@ -80,7 +84,7 @@ export class ProductWidget extends ReactWidget {
                   <button
                     className="gbx-choice"
                     key={ref.path}
-                    onClick={() => void this.store.open(ref)}
+                    onClick={() => void this.session.open(ref)}
                   >
                     {ref.label}
                   </button>

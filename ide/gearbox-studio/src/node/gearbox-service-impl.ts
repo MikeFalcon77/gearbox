@@ -23,6 +23,7 @@ import type { InitializeResult } from "../common/generated/InitializeResult";
 import type { LockResult } from "../common/generated/LockResult";
 import type { LogParams } from "../common/generated/LogParams";
 import type { ProductLoadResult } from "../common/generated/ProductLoadResult";
+import type { StudioSession } from "../common/protocol";
 import type { ResolveResult } from "../common/generated/ResolveResult";
 import type { ValidateResult } from "../common/generated/ValidateResult";
 import type { ProgressParams } from "../common/generated/ProgressParams";
@@ -113,9 +114,9 @@ export class GearboxServiceImpl implements GearboxService {
     this.client = client;
   }
 
-  async initialize(): Promise<InitializeResult> {
+  async initialize(session?: StudioSession): Promise<InitializeResult> {
     this.disposeEngine();
-    const roots_ = roots();
+    const roots_ = session === undefined ? roots() : [...session.roots];
     const engine = spawnEngine(enginePath(), roots_, this.logger);
     this.engine = engine;
 
@@ -161,7 +162,11 @@ export class GearboxServiceImpl implements GearboxService {
         // And the boundary those writes may not leave. A product description
         // lives beside the products rather than inside a gear source root, so the
         // roots alone would refuse every legitimate edit.
-        workspace: findRepoRoot(__dirname),
+        //
+        // From the session when there is one. The fixed repository root is only a
+        // default for the catalogue-only case: a product opened from elsewhere
+        // would otherwise be readable and unwritable, which is the worst of both.
+        workspace: session?.workspace ?? findRepoRoot(__dirname),
       },
       INITIALIZE_TIMEOUT_MS,
     );

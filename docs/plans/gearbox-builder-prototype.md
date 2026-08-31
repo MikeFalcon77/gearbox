@@ -1124,6 +1124,52 @@ control in every state, and an automatic refresh after the Generate view applies
 true until this landed and is now corrected in place.
 
 
+#### A product session decides where the engine looks and where it may write
+
+A product is a directory and the unit of work, so opening one is not "point a panel at a file". Until
+this landed the backend fixed both halves of that -- `../gears-rust` as the only source root, the
+repository as the write boundary -- so a product anywhere else could be *read* and then refused on
+every edit and every generate, because `writable_path` and `writable_out_root` both measure from the
+declared workspace. `StudioSession { roots, workspace }` is what a client declares, and
+`GearboxService.initialize()` takes it; the wire already carried all three fields.
+
+**The order is forced, and one step of it is not obvious.** Source roots come from the product's own
+`sources`, and reading those means evaluating the description, which needs a running engine. So the
+engine starts twice per open: once with the product's directory as the workspace and no roots -- which
+is enough, because `load_product` evaluates without joining a catalogue -- and again with the derived
+roots. Two spawns is the price of deriving roots from the thing being opened rather than from a
+constant, and it is the cost `Reload Catalogue` already pays.
+
+`git(...)` sources are refused by name rather than skipped: fetching a repository is not built, and a
+catalogue quietly missing a source is indistinguishable from a product whose gears do not exist.
+
+Auto-open moved out of `ProductStore.discover()`, which had been opening a product *without*
+re-initializing the engine -- so the catalogue kept whatever roots the previous session left. Listing
+and opening are now separate, and "open it if it is the only one" lives with opening.
+
+#### Three guards on the descriptions, because two were not enough
+
+A stray `use_gear(...)` has reached `products/payments-demo/product.gdl` three times now. The gear is
+not random: twice `types-registry`, once `grpc-hub` -- the second and third rows of the catalogue as
+rendered. Something reaches a *particular row*.
+
+The third occurrence exposed a hole in the guard built for the second. A per-test hook checks after a
+test **ends**, so a write that lands during teardown, or after the final hook, is invisible to it: the
+run reported no failures and a clean tree, and the write surfaced as a refusal to start the *next*
+run -- a different day, a different file, no connection to the cause. So there are three checks now,
+and between them no path stays quiet:
+
+* `global-setup` refuses to start against a modified description;
+* the fixture's hook **fails the test** that dirtied one, with the diff naming the gear;
+* `global-teardown` fails the **run** for a write that lands after the last test, saying explicitly
+  that no test is blamed because none was running.
+
+The cause is still not found, and the guards are not a substitute for finding it. What the third
+occurrence added is a direction: the next attempt should watch the catalogue's focus and its queued
+actions as the page tears down, rather than arm a stack trace on the write path -- which has now been
+tried and caught nothing across four runs.
+
+
 #### Two working contexts, and a whitelist instead of exceptions
 
 The shell was Theia with Gearbox panels bolted on, and it showed: `Catalogue` and `Product` buttons
