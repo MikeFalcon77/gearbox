@@ -60,15 +60,14 @@ impl Edit {
 /// Returns the diagnostics explaining why the file could not be edited: it did
 /// not parse, it declares no `product(...)` call, or its `gears` argument is not
 /// a literal list this can insert into.
-pub fn add_gear(
-    uri: &str,
-    source: &str,
-    gear: &str,
-    source_id: &str,
-) -> Result<Edit, Diagnostics> {
+pub fn add_gear(uri: &str, source: &str, gear: &str, source_id: &str) -> Result<Edit, Diagnostics> {
     let list = gears_list(uri, source)?;
 
-    if list.entries.iter().any(|entry| names_gear(source, *entry, gear)) {
+    if list
+        .entries
+        .iter()
+        .any(|entry| names_gear(source, *entry, gear))
+    {
         return Ok(Edit::Unchanged);
     }
 
@@ -116,14 +115,13 @@ fn gears_list(uri: &str, source: &str) -> Result<GearsList, Diagnostics> {
             )
         })?;
 
-    let call = find_product_call(ast.statement())
-        .ok_or_else(|| {
-            refuse(
-                uri,
-                "no top-level `product(...)` call to edit",
-                "point this at a product description; a `gear.gdl` has no `gears` list to add to",
-            )
-        })?;
+    let call = find_product_call(ast.statement()).ok_or_else(|| {
+        refuse(
+            uri,
+            "no top-level `product(...)` call to edit",
+            "point this at a product description; a `gear.gdl` has no `gears` list to add to",
+        )
+    })?;
 
     let gears = call
         .iter()
@@ -155,7 +153,9 @@ fn gears_list(uri: &str, source: &str) -> Result<GearsList, Diagnostics> {
 }
 
 /// The argument list of the first top-level `product(...)` call.
-fn find_product_call<P>(stmt: &AstStmtP<P>) -> Option<&[starlark_syntax::syntax::ast::AstArgumentP<P>]>
+fn find_product_call<P>(
+    stmt: &AstStmtP<P>,
+) -> Option<&[starlark_syntax::syntax::ast::AstArgumentP<P>]>
 where
     P: starlark_syntax::syntax::ast::AstPayload,
 {
@@ -215,7 +215,9 @@ fn insert_entry(source: &str, list: &GearsList, entry: &str) -> String {
     if multiline || list.entries.is_empty() {
         // Everything up to and including the last newline before `]`, so the
         // closing bracket keeps its own indentation.
-        let cut = before_bracket.rfind('\n').map_or(before_bracket.len(), |at| at + 1);
+        let cut = before_bracket
+            .rfind('\n')
+            .map_or(before_bracket.len(), |at| at + 1);
         out.push_str(&source[..cut]);
         out.push_str(&insertion);
         out.push_str(&source[cut..]);
@@ -248,7 +250,11 @@ fn remove_entry(source: &str, entry: Span) -> String {
     // And the indentation in front of it, for the same reason.
     let head = &source[..start];
     let line_start = head.rfind('\n').map_or(0, |at| at + 1);
-    let cut = if head[line_start..].trim().is_empty() { line_start } else { start };
+    let cut = if head[line_start..].trim().is_empty() {
+        line_start
+    } else {
+        start
+    };
 
     let mut out = String::with_capacity(source.len());
     out.push_str(&source[..cut]);
@@ -295,13 +301,18 @@ fn indent_of(source: &str, span: Span) -> String {
 /// `cpt-gearbox-nfr-actionable-diagnostics` enforced by the type rather than by a
 /// review comment.
 fn refuse(uri: &str, message: &str, help: &str) -> Diagnostics {
-    let zero = Position { line: 0, character: 0 };
-    let mut diagnostics: Diagnostics = [Diagnostic::error(
-        DiagnosticCode::GdlParse,
-        message,
-        help,
-    )
-    .at(Location::new(uri.to_owned(), Range { start: zero, end: zero }))]
+    let zero = Position {
+        line: 0,
+        character: 0,
+    };
+    let mut diagnostics: Diagnostics = [Diagnostic::error(DiagnosticCode::GdlParse, message, help)
+        .at(Location::new(
+            uri.to_owned(),
+            Range {
+                start: zero,
+                end: zero,
+            },
+        ))]
     .into_iter()
     .collect();
     diagnostics.finish();

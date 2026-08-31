@@ -94,7 +94,10 @@ fn editing_a_description_moves_the_digest() {
     .expect("rewrite the description");
     let after = digest_of(&load_catalogue(&[open(&root)]).catalogue, "gears");
 
-    assert_ne!(before, after, "an edited description did not move the digest");
+    assert_ne!(
+        before, after,
+        "an edited description did not move the digest"
+    );
 
     std::fs::remove_dir_all(&root).ok();
 }

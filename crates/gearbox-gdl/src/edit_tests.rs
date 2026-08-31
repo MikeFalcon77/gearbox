@@ -64,7 +64,11 @@ fn only_one_line_changes() {
 
     let before: Vec<&str> = COMMENTED.lines().collect();
     let after: Vec<&str> = edited.lines().collect();
-    assert_eq!(after.len(), before.len() + 1, "expected exactly one new line");
+    assert_eq!(
+        after.len(),
+        before.len() + 1,
+        "expected exactly one new line"
+    );
 
     let added: Vec<&&str> = after.iter().filter(|line| !before.contains(line)).collect();
     assert_eq!(
@@ -122,7 +126,10 @@ fn an_empty_list_is_filled_rather_than_refused() {
         .changed()
         .expect("changed")
         .to_owned();
-    assert!(edited.contains("use_gear(\"a\", source = \"s\"),"), "{edited}");
+    assert!(
+        edited.contains("use_gear(\"a\", source = \"s\"),"),
+        "{edited}"
+    );
 }
 
 #[test]
@@ -235,7 +242,10 @@ fn the_real_product_takes_one_line_and_keeps_every_comment() {
         return;
     };
 
-    let comments_before = source.lines().filter(|l| l.trim_start().starts_with('#')).count();
+    let comments_before = source
+        .lines()
+        .filter(|l| l.trim_start().starts_with('#'))
+        .count();
     // A guard on the test rather than on the code: comment preservation is only
     // worth asserting against a file that has comments to lose. Stated as a share
     // of the file so it describes itself instead of holding a number somebody
@@ -252,8 +262,14 @@ fn the_real_product_takes_one_line_and_keeps_every_comment() {
         .expect("adding a gear it does not have should change it")
         .to_owned();
 
-    let comments_after = edited.lines().filter(|l| l.trim_start().starts_with('#')).count();
-    assert_eq!(comments_after, comments_before, "a comment was lost or moved");
+    let comments_after = edited
+        .lines()
+        .filter(|l| l.trim_start().starts_with('#'))
+        .count();
+    assert_eq!(
+        comments_after, comments_before,
+        "a comment was lost or moved"
+    );
     assert_eq!(
         edited.lines().count(),
         source.lines().count() + 1,

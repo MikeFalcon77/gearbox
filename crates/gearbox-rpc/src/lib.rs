@@ -25,10 +25,9 @@ use lsp_server::{Connection, ExtractError, Message, Notification, Request, Reque
 use crate::protocol::{
     Capabilities, CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, EditGearParams,
     EditGearResult, FailedRoot, GenerateApplyResult, GenerateFileParams, GenerateFileResult,
-    GenerateParams, GeneratePlanResult, InitializeParams, InitializeResult, LockOnDisk,
-    LockParams, LockResult,
-    LogParams, ProductLoadParams, ProductLoadResult, ProgressParams, ResolveParams, ResolveResult,
-    ResolvedRoot, ServerInfo, ValidateParams, ValidateResult, error_code, method,
+    GenerateParams, GeneratePlanResult, InitializeParams, InitializeResult, LockOnDisk, LockParams,
+    LockResult, LogParams, ProductLoadParams, ProductLoadResult, ProgressParams, ResolveParams,
+    ResolveResult, ResolvedRoot, ServerInfo, ValidateParams, ValidateResult, error_code, method,
 };
 
 /// Why the server could not run.
