@@ -3,6 +3,7 @@
 import { FrontendApplicationContribution, bindViewContribution } from "@theia/core/lib/browser";
 import { PerspectiveContribution } from "@theia/core/lib/browser/perspective-service";
 import { WebSocketConnectionProvider } from "@theia/core/lib/browser/messaging";
+import { CommandContribution } from "@theia/core/lib/common/command";
 import { MenuContribution } from "@theia/core/lib/common/menu";
 import { ContainerModule } from "@theia/core/shared/inversify";
 import { DebugFrontendApplicationContribution } from "@theia/debug/lib/browser/debug-frontend-application-contribution";
@@ -45,6 +46,7 @@ import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
 import { FabricThemeContribution } from "./theme/fabric-theme-contribution";
 import { GearboxPerspectives } from "./shell/gearbox-perspectives";
 import { ProductSessionService } from "./shell/product-session-service";
+import { SessionCommands } from "./shell/session-commands";
 import { StudioContextService } from "./shell/studio-context-service";
 import { ToolbarContribution } from "./shell/toolbar-contribution";
 import { ToolbarWidget } from "./shell/toolbar-widget";
@@ -137,6 +139,14 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // one of the products in this checkout" -- readable anywhere, editable nowhere
   // else, because both write gates measure from the declared workspace.
   bind(ProductSessionService).toSelf().inSingletonScope();
+
+  // Why: `File` is where a person looks for "what am I working on", so Open and
+  // Close live there rather than under `Gearbox`, which holds the verbs that act
+  // on what is already open. `New Product` is deliberately absent until there is
+  // a skeleton to create.
+  bind(SessionCommands).toSelf().inSingletonScope();
+  bind(CommandContribution).toService(SessionCommands);
+  bind(MenuContribution).toService(SessionCommands);
 
   bind(StudioContextService).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(StudioContextService);

@@ -190,6 +190,27 @@ export class ProductStore {
     await this.resolveCurrent(epoch);
   }
 
+  /**
+   * Forget the open product and everything derived from it.
+   *
+   * All of it, not the reference alone: a resolution, a lock, diagnostics or a
+   * selection surviving a close would render behind an empty panel and read as an
+   * answer about a product nobody has open. `EMPTY` is the same value the store
+   * starts at, so closing lands exactly where a fresh session does -- including
+   * `products`, because the list is discovered per session and a session that has
+   * ended has no list.
+   *
+   * The epoch is bumped first, which abandons any resolve in flight. Without that
+   * a resolution begun before the close would call `update` afterwards and put the
+   * product back.
+   */
+  clear(): void {
+    this.epoch += 1;
+    this.focused = undefined;
+    this.state = EMPTY;
+    this.onChangedEmitter.fire();
+  }
+
   async reload(): Promise<void> {
     const ref = this.state.open;
     if (ref === undefined) {

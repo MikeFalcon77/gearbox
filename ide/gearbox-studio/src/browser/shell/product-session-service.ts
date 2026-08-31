@@ -29,7 +29,10 @@
 // is not built, and a catalogue quietly missing a source is indistinguishable
 // from a product whose gears do not exist.
 
+import { StorageService } from "@theia/core/lib/browser/storage-service";
+import { URI } from "@theia/core/lib/common/uri";
 import { MessageService } from "@theia/core/lib/common/message-service";
+import { MonacoTextModelService } from "@theia/monaco/lib/browser/monaco-text-model-service";
 import { inject, injectable } from "@theia/core/shared/inversify";
 
 import type { SourceDecl } from "../../common/generated/SourceDecl";
@@ -37,12 +40,124 @@ import { GearboxService, type ProductRef, type StudioSession } from "../../commo
 import { CatalogueStore } from "../catalogue-store";
 import { ProductStore } from "../product-store";
 
+/** Where the Recent list lives. Per browser profile, like any other Theia state. */
+const RECENT_KEY = "gearbox.recentProducts";
+
+/**
+ * How many to keep.
+ *
+ * Short on purpose: a Recent list is a shortcut, and one that needs scrolling has
+ * stopped being one. `Open Product` is the answer for anything older.
+ */
+const RECENT_LIMIT = 8;
+
 @injectable()
 export class ProductSessionService {
   @inject(GearboxService) protected readonly service!: GearboxService;
   @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
   @inject(ProductStore) protected readonly products!: ProductStore;
   @inject(MessageService) protected readonly messages!: MessageService;
+  @inject(MonacoTextModelService) protected readonly models!: MonacoTextModelService;
+  @inject(StorageService) protected readonly storage!: StorageService;
+
+  /**
+   * The open in flight, if any.
+   *
+   * **An open is not reentrant.** It respawns the engine twice, and two of them
+   * interleaved leave the catalogue loading against one set of roots while the
+   * product resolves against another -- which presents as a panel that never
+   * finishes resolving. The Product widget is closable, so its `postConstruct`
+   * runs again on every reopen and `ensureOpen` is called more than once by
+   * design; concurrent callers wait for the same answer rather than starting a
+   * second sequence.
+   */
+  protected inFlight: Promise<boolean> | undefined;
+
+  /**
+   * The products opened before, most recent first.
+   *
+   * Read through, not cached: the list is short and a stale one is the whole
+   * failure mode of a Recent menu.
+   */
+  async recent(): Promise<ProductRef[]> {
+    return (await this.storage.getData<ProductRef[]>(RECENT_KEY)) ?? [];
+  }
+
+  /**
+   * Open a remembered product, dropping the entry if it is gone.
+   *
+   * A Recent list is the one place where a path is expected to have rotted, and
+   * the honest response is to say so and forget it -- not to open an empty panel
+   * and leave the reader wondering. Checked by asking the engine to list what it
+   * can find rather than by touching the filesystem, which the frontend cannot do.
+   */
+  async openRecent(ref: ProductRef): Promise<boolean> {
+    if (await this.open(ref)) return true;
+    await this.forget(ref);
+    this.messages.warn(`${ref.label} could not be opened, so it was removed from Recent.`);
+    return false;
+  }
+
+  /**
+   * Remember a product that opened.
+   *
+   * **Only after a successful open**, which is the difference between a Recent
+   * list and a list of things once attempted. Canonicalised on the path the
+   * engine reported, so the same product reached two ways is one entry.
+   */
+  protected async remember(ref: ProductRef): Promise<void> {
+    const kept = (await this.recent()).filter((entry) => entry.path !== ref.path);
+    kept.unshift(ref);
+    await this.storage.setData(RECENT_KEY, kept.slice(0, RECENT_LIMIT));
+  }
+
+  protected async forget(ref: ProductRef): Promise<void> {
+    const kept = (await this.recent()).filter((entry) => entry.path !== ref.path);
+    await this.storage.setData(RECENT_KEY, kept);
+  }
+
+  /**
+   * Close the open product, unless doing so would lose an edit.
+   *
+   * **Refuses rather than asking.** `ProductEditService` already takes this
+   * position for a write -- it will not touch a description with unsaved changes,
+   * and it will not save on the author's behalf either, because that commits an
+   * edit they had not finished. Closing is the same shape of decision, so it gets
+   * the same answer until there is a reason for a three-way dialog. The full
+   * Save / Close without saving / Cancel set is a later choice, not a missing one.
+   *
+   * Returns whether it closed.
+   */
+  async close(): Promise<boolean> {
+    const open = this.products.current.open;
+    if (open === undefined) return true;
+
+    if (this.isDirty(open.path)) {
+      this.messages.error(
+        `${open.label} has unsaved changes. Save or revert them before closing -- ` +
+          `closing now would leave an edit nobody asked to discard.`,
+      );
+      return false;
+    }
+
+    // Everything the product was, not just the reference. A stale resolution
+    // behind a closed product is worse than an empty panel: it looks like an
+    // answer. `ProductStore.clear` drops the resolution, the diagnostics, the
+    // lock, the selection and the profile together.
+    this.products.clear();
+    return true;
+  }
+
+  /**
+   * Whether the description is open in an editor with unsaved changes.
+   *
+   * By URI rather than by path string, because a model's URI is normalised and a
+   * path is not: `/a/./b` and `/a/b` are the same file and different strings.
+   */
+  protected isDirty(path: string): boolean {
+    const wanted = URI.fromFilePath(path).toString();
+    return this.models.models.some((model) => model.uri === wanted && model.dirty);
+  }
 
   /**
    * Make sure something is open, if there is an obvious something.
@@ -70,6 +185,20 @@ export class ProductSessionService {
    * not evaluate, a `git(...)` source, no local sources at all.
    */
   async open(ref: ProductRef): Promise<boolean> {
+    const pending = this.inFlight;
+    if (pending !== undefined) return pending;
+    const started = this.doOpen(ref);
+    this.inFlight = started;
+    try {
+      return await started;
+    } finally {
+      if (this.inFlight === started) {
+        this.inFlight = undefined;
+      }
+    }
+  }
+
+  protected async doOpen(ref: ProductRef): Promise<boolean> {
     const directory = parentOf(ref.path);
 
     // Step 1: an engine that can evaluate a description and nothing more. The
@@ -119,7 +248,11 @@ export class ProductSessionService {
     const session: StudioSession = { roots, workspace: directory };
     await this.catalogue.load(session);
     await this.products.open(ref);
-    return this.products.current.open !== undefined;
+    const opened = this.products.current.open !== undefined;
+    if (opened) {
+      await this.remember(ref);
+    }
+    return opened;
   }
 }
 

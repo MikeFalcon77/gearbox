@@ -1147,6 +1147,47 @@ Auto-open moved out of `ProductStore.discover()`, which had been opening a produ
 re-initializing the engine -- so the catalogue kept whatever roots the previous session left. Listing
 and opening are now separate, and "open it if it is the only one" lives with opening.
 
+#### Open, Close, Recent -- and why Close stays closed
+
+`File` carries the verbs that decide *what* is being worked on: `Open Product…`, `Close Product`, and
+the Recent entries the picker offers. Under `File` rather than `Gearbox`, which holds the verbs that
+act on what is already open. **`New Product` is deliberately absent** -- it needs a skeleton, and a
+menu entry promising a product it cannot create is worse than no entry.
+
+**Close refuses rather than asking.** If the description has unsaved changes it says so and does not
+close, which is the position `ProductEditService` already takes for a write: it will not touch a dirty
+buffer, and it will not save on the author's behalf either, because that commits an edit they had not
+finished. The full Save / Close without saving / Cancel set is a later choice, not a missing one.
+
+Closing clears everything derived from the product, not just the reference -- resolution, lock,
+diagnostics, selection, profile -- and bumps the store's epoch first, because a resolve begun before
+the close would otherwise call `update` afterwards and put the product back.
+
+**A close stays closed.** `ensureOpen` runs when the Product widget is constructed, not every time it
+is shown, so revealing the panel again offers the picker instead of reopening what was just closed. A
+panel that reopened it would make Close look broken. That is also why the Recent claim drives the
+picker rather than the reveal helper.
+
+Recent is written **only after a successful open** -- the difference between a Recent list and a list
+of things once attempted -- keyed on the path so one product reached two ways is one entry, and an
+entry that fails to open is dropped as it fails, with a message, rather than opening an empty panel.
+
+**Two name collisions this stage, both mine, and the second was a fragility all along.** Adding a
+helper to the test fixture without checking whether one existed produced a duplicate declaration that
+broke the whole file. And adding `Gearbox: Open Product…` made it rank *first* in the command palette
+for the text `Gearbox Product`, above `View: Toggle Gearbox Product` -- so `runCommand` pressed Enter
+on the wrong command, opened a second quick-pick, and the caller waited sixty seconds for a panel
+nobody had asked for. First-match-wins was never safe: every command added to this application could
+shift the ranking under every test that reveals a view. `runCommand` now clicks an entry that
+*contains* the label, and the measurement is in the comment, because equality would not do -- the
+palette renders `Gearbox Product` inside `View: Toggle …`.
+
+Not claimed in §9 yet: closing, Recent and the picker are asserted in `regression.spec.ts` because §9
+still describes the shell it had before this rework. Rewriting that table is the remaining documentation
+work of this stage, along with the Start screen, `Create Product` and the multiple-source-roots
+decision that deriving roots from a product has made live.
+
+
 #### Three guards on the descriptions, because two were not enough
 
 A stray `use_gear(...)` has reached `products/payments-demo/product.gdl` three times now. The gear is

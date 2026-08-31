@@ -239,7 +239,26 @@ export async function runCommand(page: Page, label: string): Promise<void> {
   await page.keyboard.type(label, { delay: 20 });
   // Wait for the filtered list to settle on a match before committing, rather
   // than sleeping a guessed interval.
-  await page.locator(`.quick-input-list [role="option"]`).first().waitFor({ state: "visible" });
+  const options = page.locator(`.quick-input-list [role="option"]`);
+  await options.first().waitFor({ state: "visible" });
+
+  // Click an entry that actually *contains* what was typed, rather than pressing
+  // Enter on whatever the fuzzy matcher ranked first.
+  //
+  // Measured: typing `Gearbox Product` offers `Gearbox: Open Product…` **first**
+  // and `View: Toggle Gearbox Product` second, because a view toggle's palette
+  // label is prefixed. So Enter ran the wrong command -- it opened a second
+  // quick-pick -- and the caller waited sixty seconds for a panel nobody had
+  // asked for. First-match-wins was a fragility all along: every command added to
+  // this application could shift the ranking under every test that reveals a view.
+  //
+  // Containment, not equality: the label a caller knows is `Gearbox Product`, and
+  // the palette renders it inside `View: Toggle …`.
+  const matching = options.filter({ hasText: label });
+  if ((await matching.count()) > 0) {
+    await matching.first().click();
+    return;
+  }
   await page.keyboard.press("Enter");
 }
 

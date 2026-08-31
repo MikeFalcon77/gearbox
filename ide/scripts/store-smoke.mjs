@@ -328,7 +328,13 @@ function productService(overrides) {
   const store = productWith(
     productService({ lock: () => Promise.reject(new Error("cannot serialize the lock")) }),
   );
+  // Opened explicitly: `discover` lists and no longer opens. Auto-open moved to
+  // `ProductSessionService`, because opening decides the engine's source roots and
+  // write boundary and the store cannot know them -- it had been opening with
+  // whatever roots the previous session left.
   await store.discover();
+  const [only] = store.current.products;
+  await store.open(only);
   check(store.current.status === "ready", "the product resolved");
 
   await store.ensureLock();

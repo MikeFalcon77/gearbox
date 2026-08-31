@@ -37,4 +37,13 @@ export namespace GearboxMenus {
  * they are tools, not one of the two things this application is about, so they
  * sit one level down instead of competing with `Product` for the menu bar.
  */
+/**
+ * Where opening and closing a product live: `File`, above the generic entries.
+ *
+ * A group of its own so ordering is ours rather than a fight with whatever
+ * `@theia/workspace` registers -- and so a reader sees the product verbs first,
+ * which is what `File` is for in an application whose documents are products.
+ */
+export const FILE_PRODUCT: MenuPath = [...MAIN_MENU_BAR, "1_file", "0_product"];
+
 export const VIEW_ADVANCED: MenuPath = [...MAIN_MENU_BAR, "4_view", "9_advanced"];

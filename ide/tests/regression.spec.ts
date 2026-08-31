@@ -434,3 +434,61 @@ test.describe("the toolbar names only registered commands", () => {
     await expect(studio.page.locator(".gbx-toolbar-name")).not.toBeEmpty();
   });
 });
+
+test.describe("a product is a session, not a panel", () => {
+  test("closing returns the shell to home and empties the header", async ({ studio }) => {
+    // Closing is not "hide the panel": the session ends, so the resolution, the
+    // lock, the diagnostics and the selection go with it. A stale resolution
+    // behind a closed product is worse than an empty one, because it looks like an
+    // answer.
+    await openProduct(studio.page, "dev");
+    await expectContext(studio.page, "product");
+
+    await runCommand(studio.page, "Close Product");
+    await expectContext(studio.page, "home");
+    await expect(studio.page.locator(".gbx-toolbar-empty")).toBeVisible();
+    await expect(studio.page.locator(".gbx-toolbar-name")).toHaveCount(0);
+  });
+
+  test("a product that opened is offered again, and reopens from the picker", async ({
+    studio,
+  }) => {
+    // Two claims in one flow, because they are the same flow. Recent is written
+    // only on a successful open -- the difference between a Recent list and a list
+    // of things once attempted -- and reopening goes through the picker.
+    //
+    // **Not through `openProduct`**, and that is the point. After a close the
+    // Product panel does not re-open anything: `ensureOpen` runs when the widget
+    // is constructed, not every time it is shown, so a close stays closed. A panel
+    // that reopened what you just closed would make Close look broken. The panel
+    // offers the picker instead, which is what this drives.
+    await runCommand(studio.page, "Open Product…");
+    const first = studio.page.locator(`.quick-input-list [role="option"]`);
+    await first.first().waitFor({ state: "visible" });
+    await first.filter({ hasText: "payments-demo" }).first().click();
+    await expectContext(studio.page, "product");
+
+    await runCommand(studio.page, "Close Product");
+    await expectContext(studio.page, "home");
+
+    await runCommand(studio.page, "Open Product…");
+    const options = studio.page.locator(`.quick-input-list [role="option"]`);
+    await options.first().waitFor({ state: "visible" });
+    const labels = await options.evaluateAll((ns) => ns.map((n) => (n.textContent ?? "").trim()));
+    await studio.page.keyboard.press("Escape");
+    expect(labels.some((l) => l.includes("payments-demo"))).toBe(true);
+  });
+
+  test.fixme("closing refuses while the description has unsaved changes", async ({ studio }) => {
+    // The guard is written -- `ProductSessionService.close` reads
+    // `MonacoTextModelService.models` for a dirty model of the description, the
+    // same check `ProductEditService` makes before writing -- but making a model
+    // dirty from a test means typing into Monaco, and this repository has already
+    // recorded why that is not straightforward: `.monaco-editor .inputarea` is
+    // parked off-screen, so `press` hangs on it.
+    //
+    // Named rather than skipped silently, because the claim matters: closing under
+    // an unsaved edit is exactly the loss the write gates exist to prevent.
+    await openProduct(studio.page, "dev");
+  });
+});
