@@ -15,6 +15,7 @@ import { inject, injectable } from "@theia/core/shared/inversify";
 import { CatalogueStore } from "./catalogue-store";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import { ConflictsWidget } from "./conflicts/conflicts-widget";
+import { CreateProductWidget, type CreateProductState } from "./create/create-product-widget";
 import { GraphWidget } from "./graph/graph-widget";
 import { InspectorWidget } from "./inspector/inspector-widget";
 import { GenerateWidget } from "./generate/generate-widget";
@@ -187,6 +188,23 @@ export class StartViewContribution extends AbstractViewContribution<StartWidget>
       // `Gearbox Studio` among seven `Gearbox <noun>` views -- the application's
       // own name sitting in a list of its panels.
     });
+  }
+}
+
+@injectable()
+export class CreateProductViewContribution extends AbstractViewContribution<CreateProductWidget> {
+  constructor() {
+    super({
+      widgetId: CreateProductWidget.ID,
+      widgetName: CreateProductWidget.LABEL,
+      defaultWidgetOptions: { area: "main" },
+      toggleCommandId: "gearbox.product.create.toggle",
+    });
+  }
+
+  async openCreate(state?: CreateProductState): Promise<void> {
+    const widget = await this.openView({ activate: true, reveal: true });
+    widget.openWith(state);
   }
 }
 

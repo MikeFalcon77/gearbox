@@ -238,18 +238,16 @@ export class ProductSessionService {
     // Step 1: an engine whose workspace is the product's, so a later edit is
     // inside the write boundary before anything reads the description.
     //
-    // **Keeping the roots already open, not asking for none.** This asked for
-    // `roots: []` on the theory that evaluating a description needs no catalogue,
-    // and the engine disagrees: `gearbox/product/load` answers
-    // `no source root is open; pass roots to initialize or --root to the CLI`
-    // (measured -- drive `gearbox rpc --stdio` with `initialize({roots: []})` and
-    // then `product/load` to see it). The step therefore left an engine that
-    // refused step 2, and the open ended there.
+    // **Keeping the roots already open, not asking for none.** Passing `roots: []`
+    // on purpose used to leave an engine that refused `product/load` with
+    // `no source root is open` (measured). Whatever is open now is the right set
+    // to carry: at boot it is the backend's defaults, and after a previous product
+    // it is that product's -- either way a description can be evaluated, and step
+    // 4 replaces them with the ones this product actually declares.
     //
-    // Whatever is open now is the right set to carry: at boot it is the backend's
-    // defaults, and after a previous product it is that product's -- either way a
-    // description can be evaluated, and step 4 replaces them with the ones this
-    // product actually declares.
+    // After a page reload `rootPaths()` can still be empty while the boot catalogue
+    // load has not finished. `initialize` treats that empty list as "use defaults"
+    // rather than "open nothing", so this step stays safe in that window.
     await this.catalogue.load({ roots: this.catalogue.rootPaths(), workspace });
 
     // Step 2: read what the description declares. `loadProduct` is evaluation

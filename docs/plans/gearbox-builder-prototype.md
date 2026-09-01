@@ -1046,6 +1046,21 @@ The backend spawns `../target/debug/gearbox`, so the Rust half stays stale and
 the symptom is a client reporting something the engine was already taught to
 send. `npm run verify` builds it first.
 
+**P0 stray-write hunt (2026-09-01).** A trap logged every `Gearbox: writing`
+`console.info` with a stack (`ide/tests/fixtures/studio.ts`,
+`ide/tests/global-teardown.ts`). Five full Playwright passes after closing the
+suspected mechanism left `git status --porcelain products/` clean each time.
+**After closing that mechanism, the stray write was not reproduced in five full
+runs** — weak negative evidence, not a proof that no path exists.
+
+**Product authoring (2026-09-01).** The GDL editor generalised from `gears` list
+membership to any named argument inside a literal list on `product(...)` — see
+ADR `cpt-gearbox-adr-create-product` and the ADR-0010 amendment of the same
+date. Studio now offers **New Product…** and **Clone** on the Start screen,
+config/features on the Inspector for gears the product asks for, and profile
+add/remove/scalar edit on the Product view. RPC: `setConfig`, `setFeatures`,
+`addProfile`, `removeProfile`, `setProfileField`, `create`.
+
 The favicon gap this section used to record is closed. `@theia/cli` 1.75 still offers no hook and
 its generated `index.html` still has no `<link rel="icon">`, so `FabricThemeContribution` injects
 one from `onStart` -- the same contribution that registers the Constructor Fabric colour theme and

@@ -17,6 +17,7 @@ import { inject, injectable, postConstruct } from "@theia/core/shared/inversify"
 import React from "@theia/core/shared/react";
 
 import type { Choice } from "../../common/generated/Choice";
+import type { DeploymentProfileDecl } from "../../common/generated/DeploymentProfileDecl";
 import type { ClusterResolution } from "../../common/generated/ClusterResolution";
 import type { Diagnostic } from "../../common/generated/Diagnostic";
 import type { InclusionReason } from "../../common/generated/InclusionReason";
@@ -24,6 +25,7 @@ import type { ResolvedBinding } from "../../common/generated/ResolvedBinding";
 import type { ResolvedProcess } from "../../common/generated/ResolvedProcess";
 import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
 import { ProductStore } from "../product-store";
+import { ProductEditService } from "../product-edit-service";
 import { ProductSessionService } from "../shell/product-session-service";
 import { RevealLink, RevealPathLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
@@ -34,6 +36,7 @@ export class ProductWidget extends ReactWidget {
   static readonly LABEL = "Gearbox Product";
 
   @inject(ProductStore) protected readonly store!: ProductStore;
+  @inject(ProductEditService) protected readonly edits!: ProductEditService;
   // Opening is the session's, not the store's: it decides the engine's roots and
   // write boundary, which is what makes a product outside this checkout editable.
   @inject(ProductSessionService) protected readonly session!: ProductSessionService;
@@ -114,23 +117,34 @@ export class ProductWidget extends ReactWidget {
         </div>
 
         {intent && (
-          <div className="gbx-kv">
-            <span>profile</span>
-            <span className="gbx-profiles">
-              {Object.keys(intent.profiles).map((id) => (
+          <>
+            <div className="gbx-kv">
+              <span>profile</span>
+              <span className="gbx-profiles">
+                {Object.keys(intent.profiles).map((id) => (
+                  <button
+                    className={`gbx-choice ${id === state.profile ? "gbx-choice-on" : ""}`}
+                    key={id}
+                    aria-pressed={id === state.profile}
+                    data-profile={id}
+                    onClick={() => void this.store.setProfile(id)}
+                  >
+                    {id}
+                    {id === intent.default_profile ? " (default)" : ""}
+                  </button>
+                ))}
                 <button
-                  className={`gbx-choice ${id === state.profile ? "gbx-choice-on" : ""}`}
-                  key={id}
-                  aria-pressed={id === state.profile}
-                  data-profile={id}
-                  onClick={() => void this.store.setProfile(id)}
+                  type="button"
+                  className="gbx-choice"
+                  data-add-profile
+                  onClick={() => void this.promptAddProfile()}
                 >
-                  {id}
-                  {id === intent.default_profile ? " (default)" : ""}
+                  Add profile…
                 </button>
-              ))}
-            </span>
-          </div>
+              </span>
+            </div>
+            {state.profile !== undefined && this.renderProfileEdit(intent.profiles[state.profile], state.profile, intent.default_profile)}
+          </>
         )}
 
         {state.status === "resolving" && <div className="gbx-progress">resolving…</div>}
@@ -139,6 +153,61 @@ export class ProductWidget extends ReactWidget {
         {renderDiagnosticsSummary(state.diagnostics, () => this.showConflicts())}
       </div>
     );
+  }
+
+  protected renderProfileEdit(
+    profile: DeploymentProfileDecl | undefined,
+    id: string,
+    defaultProfile: string,
+  ): React.ReactNode {
+    if (profile === undefined) return undefined;
+    const fields = profileFields(profile);
+    return (
+      <div className="gbx-profile-edit" data-profile-edit={id}>
+        <div className="gbx-kv">
+          <span>kind</span>
+          <span>{profile.profile}</span>
+        </div>
+        {fields.map(({ wire, label, value }) => (
+          <div className="gbx-kv" key={wire}>
+            <span>{label}</span>
+            <span>
+              <input
+                defaultValue={value ?? ""}
+                data-profile-field={wire}
+                onBlur={(e) => void this.applyProfileField(id, wire, e.target.value || undefined)}
+              />
+            </span>
+          </div>
+        ))}
+        {id !== defaultProfile && (
+          <button
+            type="button"
+            className="gbx-choice"
+            data-remove-profile={id}
+            onClick={() => void this.edits.removeProfile(id).then(() => this.update())}
+          >
+            Remove profile
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  protected async applyProfileField(
+    id: string,
+    field: string,
+    value: string | undefined,
+  ): Promise<void> {
+    if (!(await this.edits.setProfileField(id, field, value))) return;
+    this.update();
+  }
+
+  protected async promptAddProfile(): Promise<void> {
+    const id = window.prompt("Profile id");
+    if (id === null || id.trim() === "") return;
+    const ok = await this.edits.addProfile("embedded", id.trim(), []);
+    if (ok) this.update();
   }
 
   protected renderResolved(product: ResolvedProduct): React.ReactNode {
@@ -508,6 +577,27 @@ export class ProductWidget extends ReactWidget {
           )}
       </div>
     );
+  }
+}
+
+function profileFields(
+  profile: DeploymentProfileDecl,
+): ReadonlyArray<{ wire: string; label: string; value: string | null | undefined }> {
+  switch (profile.profile) {
+    case "embedded":
+      return [];
+    case "host_workers":
+      return [
+        { wire: "host", label: "host", value: profile.host },
+        { wire: "worker_discovery", label: "worker_discovery", value: profile.discovery },
+        { wire: "target_dir", label: "target_dir", value: profile.target_dir },
+      ];
+    case "kubernetes":
+      return [
+        { wire: "discovery", label: "discovery", value: profile.discovery },
+        { wire: "namespace", label: "namespace", value: profile.namespace },
+        { wire: "image_registry", label: "image_registry", value: profile.image_registry },
+      ];
   }
 }
 

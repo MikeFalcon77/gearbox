@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import { resetWriteTraces } from "./fixtures/write-traces";
 
 /** The newest mtime under a directory tree. */
 function newestMtime(dir: string): number {
@@ -86,4 +87,6 @@ export default function globalSetup(): void {
         `Commit the edit, or run \`git checkout -- products\` if it is a leftover.`,
     );
   }
+
+  resetWriteTraces();
 }

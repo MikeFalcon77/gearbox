@@ -34,6 +34,7 @@ import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
 import type { Row } from "../../common/protocol";
 import { CatalogueStore } from "../catalogue-store";
 import { Focus, ProductStore } from "../product-store";
+import { ProductEditService } from "../product-edit-service";
 import { RevealLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
 import { Selection, SelectionService } from "../shell/selection-service";
@@ -140,6 +141,10 @@ export class InspectorWidget extends ReactWidget {
   @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
   @inject(ProductStore) protected readonly products!: ProductStore;
   @inject(RevealService) protected readonly reveals!: RevealService;
+  @inject(ProductEditService) protected readonly edits!: ProductEditService;
+
+  protected newConfigKey = "";
+  protected newConfigValue = "";
 
   @postConstruct()
   protected init(): void {
@@ -231,7 +236,145 @@ export class InspectorWidget extends ReactWidget {
       );
     }
 
-    return this.renderProjected(row.gear);
+    return (
+      <>
+        {this.renderProjected(row.gear)}
+        {this.renderProductGearEdit(selection, row.gear.id)}
+      </>
+    );
+  }
+
+  /**
+   * Config and features for a gear the product asks for directly.
+   *
+   * Only when the gear is `selected` in the intent — pulled-in gears are not
+   * edited here; their facts live in another `use_gear` entry or in the closure.
+   */
+  protected renderProductGearEdit(selection: Selection, gearId: string): React.ReactNode {
+    if (selection.kind !== "gear") return undefined;
+    const intent = this.products.current.intent;
+    if (intent === undefined) return undefined;
+    const picked = intent.selected_gears.find((entry) => entry.gear === gearId);
+    if (picked === undefined) return undefined;
+
+    const config = picked.config ?? {};
+    const features = picked.features ?? [];
+
+    return (
+      <div className="gbx-product-edit" data-gear-config={gearId}>
+        <div className="gbx-detail-title">in this product</div>
+        <div className="gbx-kv">
+          <span>config</span>
+          <span className="gbx-config-list">
+            {Object.keys(config).length === 0 && "—"}
+            {Object.entries(config).map(([key, value]) => (
+              <label key={key} className="gbx-config-row" data-config-key={key}>
+                <code>{key}</code>
+                <input
+                  defaultValue={String(value)}
+                  data-config-edit={key}
+                  onBlur={(e) => void this.applyConfig(gearId, key, e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="gbx-choice"
+                  data-config-remove={key}
+                  onClick={() => void this.applyConfig(gearId, key, undefined)}
+                >
+                  Remove
+                </button>
+              </label>
+            ))}
+            <button
+              type="button"
+              className="gbx-choice"
+              data-add-config={gearId}
+              onClick={() => void this.applyNewConfig(gearId)}
+            >
+              Add key
+            </button>
+            <label className="gbx-config-row">
+              <input
+                data-config-new-key
+                placeholder="key"
+                value={this.newConfigKey}
+                onChange={(e) => {
+                  this.newConfigKey = e.target.value;
+                  this.update();
+                }}
+              />
+              <input
+                data-config-new-value
+                placeholder="value"
+                value={this.newConfigValue}
+                onChange={(e) => {
+                  this.newConfigValue = e.target.value;
+                  this.update();
+                }}
+              />
+            </label>
+          </span>
+        </div>
+        <div className="gbx-kv">
+          <span>features</span>
+          <span className="gbx-features-list">
+            {features.length === 0 && "—"}
+            {features.map((feature) => (
+              <span className="gbx-badge" key={feature} data-feature={feature}>
+                {feature}
+                <button
+                  type="button"
+                  className="gbx-feature-remove"
+                  aria-label={`Remove ${feature}`}
+                  onClick={() =>
+                    void this.applyFeatures(
+                      gearId,
+                      features.filter((f) => f !== feature),
+                    )
+                  }
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            <button
+              type="button"
+              className="gbx-choice"
+              data-add-feature={gearId}
+              onClick={() => void this.promptFeature(gearId, features)}
+            >
+              Add feature…
+            </button>
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  protected async applyNewConfig(gear: string): Promise<void> {
+    const key = this.newConfigKey.trim();
+    if (key === "") return;
+    const value = this.newConfigValue;
+    this.newConfigKey = "";
+    this.newConfigValue = "";
+    await this.applyConfig(gear, key, value === "" ? undefined : value);
+  }
+
+  protected async applyConfig(gear: string, key: string, value: string | undefined): Promise<void> {
+    if (!(await this.edits.setConfig(gear, key, value))) return;
+    this.update();
+  }
+
+  protected async applyFeatures(gear: string, features: readonly string[]): Promise<void> {
+    if (!(await this.edits.setFeatures(gear, features))) return;
+    this.update();
+  }
+
+  protected async promptFeature(gear: string, current: readonly string[]): Promise<void> {
+    const feature = window.prompt("Feature name");
+    if (feature === null || feature.trim() === "") return;
+    if (current.includes(feature.trim())) return;
+    await this.applyFeatures(gear, [...current, feature.trim()]);
   }
 
   protected renderProjected(gear: GearDescriptor): React.ReactNode {

@@ -6,6 +6,8 @@
     reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
 )]
 
+use starlark::syntax::AstModule;
+
 use super::*;
 
 const URI: &str = "file:///product.gdl";
@@ -292,4 +294,162 @@ fn the_real_product_takes_one_line_and_keeps_every_comment() {
         source,
         "remove did not undo add exactly"
     );
+}
+
+const WITH_CONFIG: &str = r#"# Keep this comment.
+product(
+    gears = [
+        # gear rationale
+        use_gear("api-gateway", source = "gears-rust", config = {"demo_mode": "off"}),
+    ],
+    profiles = [
+        embedded(id = "dev"),
+    ],
+)
+"#;
+
+#[test]
+fn config_edit_keeps_comments_and_is_inverse() {
+    let edited = set_gear_config(URI, WITH_CONFIG, "api-gateway", "demo_mode", Some("on"))
+        .expect("editable")
+        .changed()
+        .expect("changed")
+        .to_owned();
+    assert!(edited.contains("# Keep this comment."), "{edited}");
+    assert!(edited.contains("# gear rationale"), "{edited}");
+    assert!(edited.contains("\"demo_mode\": \"on\""), "{edited}");
+
+    assert_eq!(
+        set_gear_config(URI, &edited, "api-gateway", "demo_mode", Some("on")).expect("editable"),
+        Edit::Unchanged
+    );
+
+    let restored = set_gear_config(URI, &edited, "api-gateway", "demo_mode", Some("off"))
+        .expect("editable")
+        .changed()
+        .expect("changed")
+        .to_owned();
+    assert_eq!(restored, WITH_CONFIG);
+}
+
+#[test]
+fn config_key_inside_a_string_is_not_matched_by_find() {
+    // A comment and a string value both contain the substring `config = `; surgery
+    // must use the named-argument span, not `text.find`.
+    let source = r#"product(
+    gears = [
+        use_gear("g", source = "s", note = "mentions config = nowhere", config = {"a": "1"}),
+    ],
+)
+"#;
+    let edited = set_gear_config(URI, source, "g", "a", Some("2"))
+        .expect("editable")
+        .changed()
+        .expect("changed")
+        .to_owned();
+    assert!(
+        edited.contains("note = \"mentions config = nowhere\""),
+        "{edited}"
+    );
+    assert!(edited.contains("\"a\": \"2\""), "{edited}");
+}
+
+#[test]
+fn quoted_values_survive_escaping() {
+    let source = r#"product(
+    gears = [
+        use_gear("g", source = "s"),
+    ],
+)
+"#;
+    let edited = set_gear_config(URI, source, "g", "msg", Some(r#"He said "hi""#))
+        .expect("editable")
+        .changed()
+        .expect("changed")
+        .to_owned();
+    assert!(edited.contains(r#""msg": "He said \"hi\"""#), "{edited}");
+    gears_list(URI, &edited).expect("escaped config must still parse");
+}
+
+#[test]
+fn render_template_escapes_and_parses() {
+    let text = render_product_template(&CreateProductParams {
+        id: "x".into(),
+        name: r#"He said "hi""#.into(),
+        version: "0.1.0".into(),
+        sources: vec![("gears-rust".into(), "gears".into())],
+        profile_kind: "embedded".into(),
+        profile_id: "dev".into(),
+    });
+    assert!(text.contains(r#"name = "He said \"hi\"""#), "{text}");
+    AstModule::parse(URI, text, &crate::declarative::dialect()).expect("template must parse");
+}
+
+#[test]
+fn clone_keeps_comments_byte_exact_elsewhere() {
+    let Some(source) = real_product() else {
+        eprintln!("skipping: products/payments-demo/product.gdl not present");
+        return;
+    };
+    let comments_before = source
+        .lines()
+        .filter(|l| l.trim_start().starts_with('#'))
+        .count();
+    let cloned = clone_product_text(URI, &source, "clone-id", "Clone Name").expect("cloneable");
+    let comments_after = cloned
+        .lines()
+        .filter(|l| l.trim_start().starts_with('#'))
+        .count();
+    assert_eq!(comments_after, comments_before);
+    assert!(cloned.contains(r#"id = "clone-id""#), "{cloned}");
+    assert!(cloned.contains(r#"name = "Clone Name""#), "{cloned}");
+}
+
+#[test]
+fn profile_add_remove_is_byte_exact_inverse() {
+    let added = add_profile(
+        URI,
+        WITH_CONFIG,
+        "kubernetes",
+        "prod",
+        &[("namespace".into(), "pay".into())],
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+    assert!(
+        added.contains("kubernetes(id = \"prod\", namespace = \"pay\")"),
+        "{added}"
+    );
+    assert_eq!(
+        add_profile(URI, &added, "kubernetes", "prod", &[]).expect("editable"),
+        Edit::Unchanged
+    );
+    assert_eq!(
+        remove_profile(URI, &added, "prod")
+            .expect("editable")
+            .changed()
+            .expect("changed"),
+        WITH_CONFIG
+    );
+}
+
+#[test]
+fn computed_profiles_list_is_refused() {
+    let source = "load(\"//lib.gdl\", \"chosen\")\nproduct(profiles = chosen())\n";
+    let diagnostics = add_profile(URI, source, "embedded", "dev", &[]).expect_err("not editable");
+    assert!(
+        diagnostics
+            .as_slice()
+            .iter()
+            .any(|d| d.message.contains("not a list literal")),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn quote_string_escapes_control_chars() {
+    assert_eq!(quote_string("a\"b\\c"), r#""a\"b\\c""#);
+    assert_eq!(quote_string("a\nb"), "\"a\\nb\"");
 }

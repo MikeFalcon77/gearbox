@@ -367,3 +367,24 @@ client, because a client is not a security boundary.
   description in tier 3 rather than tier 5, and `cpt-gearbox-fr-rpc-writes-opt-in` is what gates the
   write. Implemented in `crates/gearbox-gdl/src/edit.rs`; the four client-side refusals are in
   `docs/plans/gearbox-builder-prototype.md` §9.2.
+
+## Amendment 2026-09-01: any named argument in a literal list
+
+**Status: accepted. This extends tier 3; it reverses nothing.**
+
+The 2026-08-29 amendment limited tier-3 surgery to **list membership** in `gears`. Product authoring
+now also changes **named arguments** inside calls that appear in literal lists on `product(...)`:
+
+* `config = {...}` and `features = [...]` on a `use_gear(...)` entry;
+* fields on `embedded(...)`, `host_workers(...)` and `kubernetes(...)` in `profiles = [...]`;
+* `id` and `name` on `product(...)` when cloning.
+
+The same three limits apply: span-surgical edits only; refuse when the list is not a literal; refuse
+on an unsaved buffer. Scalar values only for `config` in this pass. Secret-like **config key names**
+are refused by **heuristic** (see ADR `cpt-gearbox-adr-create-product`).
+
+Creating a new `product.gdl` uses `writable_out_root` (path must not exist yet); editing an
+existing description uses `writable_path`. Details: ADR `cpt-gearbox-adr-create-product`.
+
+Implemented in `crates/gearbox-gdl/src/edit_call.rs` and the `gearbox/product/*` RPC methods added
+in the same pass.

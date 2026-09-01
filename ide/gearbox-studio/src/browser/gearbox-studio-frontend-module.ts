@@ -38,9 +38,12 @@ import { RevealService } from "./reveal-service";
 import { CataloguePicker } from "./catalogue/catalogue-picker";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import { ConflictsWidget } from "./conflicts/conflicts-widget";
+import { CreateProductWidget } from "./create/create-product-widget";
+import { PendingCreate } from "./create/pending-create";
 import {
   CatalogueViewContribution,
   ConflictsViewContribution,
+  CreateProductViewContribution,
   GenerateViewContribution,
   GraphViewContribution,
   InspectorViewContribution,
@@ -140,6 +143,7 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // confirm. A service rather than a widget handler, so the next widget that
   // wants to edit does not reimplement the four checks.
   bind(ProductEditService).toSelf().inSingletonScope();
+  bind(PendingCreate).toSelf().inSingletonScope();
   // The policy in front of Apply: generate advertised, writes declared, no
   // resolution errors, no conflicts. Named in the UI when they fail.
   bind(GenerateService).toSelf().inSingletonScope();
@@ -174,10 +178,9 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // else, because both write gates measure from the declared workspace.
   bind(ProductSessionService).toSelf().inSingletonScope();
 
-  // Why: `File` is where a person looks for "what am I working on", so Open and
-  // Close live there rather than under `Gearbox`, which holds the verbs that act
-  // on what is already open. `New Product` is deliberately absent until there is
-  // a skeleton to create.
+  // Why: `File` is where a person looks for "what am I working on", so Open,
+  // New and Close live there rather than under `Gearbox`, which holds the verbs
+  // that act on what is already open.
   bind(SessionCommands).toSelf().inSingletonScope();
   bind(CommandContribution).toService(SessionCommands);
   bind(MenuContribution).toService(SessionCommands);
@@ -250,6 +253,7 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bindWidget(bind, InspectorWidget);
   bindWidget(bind, ConflictsWidget);
   bindWidget(bind, StartWidget);
+  bindWidget(bind, CreateProductWidget);
   bindWidget(bind, LockWidget);
   bindWidget(bind, GenerateWidget);
 
@@ -280,6 +284,7 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // so it has nothing of that interface to implement.
   bindViewContribution(bind, ProductViewContribution);
   bindViewContribution(bind, StartViewContribution);
+  bindViewContribution(bind, CreateProductViewContribution);
   bindViewContribution(bind, ConflictsViewContribution);
   bindViewContribution(bind, LockViewContribution);
   bindViewContribution(bind, GenerateViewContribution);

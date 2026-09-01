@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **107** — 100 built, 4 not built, 0 broken, 3 not observed.
+Claims: **112** — 105 built, 4 not built, 0 broken, 3 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -76,6 +76,16 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the change count is the repository's, not a placeholder | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
 | git decorates the Explorer | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
 | a product.lock opened as a file is read-only | `PRD cpt-gearbox-fr-lock-read-only` | ✅ built |  |
+
+## `conformance/adr-0013-create-product.spec.ts`
+
+| Claim | Source | Status | Note |
+|---|---|---|---|
+| Create shows preview text, Cancel writes nothing, Create opens the product | `ADR-0013 §Confirmation` | ✅ built |  |
+| Clone keeps the source comment line count | `ADR-0013 §Confirmation` | ✅ built |  |
+| a config edit changes one line | `ADR-0013 §Confirmation` | ✅ built |  |
+| a config key named password is refused with an explanation | `ADR-0013 §Confirmation` | ✅ built |  |
+| an added profile appears in the switcher and resolves | `ADR-0013 §Confirmation` | ✅ built |  |
 
 ## `conformance/plan-widgets.spec.ts`
 

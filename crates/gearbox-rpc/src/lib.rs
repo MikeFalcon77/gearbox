@@ -23,11 +23,13 @@ use gearbox_ir::{Diagnostic, ExplanationGraph, ProfileId, RelPath, ResolvedProdu
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
 
 use crate::protocol::{
-    Capabilities, CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, EditGearParams,
-    EditGearResult, FailedRoot, GenerateApplyResult, GenerateFileParams, GenerateFileResult,
-    GenerateParams, GeneratePlanResult, InitializeParams, InitializeResult, LockOnDisk, LockParams,
-    LockResult, LogParams, ProductLoadParams, ProductLoadResult, ProgressParams, ResolveParams,
-    ResolveResult, ResolvedRoot, ServerInfo, ValidateParams, ValidateResult, error_code, method,
+    AddProfileParams, Capabilities, CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult,
+    CreateProductParams, EditGearParams, EditGearResult, FailedRoot, GenerateApplyResult,
+    GenerateFileParams, GenerateFileResult, GenerateParams, GeneratePlanResult, InitializeParams,
+    InitializeResult, LockOnDisk, LockParams, LockResult, LogParams, ProductLoadParams,
+    ProductLoadResult, ProgressParams, RemoveProfileParams, ResolveParams, ResolveResult,
+    ResolvedRoot, ServerInfo, SetConfigParams, SetFeaturesParams, SetProfileFieldParams,
+    ValidateParams, ValidateResult, error_code, method,
 };
 
 /// Why the server could not run.
@@ -159,6 +161,7 @@ fn open_roots(paths: &[PathBuf]) -> (Vec<SourceRoot>, Vec<FailedRoot>) {
     (opened, failed)
 }
 
+#[allow(clippy::cognitive_complexity)]
 fn dispatch(connection: &Connection, state: &mut State, request: Request) -> Option<Response> {
     let id = request.id.clone();
     match request.method.as_str() {
@@ -228,6 +231,48 @@ fn dispatch(connection: &Connection, state: &mut State, request: Request) -> Opt
             Some(refusal) => refusal,
             None => match cast::<EditGearParams>(request) {
                 Ok((id, params)) => edit_gear(state, id, &params, false),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
+        method::PRODUCT_SET_CONFIG => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<SetConfigParams>(request) {
+                Ok((id, params)) => edit_set_config(state, id, &params),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
+        method::PRODUCT_SET_FEATURES => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<SetFeaturesParams>(request) {
+                Ok((id, params)) => edit_set_features(state, id, &params),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
+        method::PRODUCT_ADD_PROFILE => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<AddProfileParams>(request) {
+                Ok((id, params)) => edit_add_profile(state, id, &params),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
+        method::PRODUCT_REMOVE_PROFILE => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<RemoveProfileParams>(request) {
+                Ok((id, params)) => edit_remove_profile(state, id, &params),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
+        method::PRODUCT_SET_PROFILE_FIELD => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<SetProfileFieldParams>(request) {
+                Ok((id, params)) => edit_set_profile_field(state, id, &params),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
+        method::PRODUCT_CREATE => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<CreateProductParams>(request) {
+                Ok((id, params)) => create_product(state, id, &params),
                 Err(e) => invalid_params(id, &e),
             },
         }),
@@ -563,6 +608,253 @@ fn edit_gear(state: &mut State, id: RequestId, params: &EditGearParams, add: boo
             changed,
             written: changed && !params.dry_run,
             before,
+            after,
+            diagnostics: Vec::new(),
+        },
+    )
+}
+
+fn edit_set_config(state: &mut State, id: RequestId, params: &SetConfigParams) -> Response {
+    edit_with(state, id, &params.path, params.dry_run, |uri, before| {
+        gearbox_gdl::edit::set_gear_config(
+            uri,
+            before,
+            &params.gear,
+            &params.key,
+            params.value.as_deref(),
+        )
+    })
+}
+
+fn edit_set_features(state: &mut State, id: RequestId, params: &SetFeaturesParams) -> Response {
+    edit_with(state, id, &params.path, params.dry_run, |uri, before| {
+        gearbox_gdl::edit::set_gear_features(uri, before, &params.gear, &params.features)
+    })
+}
+
+fn edit_add_profile(state: &mut State, id: RequestId, params: &AddProfileParams) -> Response {
+    let fields = params
+        .fields
+        .iter()
+        .map(|f| (f.name.clone(), f.value.clone()))
+        .collect::<Vec<_>>();
+    edit_with(state, id, &params.path, params.dry_run, |uri, before| {
+        gearbox_gdl::edit::add_profile(uri, before, &params.kind, &params.id, &fields)
+    })
+}
+
+fn edit_remove_profile(state: &mut State, id: RequestId, params: &RemoveProfileParams) -> Response {
+    edit_with(state, id, &params.path, params.dry_run, |uri, before| {
+        gearbox_gdl::edit::remove_profile(uri, before, &params.id)
+    })
+}
+
+fn edit_set_profile_field(
+    state: &mut State,
+    id: RequestId,
+    params: &SetProfileFieldParams,
+) -> Response {
+    edit_with(state, id, &params.path, params.dry_run, |uri, before| {
+        gearbox_gdl::edit::set_profile_field(
+            uri,
+            before,
+            &params.id,
+            &params.field,
+            params.value.as_deref(),
+        )
+    })
+}
+
+fn edit_with(
+    state: &mut State,
+    id: RequestId,
+    path_str: &str,
+    dry_run: bool,
+    apply: impl FnOnce(&str, &str) -> Result<gearbox_gdl::edit::Edit, gearbox_ir::Diagnostics>,
+) -> Response {
+    if !state.allow_writes {
+        return error(
+            id,
+            error_code::WRITES_NOT_ALLOWED,
+            "this session declared no write capability, so nothing will be written; \
+             pass `allow_writes: true` to `initialize` if the client is meant to edit files",
+        );
+    }
+    let path = PathBuf::from(path_str);
+    if let Err(refusal) = writable_path(state, &path) {
+        return error(id, error_code::EDIT_REFUSED, &refusal);
+    }
+    let before = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) => {
+            return error(
+                id,
+                error_code::EDIT_REFUSED,
+                &format!("cannot read `{path_str}`: {e}"),
+            );
+        }
+    };
+    let uri = format!("file://{}", path.display());
+    let edit = match apply(&uri, &before) {
+        Ok(edit) => edit,
+        Err(diagnostics) => {
+            return error_with_diagnostics(
+                id,
+                error_code::EDIT_REFUSED,
+                &format!("`{path_str}` could not be edited"),
+                diagnostics.as_slice(),
+            );
+        }
+    };
+    respond_edit(id, &path, dry_run, before, edit)
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn respond_edit(
+    id: RequestId,
+    path: &Path,
+    dry_run: bool,
+    before: String,
+    edit: gearbox_gdl::edit::Edit,
+) -> Response {
+    let after = edit.changed().unwrap_or(&before).to_owned();
+    let changed = edit.changed().is_some();
+    if changed
+        && !dry_run
+        && let Err(e) = write_atomically(path, &after)
+    {
+        return error(
+            id,
+            error_code::EDIT_REFUSED,
+            &format!("cannot write `{}`: {e}", path.display()),
+        );
+    }
+    ok(
+        id,
+        &EditGearResult {
+            changed,
+            written: changed && !dry_run,
+            before,
+            after,
+            diagnostics: Vec::new(),
+        },
+    )
+}
+
+fn create_product(state: &mut State, id: RequestId, params: &CreateProductParams) -> Response {
+    if !state.allow_writes && !params.dry_run {
+        return error(
+            id,
+            error_code::WRITES_NOT_ALLOWED,
+            "this session declared no write capability, so nothing will be written; \
+             pass `allow_writes: true` to `initialize` if the client is meant to create files",
+        );
+    }
+
+    let path = PathBuf::from(&params.path);
+    if path.exists() {
+        return error(
+            id,
+            error_code::EDIT_REFUSED,
+            &format!(
+                "`{}` already exists; create refuses to overwrite",
+                params.path
+            ),
+        );
+    }
+
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    if let Err(refusal) = writable_out_root(state, parent) {
+        return error(id, error_code::EDIT_REFUSED, &refusal);
+    }
+
+    let after = if let Some(clone_from) = params.clone_from.as_deref() {
+        let source = match std::fs::read_to_string(clone_from) {
+            Ok(text) => text,
+            Err(e) => {
+                return error(
+                    id,
+                    error_code::EDIT_REFUSED,
+                    &format!("cannot read clone source `{clone_from}`: {e}"),
+                );
+            }
+        };
+        let uri = format!("file://{}", PathBuf::from(clone_from).display());
+        match gearbox_gdl::edit::clone_product_text(&uri, &source, &params.id, &params.name) {
+            Ok(text) => text,
+            Err(diagnostics) => {
+                return error_with_diagnostics(
+                    id,
+                    error_code::EDIT_REFUSED,
+                    &format!("`{clone_from}` could not be cloned"),
+                    diagnostics.as_slice(),
+                );
+            }
+        }
+    } else {
+        gearbox_gdl::edit::render_product_template(&gearbox_gdl::edit::CreateProductParams {
+            id: params.id.clone(),
+            name: params.name.clone(),
+            version: params.version.clone(),
+            sources: params
+                .sources
+                .iter()
+                .map(|s| (s.id.clone(), s.at.clone()))
+                .collect(),
+            profile_kind: params.profile_kind.clone(),
+            profile_id: params.profile_id.clone(),
+        })
+    };
+
+    // Refuse to write (or preview) text that does not evaluate as a product.
+    // Escaping closes the practical hole; this catches a broken template itself.
+    let uri = gearbox_ir::file_uri(&path);
+    let identity = gearbox_gdl::FileIdentity {
+        uri,
+        source: SourceId::new("product").unwrap_or_else(|_| unreachable!("`product` is kebab")),
+        gdl_path: RelPath::new("product.gdl")
+            .unwrap_or_else(|_| unreachable!("`product.gdl` is a valid rel path")),
+        load_paths: None,
+    };
+    let outcome = gearbox_gdl::GdlEngine::new().eval_product(&identity, &after);
+    if outcome.value.is_none() {
+        return error_with_diagnostics(
+            id,
+            error_code::EDIT_REFUSED,
+            &format!(
+                "`{}` does not evaluate as a product description",
+                params.path
+            ),
+            outcome.diagnostics.as_slice(),
+        );
+    }
+
+    if !params.dry_run {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return error(
+                id,
+                error_code::EDIT_REFUSED,
+                &format!("cannot create `{}`: {e}", parent.display()),
+            );
+        }
+        if let Err(e) = write_atomically(&path, &after) {
+            return error(
+                id,
+                error_code::EDIT_REFUSED,
+                &format!("cannot write `{}`: {e}", params.path),
+            );
+        }
+    }
+
+    ok(
+        id,
+        &EditGearResult {
+            changed: true,
+            written: !params.dry_run,
+            before: String::new(),
             after,
             diagnostics: Vec::new(),
         },

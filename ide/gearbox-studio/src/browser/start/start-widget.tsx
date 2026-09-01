@@ -6,12 +6,10 @@
 // three things -- New, Load, Recent -- and only then shows domain views; this is
 // that screen minus the one that is not built.
 //
-// **No `Create Product`.** It needs a skeleton -- which sources, which profiles,
-// what the first `product.gdl` says -- and it is a new write path, which the P0
-// stray-write investigation has not cleared. A button promising a product it
-// cannot create is worse than no button, and a disabled one with a tooltip is the
-// same promise in a quieter voice.
-//
+// **Create and clone are here now.** Both go through the same screen: a wizard
+// with a live preview on the right (`cpt-gearbox-adr-authoring-ownership-tiers`
+// §Consequences: a preview is not optional). Clone reads the source file and
+// changes only `id` and `name`; everything else — comments included — survives.
 // The two lists are deliberately not merged. `Open Product…` offers one list
 // because a picker is a question with one answer; here there is room to say which
 // products are *in this workspace* and which were *opened before*, and those are
@@ -23,9 +21,10 @@ import { inject, injectable, postConstruct } from "@theia/core/shared/inversify"
 import React from "@theia/core/shared/react";
 
 import type { ProductRef } from "../../common/protocol";
+import { PendingCreate } from "../create/pending-create";
 import { ProductStore } from "../product-store";
 import { ProductSessionService } from "../shell/product-session-service";
-import { OPEN_PRODUCT } from "../shell/session-commands";
+import { NEW_PRODUCT, OPEN_PRODUCT } from "../shell/session-command-ids";
 
 @injectable()
 export class StartWidget extends ReactWidget {
@@ -35,6 +34,7 @@ export class StartWidget extends ReactWidget {
   @inject(ProductStore) protected readonly products!: ProductStore;
   @inject(ProductSessionService) protected readonly session!: ProductSessionService;
   @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
+  @inject(PendingCreate) protected readonly pending!: PendingCreate;
 
   /**
    * Recent products, read once and after every change.
@@ -89,14 +89,24 @@ export class StartWidget extends ReactWidget {
           </div>
         </div>
 
-        <button
-          type="button"
-          className="gbx-start-primary"
-          data-start-action="open"
-          onClick={() => void this.commands.executeCommand(OPEN_PRODUCT.id)}
-        >
-          Open Product…
-        </button>
+        <div className="gbx-start-actions">
+          <button
+            type="button"
+            className="gbx-start-primary"
+            data-start-action="create"
+            onClick={() => void this.commands.executeCommand(NEW_PRODUCT.id)}
+          >
+            New Product…
+          </button>
+          <button
+            type="button"
+            className="gbx-start-primary gbx-start-secondary"
+            data-start-action="open"
+            onClick={() => void this.commands.executeCommand(OPEN_PRODUCT.id)}
+          >
+            Open Product…
+          </button>
+        </div>
 
         {this.renderList("In this workspace", "workspace", found)}
         {this.renderList("Recent", "recent", remembered)}
@@ -132,11 +142,32 @@ export class StartWidget extends ReactWidget {
                 <span className="gbx-start-item-name">{ref.label}</span>
                 <span className="gbx-start-item-path">{ref.path}</span>
               </button>
+              {kind === "workspace" && (
+                <button
+                  type="button"
+                  className="gbx-start-clone"
+                  data-start-action="clone"
+                  data-clone-from={ref.path}
+                  onClick={() => this.openClone(ref)}
+                >
+                  Clone
+                </button>
+              )}
             </li>
           ))}
         </ul>
       </div>
     );
+  }
+
+  protected openClone(ref: ProductRef): void {
+    const base = ref.label.replace(/\s+/g, "-").toLowerCase();
+    this.pending.state = {
+      cloneFrom: ref.path,
+      id: `${base}-copy`,
+      name: `${ref.label} copy`,
+    };
+    void this.commands.executeCommand(NEW_PRODUCT.id);
   }
 
   /**

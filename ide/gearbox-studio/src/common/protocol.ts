@@ -45,6 +45,12 @@ export const method = {
   PRODUCT_LOCK: "gearbox/product/lock",
   PRODUCT_ADD_GEAR: "gearbox/product/addGear",
   PRODUCT_REMOVE_GEAR: "gearbox/product/removeGear",
+  PRODUCT_SET_CONFIG: "gearbox/product/setConfig",
+  PRODUCT_SET_FEATURES: "gearbox/product/setFeatures",
+  PRODUCT_ADD_PROFILE: "gearbox/product/addProfile",
+  PRODUCT_REMOVE_PROFILE: "gearbox/product/removeProfile",
+  PRODUCT_SET_PROFILE_FIELD: "gearbox/product/setProfileField",
+  PRODUCT_CREATE: "gearbox/product/create",
   VALIDATE: "gearbox/validate",
   GENERATE_PLAN: "gearbox/generate/plan",
   GENERATE_APPLY: "gearbox/generate/apply",
@@ -167,6 +173,51 @@ export interface GearboxService {
 
   /** Remove a gear from a product description, or preview the removal. */
   removeGear(path: string, gear: string, dryRun: boolean): Promise<EditGearResult>;
+
+  setConfig(
+    path: string,
+    gear: string,
+    key: string,
+    value: string | undefined,
+    dryRun: boolean,
+  ): Promise<EditGearResult>;
+
+  setFeatures(
+    path: string,
+    gear: string,
+    features: readonly string[],
+    dryRun: boolean,
+  ): Promise<EditGearResult>;
+
+  addProfile(
+    path: string,
+    kind: string,
+    id: string,
+    fields: ReadonlyArray<{ name: string; value: string }>,
+    dryRun: boolean,
+  ): Promise<EditGearResult>;
+
+  removeProfile(path: string, id: string, dryRun: boolean): Promise<EditGearResult>;
+
+  setProfileField(
+    path: string,
+    id: string,
+    field: string,
+    value: string | undefined,
+    dryRun: boolean,
+  ): Promise<EditGearResult>;
+
+  createProduct(params: {
+    path: string;
+    id: string;
+    name: string;
+    version: string;
+    sources: ReadonlyArray<{ id: string; at: string }>;
+    profileKind: string;
+    profileId: string;
+    cloneFrom?: string;
+    dryRun: boolean;
+  }): Promise<EditGearResult>;
 
   /** Everything checkable without resolving. `product` omitted checks only the
    * catalogue. */

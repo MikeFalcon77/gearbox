@@ -27,6 +27,14 @@
 //! - **Duplicate.** Adding a gear the list already names is a no-op, which is
 //!   ADR-0010's "idempotent by content" and costs nothing.
 
+#[path = "edit_call.rs"]
+mod edit_call;
+
+pub use edit_call::{
+    CreateProductParams, add_profile, clone_product_text, is_secret_config_key, quote_string,
+    remove_profile, render_product_template, set_gear_config, set_gear_features, set_profile_field,
+};
+
 use gearbox_ir::{Diagnostic, DiagnosticCode, Diagnostics, Location, Position, Range};
 use starlark::syntax::AstModule;
 use starlark_syntax::codemap::{Pos, Span};
@@ -96,16 +104,20 @@ pub fn remove_gear(uri: &str, source: &str, gear: &str) -> Result<Edit, Diagnost
     })
 }
 
-/// A `gears = [...]` argument, located.
-struct GearsList {
+/// A named list argument on `product(...)`, located.
+pub(crate) struct NamedList {
     /// The list expression's own span, brackets included.
     span: Span,
     /// The spans of the entries already in it.
     entries: Vec<Span>,
 }
 
-/// Find the `gears` argument of the top-level `product(...)` call.
-fn gears_list(uri: &str, source: &str) -> Result<GearsList, Diagnostics> {
+/// Find a named list literal on the top-level `product(...)` call.
+pub(crate) fn named_list_literal(
+    uri: &str,
+    source: &str,
+    arg: &str,
+) -> Result<NamedList, Diagnostics> {
     let ast = AstModule::parse(uri, source.to_owned(), &dialect())
         .map_err(|e| {
             refuse(
@@ -123,37 +135,41 @@ fn gears_list(uri: &str, source: &str) -> Result<GearsList, Diagnostics> {
         )
     })?;
 
-    let gears = call
+    let value = call
         .iter()
         .find_map(|argument| match &argument.node {
-            ArgumentP::Named(name, value) if name.node == "gears" => Some(value),
+            ArgumentP::Named(name, value) if name.node == arg => Some(value),
             _ => None,
         })
         .ok_or_else(|| {
             refuse(
                 uri,
-                "`product(...)` declares no `gears` argument",
-                "add `gears = []` to the product and retry, so there is a list to insert into",
+                &format!("`product(...)` declares no `{arg}` argument"),
+                &format!(
+                    "add `{arg} = []` to the product and retry, so there is a list to insert into"
+                ),
             )
         })?;
 
-    match &gears.node {
-        ExprP::List(entries) => Ok(GearsList {
-            span: gears.span,
+    match &value.node {
+        ExprP::List(entries) => Ok(NamedList {
+            span: value.span,
             entries: entries.iter().map(|entry| entry.span).collect(),
         }),
-        // A list built by anything other than a literal has no span to insert
-        // into. Refusing names the shape rather than mangling it.
         _ => Err(refuse(
             uri,
-            "`gears` is not a list literal, so there is no place to insert an entry",
+            &format!("`{arg}` is not a list literal, so there is no place to insert an entry"),
             "write the entries as a literal list, or add this one by hand -- a computed list has no span to edit",
         )),
     }
 }
 
+fn gears_list(uri: &str, source: &str) -> Result<NamedList, Diagnostics> {
+    named_list_literal(uri, source, "gears")
+}
+
 /// The argument list of the first top-level `product(...)` call.
-fn find_product_call<P>(
+pub(crate) fn find_product_call<P>(
     stmt: &AstStmtP<P>,
 ) -> Option<&[starlark_syntax::syntax::ast::AstArgumentP<P>]>
 where
@@ -169,7 +185,7 @@ where
     }
 }
 
-fn is_identifier<P>(expr: &AstExprP<P>, name: &str) -> bool
+pub(crate) fn is_identifier<P>(expr: &AstExprP<P>, name: &str) -> bool
 where
     P: starlark_syntax::syntax::ast::AstPayload,
 {
@@ -183,13 +199,12 @@ where
 /// comparing the rendered text keeps this indifferent to how the rest of the
 /// entry is written.
 fn names_gear(source: &str, entry: Span, gear: &str) -> bool {
-    let text = slice(source, entry);
-    text.trim_start().starts_with("use_gear")
-        && (text.contains(&format!("\"{gear}\"")) || text.contains(&format!("'{gear}'")))
+    edit_call::names_entry(source, entry, gear)
+        && slice(source, entry).trim_start().starts_with("use_gear")
 }
 
 /// Insert `entry` as the last element of `list`.
-fn insert_entry(source: &str, list: &GearsList, entry: &str) -> String {
+pub(crate) fn insert_entry(source: &str, list: &NamedList, entry: &str) -> String {
     let close = offset(list.span.end(), source);
     // The insertion point is just before the closing bracket, and the text before
     // it decides the shape: a list whose entries are on their own lines gets a
@@ -231,7 +246,7 @@ fn insert_entry(source: &str, list: &GearsList, entry: &str) -> String {
 }
 
 /// Remove one entry, and the comma and blank line it leaves behind.
-fn remove_entry(source: &str, entry: Span) -> String {
+pub(crate) fn remove_entry(source: &str, entry: Span) -> String {
     let start = offset(entry.begin(), source);
     let mut end = offset(entry.end(), source);
 
@@ -267,11 +282,11 @@ fn remove_entry(source: &str, entry: Span) -> String {
 /// Clamped rather than trusted: the span and the text come from the same parse,
 /// so they agree -- but an index that could panic on a mismatch is not worth the
 /// risk in a function whose whole job is slicing.
-fn offset(pos: Pos, source: &str) -> usize {
+pub(crate) fn offset(pos: Pos, source: &str) -> usize {
     (pos.get() as usize).min(source.len())
 }
 
-fn slice(source: &str, span: Span) -> &str {
+pub(crate) fn slice(source: &str, span: Span) -> &str {
     &source[offset(span.begin(), source)..offset(span.end(), source)]
 }
 
@@ -300,7 +315,7 @@ fn indent_of(source: &str, span: Span) -> String {
 /// not optional -- `Diagnostic::error` requires it, which is
 /// `cpt-gearbox-nfr-actionable-diagnostics` enforced by the type rather than by a
 /// review comment.
-fn refuse(uri: &str, message: &str, help: &str) -> Diagnostics {
+pub(crate) fn refuse(uri: &str, message: &str, help: &str) -> Diagnostics {
     let zero = Position {
         line: 0,
         character: 0,

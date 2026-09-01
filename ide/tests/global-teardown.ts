@@ -17,19 +17,47 @@
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
-export default function globalTeardown(): void {
+import {
+  flushWriteTraces,
+  formatWriteTraces,
+  readWriteTraces,
+  resetWriteTraces,
+} from "./fixtures/write-traces";
+
+export default async function globalTeardown(): Promise<void> {
   const repo = join(__dirname, "../..");
+  await flushWriteTraces();
   const dirty = execFileSync("git", ["status", "--porcelain", "--", "products"], {
     cwd: repo,
     encoding: "utf8",
   }).trim();
-  if (dirty === "") return;
+  const traces = readWriteTraces();
+  const traceBlock = formatWriteTraces(traces);
+  resetWriteTraces();
 
-  const diff = execFileSync("git", ["diff", "--", "products"], { cwd: repo, encoding: "utf8" });
+  if (dirty === "" && traces.length === 0) return;
+
+  if (dirty === "") {
+    // Tree is clean: leftover traces are a race or an intentional write that
+    // restored the file — not a changed description.
+    throw new Error(
+      `The run left Gearbox write traces with a clean products/ tree:\n\n` +
+        traceBlock +
+        `products/ was not modified. A late append after a clean reset used to ` +
+        `look like a dirty tree; if this still fires after flushWriteTraces, the ` +
+        `trace file outlived the run without a matching description change.`,
+    );
+  }
+
+  const diff = execFileSync("git", ["diff", "--", "products"], {
+    cwd: repo,
+    encoding: "utf8",
+  });
   execFileSync("git", ["checkout", "--", "products"], { cwd: repo });
   throw new Error(
-    `The run left a product description changed after the last test finished:\n${dirty}\n\n` +
-      `${diff}\n` +
+    `The run left a product description changed after the last test finished:\n` +
+      `${dirty}\n\n${diff}\n\n` +
+      traceBlock +
       `The tree has been restored. No test was blamed because none was still running: ` +
       `the write landed in teardown or after the final hook, which is why the per-test ` +
       `guard did not see it. Two claims edit a description on purpose and put it back; ` +

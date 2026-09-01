@@ -26,6 +26,12 @@ pub mod method {
     pub const PRODUCT_LOCK: &str = "gearbox/product/lock";
     pub const PRODUCT_ADD_GEAR: &str = "gearbox/product/addGear";
     pub const PRODUCT_REMOVE_GEAR: &str = "gearbox/product/removeGear";
+    pub const PRODUCT_SET_CONFIG: &str = "gearbox/product/setConfig";
+    pub const PRODUCT_SET_FEATURES: &str = "gearbox/product/setFeatures";
+    pub const PRODUCT_ADD_PROFILE: &str = "gearbox/product/addProfile";
+    pub const PRODUCT_REMOVE_PROFILE: &str = "gearbox/product/removeProfile";
+    pub const PRODUCT_SET_PROFILE_FIELD: &str = "gearbox/product/setProfileField";
+    pub const PRODUCT_CREATE: &str = "gearbox/product/create";
     pub const VALIDATE: &str = "gearbox/validate";
     pub const GENERATE_PLAN: &str = "gearbox/generate/plan";
     pub const GENERATE_APPLY: &str = "gearbox/generate/apply";
@@ -332,6 +338,106 @@ pub struct EditGearParams {
     /// second method, for the same reason `gearbox generate` has one.
     #[serde(default)]
     pub dry_run: bool,
+}
+
+/// `gearbox/product/setConfig` -- one key in a gear's `config = {...}`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SetConfigParams {
+    pub path: String,
+    pub gear: String,
+    pub key: String,
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// `gearbox/product/setFeatures`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SetFeaturesParams {
+    pub path: String,
+    pub gear: String,
+    pub features: Vec<String>,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// `gearbox/product/addProfile`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct AddProfileParams {
+    pub path: String,
+    pub kind: String,
+    pub id: String,
+    #[serde(default)]
+    pub fields: Vec<ProfileFieldEntry>,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ProfileFieldEntry {
+    pub name: String,
+    pub value: String,
+}
+
+/// `gearbox/product/removeProfile`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct RemoveProfileParams {
+    pub path: String,
+    pub id: String,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// `gearbox/product/setProfileField`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SetProfileFieldParams {
+    pub path: String,
+    pub id: String,
+    pub field: String,
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// A source entry written into a new product description.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct CreateSourceEntry {
+    pub id: String,
+    pub at: String,
+}
+
+/// `gearbox/product/create` -- new file from a template or a clone.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct CreateProductParams {
+    pub path: String,
+    pub id: String,
+    pub name: String,
+    #[serde(default = "default_product_version")]
+    pub version: String,
+    #[serde(default)]
+    pub sources: Vec<CreateSourceEntry>,
+    #[serde(default = "default_profile_kind")]
+    pub profile_kind: String,
+    #[serde(default = "default_profile_id")]
+    pub profile_id: String,
+    #[serde(default)]
+    pub clone_from: Option<String>,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+fn default_product_version() -> String {
+    "0.1.0".to_owned()
+}
+
+fn default_profile_kind() -> String {
+    "embedded".to_owned()
+}
+
+fn default_profile_id() -> String {
+    "dev".to_owned()
 }
 
 /// What an edit would do, or did.

@@ -623,7 +623,78 @@
   background: var(--theia-button-background);
 }
 .gbx-start-primary:hover { background: var(--theia-button-hoverBackground); }
+.gbx-start-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.gbx-start-secondary {
+  color: var(--theia-foreground);
+  background: var(--theia-button-secondaryBackground, transparent);
+  border: 1px solid var(--theia-editorGroup-border);
+}
 .gbx-start-section { margin-top: 28px; }
+.gbx-start-items li { display: flex; align-items: center; gap: 8px; }
+.gbx-start-clone {
+  flex: 0 0 auto;
+  font: inherit; font-size: 0.85em; cursor: pointer;
+  padding: 4px 10px; border-radius: 3px;
+  border: 1px solid var(--theia-editorGroup-border);
+  background: transparent; color: var(--theia-foreground);
+}
+.gbx-start-clone:hover { background: var(--theia-list-hoverBackground); }
+
+/* --- Create product ------------------------------------------------------ */
+
+.gbx-create {
+  display: flex; gap: 16px; height: 100%; padding: 12px 16px; box-sizing: border-box;
+}
+.gbx-create-form {
+  flex: 0 0 360px; display: flex; flex-direction: column; gap: 10px; overflow: auto;
+}
+.gbx-create-form label { display: flex; flex-direction: column; gap: 4px; }
+.gbx-create-form input[type="text"],
+.gbx-create-form input:not([type]) {
+  font: inherit; padding: 4px 6px;
+  border: 1px solid var(--theia-input-border, var(--theia-editorGroup-border));
+  background: var(--theia-input-background, var(--theia-editor-background));
+  color: var(--theia-input-foreground, var(--theia-foreground));
+}
+.gbx-create-sources label { flex-direction: row; align-items: center; gap: 8px; }
+.gbx-create-actions { display: flex; gap: 8px; margin-top: 8px; }
+.gbx-create-preview {
+  flex: 1 1 auto; min-width: 0; margin: 0; overflow: auto;
+  padding: 10px 12px;
+  font-family: var(--theia-code-font-family);
+  font-size: var(--theia-code-font-size);
+  white-space: pre;
+  border: 1px solid var(--theia-editorGroup-border);
+  border-radius: 3px;
+  background: var(--theia-editor-background);
+}
+
+/* --- In-product edits (Inspector / Product) ------------------------------ */
+
+.gbx-product-edit, .gbx-profile-edit {
+  margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid var(--theia-editorGroup-border);
+}
+.gbx-config-list, .gbx-features-list { display: flex; flex-direction: column; gap: 6px; }
+.gbx-config-row {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.gbx-config-row input {
+  flex: 1 1 120px; min-width: 80px;
+  font: inherit; padding: 2px 6px;
+  border: 1px solid var(--theia-input-border, var(--theia-editorGroup-border));
+  background: var(--theia-input-background, var(--theia-editor-background));
+}
+.gbx-feature-remove {
+  margin-left: 4px; padding: 0 4px; border: none; background: transparent;
+  cursor: pointer; opacity: 0.6;
+}
+.gbx-profile-edit input {
+  font: inherit; padding: 2px 6px; width: min(100%, 420px);
+  border: 1px solid var(--theia-input-border, var(--theia-editorGroup-border));
+  background: var(--theia-input-background, var(--theia-editor-background));
+}
+
 .gbx-start-label {
   text-transform: uppercase; font-size: 0.8em; letter-spacing: 0.06em; opacity: 0.6;
   padding-bottom: 4px; border-bottom: 1px solid var(--theia-editorGroup-border);

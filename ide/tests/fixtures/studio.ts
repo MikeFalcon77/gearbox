@@ -17,6 +17,15 @@ import { join } from "node:path";
 
 import { expect, test as base, type Browser, type Locator, type Page } from "@playwright/test";
 
+import {
+  appendWriteTrace,
+  flushWriteTraces,
+  formatWriteTraces,
+  readWriteTraces,
+  resetWriteTraces,
+  trackWriteTrace,
+} from "./write-traces";
+
 /** One sample of the catalogue's DOM, taken while a load is in flight. */
 export interface Sample {
   t: number;
@@ -48,7 +57,13 @@ export interface Studio {
    * never an error. Without this the editor falls back to plaintext silently and
    * every other check still passes.
    */
+  /** Console warnings — see interface comment. */
   consoleWarnings: string[];
+  /**
+   * Stack traces from `ProductEditService` at the moment a write is about to
+   * happen. Collected separately because the default handler ignored `info`.
+   */
+  writeTraces: string[];
   /** Every sample taken since before the document had scripts. */
   timeline(): Promise<Sample[]>;
   /** Select a row whose name contains `name`; resolve with the detail text. */
@@ -115,7 +130,23 @@ async function open(browser: Browser): Promise<{ studio: Studio; close: () => Pr
 
   const consoleErrors: string[] = [];
   const consoleWarnings: string[] = [];
+  const writeTraces: string[] = [];
   page.on("console", (message) => {
+    const text = message.text();
+    if (message.type() === "info" && text.startsWith("Gearbox: writing")) {
+      const args = message.args();
+      const work = Promise.resolve(args[1]?.jsonValue())
+        .then((stack) => {
+          const line = stack ? `${text}\n${String(stack)}` : text;
+          writeTraces.push(line);
+          appendWriteTrace(line);
+        })
+        .catch(() => {
+          writeTraces.push(text);
+          appendWriteTrace(text);
+        });
+      trackWriteTrace(work);
+    }
     if (message.type() === "error") {
       // The URL of a failed request lives in `location()`, not in `text()`: the
       // text is only "Failed to load resource: ... 404". Without the URL there
@@ -134,6 +165,7 @@ async function open(browser: Browser): Promise<{ studio: Studio; close: () => Pr
     page,
     consoleErrors,
     consoleWarnings,
+    writeTraces,
     timeline: () =>
       page.evaluate(
         () => (window as unknown as { __gbxSamples?: Sample[] }).__gbxSamples ?? [],
@@ -417,22 +449,34 @@ async function revealView(page: Page, command: string, selector: string): Promis
  * it**, prints the diff naming the gear, and restores the tree so the rest of the
  * run is still worth reading. Silently restoring would have hidden it again.
  */
+// Do not request the worker-scoped `studio` fixture here: staged-loading tests
+// use `freshStudio` and are timing-sensitive; pulling `studio` into every test
+// would instantiate the shared session for them. Write stacks are also appended
+// to the trace file from `open()`, so the file is enough for this guard.
 base.afterEach(async ({}, testInfo) => {
   const { execFileSync } = await import("node:child_process");
   const repo = join(__dirname, "../..");
+  await flushWriteTraces();
   const dirty = execFileSync("git", ["status", "--porcelain", "--", "products"], {
     cwd: repo,
     encoding: "utf8",
   }).trim();
-  if (dirty === "") return;
+  const traces = readWriteTraces();
+  const traceBlock = formatWriteTraces(traces);
+  if (dirty === "") {
+    resetWriteTraces();
+    return;
+  }
 
   const diff = execFileSync("git", ["diff", "--", "products"], {
     cwd: repo,
     encoding: "utf8",
   });
   execFileSync("git", ["checkout", "--", "products"], { cwd: repo });
+  resetWriteTraces();
   throw new Error(
-    `"${testInfo.title}" left a product description changed:\n${dirty}\n\n${diff}\n` +
+    `"${testInfo.title}" left a product description changed:\n${dirty}\n\n${diff}\n\n` +
+      traceBlock +
       `The tree has been restored. Two claims edit a description on purpose and put ` +
       `it back; anything else writing there is the defect this guard exists to name.`,
   );

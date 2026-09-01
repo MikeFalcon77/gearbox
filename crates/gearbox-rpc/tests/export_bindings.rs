@@ -26,11 +26,12 @@ use std::path::{Path, PathBuf};
 
 use gearbox_ir::{Catalogue, ExplanationGraph, PendingGear, ProductIntent, ResolvedProduct};
 use gearbox_rpc::protocol::{
-    CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult, EditGearParams, EditGearResult,
-    GenerateApplyResult, GenerateFileParams, GenerateFileResult, GenerateParams,
-    GeneratePlanResult, InitializeParams, InitializeResult, LockParams, LockResult, LogParams,
-    ProductLoadParams, ProductLoadResult, ProgressParams, ResolveParams, ResolveResult,
-    ValidateParams, ValidateResult,
+    AddProfileParams, CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult,
+    CreateProductParams, CreateSourceEntry, EditGearParams, EditGearResult, GenerateApplyResult,
+    GenerateFileParams, GenerateFileResult, GenerateParams, GeneratePlanResult, InitializeParams,
+    InitializeResult, LockParams, LockResult, LogParams, ProductLoadParams, ProductLoadResult,
+    ProfileFieldEntry, ProgressParams, RemoveProfileParams, ResolveParams, ResolveResult,
+    SetConfigParams, SetFeaturesParams, SetProfileFieldParams, ValidateParams, ValidateResult,
 };
 use ts_rs::{Config, TS};
 
@@ -67,6 +68,14 @@ fn export_roots(cfg: &Config) {
     ResolveResult::export_all(cfg).expect("export ResolveResult");
     EditGearParams::export_all(cfg).expect("export EditGearParams");
     EditGearResult::export_all(cfg).expect("export EditGearResult");
+    SetConfigParams::export_all(cfg).expect("export SetConfigParams");
+    SetFeaturesParams::export_all(cfg).expect("export SetFeaturesParams");
+    AddProfileParams::export_all(cfg).expect("export AddProfileParams");
+    ProfileFieldEntry::export_all(cfg).expect("export ProfileFieldEntry");
+    RemoveProfileParams::export_all(cfg).expect("export RemoveProfileParams");
+    SetProfileFieldParams::export_all(cfg).expect("export SetProfileFieldParams");
+    CreateProductParams::export_all(cfg).expect("export CreateProductParams");
+    CreateSourceEntry::export_all(cfg).expect("export CreateSourceEntry");
     LockParams::export_all(cfg).expect("export LockParams");
     LockResult::export_all(cfg).expect("export LockResult");
     ValidateParams::export_all(cfg).expect("export ValidateParams");

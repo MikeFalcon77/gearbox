@@ -37,11 +37,13 @@ import { inject, injectable } from "@theia/core/shared/inversify";
 import type { EditGearResult } from "../common/generated/EditGearResult";
 import { GearboxService } from "../common/protocol";
 import { ProductStore } from "./product-store";
+import { ProductSessionService } from "./shell/product-session-service";
 
 @injectable()
 export class ProductEditService {
   @inject(GearboxService) protected readonly service!: GearboxService;
   @inject(ProductStore) protected readonly product!: ProductStore;
+  @inject(ProductSessionService) protected readonly session!: ProductSessionService;
   @inject(MonacoTextModelService) protected readonly models!: MonacoTextModelService;
   @inject(MessageService) protected readonly messages!: MessageService;
 
@@ -126,6 +128,230 @@ export class ProductEditService {
     // is about the previous one until this finishes.
     await this.product.reload();
     return true;
+  }
+
+  async setConfig(gear: string, key: string, value: string | undefined): Promise<boolean> {
+    const open = this.product.current.open;
+    if (open === undefined) return false;
+    return this.applyDescriptionEdit({
+      title: "Change config",
+      ok: "Apply",
+      summary: `${key} on ${gear}`,
+      path: open.path,
+      label: open.label,
+      dryRun: () => this.service.setConfig(open.path, gear, key, value, true),
+      commit: () => this.service.setConfig(open.path, gear, key, value, false),
+      log: `set config ${key} on ${gear}`,
+    });
+  }
+
+  async createProduct(params: {
+    path: string;
+    id: string;
+    name: string;
+    version: string;
+    sources: ReadonlyArray<{ id: string; at: string }>;
+    profileKind: string;
+    profileId: string;
+    cloneFrom?: string;
+    preview: string;
+  }): Promise<boolean> {
+    let preview: EditGearResult;
+    try {
+      preview = await this.service.createProduct({ ...params, dryRun: true });
+    } catch (error) {
+      this.messages.error(messageOf(error));
+      return false;
+    }
+    if (!(await this.confirmCreate(params.name, preview))) return false;
+    try {
+      preview = await this.service.createProduct({ ...params, dryRun: true });
+    } catch (error) {
+      this.messages.error(messageOf(error));
+      return false;
+    }
+    if (preview.after !== params.preview) {
+      this.messages.warn("The preview changed while the dialog was open. Try again.");
+      return false;
+    }
+    // eslint-disable-next-line no-console
+    console.info(`Gearbox: writing create ${params.path}`, new Error("write path").stack);
+    try {
+      await this.service.createProduct({ ...params, dryRun: false });
+    } catch (error) {
+      this.messages.error(messageOf(error));
+      return false;
+    }
+    await this.product.ensureDiscovered();
+    await this.session.open({ path: params.path, label: params.name });
+    return true;
+  }
+
+  async setFeatures(gear: string, features: readonly string[]): Promise<boolean> {
+    const open = this.product.current.open;
+    if (open === undefined) return false;
+    return this.applyDescriptionEdit({
+      title: "Change features",
+      ok: "Apply",
+      summary: `features on ${gear}`,
+      path: open.path,
+      label: open.label,
+      dryRun: () => this.service.setFeatures(open.path, gear, features, true),
+      commit: () => this.service.setFeatures(open.path, gear, features, false),
+      log: `set features on ${gear}`,
+    });
+  }
+
+  async addProfile(
+    kind: string,
+    id: string,
+    fields: ReadonlyArray<{ name: string; value: string }>,
+  ): Promise<boolean> {
+    const open = this.product.current.open;
+    if (open === undefined) return false;
+    return this.applyDescriptionEdit({
+      title: "Add profile",
+      ok: "Add",
+      summary: `profile ${id}`,
+      path: open.path,
+      label: open.label,
+      dryRun: () => this.service.addProfile(open.path, kind, id, fields, true),
+      commit: () => this.service.addProfile(open.path, kind, id, fields, false),
+      log: `add profile ${id}`,
+    });
+  }
+
+  async removeProfile(id: string): Promise<boolean> {
+    const open = this.product.current.open;
+    if (open === undefined) return false;
+    return this.applyDescriptionEdit({
+      title: "Remove profile",
+      ok: "Remove",
+      summary: `profile ${id}`,
+      path: open.path,
+      label: open.label,
+      dryRun: () => this.service.removeProfile(open.path, id, true),
+      commit: () => this.service.removeProfile(open.path, id, false),
+      log: `remove profile ${id}`,
+    });
+  }
+
+  async setProfileField(id: string, field: string, value: string | undefined): Promise<boolean> {
+    const open = this.product.current.open;
+    if (open === undefined) return false;
+    return this.applyDescriptionEdit({
+      title: "Change profile field",
+      ok: "Apply",
+      summary: `${field} on profile ${id}`,
+      path: open.path,
+      label: open.label,
+      dryRun: () => this.service.setProfileField(open.path, id, field, value, true),
+      commit: () => this.service.setProfileField(open.path, id, field, value, false),
+      log: `set profile ${id} ${field}`,
+    });
+  }
+
+  protected async applyDescriptionEdit(args: {
+    title: string;
+    ok: string;
+    summary: string;
+    path: string;
+    label: string;
+    dryRun: () => Promise<EditGearResult>;
+    commit: () => Promise<EditGearResult>;
+    log: string;
+  }): Promise<boolean> {
+    if (this.isDirty(args.path)) {
+      this.messages.error(
+        `${args.label} has unsaved changes. Save or revert them first — writing now would discard your edit.`,
+      );
+      return false;
+    }
+    let preview: EditGearResult;
+    try {
+      preview = await args.dryRun();
+    } catch (error) {
+      this.messages.error(messageOf(error));
+      return false;
+    }
+    if (!preview.changed) {
+      this.messages.info("Nothing to change.");
+      return false;
+    }
+    const at = this.product.revision;
+    if (!(await this.confirmEdit(args.title, args.ok, args.summary, preview))) return false;
+    const open = this.product.current.open;
+    if (this.product.revision !== at || open?.path !== args.path || this.isDirty(args.path)) {
+      this.messages.warn("Nothing was written: the product changed while the preview was open.");
+      return false;
+    }
+    let again: EditGearResult;
+    try {
+      again = await args.dryRun();
+    } catch (error) {
+      this.messages.error(messageOf(error));
+      return false;
+    }
+    if (!again.changed || again.after !== preview.after) {
+      this.messages.warn("Nothing was written: the description on disk is not the one previewed.");
+      return false;
+    }
+    // eslint-disable-next-line no-console
+    console.info(`Gearbox: writing ${args.log} to ${args.path}`, new Error("write path").stack);
+    try {
+      await args.commit();
+    } catch (error) {
+      this.messages.error(messageOf(error));
+      return false;
+    }
+    await this.product.reload();
+    return true;
+  }
+
+  protected async confirmEdit(
+    title: string,
+    ok: string,
+    summary: string,
+    preview: EditGearResult,
+  ): Promise<boolean> {
+    const body = document.createElement("div");
+    const head = document.createElement("div");
+    head.textContent = summary;
+    body.appendChild(head);
+    const diff = document.createElement("pre");
+    diff.className = "gbx-edit-preview";
+    diff.textContent = this.diffText(preview);
+    body.appendChild(diff);
+    return (
+      (await new EditPreviewDialog({ title, msg: body, ok, cancel: "Cancel" }).open()) === true
+    );
+  }
+
+  protected async confirmCreate(name: string, preview: EditGearResult): Promise<boolean> {
+    const body = document.createElement("div");
+    body.textContent = `Create ${name}:`;
+    const pre = document.createElement("pre");
+    pre.className = "gbx-create-preview";
+    pre.textContent = preview.after;
+    body.appendChild(pre);
+    return (
+      (await new EditPreviewDialog({
+        title: "Create product",
+        msg: body,
+        ok: "Create",
+        cancel: "Cancel",
+      }).open()) === true
+    );
+  }
+
+  protected diffText(preview: EditGearResult): string {
+    const before = preview.before.split("\n");
+    const after = preview.after.split("\n");
+    const added = after.filter((line) => !before.includes(line));
+    const removed = before.filter((line) => !after.includes(line));
+    return [...removed.map((line) => `- ${line.trim()}`), ...added.map((line) => `+ ${line.trim()}`)].join(
+      "\n",
+    );
   }
 
   /**
@@ -232,11 +458,6 @@ export class ProductEditService {
     label: string,
     preview: EditGearResult,
   ): Promise<boolean> {
-    const before = preview.before.split("\n");
-    const after = preview.after.split("\n");
-    const added = after.filter((line) => !before.includes(line));
-    const removed = before.filter((line) => !after.includes(line));
-
     const body = document.createElement("div");
     const summary = document.createElement("div");
     summary.textContent = `${add ? "Add" : "Remove"} ${gear} ${add ? "to" : "from"} ${label}:`;
@@ -244,10 +465,7 @@ export class ProductEditService {
 
     const diff = document.createElement("pre");
     diff.className = "gbx-edit-preview";
-    diff.textContent = [
-      ...removed.map((line) => `- ${line.trim()}`),
-      ...added.map((line) => `+ ${line.trim()}`),
-    ].join("\n");
+    diff.textContent = this.diffText(preview);
     body.appendChild(diff);
 
     return (

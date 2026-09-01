@@ -473,6 +473,70 @@ try {
     "and the refusal says resolution reported errors",
   );
 
+  // --- product description edits beyond add/remove gear --------------------
+  const configPreview = await connection.sendRequest("gearbox/product/setConfig", {
+    path: product,
+    gear: "api-gateway",
+    key: "demo_mode",
+    value: "demo_value",
+    dry_run: true,
+  });
+  check(configPreview.changed === true, "setConfig dry run reports a change");
+  check(configPreview.written === false, "setConfig dry run writes nothing");
+
+  let secretRefused = null;
+  try {
+    await connection.sendRequest("gearbox/product/setConfig", {
+      path: product,
+      gear: "api-gateway",
+      key: "password",
+      value: "literal",
+      dry_run: true,
+    });
+  } catch (e) {
+    secretRefused = e;
+  }
+  check(secretRefused?.code === -32056, "a secret-like config key is refused");
+  check(
+    secretRefused?.data?.diagnostics?.some((d) => /secret references/i.test(d.message ?? "")) ===
+      true,
+    "and the refusal mentions external secret references",
+  );
+
+  const featuresPreview = await connection.sendRequest("gearbox/product/setFeatures", {
+    path: product,
+    gear: "api-gateway",
+    features: ["demo-feature"],
+    dry_run: true,
+  });
+  check(featuresPreview.changed === true, "setFeatures dry run reports a change");
+
+  const profilePreview = await connection.sendRequest("gearbox/product/addProfile", {
+    path: product,
+    kind: "embedded",
+    id: "smoke-staging",
+    fields: [],
+    dry_run: true,
+  });
+  check(profilePreview.changed === true, "addProfile dry run reports a change");
+
+  const createScratch = resolve(repo, ".gearbox/smoke/create-product.gdl");
+  rmSync(dirname(createScratch), { recursive: true, force: true });
+  const created = await connection.sendRequest("gearbox/product/create", {
+    path: createScratch,
+    id: "smoke-create",
+    name: "Smoke Create",
+    version: "0.1.0",
+    sources: [{ id: "gears-rust", at: "../../../gears-rust" }],
+    profile_kind: "embedded",
+    profile_id: "dev",
+    dry_run: true,
+  });
+  check(created.changed === true, "create dry run returns the full text");
+  check(created.after.includes('id = "smoke-create"'), "create dry run names the requested id");
+  check(created.written === false, "create dry run writes nothing");
+  rmSync(dirname(createScratch), { recursive: true, force: true });
+
   await connection.sendRequest("shutdown");
   connection.sendNotification("exit");
 } catch (e) {

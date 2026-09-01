@@ -116,7 +116,14 @@ export class GearboxServiceImpl implements GearboxService {
 
   async initialize(session?: StudioSession): Promise<InitializeResult> {
     this.disposeEngine();
-    const roots_ = session === undefined ? roots() : [...session.roots];
+    // Empty `roots` means "use the defaults", not "open nothing". The frontend
+    // reaches that after a reload, when `CatalogueStore.rootPaths()` is still
+    // empty because the boot load has not installed `rootsById` yet; passing the
+    // empty list through used to spawn an engine with no `--root`, and
+    // `product/load` then answered `no source root is open`. The RPC side already
+    // treats an empty `initialize.roots` as "keep the CLI defaults" -- match it.
+    const roots_ =
+      session === undefined || session.roots.length === 0 ? roots() : [...session.roots];
     const engine = spawnEngine(enginePath(), roots_, this.logger);
     this.engine = engine;
 
@@ -246,6 +253,96 @@ export class GearboxServiceImpl implements GearboxService {
 
   async removeGear(path: string, gear: string, dryRun: boolean): Promise<EditGearResult> {
     return this.request(method.PRODUCT_REMOVE_GEAR, { path, gear, dry_run: dryRun });
+  }
+
+  async setConfig(
+    path: string,
+    gear: string,
+    key: string,
+    value: string | undefined,
+    dryRun: boolean,
+  ): Promise<EditGearResult> {
+    return this.request(method.PRODUCT_SET_CONFIG, {
+      path,
+      gear,
+      key,
+      value,
+      dry_run: dryRun,
+    });
+  }
+
+  async setFeatures(
+    path: string,
+    gear: string,
+    features: readonly string[],
+    dryRun: boolean,
+  ): Promise<EditGearResult> {
+    return this.request(method.PRODUCT_SET_FEATURES, {
+      path,
+      gear,
+      features: [...features],
+      dry_run: dryRun,
+    });
+  }
+
+  async addProfile(
+    path: string,
+    kind: string,
+    id: string,
+    fields: ReadonlyArray<{ name: string; value: string }>,
+    dryRun: boolean,
+  ): Promise<EditGearResult> {
+    return this.request(method.PRODUCT_ADD_PROFILE, {
+      path,
+      kind,
+      id,
+      fields: [...fields],
+      dry_run: dryRun,
+    });
+  }
+
+  async removeProfile(path: string, id: string, dryRun: boolean): Promise<EditGearResult> {
+    return this.request(method.PRODUCT_REMOVE_PROFILE, { path, id, dry_run: dryRun });
+  }
+
+  async setProfileField(
+    path: string,
+    id: string,
+    field: string,
+    value: string | undefined,
+    dryRun: boolean,
+  ): Promise<EditGearResult> {
+    return this.request(method.PRODUCT_SET_PROFILE_FIELD, {
+      path,
+      id,
+      field,
+      value,
+      dry_run: dryRun,
+    });
+  }
+
+  async createProduct(params: {
+    path: string;
+    id: string;
+    name: string;
+    version: string;
+    sources: ReadonlyArray<{ id: string; at: string }>;
+    profileKind: string;
+    profileId: string;
+    cloneFrom?: string;
+    dryRun: boolean;
+  }): Promise<EditGearResult> {
+    return this.request(method.PRODUCT_CREATE, {
+      path: params.path,
+      id: params.id,
+      name: params.name,
+      version: params.version,
+      sources: [...params.sources],
+      profile_kind: params.profileKind,
+      profile_id: params.profileId,
+      clone_from: params.cloneFrom,
+      dry_run: params.dryRun,
+    });
   }
 
   async validate(product?: string): Promise<ValidateResult> {
