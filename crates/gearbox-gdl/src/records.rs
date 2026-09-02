@@ -268,6 +268,9 @@ gdl_record! {
     SourceRecord as "gdl_source" {
         pub id: String,
         pub at: SourceAtRecord,
+        /// Where this `source(...)` call was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }
 
@@ -298,6 +301,9 @@ gdl_record! {
         pub target_dir: Option<String>,
         pub namespace: Option<String>,
         pub image_registry: Option<String>,
+        /// Where this profile constructor was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }
 
@@ -311,6 +317,9 @@ gdl_record! {
         pub config: Vec<(String, serde_json::Value)>,
         /// Implementations chosen for this gear's plugin extension points.
         pub plugins: Vec<PluginRecord>,
+        /// Where this `use_gear(...)` call was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }
 
@@ -325,6 +334,9 @@ gdl_record! {
         pub transport: Option<String>,
         pub endpoint: Option<String>,
         pub profiles: Vec<String>,
+        /// Where this `bind(...)` call was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }
 

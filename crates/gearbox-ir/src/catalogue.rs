@@ -325,6 +325,10 @@ pub struct GearDescriptor {
     /// GTS types this gear exposes, from the schema declarations in its SDK.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gts_types: Vec<GtsTypeDecl>,
+
+    /// Where `gear(...)` was written in this gear's description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_at: Option<crate::diagnostics::Location>,
 }
 
 /// How far a gear has got through a staged catalogue load.

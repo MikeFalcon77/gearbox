@@ -613,7 +613,7 @@ export class InspectorWidget extends ReactWidget {
   }
 
   protected renderStep(step: Step, index: number): React.ReactNode {
-    const { edge, to, depth } = step;
+    const { edge, from, to, depth } = step;
     const downgrade = edge.kind === "downgraded-by";
     return (
       <li
@@ -629,7 +629,7 @@ export class InspectorWidget extends ReactWidget {
         <div className="gbx-step-meta">
           <span className="gbx-badge">{edge.kind}</span>
           <span className="gbx-id">{to?.label ?? edge.to}</span>
-          {this.renderOrigin(to?.origin ?? undefined)}
+          {this.renderOrigin(from?.origin ?? undefined)}
         </div>
       </li>
     );

@@ -35,6 +35,7 @@ use starlark::values::Value;
 use starlark::values::list::UnpackList;
 use starlark::values::none::NoneType;
 
+use crate::declarative::call_location;
 use crate::records::{
     BindRecord, ClusterProfileRecord, PluginRecord, PreferenceRecord, ProcessRecord, ProfileRecord,
     ProviderBindingRecord, SourceAtRecord, SourceRecord, UseGearRecord,
@@ -209,15 +210,20 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     fn source<'v>(
         #[starlark(require = named)] id: &str,
         #[starlark(require = named)] at: &'v SourceAtRecord,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<SourceRecord> {
         Ok(SourceRecord {
             id: id.to_owned(),
             at: at.clone(),
+            declared_at: call_location(eval),
         })
     }
 
     /// `embedded(id = ...)` -- one process; every binding is local by construction.
-    fn embedded(#[starlark(require = named)] id: &str) -> anyhow::Result<ProfileRecord> {
+    fn embedded<'v>(
+        #[starlark(require = named)] id: &str,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<ProfileRecord> {
         Ok(ProfileRecord {
             kind: "embedded".to_owned(),
             id: id.to_owned(),
@@ -226,15 +232,17 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             target_dir: None,
             namespace: None,
             image_registry: None,
+            declared_at: call_location(eval),
         })
     }
 
     /// `host_workers(id = ..., host = ..., worker_discovery = ..., target_dir = ...)`
-    fn host_workers(
+    fn host_workers<'v>(
         #[starlark(require = named)] id: &str,
         #[starlark(require = named)] host: &str,
         #[starlark(require = named)] worker_discovery: &str,
         #[starlark(require = named)] target_dir: Option<&str>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ProfileRecord> {
         Ok(ProfileRecord {
             kind: "host-workers".to_owned(),
@@ -244,15 +252,17 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             target_dir: target_dir.map(str::to_owned),
             namespace: None,
             image_registry: None,
+            declared_at: call_location(eval),
         })
     }
 
     /// `kubernetes(id = ..., discovery = ..., namespace = ..., image_registry = ...)`
-    fn kubernetes(
+    fn kubernetes<'v>(
         #[starlark(require = named)] id: &str,
         #[starlark(require = named)] discovery: &str,
         #[starlark(require = named)] namespace: Option<&str>,
         #[starlark(require = named)] image_registry: Option<&str>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ProfileRecord> {
         Ok(ProfileRecord {
             kind: "kubernetes".to_owned(),
@@ -262,6 +272,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             target_dir: None,
             namespace: namespace.map(str::to_owned),
             image_registry: image_registry.map(str::to_owned),
+            declared_at: call_location(eval),
         })
     }
 
@@ -288,6 +299,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] features: Option<UnpackList<String>>,
         #[starlark(require = named)] config: Option<Value<'v>>,
         #[starlark(require = named)] plugins: Option<UnpackList<&'v PluginRecord>>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<UseGearRecord> {
         Ok(UseGearRecord {
             gear: gear.to_owned(),
@@ -297,6 +309,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             plugins: plugins
                 .map(|l| l.items.into_iter().cloned().collect())
                 .unwrap_or_default(),
+            declared_at: call_location(eval),
         })
     }
 
@@ -308,6 +321,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] transport: Option<&'v crate::values::GdlEnum>,
         #[starlark(require = named)] endpoint: Option<&str>,
         #[starlark(require = named)] profiles: Option<UnpackList<String>>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<BindRecord> {
         // Validated here rather than in the engine so a member of the wrong
         // namespace is reported at the call that wrote it. The variant name is
@@ -325,6 +339,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             transport: transport.map(|t| t.variant.to_owned()),
             endpoint: endpoint.map(str::to_owned),
             profiles: strings(profiles),
+            declared_at: call_location(eval),
         })
     }
 

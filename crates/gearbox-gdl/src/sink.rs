@@ -60,6 +60,8 @@ pub struct GearDecl {
     pub cluster_plugins: Vec<crate::records::ClusterPluginRecord>,
     pub declared_roles: Vec<RoleRecord>,
     pub config_schema: Option<String>,
+    /// Where the `gear(...)` call was written in the description.
+    pub declared_at: Option<gearbox_ir::Location>,
 }
 
 /// The raw result of one `product(...)` call.

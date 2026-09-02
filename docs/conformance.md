@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **112** — 105 built, 4 not built, 0 broken, 3 not observed.
+Claims: **112** — 106 built, 3 not built, 0 broken, 3 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -132,7 +132,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | a gear pulled in by co-location is explained back to a named gear | `PRD cpt-gearbox-fr-explain` | ✅ built |  |
 | a plugin's inclusion names the host and the profile | `PRD cpt-gearbox-fr-plugin-selection` | ✅ built |  |
 | a selection that this profile does not contain reads as ordinary | `PRD cpt-gearbox-fr-explain` | ✅ built |  |
-| each step links to the source location of its fact | `PRD cpt-gearbox-fr-explain: the source location of each contributing fact` | 🚧 not built |  |
+| each step links to the source location of its fact | `PRD cpt-gearbox-fr-explain: the source location of each contributing fact` | ✅ built |  |
 
 ## `conformance/prd-lock.spec.ts`
 

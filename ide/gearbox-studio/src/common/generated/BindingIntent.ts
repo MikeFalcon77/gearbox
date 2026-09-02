@@ -2,6 +2,7 @@
 import type { BindingMode } from "./BindingMode";
 import type { ContractId } from "./ContractId";
 import type { GearId } from "./GearId";
+import type { Location } from "./Location";
 import type { ProfileId } from "./ProfileId";
 import type { Transport } from "./Transport";
 
@@ -24,4 +25,8 @@ endpoint?: string | null,
 /**
  * Profiles this applies to. Empty means all of them.
  */
-profiles?: Array<ProfileId>, };
+profiles?: Array<ProfileId>, 
+/**
+ * Where `bind(...)` was written in the product description.
+ */
+declared_at?: Location | null, };

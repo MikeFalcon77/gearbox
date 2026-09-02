@@ -66,6 +66,7 @@ pub fn descriptor(id: &str) -> GearDescriptor {
         config_schema: None,
         docs: None,
         gts_types: Vec::new(),
+        declared_at: None,
     }
 }
 
@@ -80,7 +81,10 @@ pub fn intent(gears: &[&str]) -> ProductIntent {
         sources: BTreeMap::new(),
         profiles: [(
             dev.clone(),
-            gearbox_ir::DeploymentProfileDecl::Embedded { id: dev.clone() },
+            gearbox_ir::DeploymentProfileDecl::Embedded {
+                id: dev.clone(),
+                declared_at: None,
+            },
         )]
         .into_iter()
         .collect(),
@@ -93,6 +97,7 @@ pub fn intent(gears: &[&str]) -> ProductIntent {
                 features: Vec::new(),
                 config: BTreeMap::new(),
                 plugins: Vec::new(),
+                declared_at: None,
             })
             .collect(),
         bindings: Vec::new(),
@@ -272,6 +277,7 @@ pub fn host_workers_intent(gears: &[&str]) -> ProductIntent {
             host: gearbox_ir::ProcessId::new("gateway").unwrap(),
             discovery: gearbox_ir::Discovery::Static,
             target_dir: None,
+            declared_at: None,
         },
     );
     intent
@@ -313,6 +319,7 @@ pub fn host_workers(
             host: gearbox_ir::ProcessId::new("host").unwrap(),
             discovery,
             target_dir: target_dir.map(ToOwned::to_owned),
+            declared_at: None,
         },
     );
     intent

@@ -276,6 +276,7 @@ fn build_gears(
             features: record.features.clone(),
             config: record.config.iter().cloned().collect(),
             plugins,
+            declared_at: record.declared_at.clone(),
         });
     }
     selected
@@ -381,6 +382,7 @@ fn build_bindings(
             transport: record.transport.as_deref().and_then(transport),
             endpoint: record.endpoint.clone(),
             profiles: scoped,
+            declared_at: record.declared_at.clone(),
         });
     }
     bindings
@@ -633,7 +635,10 @@ fn deployment_profile(
     diagnostics: &mut Diagnostics,
 ) -> Option<DeploymentProfileDecl> {
     match record.kind.as_str() {
-        "embedded" => Some(DeploymentProfileDecl::Embedded { id: id.clone() }),
+        "embedded" => Some(DeploymentProfileDecl::Embedded {
+            id: id.clone(),
+            declared_at: record.declared_at.clone(),
+        }),
         "host-workers" => {
             let raw = record.host.clone().unwrap_or_default();
             let host = match ProcessId::new(raw.clone()) {
@@ -652,6 +657,7 @@ fn deployment_profile(
                 host,
                 discovery: discovery(uri, id, record.discovery.as_deref(), diagnostics)?,
                 target_dir: record.target_dir.clone(),
+                declared_at: record.declared_at.clone(),
             })
         }
         "kubernetes" => Some(DeploymentProfileDecl::Kubernetes {
@@ -659,6 +665,7 @@ fn deployment_profile(
             discovery: discovery(uri, id, record.discovery.as_deref(), diagnostics)?,
             namespace: record.namespace.clone(),
             image_registry: record.image_registry.clone(),
+            declared_at: record.declared_at.clone(),
         }),
         other => {
             diagnostics.push(invalid(

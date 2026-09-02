@@ -28,8 +28,9 @@
 //! prove too blunt, the precise upgrade is a walk over `StmtP`/`ExprP`.
 
 use gearbox_ir::{Diagnostic, DiagnosticCode, Location, Position, Range};
+use starlark::eval::Evaluator;
 use starlark::syntax::{Dialect, DialectTypes};
-use starlark_syntax::codemap::{CodeMap, Pos, Span};
+use starlark_syntax::codemap::{CodeMap, FileSpan, Pos, Span};
 use starlark_syntax::lexer::{Lexer, Token};
 
 /// The GDL dialect: layer 1.
@@ -178,7 +179,7 @@ pub fn scan_forbidden_tokens(uri: &str, source: &str) -> Vec<Diagnostic> {
                     "state the fact directly, or scope the declaration to a profile with \
                      `profiles = [...]` instead of branching",
                 )
-                .at(Location::new(uri.to_owned(), resolve(&codemap, span))),
+                .at(Location::new(uri.to_owned(), span_to_range(&codemap, span))),
             );
         }
     }
@@ -191,7 +192,8 @@ pub fn scan_forbidden_tokens(uri: &str, source: &str) -> Vec<Diagnostic> {
 /// field copy rather than arithmetic -- which is why the IR's `Position` was
 /// defined 0-based in the first place. (Their `Display` is 1-based; never parse
 /// the display form.)
-fn resolve(codemap: &CodeMap, span: Span) -> Range {
+#[must_use]
+pub fn span_to_range(codemap: &CodeMap, span: Span) -> Range {
     let resolved = codemap.resolve_span(span);
     Range::new(
         Position::new(
@@ -203,4 +205,27 @@ fn resolve(codemap: &CodeMap, span: Span) -> Range {
             u32::try_from(resolved.end.column).unwrap_or(u32::MAX),
         ),
     )
+}
+
+/// Where the active GDL call was written, when the evaluator can say.
+///
+/// Built from [`Evaluator::call_stack_top_location`]: the filename is the URI
+/// handed to `AstModule::parse` (a `file://` path in this project), and the
+/// range is the same 0-based span diagnostics use.
+#[must_use]
+pub fn call_location(eval: &Evaluator<'_, '_, '_>) -> Option<Location> {
+    location_from_file_span(&eval.call_stack_top_location()?)
+}
+
+/// [`FileSpan`] → IR [`Location`], sharing [`span_to_range`] with the token scan.
+#[must_use]
+pub fn location_from_file_span(span: &FileSpan) -> Option<Location> {
+    let uri = span.filename();
+    if uri.is_empty() {
+        return None;
+    }
+    Some(Location::new(
+        uri.to_owned(),
+        span_to_range(&span.file, span.span),
+    ))
 }

@@ -64,6 +64,27 @@ fn a_minimal_product_evaluates() {
 }
 
 #[test]
+fn use_gear_on_the_third_line_records_line_two() {
+    // 0-based: a call written on the third source line must not claim the start
+    // of the file. That is the unit proof behind "the link opens on use_gear".
+    let src = "\
+product(
+    id = \"demo\", version = \"0.1.0\", sources = [source(id = \"s\", at = path(\".\"))], profiles = [embedded(id = \"dev\")], default_profile = \"dev\",
+    gears = [use_gear(\"api-gateway\", source = \"s\")],
+)
+";
+    let (intent, codes, messages) = eval(src);
+    assert!(codes.is_empty(), "{codes:?} {messages}");
+    let intent = intent.expect("evaluates");
+    let at = intent.selected_gears[0]
+        .declared_at
+        .as_ref()
+        .expect("use_gear records its call site");
+    assert_eq!(at.range.start.line, 2, "{at:?}");
+    assert!(at.uri.contains("product.gdl"), "{}", at.uri);
+}
+
+#[test]
 fn every_profile_is_data_and_scoping_selects_among_them() {
     let src = product(
         r#"bindings = [

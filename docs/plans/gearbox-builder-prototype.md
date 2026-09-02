@@ -1061,6 +1061,15 @@ config/features on the Inspector for gears the product asks for, and profile
 add/remove/scalar edit on the Product view. RPC: `setConfig`, `setFeatures`,
 `addProfile`, `removeProfile`, `setProfileField`, `create`.
 
+**Explain origins (2026-09-02).** `ExplanationNode.origin` and `ExplanationNode::at`
+had been on the wire with **no callers**, the third case of an IR field that
+nothing filled — after `Diagnostic::subject` / `Diagnostic::about` (§9.1 above)
+and the same shape of gap. GDL now records `declared_at` from
+`Evaluator::call_stack_top_location` on `use_gear` / `bind` / profile
+constructors / `gear(...)`; the graph builder threads those into origins.
+Selected gears link into `product.gdl`; colocated gears link into their
+`gear.gdl`. The lock is unchanged: it stores provenance *edges* only.
+
 The favicon gap this section used to record is closed. `@theia/cli` 1.75 still offers no hook and
 its generated `index.html` still has no `<link rel="icon">`, so `FabricThemeContribution` injects
 one from `onStart` -- the same contribution that registers the Constructor Fabric colour theme and

@@ -374,6 +374,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
                 .map(|l| l.items.into_iter().cloned().collect())
                 .unwrap_or_default(),
             config_schema: config_schema.map(str::to_owned),
+            declared_at: crate::declarative::call_location(eval),
         });
         Ok(NoneType)
     }

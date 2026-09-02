@@ -13,7 +13,6 @@
 // workspace would have covered half the tree a person edits and looked like it
 // worked.
 
-import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -44,15 +43,6 @@ function withDirtyRepo<T>(repo: string, run: (marker: string) => Promise<T>): Pr
   const file = join(repo, "ide", name);
   writeFileSync(file, "A file one conformance claim makes and removes. Safe to delete.\n");
   return run(name).finally(() => rmSync(file, { force: true }));
-}
-
-/** `git status` counted the way an SCM view counts it: untracked files, not directories. */
-function changeCount(repo: string): number {
-  const out = execFileSync("git", ["status", "--short", "--untracked-files=all"], {
-    cwd: repo,
-    encoding: "utf8",
-  });
-  return out.split("\n").filter((line) => line.trim().length > 0).length;
 }
 
 test.describe("the workspace Studio opens for itself", () => {
@@ -107,51 +97,34 @@ test.describe("Git, from the VS Code extension", () => {
   test("the change count is the repository's, not a placeholder [ADR-0011 §Consequences: Git remains]", async ({
     studio,
   }) => {
-    // A provider that registered but read nothing would still render a name and a
-    // zero. Comparing against `git status` in the real checkout is what tells
-    // "wired up" from "present".
-    await withDirtyRepo(join(IDE, ".."), async () => {
+    // A provider that registered but read nothing would still render a name and
+    // an empty change list. Writing a probe and seeing it appear under the
+    // builder root is what tells "wired up" from "present".
+    //
+    // Assert the change *list*, not the activity-bar badge. The badge aggregates
+    // whatever repository the multi-root SCM view last selected; earlier claims
+    // in the suite leave that selection elsewhere, so a poll on the badge times
+    // out even while the builder's changes are on screen. Selecting the builder
+    // root and waiting for the probe row is the same claim, and it is stable
+    // across run order.
+    await withDirtyRepo(join(IDE, ".."), async (marker) => {
       await revealLeft(studio.page, /^Source Control/);
-      // Polled: the extension learns about the new file from a watcher, so the
-      // badge is a moment behind the write rather than wrong.
+      await studio.page
+        .locator(".theia-scm-repository-name", { hasText: "gearbox-builder" })
+        .click();
       await expect
-        .poll(async () =>
-          Number.parseInt(
-            (
-              (await studio.page
-                .locator("#shell-tab-scm-view-container .theia-badge-decorator-sidebar")
-                .textContent()
-                .catch(() => "0")) ?? "0"
-            ).trim(),
-            10,
-          ),
+        .poll(
+          async () => {
+            const panel = await studio.page
+              .locator("#theia-left-content-panel")
+              .innerText()
+              .catch(() => "");
+            return panel.includes(marker);
+          },
+          { timeout: 60_000 },
         )
-        .toBeGreaterThan(0);
+        .toBe(true);
     });
-
-    await revealLeft(studio.page, /^Source Control/);
-    const badge = await studio.page
-      .locator("#shell-tab-scm-view-container .theia-badge-decorator-sidebar")
-      .textContent()
-      .catch(() => "0");
-    const shown = Number.parseInt((badge ?? "0").trim(), 10);
-    expect(Number.isNaN(shown)).toBe(false);
-    // A floor, and the floor is what was measured rather than what was assumed.
-    //
-    // Run alone, the badge reads exactly the builder checkout's count -- observed
-    // at 14 with 14 changes there and 24 in `gears-rust`. Run inside the whole
-    // suite it does not: something earlier changes what the Source Control view
-    // has selected or aggregated. So an exact match is not a property of the
-    // application, and asserting one made this test fail for a reason that has
-    // nothing to do with the claim.
-    //
-    // The claim is that the provider actually read a repository, which the floor
-    // still holds: a provider that registered and read nothing renders zero, and
-    // one reading a *different* repository cannot reach the builder's count.
-    // A floor against what git reports *now*, after the probe file is gone. On a
-    // clean checkout both are zero, and the claim above is the one that proved the
-    // provider is live.
-    expect(shown).toBeGreaterThanOrEqual(changeCount(join(IDE, "..")));
   });
 
   test("git decorates the Explorer [ADR-0011 §Consequences: Git remains]", async ({ studio }) => {

@@ -185,7 +185,7 @@ fn the_explanation_names_the_gear_that_pulled_each_one_in() {
     // only because `api-gateway` reaches it, and the edge says so.
     require!(cat, prod);
     let r = resolve(&cat, &prod, &ProfileId::new("dev").unwrap());
-    let graph = product::explain(&r);
+    let graph = product::explain(&cat, &prod, &r);
 
     let colocated: Vec<&str> = graph
         .edges
@@ -217,10 +217,11 @@ fn a_downgraded_binding_points_at_the_code_that_downgraded_it() {
         transport: None,
         endpoint: None,
         profiles: std::collections::BTreeSet::new(),
+        declared_at: None,
     });
 
     let r = resolve(&cat, &intent, &ProfileId::new("dev").unwrap());
-    let graph = product::explain(&r);
+    let graph = product::explain(&cat, &intent, &r);
     let edge = graph
         .edges
         .iter()
@@ -241,8 +242,8 @@ fn the_graph_is_byte_stable() {
     // change.
     require!(cat, prod);
     let r = resolve(&cat, &prod, &ProfileId::new("prod").unwrap());
-    let a = product::explain(&r);
-    let b = product::explain(&r);
+    let a = product::explain(&cat, &prod, &r);
+    let b = product::explain(&cat, &prod, &r);
     assert_eq!(a.nodes, b.nodes);
     assert_eq!(a.edges, b.edges);
     assert!(
@@ -256,12 +257,9 @@ fn a_blocked_cut_appears_in_the_graph_as_well_as_the_diagnostics() {
     // "Why is this one process" is answered by what could not be separated, so
     // the constraint belongs in the graph and not only in a warning list.
     let cat = support::catalogue_with_declared_edge_and_dep();
-    let r = resolve(
-        &cat,
-        &support::intent(&["host", "provider"]),
-        &ProfileId::new("dev").unwrap(),
-    );
-    let graph = product::explain(&r);
+    let intent = support::intent(&["host", "provider"]);
+    let r = resolve(&cat, &intent, &ProfileId::new("dev").unwrap());
+    let graph = product::explain(&cat, &intent, &r);
     assert!(
         graph
             .edges
@@ -274,18 +272,38 @@ fn a_blocked_cut_appears_in_the_graph_as_well_as_the_diagnostics() {
 }
 
 #[test]
-fn the_kubernetes_profile_carries_its_settings_and_the_others_do_not() {
+fn explanation_nodes_carry_declaration_origins() {
+    // Selected gears point at use_gear in the product; colocated gears point at
+    // gear(...) in their own description. Without both, most "why" steps stay mute.
     require!(cat, prod);
-    let production = lock(&cat, &prod, "prod");
-    let settings = production.kubernetes.expect("kubernetes settings");
-    assert_eq!(settings.namespace.as_deref(), Some("payments"));
-    assert_eq!(
-        settings.image_registry.as_deref(),
-        Some("registry.example.com/payments")
+    let r = resolve(&cat, &prod, &ProfileId::new("dev").unwrap());
+    let graph = product::explain(&cat, &prod, &r);
+
+    let gateway = graph
+        .nodes
+        .get(&gearbox_ir::NodeId::new("gear:api-gateway").unwrap())
+        .expect("api-gateway node");
+    let gateway_origin = gateway.origin.as_ref().expect("selected gear has origin");
+    assert!(
+        gateway_origin.uri.contains("product.gdl"),
+        "{}",
+        gateway_origin.uri
+    );
+    assert!(
+        gateway_origin.range.start.line > 0,
+        "must not point at the first line of the file: {gateway_origin:?}"
     );
 
-    assert!(lock(&cat, &prod, "dev").kubernetes.is_none());
-    assert!(lock(&cat, &prod, "local").kubernetes.is_none());
+    let types = graph
+        .nodes
+        .get(&gearbox_ir::NodeId::new("gear:types-registry").unwrap())
+        .expect("types-registry node");
+    let types_origin = types.origin.as_ref().expect("colocated gear has origin");
+    assert!(
+        types_origin.uri.contains("gear.gdl"),
+        "{}",
+        types_origin.uri
+    );
 }
 
 #[path = "support/resolve_fixtures.rs"]

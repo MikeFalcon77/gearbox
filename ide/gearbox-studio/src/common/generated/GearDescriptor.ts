@@ -8,6 +8,7 @@ import type { GearDocs } from "./GearDocs";
 import type { GearId } from "./GearId";
 import type { GtsTypeDecl } from "./GtsTypeDecl";
 import type { LifecycleDecl } from "./LifecycleDecl";
+import type { Location } from "./Location";
 import type { PluginFill } from "./PluginFill";
 import type { ProviderDescriptor } from "./ProviderDescriptor";
 import type { RelPath } from "./RelPath";
@@ -104,4 +105,8 @@ docs?: GearDocs | null,
 /**
  * GTS types this gear exposes, from the schema declarations in its SDK.
  */
-gts_types?: Array<GtsTypeDecl>, };
+gts_types?: Array<GtsTypeDecl>, 
+/**
+ * Where `gear(...)` was written in this gear's description.
+ */
+declared_at?: Location | null, };

@@ -97,17 +97,42 @@ test.describe("why the resolution is the way it is", () => {
     await expect(studio.page.locator(".gbx-explain .gbx-error")).toHaveCount(0);
   });
 
-  test.fixme(
-    "each step links to the source location of its fact [PRD cpt-gearbox-fr-explain: the source location of each contributing fact]",
-    async ({ studio }) => {
-      // Not built, and precisely locatable: `ExplanationNode::at(origin)` exists
-      // in `crates/gearbox-ir/src/explain.rs` and is never called, so every node
-      // arrives with `origin: null`. The widget already renders a `file:line`
-      // link when one is present -- this flips green the day the resolver threads
-      // declaration spans into the graph, with no change here.
-      await openProduct(studio.page, "prod");
-      const { steps } = await explain(studio.page, "[data-binding]");
-      expect(steps.filter((s) => s.origin !== null).length).toBeGreaterThan(0);
-    },
-  );
+  test("each step links to the source location of its fact [PRD cpt-gearbox-fr-explain: the source location of each contributing fact]", async ({
+    studio,
+  }) => {
+    await openProduct(studio.page, "prod");
+    const { steps } = await explain(studio.page, '[data-asked-for="api-gateway"] a');
+    const withOrigin = steps.filter((s) => s.origin !== null);
+    expect(withOrigin.length).toBeGreaterThan(0);
+
+    const gateway = withOrigin.find((s) => s.origin?.includes("product.gdl"));
+    expect(gateway?.origin, "selected gear must link into the product description").toMatch(
+      /product\.gdl:\d+/,
+    );
+    expect(
+      Number(gateway?.origin?.split(":").pop()),
+      "must not open on line 1 of the file",
+    ).toBeGreaterThan(1);
+
+    // Colocated into the closure: origin is the declaring gear.gdl, not the product.
+    // Re-open Product: selecting a gear can leave the pulled-in row scrolled out of
+    // the panel's visible area, and Playwright then waits forever on a hidden link.
+    await openProduct(studio.page, "prod");
+    const pulled = studio.page.locator('[data-pulled-in="types-registry"] a');
+    await pulled.scrollIntoViewIfNeeded();
+    const colocated = await explain(studio.page, '[data-pulled-in="types-registry"] a');
+    expect(colocated.steps.some((s) => s.origin?.includes("gear.gdl"))).toBe(true);
+
+    // Click opens the product description on the use_gear line, not the top.
+    // Scope to the product.gdl model: Generate's diff editors stay in the DOM and
+    // `.monaco-editor` alone matches four hosts (strict-mode failure).
+    await openProduct(studio.page, "prod");
+    await explain(studio.page, '[data-asked-for="api-gateway"] a');
+    const link = studio.page.locator(".gbx-step-origin", { hasText: "product.gdl" }).first();
+    await link.click();
+    const productEditor = studio.page.locator('.monaco-editor[data-uri*="product.gdl"]');
+    await expect(productEditor).toContainText('use_gear("api-gateway"', {
+      timeout: 30_000,
+    });
+  });
 });

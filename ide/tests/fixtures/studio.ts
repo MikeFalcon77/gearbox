@@ -633,7 +633,12 @@ export async function revealInExplorer(
   file: string,
 ): Promise<Locator> {
   await revealLeft(page, "Explorer");
-  const target = page.locator(".theia-TreeNode", { hasText: new RegExp(`^${escapeForRegExp(file)}$`) });
+  // Git's decoration letter is part of the same text node (`fileU`, `fileM`), so
+  // an exact name match misses the row the moment the provider has done its job
+  // -- which is exactly when the decorate claim runs after the change-count one.
+  const target = page.locator(".theia-TreeNode", {
+    hasText: new RegExp(`^${escapeForRegExp(file)}[MUAD]?$`),
+  });
   const hints = typeof pathContains === "string" ? [pathContains] : [...pathContains];
 
   for (let round = 0; round < 10; round += 1) {

@@ -72,7 +72,7 @@ dist/
 # The write-trace log the conformance guards read: `global-teardown` deletes it
 # on a clean run, so it is only ever present after a run that was interrupted --
 # exactly when nobody wants to be asked about it by `git status`.
-/ide/.write-traces.log
+/ide/tests/.write-traces.log
 /ide/playwright-report/
 /ide/blob-report/
 /ide/.playwright-artifacts-*/

@@ -230,6 +230,7 @@ fn asking_for_remote_in_a_single_process_profile_is_recorded_as_a_downgrade() {
         transport: None,
         endpoint: None,
         profiles: std::collections::BTreeSet::new(),
+        declared_at: None,
     });
 
     let r = resolve(&cat, &intent, &pid("dev"));
@@ -270,6 +271,7 @@ fn asking_for_grpc_across_a_boundary_is_downgraded_to_rest() {
         transport: Some(Transport::Grpc),
         endpoint: None,
         profiles: std::collections::BTreeSet::new(),
+        declared_at: None,
     });
 
     let r = resolve(&cat, &intent, &pid("local"));

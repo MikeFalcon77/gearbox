@@ -59,6 +59,10 @@ pub struct Projections<'a> {
     pub gts_types: Vec<gearbox_ir::GtsTypeDecl>,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one merge of every projected and declared field; splitting hides the inventory"
+)]
 pub fn merge(
     identity: &FileIdentity,
     decl: &GearDecl,
@@ -298,6 +302,7 @@ pub fn merge(
         // Found by convention beside the gear and one level up; see `docs.rs`.
         docs,
         gts_types,
+        declared_at: decl.declared_at.clone(),
     };
 
     Some(MergedGear { gear, contracts })

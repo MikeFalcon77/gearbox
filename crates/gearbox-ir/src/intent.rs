@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::contract::Transport;
+use crate::diagnostics::Location;
 use crate::ids::{ContractId, GearId, ProcessId, ProfileId, RelPath, SourceId};
 use crate::requirement::ClusterPrimitive;
 
@@ -98,7 +99,12 @@ impl Discovery {
 #[serde(tag = "profile", rename_all = "snake_case")]
 pub enum DeploymentProfileDecl {
     /// Everything in one process. Every contract binding is local by construction.
-    Embedded { id: ProfileId },
+    Embedded {
+        id: ProfileId,
+        /// Where `embedded(...)` was written in the product description.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        declared_at: Option<Location>,
+    },
 
     /// One host process that spawns worker processes.
     ///
@@ -113,6 +119,9 @@ pub enum DeploymentProfileDecl {
         /// executable path.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target_dir: Option<String>,
+        /// Where `host_workers(...)` was written in the product description.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        declared_at: Option<Location>,
     },
 
     /// One container image and workload per process.
@@ -123,6 +132,9 @@ pub enum DeploymentProfileDecl {
         namespace: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         image_registry: Option<String>,
+        /// Where `kubernetes(...)` was written in the product description.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        declared_at: Option<Location>,
     },
 }
 
@@ -130,9 +142,19 @@ impl DeploymentProfileDecl {
     #[must_use]
     pub const fn id(&self) -> &ProfileId {
         match self {
-            Self::Embedded { id } | Self::HostWorkers { id, .. } | Self::Kubernetes { id, .. } => {
-                id
-            }
+            Self::Embedded { id, .. }
+            | Self::HostWorkers { id, .. }
+            | Self::Kubernetes { id, .. } => id,
+        }
+    }
+
+    /// Where this profile was declared in the product description, when known.
+    #[must_use]
+    pub const fn declared_at(&self) -> Option<&Location> {
+        match self {
+            Self::Embedded { declared_at, .. }
+            | Self::HostWorkers { declared_at, .. }
+            | Self::Kubernetes { declared_at, .. } => declared_at.as_ref(),
         }
     }
 
@@ -189,6 +211,10 @@ pub struct GearSelection {
     /// Implementations chosen for this gear's plugin extension points.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugins: Vec<PluginSelection>,
+
+    /// Where `use_gear(...)` was written in the product description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_at: Option<Location>,
 }
 
 /// One plugin implementation chosen for a host gear.
@@ -269,6 +295,10 @@ pub struct BindingIntent {
     /// Profiles this applies to. Empty means all of them.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub profiles: BTreeSet<ProfileId>,
+
+    /// Where `bind(...)` was written in the product description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_at: Option<Location>,
 }
 
 /// A cluster provider choice.

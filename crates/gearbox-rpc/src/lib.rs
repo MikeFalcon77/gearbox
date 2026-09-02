@@ -452,7 +452,7 @@ fn resolve_once(
     let resolution = gearbox_engine::resolve::resolve_at(catalogue, &intent, &profile, Some(&path));
     let product =
         gearbox_engine::resolve::product::assemble(catalogue, &intent, &resolution, sources);
-    let explanation = gearbox_engine::resolve::product::explain(&resolution);
+    let explanation = gearbox_engine::resolve::product::explain(catalogue, &intent, &resolution);
 
     // The product's own diagnostics are already inside it; the ones added here
     // are the description's, which resolution never sees.

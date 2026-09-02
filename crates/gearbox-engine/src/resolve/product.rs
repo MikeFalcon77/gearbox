@@ -57,7 +57,7 @@ pub fn assemble(
         bindings: resolution.bindings.clone(),
         cluster: resolution.cluster.clone(),
         cuttable_if_declared: resolution.cuts.blocked.clone(),
-        provenance: explain(resolution).edges,
+        provenance: explain(catalogue, intent, resolution).edges,
         diagnostics: resolution.diagnostics.clone(),
     };
 
@@ -115,28 +115,42 @@ fn gears(catalogue: &Catalogue, resolution: &Resolution) -> BTreeMap<GearId, Res
 /// Step 9: the graph that answers "why".
 ///
 /// Node ids are content-derived, never counters, so the same resolution produces
-/// the same graph byte for byte.
+/// the same graph byte for byte. Origins come from the product description when
+/// the fact was written there (`use_gear`, `bind`, a profile constructor), and
+/// from the catalogue's `gear(...)` when a gear arrived through co-location.
 #[must_use]
-pub fn explain(resolution: &Resolution) -> ExplanationGraph {
+pub fn explain(
+    catalogue: &Catalogue,
+    intent: &ProductIntent,
+    resolution: &Resolution,
+) -> ExplanationGraph {
     let mut graph = ExplanationGraph::new();
     let Some(profile) = node_id(NodeKind::Profile, resolution.profile.as_str()) else {
         return graph;
     };
-    graph.add_node(ExplanationNode::new(
+    let mut profile_node = ExplanationNode::new(
         profile.clone(),
         NodeKind::Profile,
         resolution.profile.to_string(),
-    ));
+    );
+    if let Some(origin) = intent
+        .profiles
+        .get(&resolution.profile)
+        .and_then(|d| d.declared_at().cloned())
+    {
+        profile_node = profile_node.at(origin);
+    }
+    graph.add_node(profile_node);
 
     for (gear, reasons) in &resolution.closure.members {
         let Some(id) = node_id(NodeKind::Gear, gear.as_str()) else {
             continue;
         };
-        graph.add_node(ExplanationNode::new(
-            id.clone(),
-            NodeKind::Gear,
-            gear.to_string(),
-        ));
+        let mut node = ExplanationNode::new(id.clone(), NodeKind::Gear, gear.to_string());
+        if let Some(origin) = gear_origin(catalogue, intent, gear) {
+            node = node.at(origin);
+        }
+        graph.add_node(node);
         for reason in reasons {
             let edge = match reason {
                 InclusionReason::Selected => Some(ProvenanceEdge::new(
@@ -216,11 +230,20 @@ pub fn explain(resolution: &Resolution) -> ExplanationGraph {
         ) else {
             continue;
         };
-        graph.add_node(ExplanationNode::new(
+        let mut node = ExplanationNode::new(
             id.clone(),
             NodeKind::Binding,
             format!("{} -> {}", binding.consumer, binding.contract),
-        ));
+        );
+        if let Some(origin) = intent
+            .bindings
+            .iter()
+            .find(|b| b.consumer == binding.consumer && b.contract == binding.contract)
+            .and_then(|b| b.declared_at.clone())
+        {
+            node = node.at(origin);
+        }
+        graph.add_node(node);
         graph.add_edge(ProvenanceEdge::new(
             id.clone(),
             consumer_process,
@@ -303,6 +326,26 @@ pub fn explain(resolution: &Resolution) -> ExplanationGraph {
 
     graph.finish();
     graph
+}
+
+/// Origin of a gear node: the product's `use_gear` when named, else `gear(...)`.
+fn gear_origin(
+    catalogue: &Catalogue,
+    intent: &ProductIntent,
+    gear: &GearId,
+) -> Option<gearbox_ir::Location> {
+    if let Some(origin) = intent
+        .selected_gears
+        .iter()
+        .find(|s| &s.gear == gear)
+        .and_then(|s| s.declared_at.clone())
+    {
+        return Some(origin);
+    }
+    catalogue
+        .gears
+        .get(gear)
+        .and_then(|d| d.declared_at.clone())
 }
 
 /// A node id derived from what it names, so the graph is byte-stable.
