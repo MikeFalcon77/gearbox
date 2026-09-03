@@ -372,6 +372,50 @@ fn defaults_are_read_from_a_default_impl_and_from_a_serde_fn() {
     );
 }
 
+/// Three defaults that were wrong before they were read off the real corpus, and
+/// each was wrong in the same way: a path is a *name*, not a value.
+#[test]
+fn a_path_default_is_resolved_or_omitted_but_never_reported_as_its_own_name() {
+    let files = [file(
+        r#"
+        #[derive(Deserialize)]
+        #[serde(default)]
+        pub struct DemoConfig {
+            pub advertise_addr: Option<String>,
+            pub ttl_secs: u64,
+            pub mode: AuthNMode,
+        }
+
+        impl Default for DemoConfig {
+            fn default() -> Self {
+                Self {
+                    advertise_addr: None,
+                    ttl_secs: DEFAULT_TTL_SECS,
+                    mode: AuthNMode::AcceptAll,
+                }
+            }
+        }
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum AuthNMode { AcceptAll, StaticTokens }
+        "#,
+    )];
+    let fields = project_config_fields(&files, "DemoConfig");
+
+    // `None` is the absence of a default, not the string "None".
+    assert_eq!(named(&fields, "advertise_addr").default, None);
+    // A `const` is a name this cannot resolve; reporting the identifier as the
+    // value would put `DEFAULT_TTL_SECS` in a number box.
+    assert_eq!(named(&fields, "ttl_secs").default, None);
+    // An enum default is written in Rust and read in YAML, so it is spelled as
+    // the wire spells it -- and as its own variants list spells it.
+    assert_eq!(
+        named(&fields, "mode").default,
+        Some(serde_json::Value::String("accept_all".to_owned()))
+    );
+}
+
 #[test]
 fn a_unit_struct_has_no_surface() {
     let files = [file(

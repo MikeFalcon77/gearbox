@@ -295,7 +295,7 @@ fn find_struct<'a>(
 ///
 /// A data-carrying variant means the value is not a scalar, so there is no
 /// control for it and `Complex` is the truthful answer.
-fn unit_enum_variants(item: &syn::ItemEnum) -> Option<Vec<String>> {
+fn variant_names(item: &syn::ItemEnum) -> Option<Vec<(String, String)>> {
     let container = serde_attrs(&item.attrs);
     item.variants
         .iter()
@@ -305,14 +305,25 @@ fn unit_enum_variants(item: &syn::ItemEnum) -> Option<Vec<String>> {
             }
             let attrs = serde_attrs(&variant.attrs);
             let ident = variant.ident.to_string();
-            Some(attrs.rename.unwrap_or_else(|| {
+            let wire = attrs.rename.unwrap_or_else(|| {
                 container
                     .rename_all
                     .as_deref()
                     .map_or(ident.clone(), |rule| rename_all(rule, &ident))
-            }))
+            });
+            Some((ident, wire))
         })
         .collect()
+}
+
+/// The wire spellings of a unit-only enum, or `None` if it is not one.
+fn unit_enum_variants(item: &syn::ItemEnum) -> Option<Vec<String>> {
+    Some(
+        variant_names(item)?
+            .into_iter()
+            .map(|(_, wire)| wire)
+            .collect(),
+    )
 }
 
 /// Whether a path type is `Option<T>`, and its `T`.
@@ -378,10 +389,34 @@ fn literal_value(expr: &syn::Expr) -> Option<serde_json::Value> {
             .ok()
             .and_then(serde_json::Number::from_f64)
             .map(serde_json::Value::Number),
-        // `Mode::AcceptAll` as a default: the variant name is the useful part.
-        syn::Expr::Path(p) => Some(serde_json::Value::String(last_segment(&p.path))),
+        // Paths are deliberately absent. `None` is the *absence* of a default,
+        // not the string "None"; a `const` is a name this cannot resolve, and
+        // reporting the identifier as though it were the value is a lie a
+        // placeholder would then show. An enum variant is resolved by the caller,
+        // which knows the field's type and so can spell it as the wire does.
         _ => None,
     }
+}
+
+/// The wire spelling of `variant` in the enum named `ty`, if it is a unit-only
+/// enum this scan can see.
+///
+/// Needed because a default is written in Rust (`AuthNMode::AcceptAll`) and read
+/// in YAML (`accept_all`). Showing the Rust ident as a placeholder would offer a
+/// value the gear rejects.
+fn enum_default(files: &[RustFile], ty: &syn::Type, expr: &syn::Expr) -> Option<serde_json::Value> {
+    let syn::Expr::Path(path) = expr else {
+        return None;
+    };
+    let variant = last_segment(&path.path);
+    let ident = type_ident(ty)?;
+    let syn::Item::Enum(item) = find_item(files, &ident)? else {
+        return None;
+    };
+    let wire = variant_names(item)?;
+    wire.into_iter()
+        .find(|(rust, _)| rust == &variant)
+        .map(|(_, wire)| serde_json::Value::String(wire))
 }
 
 /// The `Self { .. }` of `impl Default for <ident>`, as field name to expression.
@@ -469,7 +504,7 @@ pub fn project_config_fields(files: &[RustFile], root: &str) -> Vec<ConfigField>
                 && attrs.default_fn.is_none()
                 && optional.is_none();
 
-            let default = attrs
+            let default_expr = attrs
                 .default_fn
                 .as_deref()
                 .and_then(|name| free_fn_body(files, name))
@@ -478,8 +513,11 @@ pub fn project_config_fields(files: &[RustFile], root: &str) -> Vec<ConfigField>
                         .iter()
                         .find(|(f, _)| *f == ident)
                         .map(|(_, expr)| *expr)
-                })
-                .and_then(literal_value);
+                });
+            let default = default_expr.and_then(|expr| {
+                literal_value(expr)
+                    .or_else(|| enum_default(files, optional.unwrap_or(&field.ty), expr))
+            });
 
             Some(ConfigField {
                 name,

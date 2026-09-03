@@ -222,12 +222,24 @@ test.describe("typed config from schema (Phase 7)", () => {
     await page.locator(".gearbox-catalogue .gbx-row", { hasText: "api-gateway" }).click();
     await revealInspector(page);
 
-    // api-gateway declares no `config_schema`, so it gets no typed controls --
-    // absence is the honest answer, not an empty form.
     await expect(page.locator('[data-gear-config="api-gateway"]')).toBeVisible({
       timeout: 60_000,
     });
-    await expect(page.locator("[data-config-field]")).toHaveCount(0);
+
+    // The five settings its description exposes, out of the fourteen the struct
+    // declares -- curation is the half a description contributes.
+    const bind = page.locator('[data-config-field="bind_addr"]');
+    await expect(bind).toBeVisible();
+    await expect(bind).toHaveAttribute("data-config-field-kind", "str");
+
+    // A bool is a checkbox because Rust says it is a bool, not because anything
+    // here knows what `enable_docs` means.
+    const docs = page.locator('[data-config-field="enable_docs"]');
+    await expect(docs).toHaveAttribute("data-config-field-kind", "bool");
+    await expect(docs.locator('input[type="checkbox"]')).toBeVisible();
+
+    // Nested fields carry no control and are not offered as one.
+    await expect(page.locator('[data-config-field="openapi"]')).toHaveCount(0);
   });
 
   /**

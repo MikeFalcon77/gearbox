@@ -1189,6 +1189,14 @@ gear(
         lib = {lib_quoted},
         path = ".",
     ),
+
+    # Uncomment once this gear reads configuration. `exposes` is the only half
+    # written here: which settings are worth putting in front of an integrator.
+    # Their names, types, defaults and doc comments are read from the struct the
+    # gear deserializes into, which is found from the `ctx.config*()` call in
+    # `impl Gear::init` -- so nothing about the struct is repeated here.
+    #
+    # config_schema = config(exposes = ["bind_addr"]),
 )
 "#,
         comment = params.name.replace(['\n', '\r'], " "),
