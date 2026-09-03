@@ -38,7 +38,7 @@ pub use ids::{
     RequirementId, SourceId,
 };
 pub use intent::{
-    BindingIntent, BindingMode, ClusterScopeIntent, DeploymentProfileDecl, Discovery,
+    BindingIntent, BindingMode, ClusterScopeIntent, ConfigValue, DeploymentProfileDecl, Discovery,
     GearSelection, PluginSelection, Preference, ProcessPin, ProductIntent, ProviderBinding,
     SourceDecl,
 };

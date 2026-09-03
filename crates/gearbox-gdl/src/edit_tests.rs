@@ -10,6 +10,21 @@ use starlark::syntax::AstModule;
 
 use super::*;
 
+/// The identity the round-trip test evaluates a product under.
+fn product_identity() -> crate::FileIdentity {
+    crate::FileIdentity {
+        uri: URI.to_owned(),
+        source: gearbox_ir::SourceId::new("product").unwrap(),
+        gdl_path: gearbox_ir::RelPath::new("product.gdl").unwrap(),
+        load_paths: None,
+    }
+}
+
+/// A string config value, which is what every case below writes.
+fn str_value(s: &str) -> gearbox_ir::ConfigValue {
+    gearbox_ir::ConfigValue::Str(s.to_owned())
+}
+
 const URI: &str = "file:///product.gdl";
 
 /// A product shaped like the real one: comments carrying the reasoning, one
@@ -308,27 +323,180 @@ product(
 )
 "#;
 
+/// The name check protects against a credential typed into a form, and only a
+/// string can be one. Before typing, a `bool` named `mtls_key` was unwritable
+/// for a reason that never applied to it.
+#[test]
+fn the_secret_rule_refuses_strings_and_leaves_other_types_alone() {
+    use gearbox_ir::ConfigValue;
+
+    let refused = set_gear_config(
+        URI,
+        WITH_CONFIG,
+        "api-gateway",
+        "api_key",
+        Some(&str_value("sk-live-1")),
+    )
+    .expect_err("a string under a secret-looking key is refused");
+    assert!(
+        refused
+            .as_slice()
+            .iter()
+            .any(|d| d.message.contains("api_key")),
+        "{refused:?}"
+    );
+
+    // Same key name, a bool: nothing to protect, so nothing is refused.
+    set_gear_config(
+        URI,
+        WITH_CONFIG,
+        "api-gateway",
+        "mtls_key",
+        Some(&ConfigValue::Bool(true)),
+    )
+    .expect("a bool cannot carry a credential");
+
+    // Removal was always allowed and stays allowed.
+    set_gear_config(URI, WITH_CONFIG, "api-gateway", "api_key", None)
+        .expect("removing a secret-looking key is not a write of one");
+}
+
+/// The typed twin of `config_edit_keeps_comments_and_is_inverse`, and the reason
+/// the wire stopped carrying strings: a checkbox that wrote `"True"` would be
+/// writing a string that happens to read like a boolean.
+#[test]
+fn typed_values_render_as_starlark_literals_not_as_strings() {
+    use gearbox_ir::ConfigValue;
+
+    for (value, expected) in [
+        (ConfigValue::Bool(true), r#""demo_mode": True"#),
+        (ConfigValue::Bool(false), r#""demo_mode": False"#),
+        (ConfigValue::Int(8087), r#""demo_mode": 8087"#),
+        (ConfigValue::Int(-1), r#""demo_mode": -1"#),
+        // `{:?}` keeps the `.0`, so a float stays a float on the next read.
+        (ConfigValue::Float(1.5), r#""demo_mode": 1.5"#),
+        (ConfigValue::Float(8087.0), r#""demo_mode": 8087.0"#),
+        (ConfigValue::Str("on".to_owned()), r#""demo_mode": "on""#),
+    ] {
+        let edited = set_gear_config(URI, WITH_CONFIG, "api-gateway", "demo_mode", Some(&value))
+            .expect("editable")
+            .changed()
+            .expect("changed")
+            .to_owned();
+        assert!(
+            edited.contains(expected),
+            "expected `{expected}` in:\n{edited}"
+        );
+
+        // Writing the same value again is textually idempotent for every shape,
+        // which is what keeps a panel from rewriting a file it did not change.
+        assert_eq!(
+            set_gear_config(URI, &edited, "api-gateway", "demo_mode", Some(&value))
+                .expect("editable"),
+            Edit::Unchanged,
+            "re-writing `{expected}` should change nothing"
+        );
+    }
+}
+
+/// A typed value must survive the evaluator, not just the editor. Before this,
+/// `to_json_at` knew no floats and capped integers at `i32`, so a number control
+/// could write a description that parsed and then refused to evaluate.
+#[test]
+fn typed_values_survive_a_round_trip_through_the_evaluator() {
+    use gearbox_ir::ConfigValue;
+
+    // A well-formed product, unlike the surgery fixtures above: this one has to
+    // survive the evaluator, not just the editor.
+    const VALID: &str = r#"
+product(
+    id = "demo", version = "0.1.0",
+    sources = [source(id = "gears-rust", at = path("../gears-rust"))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [use_gear("api-gateway", source = "gears-rust", config = {"demo_mode": "off"})],
+)
+"#;
+
+    for value in [
+        ConfigValue::Bool(true),
+        ConfigValue::Int(8087),
+        ConfigValue::Int(5_000_000_000),
+        ConfigValue::Float(1.5),
+        ConfigValue::Str("on".to_owned()),
+    ] {
+        let edited = set_gear_config(URI, VALID, "api-gateway", "demo_mode", Some(&value))
+            .expect("editable")
+            .changed()
+            .expect("changed")
+            .to_owned();
+
+        let out = crate::GdlEngine::new().eval_product(&product_identity(), &edited);
+        assert!(
+            out.value.is_some(),
+            "`{value}` produced a description that does not evaluate: {:?}",
+            out.diagnostics
+        );
+        let intent = out.value.expect("evaluated");
+        let selection = intent
+            .selected_gears
+            .iter()
+            .find(|g| g.gear.as_str() == "api-gateway")
+            .expect("the gear is selected");
+        let written = selection
+            .config
+            .get("demo_mode")
+            .expect("the key was written");
+        let expected = match &value {
+            ConfigValue::Bool(b) => serde_json::Value::Bool(*b),
+            ConfigValue::Int(i) => serde_json::Value::from(*i),
+            ConfigValue::Float(f) => serde_json::Value::from(*f),
+            ConfigValue::Str(s) => serde_json::Value::String(s.clone()),
+        };
+        assert_eq!(written, &expected, "for `{value}`");
+    }
+}
+
 #[test]
 fn config_edit_keeps_comments_and_is_inverse() {
-    let edited = set_gear_config(URI, WITH_CONFIG, "api-gateway", "demo_mode", Some("on"))
-        .expect("editable")
-        .changed()
-        .expect("changed")
-        .to_owned();
+    let edited = set_gear_config(
+        URI,
+        WITH_CONFIG,
+        "api-gateway",
+        "demo_mode",
+        Some(&str_value("on")),
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
     assert!(edited.contains("# Keep this comment."), "{edited}");
     assert!(edited.contains("# gear rationale"), "{edited}");
     assert!(edited.contains("\"demo_mode\": \"on\""), "{edited}");
 
     assert_eq!(
-        set_gear_config(URI, &edited, "api-gateway", "demo_mode", Some("on")).expect("editable"),
+        set_gear_config(
+            URI,
+            &edited,
+            "api-gateway",
+            "demo_mode",
+            Some(&str_value("on"))
+        )
+        .expect("editable"),
         Edit::Unchanged
     );
 
-    let restored = set_gear_config(URI, &edited, "api-gateway", "demo_mode", Some("off"))
-        .expect("editable")
-        .changed()
-        .expect("changed")
-        .to_owned();
+    let restored = set_gear_config(
+        URI,
+        &edited,
+        "api-gateway",
+        "demo_mode",
+        Some(&str_value("off")),
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
     assert_eq!(restored, WITH_CONFIG);
 }
 
@@ -342,7 +510,7 @@ fn config_key_inside_a_string_is_not_matched_by_find() {
     ],
 )
 "#;
-    let edited = set_gear_config(URI, source, "g", "a", Some("2"))
+    let edited = set_gear_config(URI, source, "g", "a", Some(&str_value("2")))
         .expect("editable")
         .changed()
         .expect("changed")
@@ -362,7 +530,7 @@ fn quoted_values_survive_escaping() {
     ],
 )
 "#;
-    let edited = set_gear_config(URI, source, "g", "msg", Some(r#"He said "hi""#))
+    let edited = set_gear_config(URI, source, "g", "msg", Some(&str_value(r#"He said "hi""#)))
         .expect("editable")
         .changed()
         .expect("changed")

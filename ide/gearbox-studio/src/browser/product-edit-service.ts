@@ -99,7 +99,15 @@ export class ProductEditService {
       this.messages.warn("Open a product before editing it.");
       return false;
     }
-    if (edit.kind === "set_config" && edit.value != null && isSecretConfigKey(edit.key)) {
+    // Narrowed by type, exactly as `refuses_as_literal_secret` narrows it in the
+    // engine: a bool or a number cannot carry a credential, so a `mtls_key`
+    // checkbox is no longer refused for a reason that never applied to it. The
+    // two must agree -- this one is UX, the engine's is the rule.
+    if (
+      edit.kind === "set_config" &&
+      typeof edit.value === "string" &&
+      isSecretConfigKey(edit.key)
+    ) {
       this.messages.error(
         `refusing to write config key \`${edit.key}\`: names like this are for external secret references`,
       );
@@ -162,7 +170,9 @@ export class ProductEditService {
     for (const edit of this.draftEdits()) {
       if (edit.kind !== "set_config" || edit.gear !== gear) continue;
       if (edit.value == null) delete out[edit.key];
-      else out[edit.key] = edit.value;
+      // `String(...)` for the same reason the saved side above uses it: this map
+      // feeds the untyped text rows, and a typed control reads the edit itself.
+      else out[edit.key] = String(edit.value);
     }
     return out;
   }

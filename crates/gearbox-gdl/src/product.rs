@@ -31,9 +31,9 @@ use starlark::collections::SmallMap;
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
 use starlark::starlark_module;
-use starlark::values::Value;
 use starlark::values::list::UnpackList;
 use starlark::values::none::NoneType;
+use starlark::values::{UnpackValue, Value};
 
 use crate::declarative::call_location;
 use crate::records::{
@@ -81,8 +81,22 @@ fn to_json_at(key: &str, value: Value<'_>, depth: usize) -> anyhow::Result<serde
     if let Some(b) = value.unpack_bool() {
         return Ok(serde_json::Value::Bool(b));
     }
-    if let Some(i) = value.unpack_i32() {
+    // `i64`, not `i32`: a port or a byte limit past two billion is ordinary, and
+    // the narrow unpack made such a value a description that parsed and then
+    // refused to evaluate, with a message naming neither the range nor the field.
+    if let Some(i) = i64::unpack_value(value).ok().flatten() {
         return Ok(serde_json::Value::Number(i.into()));
+    }
+    // Floats were absent entirely, so `1.5` was reported as "not a string,
+    // integer, bool, list or map" -- a list that mentions float only by omission.
+    if let Some(f) = starlark::values::float::StarlarkFloat::unpack_value(value)
+        .ok()
+        .flatten()
+    {
+        let number = serde_json::Number::from_f64(f.0).ok_or_else(|| {
+            anyhow::anyhow!("option `{key}` is `{}`, which JSON cannot represent", f.0)
+        })?;
+        return Ok(serde_json::Value::Number(number));
     }
     if let Some(list) = starlark::values::list::ListRef::from_value(value) {
         let items = list
@@ -102,7 +116,7 @@ fn to_json_at(key: &str, value: Value<'_>, depth: usize) -> anyhow::Result<serde
         return Ok(serde_json::Value::Object(map));
     }
     Err(anyhow::anyhow!(
-        "option `{key}` has value `{value}`, which is not a string, integer, bool, \
+        "option `{key}` has value `{value}`, which is not a string, number, bool, \
          list or map. Cluster options are passed to the plugin as JSON."
     ))
 }

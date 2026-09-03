@@ -186,6 +186,64 @@ impl DeploymentProfileDecl {
     }
 }
 
+/// One scalar a typed configuration control can write.
+///
+/// Deliberately narrower than the `serde_json::Value` a description may hold. A
+/// hand-written `config = {...}` can nest a list or a map and the evaluator
+/// accepts it, but the surgical editor cannot: a nested literal has no control
+/// to render it and no merge rule that preserves the comments inside it.
+/// Narrowing here makes that refusal a deserialization failure at the wire
+/// rather than an arm in the renderer somebody has to remember.
+///
+/// Untagged, because on the wire these *are* the JSON scalars the evaluator
+/// already reads. A tag would state the type a second time, and two statements
+/// of one fact are how a client ends up sending a bool labelled as a string.
+///
+/// **Variant order is load-bearing.** `Bool` before `Int` so `true` does not
+/// arrive as `1`; `Int` before `Float` so `8087` stays an integer instead of
+/// becoming `8087.0` in the description.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(untagged)]
+pub enum ConfigValue {
+    Bool(bool),
+    /// `i64` in Rust so a hand-written description may hold any integer, but
+    /// `number` on the wire: ts-rs would otherwise emit `bigint`, which
+    /// `JSON.stringify` refuses outright. The cost is the usual JSON one --
+    /// integers past 2^53 do not round-trip through a browser -- and a config
+    /// key holding one would be remarkable.
+    Int(#[ts(type = "number")] i64),
+    Float(f64),
+    Str(String),
+}
+
+impl std::fmt::Display for ConfigValue {
+    /// The GDL literal that reads back as this value.
+    ///
+    /// Starlark spells its booleans `True`/`False` -- they are globals, not
+    /// literals, so its AST has no `Bool` variant at all -- and numerals are
+    /// bare. Only the string arm needs quoting, and it is the caller's
+    /// `quote_string` that does it, so escaping lives in one place.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Bool(true) => f.write_str("True"),
+            Self::Bool(false) => f.write_str("False"),
+            Self::Int(i) => write!(f, "{i}"),
+            // `{:?}` rather than `{}`: `Display` prints `8087` for `8087.0`,
+            // which is an integer literal in Starlark and would silently retype
+            // the field on the next read. `Debug` for `f64` is specified to
+            // round-trip, which is the property wanted here.
+            #[allow(
+                clippy::use_debug,
+                reason = "Debug is the only float formatter specified to round-trip; \
+                          Display drops the fractional part of a whole float and \
+                          would retype the field"
+            )]
+            Self::Float(v) => write!(f, "{v:?}"),
+            Self::Str(s) => f.write_str(s),
+        }
+    }
+}
+
 /// A gear someone asked for.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct GearSelection {

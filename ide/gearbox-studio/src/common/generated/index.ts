@@ -21,6 +21,7 @@ export * from "./ClusterScopeIntent";
 export * from "./ConfigFieldDecl";
 export * from "./ConfigFieldType";
 export * from "./ConfigSchema";
+export * from "./ConfigValue";
 export * from "./ContractDescriptor";
 export * from "./ContractId";
 export * from "./ContractKind";

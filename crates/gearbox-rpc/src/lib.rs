@@ -737,7 +737,7 @@ fn edit_set_config(state: &mut State, id: RequestId, params: &SetConfigParams) -
             before,
             &params.gear,
             &params.key,
-            params.value.as_deref(),
+            params.value.as_ref(),
         )
     })
 }
@@ -799,7 +799,7 @@ fn apply_product_edits(
     for edit in edits {
         let step = match edit {
             ProductEdit::SetConfig { gear, key, value } => {
-                gearbox_gdl::edit::set_gear_config(uri, &current, gear, key, value.as_deref())?
+                gearbox_gdl::edit::set_gear_config(uri, &current, gear, key, value.as_ref())?
             }
             ProductEdit::SetFeatures { gear, features } => {
                 gearbox_gdl::edit::set_gear_features(uri, &current, gear, features)?

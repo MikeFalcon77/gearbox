@@ -559,9 +559,11 @@ export class InspectorWidget extends ReactWidget {
 
         {gear.config_schema !== null && gear.config_schema !== undefined && (
           <div className="gbx-kv">
-            <span>schema</span>
-            <span className="gbx-links">
-              {this.renderLink(gear.source, gear.config_schema, `schema: ${gear.config_schema}`)}
+            <span>config</span>
+            <span>
+              {(gear.config_schema.fields ?? []).length} setting
+              {(gear.config_schema.fields ?? []).length === 1 ? "" : "s"} from{" "}
+              <code>{gear.config_schema.rust}</code>
             </span>
           </div>
         )}

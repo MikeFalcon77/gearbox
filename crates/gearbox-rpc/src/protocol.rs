@@ -10,8 +10,8 @@
 //! types carry no such attribute for the same reason.
 
 use gearbox_ir::{
-    Diagnostic, ExplanationGraph, FileAction, FilePlan, GearDescriptor, Ownership, PendingGear,
-    ProductIntent, ResolvedProduct,
+    ConfigValue, Diagnostic, ExplanationGraph, FileAction, FilePlan, GearDescriptor, Ownership,
+    PendingGear, ProductIntent, ResolvedProduct,
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -383,8 +383,9 @@ pub struct SetConfigParams {
     pub path: String,
     pub gear: String,
     pub key: String,
+    /// `None` removes the key.
     #[serde(default)]
-    pub value: Option<String>,
+    pub value: Option<ConfigValue>,
     #[serde(default)]
     pub dry_run: bool,
 }
@@ -456,8 +457,10 @@ pub enum ProductEdit {
     SetConfig {
         gear: String,
         key: String,
+        /// `None` removes the key. A scalar, because a control writes scalars
+        /// and a nested literal has no control to render it.
         #[serde(default)]
-        value: Option<String>,
+        value: Option<ConfigValue>,
     },
     SetFeatures {
         gear: String,

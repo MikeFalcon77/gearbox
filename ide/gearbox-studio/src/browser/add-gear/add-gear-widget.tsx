@@ -647,8 +647,9 @@ export class AddGearWidget extends ReactWidget {
         </p>
         {gear.config_schema !== null && gear.config_schema !== undefined && (
           <p data-add-gear-schema>
-            Config schema: <code>{gear.config_schema}</code> (typed fields not projected yet —
-            use string keys in Configuration).
+            Configured by <code>{gear.config_schema.rust}</code>, which exposes{" "}
+            {(gear.config_schema.fields ?? []).length} setting
+            {(gear.config_schema.fields ?? []).length === 1 ? "" : "s"}.
           </p>
         )}
         {this.plugins.length === 0 && <div className="gbx-empty">No plugins selected.</div>}

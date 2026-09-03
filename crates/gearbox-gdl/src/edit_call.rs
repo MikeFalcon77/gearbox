@@ -4,7 +4,7 @@
 //! re-serialisation. Named arguments and dict keys are located on the AST of the
 //! call being edited; string values are escaped before they are written.
 
-use gearbox_ir::Diagnostics;
+use gearbox_ir::{ConfigValue, Diagnostics};
 use starlark::syntax::AstModule;
 use starlark_syntax::codemap::Span;
 use starlark_syntax::syntax::ast::{
@@ -29,19 +29,41 @@ pub fn is_secret_config_key(key: &str) -> bool {
     EXACT.contains(&lower.as_str()) || SUFFIXES.iter().any(|s| lower.ends_with(s))
 }
 
+/// Whether writing `value` under `key` is refused as a literal credential.
+///
+/// Narrower than the name check alone, and deliberately: a `bool` or a number
+/// cannot carry a password, so the heuristic has nothing to protect there. Only
+/// a string can be a credential typed into a form -- which also stops a `bool`
+/// named `mtls_key` being unwritable for a reason that never applied to it.
+fn refuses_as_literal_secret(key: &str, value: Option<&ConfigValue>) -> bool {
+    matches!(value, Some(ConfigValue::Str(_))) && is_secret_config_key(key)
+}
+
+/// One config value as the GDL literal that reads back as itself.
+///
+/// Total by construction, which is why [`ConfigValue`] is narrower than the JSON
+/// the evaluator accepts: there is no arm here that exists only to refuse.
+fn render_config_value(value: &ConfigValue) -> String {
+    match value {
+        ConfigValue::Str(s) => quote_string(s),
+        // `Display` spells the Starlark literal for the rest.
+        other => other.to_string(),
+    }
+}
+
 /// Set, change, or remove one key in a gear's `config = {...}`.
 ///
 /// # Errors
-/// Refuses secret-looking key names, a missing gear, a non-literal `config`, or
-/// a description that does not parse.
+/// Refuses a string under a secret-looking key name, a missing gear, a
+/// non-literal `config`, or a description that does not parse.
 pub fn set_gear_config(
     uri: &str,
     source: &str,
     gear: &str,
     key: &str,
-    value: Option<&str>,
+    value: Option<&ConfigValue>,
 ) -> Result<Edit, Diagnostics> {
-    if value.is_some() && is_secret_config_key(key) {
+    if refuses_as_literal_secret(key, value) {
         return Err(refuse(
             uri,
             &format!(
@@ -58,7 +80,14 @@ pub fn set_gear_config(
             "add the gear first, then set its config",
         )
     })?;
-    let new_entry = set_dict_key_on_call(uri, slice(source, entry), "config", key, value)?;
+    let rendered = value.map(render_config_value);
+    let new_entry = set_dict_key_on_call(
+        uri,
+        slice(source, entry),
+        "config",
+        key,
+        rendered.as_deref(),
+    )?;
     if new_entry == slice(source, entry) {
         return Ok(Edit::Unchanged);
     }
@@ -508,12 +537,18 @@ fn set_named_arg_on_call(
     }
 }
 
+/// Set, replace or remove one key of a named dict argument on a call.
+///
+/// `rendered` is already a GDL literal, matching the convention
+/// `set_named_arg_on_call` uses for its own value parameter. Quoting used to
+/// happen here, three times, which made this span surgeon the one place that
+/// decided every config value was a string.
 fn set_dict_key_on_call(
     uri: &str,
     text: &str,
     dict_name: &str,
     key: &str,
-    value: Option<&str>,
+    rendered: Option<&str>,
 ) -> Result<String, Diagnostics> {
     let ast = parse_call(uri, text)?;
     let args = call_args(ast.statement())
@@ -522,11 +557,11 @@ fn set_dict_key_on_call(
         .iter()
         .find(|arg| matches!(&arg.node, ArgumentP::Named(n, _) if n.node == dict_name));
 
-    match (dict_arg, value) {
+    match (dict_arg, rendered) {
         (None, None) => Ok(text.to_owned()),
         (None, Some(v)) => {
-            let rendered = format!("{{{}: {}}}", quote_string(key), quote_string(v));
-            set_named_arg_on_call(uri, text, dict_name, Some(&rendered))
+            let dict = format!("{{{}: {v}}}", quote_string(key));
+            set_named_arg_on_call(uri, text, dict_name, Some(&dict))
         }
         (Some(arg), _) => {
             let ArgumentP::Named(_, dict_expr) = &arg.node else {
@@ -542,16 +577,17 @@ fn set_dict_key_on_call(
             let key_pair = pairs
                 .iter()
                 .find(|(key_expr, _)| string_literal(key_expr).as_deref() == Some(key));
-            match (key_pair, value) {
+            match (key_pair, rendered) {
                 (Some((_, old_val)), Some(v)) => {
-                    let rendered = quote_string(v);
-                    if slice(text, old_val.span) == rendered {
+                    // Textual idempotence, and it holds for every scalar shape:
+                    // `True`, `8087` and `-1` all slice back as themselves.
+                    if slice(text, old_val.span) == v {
                         return Ok(text.to_owned());
                     }
-                    Ok(replace_span(text, old_val.span, &rendered))
+                    Ok(replace_span(text, old_val.span, v))
                 }
                 (None, Some(v)) => {
-                    let pair = format!("{}: {}", quote_string(key), quote_string(v));
+                    let pair = format!("{}: {v}", quote_string(key));
                     Ok(insert_dict_pair(text, dict_expr.span, &pair))
                 }
                 (Some((key_expr, val_expr)), None) => {
