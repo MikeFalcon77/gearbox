@@ -205,6 +205,42 @@ fn a_key_outside_the_exposed_set_is_not_reported() {
     assert_eq!(codes("not_exposed", serde_json::json!(true)), []);
 }
 
+/// A key the generator derives is overwritten, and the whole point of the
+/// warning is that it is not overwritten in silence.
+#[test]
+fn setting_a_derived_key_warns_without_failing() {
+    let mut catalogue = catalogue();
+    catalogue
+        .gears
+        .get_mut(&GearId::new("demo").unwrap())
+        .unwrap()
+        .serves = vec![gearbox_ir::EndpointDecl {
+        name: "rest".to_owned(),
+        config_key: Some("bind_addr".to_owned()),
+        default_port: Some(8087),
+        via: None,
+    }];
+
+    let mut diagnostics = Diagnostics::default();
+    check(
+        &catalogue,
+        &intent("bind_addr", serde_json::json!("0.0.0.0:9999")),
+        "file:///p.gdl",
+        &mut diagnostics,
+    );
+    let reported: Vec<_> = diagnostics.iter().collect();
+    assert_eq!(reported.len(), 1);
+    assert_eq!(reported[0].code, DiagnosticCode::GdlConfigKeyDerived);
+    // A warning: the product still builds, the value is simply not the one used.
+    assert_eq!(reported[0].severity, gearbox_ir::Severity::Warning);
+    assert!(
+        reported[0].message.contains("bind_addr"),
+        "{:?}",
+        reported[0]
+    );
+    assert!(reported[0].help.is_some());
+}
+
 #[test]
 fn a_gear_without_a_schema_is_not_checked() {
     let mut catalogue = catalogue();

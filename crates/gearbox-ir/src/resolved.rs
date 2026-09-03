@@ -208,6 +208,21 @@ pub struct ResolvedGear {
     /// pulled it in. Recorded because "why is this even here" is one of the most
     /// common questions about a resolved product.
     pub selected_by: Vec<InclusionReason>,
+
+    /// The configuration the description set on this gear.
+    ///
+    /// In the lock because it is part of what was *decided*: two products whose
+    /// descriptions differ only in a config value are different products, and a
+    /// `lock_hash` that could not tell them apart would be answering about the
+    /// wrong one. It is also how the value reaches a generator at all --
+    /// `GenerateInput` carries the lock and nothing else.
+    ///
+    /// Empty for a gear the closure pulled in: only a `use_gear` entry can carry
+    /// configuration, and inventing an inherited one would be a decision nobody
+    /// wrote down.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[ts(type = "Record<string, unknown>")]
+    pub config: BTreeMap<String, serde_json::Value>,
 }
 
 /// How a gear came to be in the product.

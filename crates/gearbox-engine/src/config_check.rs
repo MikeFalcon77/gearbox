@@ -73,11 +73,40 @@ pub fn check(
     diagnostics: &mut Diagnostics,
 ) {
     for selection in &intent.selected_gears {
-        let Some(schema) = catalogue
-            .gears
-            .get(&selection.gear)
-            .and_then(|gear| gear.config_schema.as_ref())
-        else {
+        let Some(gear) = catalogue.gears.get(&selection.gear) else {
+            continue;
+        };
+
+        // Keys the generator derives from the resolved topology. Setting one is
+        // not an error -- it is simply overwritten -- but it must not be
+        // overwritten in silence, or an operator sets a bind address, finds the
+        // generated file disagreeing, and has nothing to read that explains why.
+        for endpoint in &gear.serves {
+            let Some(derived) = endpoint.config_key.as_ref() else {
+                continue;
+            };
+            if !selection.config.contains_key(derived) {
+                continue;
+            }
+            diagnostics.push(
+                // `new`, not `error`: the code's own default severity is a
+                // warning, and the product still builds.
+                Diagnostic::new(
+                    DiagnosticCode::GdlConfigKeyDerived,
+                    format!(
+                        "`{}` sets `{derived}`, which its `{}` endpoint derives from the port the resolver assigned",
+                        selection.gear, endpoint.name
+                    ),
+                )
+                .with_help(format!(
+                    "remove `{derived}` from this gear's config; a value written here describes a \
+                     product that was not resolved"
+                ))
+                .at(location(selection, uri)),
+            );
+        }
+
+        let Some(schema) = gear.config_schema.as_ref() else {
             continue;
         };
 
@@ -99,15 +128,21 @@ pub fn check(
                     ),
                     format!("write `{key}` as {expected}"),
                 )
-                // The `use_gear(...)` span when the description recorded one;
-                // claiming byte-zero precision would be worse than claiming none.
-                .at(selection
-                    .declared_at
-                    .clone()
-                    .unwrap_or_else(|| Location::file(uri.to_owned()))),
+                .at(location(selection, uri)),
             );
         }
     }
+}
+
+/// Where a diagnostic about one selection points.
+///
+/// The `use_gear(...)` span when the description recorded one; claiming
+/// byte-zero precision would be worse than claiming none.
+fn location(selection: &gearbox_ir::GearSelection, uri: &str) -> Location {
+    selection
+        .declared_at
+        .clone()
+        .unwrap_or_else(|| Location::file(uri.to_owned()))
 }
 
 #[cfg(test)]

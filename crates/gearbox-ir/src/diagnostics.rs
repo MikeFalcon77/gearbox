@@ -266,6 +266,17 @@ diagnostic_codes! {
     /// be one the gear reads.
     GdlConfigTypeMismatch = "GBX0113", Gdl, Error, false, "config value does not match the declared field type";
 
+    /// A config key a gear declares as an endpoint's `config_key` was also set
+    /// in the description, where it has no effect.
+    ///
+    /// A warning, not an error: the product resolves and builds, and the value
+    /// is simply not the one used. But it is worth saying, because the failure
+    /// it prevents is an operator setting a bind address, seeing the generated
+    /// file disagree, and having nothing to read that explains why. The port
+    /// comes from the topology the resolver decided; a value written by hand
+    /// would be describing a product that was not resolved.
+    GdlConfigKeyDerived = "GBX0114", Gdl, Warning, false, "config key is derived from the topology and cannot be set here";
+
     // ---------------------------------------------------------------- GBX02xx
     // GBX0201-GBX0205 are deliberately absent. They compared a `gear.gdl`
     // restatement of the gear id, co-location dependencies, runtime

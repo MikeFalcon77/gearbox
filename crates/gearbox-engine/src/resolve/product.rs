@@ -52,7 +52,7 @@ pub fn assemble(
         },
         kubernetes: kubernetes(declaration),
         sources,
-        gears: gears(catalogue, resolution),
+        gears: gears(catalogue, intent, resolution),
         processes: resolution.partition.processes.clone(),
         bindings: resolution.bindings.clone(),
         cluster: resolution.cluster.clone(),
@@ -86,8 +86,12 @@ fn kubernetes(
     }
 }
 
-/// The gears in the product, each carrying why it is here.
-fn gears(catalogue: &Catalogue, resolution: &Resolution) -> BTreeMap<GearId, ResolvedGear> {
+/// The gears in the product, each carrying why it is here and what it was told.
+fn gears(
+    catalogue: &Catalogue,
+    intent: &ProductIntent,
+    resolution: &Resolution,
+) -> BTreeMap<GearId, ResolvedGear> {
     resolution
         .closure
         .members
@@ -106,6 +110,15 @@ fn gears(catalogue: &Catalogue, resolution: &Resolution) -> BTreeMap<GearId, Res
                     runtime_caps: descriptor.runtime_caps.clone(),
                     colocated_deps: descriptor.colocated_deps.clone(),
                     selected_by: reasons.clone(),
+                    // Only a `use_gear` entry carries configuration. A gear the
+                    // closure pulled in has none, and inheriting one would be a
+                    // decision nobody wrote down.
+                    config: intent
+                        .selected_gears
+                        .iter()
+                        .find(|selection| &selection.gear == id)
+                        .map(|selection| selection.config.clone())
+                        .unwrap_or_default(),
                 },
             ))
         })

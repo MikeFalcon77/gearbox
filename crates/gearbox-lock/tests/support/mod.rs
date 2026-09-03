@@ -54,6 +54,7 @@ fn resolved_gear(
         crate_dir: RelPath::new(format!("gears/{id}")).unwrap(),
         runtime_caps: caps.iter().copied().collect(),
         colocated_deps: deps.iter().map(|d| gid(d)).collect(),
+        config: std::collections::BTreeMap::new(),
         selected_by: vec![selected_by],
     }
 }

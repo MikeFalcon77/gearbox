@@ -26,4 +26,18 @@ crate_dir: RelPath, runtime_caps?: Array<RuntimeCap>, colocated_deps?: Array<Gea
  * pulled it in. Recorded because "why is this even here" is one of the most
  * common questions about a resolved product.
  */
-selected_by: Array<InclusionReason>, };
+selected_by: Array<InclusionReason>, 
+/**
+ * The configuration the description set on this gear.
+ *
+ * In the lock because it is part of what was *decided*: two products whose
+ * descriptions differ only in a config value are different products, and a
+ * `lock_hash` that could not tell them apart would be answering about the
+ * wrong one. It is also how the value reaches a generator at all --
+ * `GenerateInput` carries the lock and nothing else.
+ *
+ * Empty for a gear the closure pulled in: only a `use_gear` entry can carry
+ * configuration, and inventing an inherited one would be a decision nobody
+ * wrote down.
+ */
+config?: Record<string, unknown>, };

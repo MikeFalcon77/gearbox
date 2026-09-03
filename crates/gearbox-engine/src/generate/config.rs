@@ -79,15 +79,27 @@ pub fn app_config(
     input: &GenerateInput<'_>,
     process: &ResolvedProcess,
 ) -> Result<FileEntry, GenerateError> {
+    // The description's own values first, then the projected facts on top.
+    //
+    // The order is the point: a port, a client's wiring and a cluster binding are
+    // *derived* from the topology the resolver decided, so a hand-written value
+    // for one of them would be describing a product that was not resolved. The
+    // operator's keys go in underneath, where they belong.
     let mut gears: BTreeMap<String, GearSection> = process
         .gears
         .iter()
         .map(|id| {
+            let config = input.lock.gears.get(id).map_or_else(Map::new, |gear| {
+                gear.config
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect()
+            });
             (
                 id.to_string(),
                 GearSection {
                     runtime: None,
-                    config: Map::new(),
+                    config,
                 },
             )
         })

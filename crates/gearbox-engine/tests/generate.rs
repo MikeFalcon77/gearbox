@@ -541,3 +541,75 @@ fn plan_writes_nothing() {
         "a preview must not write"
     );
 }
+
+/// Part B: a value the description sets reaches the generated configuration.
+///
+/// It could not before. `app_config` seeded every gear's section empty and
+/// filled it only from endpoints, wiring, cluster and spawns, and it could not
+/// have done otherwise -- `GenerateInput` carries the lock, and the lock had no
+/// place to put a product's configuration. Both halves are asserted here: the
+/// lock carries it, and the generator writes it.
+#[test]
+fn a_products_config_reaches_the_generated_configuration() {
+    let Some(root) = gears_rust() else {
+        eprintln!("skipping: ../gears-rust not present");
+        return;
+    };
+    let opened = vec![SourceRoot::open(SourceId::new("gears-rust").unwrap(), &root).unwrap()];
+    let scan = load_catalogue(&opened);
+
+    let path = product_gdl();
+    let product = load_product(&path, None);
+    let mut intent = product.intent.expect("the product evaluates");
+    let selection = intent
+        .selected_gears
+        .iter_mut()
+        .find(|s| s.gear.as_str() == "api-gateway")
+        .expect("the demo product names api-gateway");
+    selection
+        .config
+        .insert("enable_docs".to_owned(), serde_json::Value::Bool(true));
+    selection.config.insert(
+        "prefix_path".to_owned(),
+        serde_json::Value::String("/cf".to_owned()),
+    );
+
+    let profile = ProfileId::new("dev").unwrap();
+    let resolution =
+        gearbox_engine::resolve::resolve_at(&scan.catalogue, &intent, &profile, Some(&path));
+    let sources = opened
+        .iter()
+        .map(|r| (r.id.clone(), r.to_resolved()))
+        .collect();
+    let lock =
+        gearbox_engine::resolve::product::assemble(&scan.catalogue, &intent, &resolution, sources);
+
+    // The lock carries it, which is what makes it reachable by a generator at all.
+    let gear = lock
+        .gears
+        .get(&gearbox_ir::GearId::new("api-gateway").unwrap())
+        .expect("api-gateway resolved");
+    assert_eq!(
+        gear.config.get("enable_docs"),
+        Some(&serde_json::Value::Bool(true))
+    );
+
+    let roots = opened
+        .iter()
+        .map(|r| (r.id.clone(), r.root.clone()))
+        .collect();
+    let files = generate(&GenerateInput {
+        lock: &lock,
+        source_roots: &roots,
+        out_root: &out_root(),
+    })
+    .expect("generation succeeds")
+    .files;
+
+    let yaml = text(&files, "config/api-gateway.yaml");
+    // A real boolean, not the string the wire used to force.
+    assert!(yaml.contains("enable_docs: true"), "{yaml}");
+    assert!(yaml.contains("prefix_path: /cf"), "{yaml}");
+    // And the projected socket still wins over anything written by hand.
+    assert!(yaml.contains("bind_addr:"), "{yaml}");
+}
