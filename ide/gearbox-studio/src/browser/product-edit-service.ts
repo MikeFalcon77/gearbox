@@ -41,6 +41,7 @@ import { inject, injectable } from "@theia/core/shared/inversify";
 
 import type { EditGearResult } from "../common/generated/EditGearResult";
 import type { ProductEdit } from "../common/generated/ProductEdit";
+import type { ResolveResult } from "../common/generated/ResolveResult";
 import { GearboxService } from "../common/protocol";
 import { ProductStore } from "./product-store";
 import { ProductSessionService } from "./shell/product-session-service";
@@ -215,6 +216,42 @@ export class ProductEditService {
       return await this.service.addGear(open.path, gear, source, true);
     } catch (error) {
       this.messages.error(messageOf(error));
+      return undefined;
+    }
+  }
+
+  /**
+   * Resolve the product as it *would* be with this gear and these edits.
+   *
+   * Answers the question the configurator exists for -- which gears the closure
+   * pulls in, which processes change, which bindings stop being local -- before
+   * anything is written. Nothing is written: the engine applies the edits to the
+   * text in memory and resolves that.
+   *
+   * The dirty-buffer refusal of the write paths deliberately does **not** apply.
+   * Reading a stale file to answer a hypothetical costs nothing, and refusing here
+   * would blank the panel for the whole time an editor is open -- exactly when a
+   * person most wants to see what their change does.
+   *
+   * Failure returns `undefined` and says nothing: this runs on every keystroke's
+   * debounce, and a message toast per failed preview would be noise. The panel
+   * reports it in place.
+   */
+  async previewResolution(
+    gear: string,
+    source: string,
+    followUps: readonly ProductEdit[],
+  ): Promise<ResolveResult | undefined> {
+    const open = this.product.current.open;
+    if (open === undefined) return undefined;
+    try {
+      return await this.service.resolvePreview({
+        path: open.path,
+        profile: this.product.current.profile,
+        add: { gear, source },
+        edits: followUps,
+      });
+    } catch {
       return undefined;
     }
   }

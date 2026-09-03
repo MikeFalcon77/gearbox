@@ -31,19 +31,17 @@ pub struct ProductScan {
 /// wants to share fragments with a sibling has to say so by being rooted higher.
 #[must_use]
 pub fn load_product(path: &Path, root: Option<&Path>) -> ProductScan {
-    let uri = gearbox_ir::file_uri(path);
-    let mut diagnostics = Diagnostics::new();
-
     let source = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) => {
+            let mut diagnostics = Diagnostics::new();
             diagnostics.push(
                 Diagnostic::error(
                     DiagnosticCode::GdlEval,
                     format!("cannot read `{}`: {e}", path.display()),
                     "check the path and the file's permissions",
                 )
-                .at(Location::file(uri)),
+                .at(Location::file(gearbox_ir::file_uri(path))),
             );
             diagnostics.finish();
             return ProductScan {
@@ -52,6 +50,25 @@ pub fn load_product(path: &Path, root: Option<&Path>) -> ProductScan {
             };
         }
     };
+    eval_product_text(path, root, &source)
+}
+
+/// Evaluate a description that is not (yet) what is on disk.
+///
+/// Everything about the evaluation is decided by *where* the description lives --
+/// `load()` is rooted at `root`, and relative `source(at = path(...))` entries
+/// resolve against the file's own directory -- so the path is still required even
+/// though the bytes come from the caller. Passing the real path is what makes an
+/// answer about proposed text an answer about *this* product.
+///
+/// Reads nothing and writes nothing. `load_product` is this function with a file
+/// read in front of it, and `gearbox/product/resolvePreview` is this function with
+/// an edit applied in front of it: the same evaluation, so a preview cannot
+/// disagree with what the write would produce.
+#[must_use]
+pub fn eval_product_text(path: &Path, root: Option<&Path>, source: &str) -> ProductScan {
+    let uri = gearbox_ir::file_uri(path);
+    let mut diagnostics = Diagnostics::new();
 
     let dir = path.parent().unwrap_or(Path::new("."));
     let root = root.unwrap_or(dir);
@@ -82,7 +99,7 @@ pub fn load_product(path: &Path, root: Option<&Path>) -> ProductScan {
         }),
     };
 
-    let outcome = GdlEngine::new().eval_product(&identity, &source);
+    let outcome = GdlEngine::new().eval_product(&identity, source);
     diagnostics.extend(outcome.diagnostics);
     diagnostics.finish();
 

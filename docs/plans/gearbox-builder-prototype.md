@@ -1677,13 +1677,37 @@ states -- Home, Product, Gear -- and the work that makes each of them true:
   atomically -- so Home has four operations rather than two and a promise.
 
 **Two of the eight phases were marked done and were half done**, which is worth recording because the
-repository did not join in. The Add Gear configurator has six of its nine intended sections: the
-hypothetical re-resolve and the process/contract diff are not built, and the widget says so on screen
+repository did not join in. The Add Gear configurator had six of its nine intended sections: the
+hypothetical re-resolve and the process/contract diff were not built, and the widget said so on screen
 ("the full resolution closure appears after Add"). `config_schema` is still `Option<RelPath>` with no
 projection into the IR, so configuration values are strings and the claim that would prove otherwise is
 still `test.fixme` with the reason written in it. The plan's checkboxes were wrong; the code, the UI and
 the conformance table were not. That asymmetry is the useful part -- a checkbox is a claim about
 yesterday, and the only claims worth trusting are the ones something re-checks.
+
+#### The missing sections, and the one that is not coming
+
+The re-resolve is now built (ADR-0013 amendment 2026-09-03). `gearbox/product/resolvePreview` applies
+`add_gear` and the panel's edits **to the description text in memory**, resolves that, and returns an
+ordinary `ResolveResult`; the panel subtracts the resolution already on screen from it and renders the
+difference as section 6, "What changes". The engine change was one split -- `load_product` reads the
+file and delegates to a new `eval_product_text` -- and it is resolution-neutral: `lock_hash` for `dev`,
+`local` and `prod` is byte-identical across it.
+
+Two things about that call are worth keeping. It writes nothing, so it needs no write gate: the panel
+asks on a debounce, and a preview that wrote would be indistinguishable from the act it previews. And
+it takes the panel's `edits`, not just the gear -- a plugin *is* a gear, so a preview that ignored the
+Plugins section would understate the closure by exactly the amount the section exists to reveal.
+
+`Add to Product` stays enabled when the proposed resolution has errors, with the count beside it.
+Building a product is add-a-gear-then-bind-it; blocking the first step until the second is done makes
+the intermediate state unreachable, and that state is where most of the work happens.
+
+The ninth section, typed controls projected from `config_schema`, is **not** being built, and the
+reason is a measurement rather than a preference: of the twelve `gear.gdl` files in the corpus, zero
+declare `config_schema` -- every match in the tree is documentation. A projection built against no
+examples would be a guess wearing the clothes of a feature. The claim stays `test.fixme` and the panel
+says plainly that the fields are strings.
 
 One thing was fixed the wrong way first. The toolbar showed `Toggle Gearbox Generate`, and the repair
 was a map from command id to caption inside `ToolbarWidget` -- which is exactly the drift that file's

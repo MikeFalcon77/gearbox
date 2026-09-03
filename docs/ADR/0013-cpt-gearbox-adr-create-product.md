@@ -144,3 +144,67 @@ Config, features and profile scalar edits accumulate in a `ProductEditService` d
 commit through `gearbox/product/applyEdits` with one dry-run and one confirmation on
 **Apply** (and Discard restoring saved values). That supersedes per-field blur preview
 dialogs.
+
+## Amendment 2026-09-03: Add Gear shows consequences, and errors do not block it
+
+**Status: accepted. This extends the Add Gear configurator; it reverses nothing about write gates,
+span-surgical edits, or the four UI gates above.**
+
+### The panel answers the question before the write
+
+A person opens Add Gear to find out what a gear does to their product, not to read a text diff.
+Until now the configurator showed the GDL that would be written and said the resolution closure
+"appears after Add" — that is, the only way to learn the consequences was to accept them.
+
+Section 6 is now **What changes**: the gears that join the closure and what pulled each one in, the
+processes that appear, vanish or gain a gear, the bindings that are new or whose `mode`/`transport`
+change, and the diagnostics the product does not have today. Section 7 is the text diff, unchanged.
+The two answer different questions and neither replaces the other.
+
+### One engine call, arithmetic in the client
+
+New method **`gearbox/product/resolvePreview`**: `{ path, profile?, add?: {gear, source}, edits? }`.
+It reads the description, applies `add_gear` and the edits **to the text in memory**, resolves that,
+and returns an ordinary `ResolveResult`. It writes nothing, so it needs no write gate — a preview
+that wrote would make asking indistinguishable from doing, and the panel asks on a debounce.
+
+`edits` is not optional decoration: the configurator collects `features`, `config` and `plugins`,
+and a **plugin is itself a gear**. A preview that ignored them would understate exactly the closure
+the section exists to show.
+
+The client subtracts the resolution already on screen from the one that comes back. That is
+arithmetic over two `ResolvedProduct` values, not a second solver: `cpt-gearbox-fr-studio` forbids
+resolution logic in Studio, and a client that reimplemented closure or binding rules would drift
+from the engine on the first change to either.
+
+The engine change this needed is one split: `load_product` becomes "read the file and delegate" to a
+new `eval_product_text(path, root, source)`. Resolution is unaffected — `lock_hash` for `dev`,
+`local` and `prod` is byte-identical across the split.
+
+### Errors warn, they do not block
+
+`Add to Product` stays enabled when the proposed resolution has errors. Building a product is
+add-a-gear-**then**-bind-it; refusing the first step until the second is done makes the intermediate
+state unreachable, and the intermediate state is where most of the work happens. The new-error count
+sits beside the button with the text that they can be fixed next. The button is still disabled when
+there is nothing to write (the description already names the gear) or a write is in flight — those
+are facts about the edit, not judgements about the result.
+
+### Confirmation
+
+* Adding a gear lists it under the closure with its reason, before anything is written.
+* Choosing a plugin makes that plugin appear in the arriving list — the preview follows `edits`.
+* The submit button's availability does not depend on diagnostics.
+* `resolvePreview` leaves the description byte-identical and `git status --porcelain products/`
+  clean — asserted in `crates/gearbox-rpc/src/preview_tests.rs` and `ide/scripts/rpc-smoke.mjs`.
+
+Implemented in `crates/gearbox-engine/src/product.rs`, `crates/gearbox-rpc`, `ProductEditService`,
+and `ide/gearbox-studio/src/browser/add-gear/`; asserted in
+`ide/tests/conformance/adr-0013-add-gear.spec.ts`.
+
+### Typed config controls are not in this pass
+
+`config_schema` projection (typed fields instead of string key/value pairs) stays unbuilt, and
+deliberately: **no** `gear.gdl` in the corpus declares `config_schema` — every match in the tree is
+documentation. A projection built against zero examples would be a guess presented as a feature.
+The Plugins section says so in place of the controls.

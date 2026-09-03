@@ -43,6 +43,7 @@ export const method = {
   CATALOGUE_LOAD: "gearbox/catalogue/load",
   PRODUCT_LOAD: "gearbox/product/load",
   PRODUCT_RESOLVE: "gearbox/product/resolve",
+  PRODUCT_RESOLVE_PREVIEW: "gearbox/product/resolvePreview",
   PRODUCT_LOCK: "gearbox/product/lock",
   PRODUCT_ADD_GEAR: "gearbox/product/addGear",
   PRODUCT_REMOVE_GEAR: "gearbox/product/removeGear",
@@ -153,6 +154,21 @@ export interface GearboxService {
    * from the description rather than from a guess made in the client.
    */
   resolve(path: string, profile?: string): Promise<ResolveResult>;
+
+  /**
+   * Resolve the description a configurator is about to write, without writing it.
+   *
+   * The answer `Add Gear` needs before the person commits to finding out: which
+   * gears the closure would pull in, which processes change, which bindings stop
+   * being local. `add` and `edits` are applied to the text in memory, in the same
+   * order `commitAddGear` writes them, so the preview and the write cannot drift.
+   */
+  resolvePreview(params: {
+    path: string;
+    profile?: string;
+    add?: { gear: string; source: string };
+    edits?: readonly ProductEdit[];
+  }): Promise<ResolveResult>;
 
   /**
    * The canonical `product.lock` text for one profile.

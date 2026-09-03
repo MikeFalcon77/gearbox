@@ -23,6 +23,7 @@ pub mod method {
     pub const CATALOGUE_LOAD: &str = "gearbox/catalogue/load";
     pub const PRODUCT_LOAD: &str = "gearbox/product/load";
     pub const PRODUCT_RESOLVE: &str = "gearbox/product/resolve";
+    pub const PRODUCT_RESOLVE_PREVIEW: &str = "gearbox/product/resolvePreview";
     pub const PRODUCT_LOCK: &str = "gearbox/product/lock";
     pub const PRODUCT_ADD_GEAR: &str = "gearbox/product/addGear";
     pub const PRODUCT_REMOVE_GEAR: &str = "gearbox/product/removeGear";
@@ -232,6 +233,40 @@ pub struct ResolveParams {
     /// rather than from a guess made here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+}
+
+/// A gear a preview proposes adding, before anything is written.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct PreviewAddGear {
+    pub gear: String,
+    /// The source id to record, exactly as `addGear` would.
+    pub source: String,
+}
+
+/// `gearbox/product/resolvePreview` -- resolve a description that is not on disk.
+///
+/// The question this answers is the one a configurator has to answer before it
+/// writes: *what would this product become*. The edits are applied to the
+/// description's text in memory and the result is resolved; nothing is written,
+/// so there is no write gate and no lock to disturb.
+///
+/// `add` and `edits` are applied in that order, which is the order
+/// `commitAddGear` uses -- a gear enters the list, then its features, config and
+/// plugins are set on the entry. A preview built from a different order would be
+/// answering about a product nobody is going to write.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ResolvePreviewParams {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// The gear to add first, if this preview is about adding one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub add: Option<PreviewAddGear>,
+    /// Edits applied after the addition. `config` and `features` do not change a
+    /// resolution, but `plugins` do -- a chosen plugin enters the closure itself --
+    /// so a preview that ignored them would understate what it is for.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edits: Vec<ProductEdit>,
 }
 
 /// `gearbox/product/lock` -- the canonical lock text for one profile.

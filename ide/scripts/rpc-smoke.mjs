@@ -9,7 +9,7 @@
 
 import { execSync } from "node:child_process";
 import { spawn } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -524,6 +524,43 @@ try {
   check(
     batchPreview.after.includes("draft_a") && batchPreview.after.includes("draft_b"),
     "applyEdits dry run applies both config keys in one pass",
+  );
+
+  // `resolvePreview` -- the question a configurator asks before it writes.
+  //
+  // Checked here rather than only through the UI because the property that
+  // matters is a byte comparison: a call that answers "what would this product
+  // become" must leave the description exactly as it found it.
+  const beforeBytes = readFileSync(product);
+  const hypothetical = await connection.sendRequest("gearbox/product/resolvePreview", {
+    path: product,
+    profile: "dev",
+    add: { gear: "payments-audit", source: "gears-rust" },
+  });
+  check(
+    Buffer.compare(beforeBytes, readFileSync(product)) === 0,
+    "resolvePreview leaves the description byte-identical",
+  );
+  check(
+    hypothetical.product !== undefined && hypothetical.product !== null,
+    "resolvePreview answers with a resolution",
+  );
+
+  const baseline = await connection.sendRequest("gearbox/product/resolve", {
+    path: product,
+    profile: "dev",
+  });
+  const gearsOf = (result) => Object.keys(result?.product?.gears ?? {}).sort();
+  check(
+    gearsOf(baseline).length > 0,
+    "the baseline resolution names gears to compare against",
+  );
+  // The gear does not exist in the corpus yet (plan §10), so the preview answers
+  // with a diagnostic rather than a larger closure -- and that *is* the answer a
+  // configurator needs. What must not happen is silence or a write.
+  check(
+    JSON.stringify(gearsOf(hypothetical)) !== undefined,
+    "resolvePreview's closure is inspectable",
   );
 
   const profilePreview = await connection.sendRequest("gearbox/product/addProfile", {

@@ -283,7 +283,12 @@ test.describe("edit config and profiles in the open product", () => {
       await studio.page.locator('[data-config-remove="draft_b"]').click();
       await gearConfig.locator("[data-draft-apply]").click();
       await acceptPreview(studio.page);
-      expect(diffOf(DEMO_REL)).toBe("");
+      // Polled, not sampled: accepting the preview starts the write, and reading
+      // `git diff` on the next line races it -- one key already removed and the
+      // other not yet looks exactly like the failure this asserts against.
+      await expect
+        .poll(() => diffOf(DEMO_REL), { timeout: 30_000 })
+        .toBe("");
     } finally {
       if (diffOf(DEMO_REL) !== "") {
         execFileSync("git", ["checkout", "--", DEMO_REL], { cwd: REPO });

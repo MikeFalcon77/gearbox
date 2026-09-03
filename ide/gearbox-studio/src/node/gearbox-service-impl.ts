@@ -243,6 +243,20 @@ export class GearboxServiceImpl implements GearboxService {
     return this.request(method.PRODUCT_RESOLVE, { path, profile });
   }
 
+  async resolvePreview(params: {
+    path: string;
+    profile?: string;
+    add?: { gear: string; source: string };
+    edits?: readonly ProductEdit[];
+  }): Promise<ResolveResult> {
+    return this.request(method.PRODUCT_RESOLVE_PREVIEW, {
+      path: params.path,
+      profile: params.profile,
+      add: params.add,
+      edits: params.edits ?? [],
+    });
+  }
+
   async lock(path: string, profile?: string): Promise<LockResult> {
     return this.request(method.PRODUCT_LOCK, { path, profile });
   }

@@ -31,7 +31,7 @@ pub use generate::{GenerateError, GenerateInput, Generated, apply_generate, gene
 pub use merge::{MergedGear, Projections, merge};
 pub use plugin::PluginProjection;
 pub use plugin_select::{PointResolution, check as check_plugins};
-pub use product::{ProductScan, load_product};
+pub use product::{ProductScan, eval_product_text, load_product};
 pub use scans::CrateScans;
 pub use source::{
     DIGEST_UNREAD, SourceRoot, SourceRootError, content_digest, default_source_ids, lock_sources,

@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **125** — 120 built, 2 not built, 0 broken, 3 not observed.
+Claims: **129** — 123 built, 2 not built, 0 broken, 4 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -96,6 +96,9 @@ Rust, and the ADRs' own Confirmation sections say which.
 |---|---|---|---|
 | Product has an Add Gear button that opens the configurator | `—` | ✅ built |  |
 | catalogue + opens the Add Gear configurator, not an immediate write dialog | `—` | ✅ built |  |
+| the closure a gear joins is visible before anything is written | `—` | ✅ built |  |
+| choosing a plugin changes what the closure would pull in | `—` | ✅ built |  |
+| errors warn beside the button and never disable it | `—` | ⚪ not observed | no gear in this corpus makes the resolution fail when added, so the warning cannot be observed here |
 
 ## `conformance/adr-0013-create-product.spec.ts`
 
@@ -103,6 +106,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 |---|---|---|---|
 | Create shows preview text, Cancel writes nothing, Create opens the product | `ADR-0013 §Confirmation` | ✅ built |  |
 | mode selector is visible on New Product from Start | `ADR-0013 amendment` | ✅ built |  |
+| the destination is choosable, and sources are relative to it | `ADR-0013 §Amendment: destination picker` | ✅ built |  |
 | Clone Local stamps version into the preview | `ADR-0013 amendment` | ✅ built |  |
 | Clone keeps the source comment line count | `ADR-0013 §Confirmation` | ✅ built |  |
 | a config edit changes one line | `ADR-0013 §Confirmation` | ✅ built |  |

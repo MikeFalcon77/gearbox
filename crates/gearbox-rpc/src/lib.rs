@@ -15,6 +15,10 @@
 
 pub mod protocol;
 
+#[cfg(test)]
+#[path = "preview_tests.rs"]
+mod preview_tests;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -28,9 +32,9 @@ use crate::protocol::{
     GenerateApplyResult, GenerateFileParams, GenerateFileResult, GenerateParams,
     GeneratePlanResult, InitializeParams, InitializeResult, LockOnDisk, LockParams, LockResult,
     LogParams, ProductEdit, ProductLoadParams, ProductLoadResult, ProgressParams,
-    RemoveProfileParams, ResolveParams, ResolveResult, ResolvedRoot, ScaffoldGearParams,
-    ServerInfo, SetConfigParams, SetFeaturesParams, SetProfileFieldParams, ValidateParams,
-    ValidateResult, error_code, method,
+    RemoveProfileParams, ResolveParams, ResolvePreviewParams, ResolveResult, ResolvedRoot,
+    ScaffoldGearParams, ServerInfo, SetConfigParams, SetFeaturesParams, SetProfileFieldParams,
+    ValidateParams, ValidateResult, error_code, method,
 };
 
 /// Why the server could not run.
@@ -211,6 +215,13 @@ fn dispatch(connection: &Connection, state: &mut State, request: Request) -> Opt
             Some(refusal) => refusal,
             None => match cast::<ResolveParams>(request) {
                 Ok((id, params)) => resolve(state, id, &params),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
+        method::PRODUCT_RESOLVE_PREVIEW => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<ResolvePreviewParams>(request) {
+                Ok((id, params)) => resolve_preview(state, id, &params),
                 Err(e) => invalid_params(id, &e),
             },
         }),
@@ -422,14 +433,25 @@ struct Resolved {
 /// resolutions of the same request -- which is the whole reason the lock text is
 /// not computed from a `ResolveResult` the client already has: the client would
 /// then be re-serializing, and only the engine may decide the lock's bytes.
+/// Resolve what is on disk, or what a caller proposes putting there.
+///
+/// `source` is the description's text when the answer is about text that does not
+/// exist yet -- `gearbox/product/resolvePreview` supplies it. Everything else is
+/// identical, deliberately: the roots, the catalogue and the sources are the real
+/// ones, and the path is the real path, so a preview is an answer about *this*
+/// product rather than about a hypothetical one somewhere else.
 fn resolve_once(
     state: &mut State,
     id: &RequestId,
     path_str: &str,
     profile: Option<&str>,
+    source: Option<&str>,
 ) -> Result<Resolved, Response> {
     let path = PathBuf::from(path_str);
-    let scan = gearbox_engine::product::load_product(&path, None);
+    let scan = match source {
+        Some(text) => gearbox_engine::product::eval_product_text(&path, None, text),
+        None => gearbox_engine::product::load_product(&path, None),
+    };
     let mut diagnostics = scan.diagnostics.as_slice().to_vec();
     let Some(intent) = scan.intent else {
         return Err(error_with_diagnostics(
@@ -481,7 +503,86 @@ fn resolve_once(
 }
 
 fn resolve(state: &mut State, id: RequestId, params: &ResolveParams) -> Response {
-    match resolve_once(state, &id, &params.path, params.profile.as_deref()) {
+    match resolve_once(state, &id, &params.path, params.profile.as_deref(), None) {
+        Err(refusal) => refusal,
+        Ok(resolved) => ok(
+            id,
+            &ResolveResult {
+                product: Some(resolved.product),
+                explanation: Some(resolved.explanation),
+                diagnostics: resolved.diagnostics,
+            },
+        ),
+    }
+}
+
+/// Resolve the description a configurator is about to write, without writing it.
+///
+/// Answers "what would this product become" before the person commits to finding
+/// out. The edits are applied to the text in memory with the same functions the
+/// write path uses -- `add_gear` then `apply_product_edits` -- so the preview and
+/// the write cannot drift: they are the same transformation, resolved once and
+/// applied once.
+///
+/// No write gate, because there is no write: the file is read, never opened for
+/// writing, and the lock is not touched.
+fn resolve_preview(state: &mut State, id: RequestId, params: &ResolvePreviewParams) -> Response {
+    let path = PathBuf::from(&params.path);
+    let uri = gearbox_ir::file_uri(&path);
+    let before = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) => {
+            return error(
+                id,
+                error_code::PRODUCT_LOAD_FAILED,
+                &format!("cannot read `{}`: {e}", params.path),
+            );
+        }
+    };
+
+    let mut proposed = before;
+    if let Some(add) = params.add.as_ref() {
+        match gearbox_gdl::edit::add_gear(&uri, &proposed, &add.gear, &add.source) {
+            Ok(edit) => {
+                if let Some(next) = edit.changed() {
+                    next.clone_into(&mut proposed);
+                }
+            }
+            Err(diagnostics) => {
+                return error_with_diagnostics(
+                    id,
+                    error_code::EDIT_REFUSED,
+                    &format!("`{}` could not be added for the preview", add.gear),
+                    diagnostics.as_slice(),
+                );
+            }
+        }
+    }
+    if !params.edits.is_empty() {
+        match apply_product_edits(&uri, &proposed, &params.edits) {
+            Ok(edit) => {
+                if let Some(next) = edit.changed() {
+                    next.clone_into(&mut proposed);
+                }
+            }
+            Err(diagnostics) => {
+                return error_with_diagnostics(
+                    id,
+                    error_code::EDIT_REFUSED,
+                    "the proposed edits could not be applied for the preview",
+                    diagnostics.as_slice(),
+                );
+            }
+        }
+    }
+
+    match resolve_once(
+        state,
+        &id,
+        &params.path,
+        params.profile.as_deref(),
+        Some(&proposed),
+    ) {
         Err(refusal) => refusal,
         Ok(resolved) => ok(
             id,
@@ -496,7 +597,7 @@ fn resolve(state: &mut State, id: RequestId, params: &ResolveParams) -> Response
 
 /// The canonical lock text for one profile.
 fn lock(state: &mut State, id: RequestId, params: &LockParams) -> Response {
-    let resolved = match resolve_once(state, &id, &params.path, params.profile.as_deref()) {
+    let resolved = match resolve_once(state, &id, &params.path, params.profile.as_deref(), None) {
         Err(refusal) => return refusal,
         Ok(resolved) => resolved,
     };
@@ -1318,7 +1419,7 @@ fn prepare_generate(
     profile: Option<&str>,
     out: Option<&str>,
 ) -> Result<PreparedGenerate, Response> {
-    let resolved = resolve_once(state, id, path, profile)?;
+    let resolved = resolve_once(state, id, path, profile, None)?;
     if !resolved.product.is_writable() {
         return Err(error_with_diagnostics(
             id.clone(),

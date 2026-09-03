@@ -30,9 +30,10 @@ use gearbox_rpc::protocol::{
     CatalogueLoadResult, CreateProductParams, CreateSourceEntry, EditGearParams, EditGearResult,
     GenerateApplyResult, GenerateFileParams, GenerateFileResult, GenerateParams,
     GeneratePlanResult, InitializeParams, InitializeResult, LockParams, LockResult, LogParams,
-    ProductEdit, ProductLoadParams, ProductLoadResult, ProfileFieldEntry, ProgressParams,
-    RemoveProfileParams, ResolveParams, ResolveResult, ScaffoldGearParams, SetConfigParams,
-    SetFeaturesParams, SetProfileFieldParams, ValidateParams, ValidateResult,
+    PreviewAddGear, ProductEdit, ProductLoadParams, ProductLoadResult, ProfileFieldEntry,
+    ProgressParams, RemoveProfileParams, ResolveParams, ResolvePreviewParams, ResolveResult,
+    ScaffoldGearParams, SetConfigParams, SetFeaturesParams, SetProfileFieldParams, ValidateParams,
+    ValidateResult,
 };
 use ts_rs::{Config, TS};
 
@@ -77,6 +78,8 @@ fn export_roots(cfg: &Config) {
     SetProfileFieldParams::export_all(cfg).expect("export SetProfileFieldParams");
     ApplyEditsParams::export_all(cfg).expect("export ApplyEditsParams");
     ProductEdit::export_all(cfg).expect("export ProductEdit");
+    PreviewAddGear::export_all(cfg).expect("export PreviewAddGear");
+    ResolvePreviewParams::export_all(cfg).expect("export ResolvePreviewParams");
     CreateProductParams::export_all(cfg).expect("export CreateProductParams");
     CreateSourceEntry::export_all(cfg).expect("export CreateSourceEntry");
     ScaffoldGearParams::export_all(cfg).expect("export ScaffoldGearParams");

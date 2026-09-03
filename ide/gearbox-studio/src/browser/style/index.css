@@ -802,8 +802,25 @@
 }
 .gbx-add-gear-section-head:hover { background: var(--theia-list-hoverBackground); }
 .gbx-add-gear-section-body { padding: 4px 12px 12px; }
-.gbx-add-gear-actions { display: flex; gap: 8px; margin-top: 16px; }
+.gbx-add-gear-actions { display: flex; gap: 8px; margin-top: 16px; align-items: center; flex-wrap: wrap; }
 .gbx-add-gear-note { opacity: 0.8; line-height: 1.45; margin: 0; }
+
+/* The impact section: one block per kind of change, each with a heading that
+   counts. Errors warn beside the button, they do not disable it. */
+.gbx-impact-group { margin-bottom: 12px; }
+.gbx-impact-group:last-child { margin-bottom: 0; }
+.gbx-impact-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--theia-descriptionForeground);
+}
+.gbx-add-gear-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--theia-editorWarning-foreground);
+}
+[data-impact-diagnostic="error"] .gbx-id { color: var(--theia-editorError-foreground); }
 .gbx-add-gear-picker label { display: flex; flex-direction: column; gap: 4px; }
 .gbx-add-gear-picker select {
   font: inherit; padding: 4px 6px;

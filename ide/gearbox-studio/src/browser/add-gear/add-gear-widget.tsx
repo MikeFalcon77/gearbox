@@ -1,20 +1,42 @@
-// Add a gear to the open product: one panel with overview, options, and a
-// dry-run preview of the description write.
+// Add a gear to the open product: one panel with overview, options, what the
+// addition would change, and a dry-run preview of the description write.
 //
 // Replaces the catalogue's immediate `+` toggle for *adding*. Removal still goes
 // through `ProductEditService.toggle` (preview dialog + confirm). Features and
 // config are collected here and applied after `addGear`, in that order.
+//
+// **The panel shows consequences before the write.** Section 6 resolves the
+// product as it would be and subtracts the resolution on screen from it, so the
+// closure, the processes and the bindings a gear brings with it are visible while
+// the choice is still reversible. Section 7 stays the literal text diff -- the two
+// answer different questions and neither replaces the other.
+//
+// **Errors warn, they do not block.** A resolution that fails after adding is a
+// normal waypoint: building a product is add-a-gear-then-bind-it, and refusing the
+// first step until the second is done makes the intermediate state unreachable.
+// The count sits beside the button; the button stays live.
 
 import { ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
+import type { Diagnostic } from "../../common/generated/Diagnostic";
 import type { EditGearResult } from "../../common/generated/EditGearResult";
 import type { GearDescriptor } from "../../common/generated/GearDescriptor";
 import type { ProductEdit } from "../../common/generated/ProductEdit";
 import { CatalogueStore } from "../catalogue-store";
 import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
+import { type Impact, impactOf, isEmpty } from "./impact";
+
+/**
+ * How long the panel waits before asking the engine what a change would do.
+ *
+ * A resolution is not free and every keystroke in a config value would ask for
+ * one. Long enough that typing does not queue resolutions, short enough that the
+ * answer arrives before attention moves on.
+ */
+const IMPACT_DEBOUNCE_MS = 400;
 
 export interface AddGearState {
   /** Preselected gear id when opened from the catalogue `+`. */
@@ -42,12 +64,25 @@ export class AddGearWidget extends ReactWidget {
   protected previewError: string | undefined;
   protected previewing = false;
   protected applying = false;
+  protected impact: Impact | undefined;
+  protected impactDiagnostics: readonly Diagnostic[] = [];
+  protected impactError: string | undefined;
+  protected impactPending = false;
+  protected impactTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Which impact request is the current one.
+   *
+   * Answers arrive out of order once a person edits while one is in flight, and a
+   * superseded answer describes a product they are no longer proposing.
+   */
+  protected impactToken = 0;
   protected openSections = new Set<string>([
     "overview",
     "compatibility",
     "features",
     "config",
     "plugins",
+    "changes",
     "closure",
   ]);
 
@@ -59,6 +94,13 @@ export class AddGearWidget extends ReactWidget {
     this.addClass("gearbox-add-gear");
     this.toDispose.push(this.catalogue.onChanged(() => this.update()));
     this.toDispose.push(this.products.onChanged(() => this.update()));
+    this.toDispose.push({
+      dispose: () => {
+        if (this.impactTimer !== undefined) clearTimeout(this.impactTimer);
+        // Anything already in flight belongs to a panel that is gone.
+        this.impactToken += 1;
+      },
+    });
   }
 
   openWith(state?: AddGearState): void {
@@ -74,12 +116,14 @@ export class AddGearWidget extends ReactWidget {
     this.previewError = undefined;
     this.previewing = false;
     this.applying = false;
+    this.resetImpact();
     this.openSections = new Set([
       "overview",
       "compatibility",
       "features",
       "config",
       "plugins",
+      "changes",
       "closure",
     ]);
     this.title.label = this.gearId !== undefined ? `Add ${this.gearId}` : AddGearWidget.LABEL;
@@ -121,6 +165,7 @@ export class AddGearWidget extends ReactWidget {
       return;
     }
     this.previewing = true;
+    this.scheduleImpact();
     this.update();
     const result = await this.edits.previewAddGear(gear.id, gear.source);
     this.previewing = false;
@@ -134,6 +179,86 @@ export class AddGearWidget extends ReactWidget {
         : `${gear.id} is already named by the product.`;
     }
     this.update();
+  }
+
+  /** Forget the impact on screen: it described a proposal that no longer stands. */
+  protected resetImpact(): void {
+    if (this.impactTimer !== undefined) clearTimeout(this.impactTimer);
+    this.impactTimer = undefined;
+    this.impactToken += 1;
+    this.impact = undefined;
+    this.impactDiagnostics = [];
+    this.impactError = undefined;
+    this.impactPending = false;
+  }
+
+  /**
+   * Ask again, after the debounce, what the current proposal would do.
+   *
+   * Called from every control that changes the proposal. `plugins` is the one that
+   * genuinely moves the closure -- a plugin is itself a gear -- but features and
+   * config go through the same `followUps`, and a section that updated for some
+   * edits and not others would teach the wrong thing about which edits matter.
+   */
+  protected scheduleImpact(): void {
+    if (this.impactTimer !== undefined) clearTimeout(this.impactTimer);
+    this.impactPending = true;
+    this.impactTimer = setTimeout(() => {
+      this.impactTimer = undefined;
+      void this.refreshImpact();
+    }, IMPACT_DEBOUNCE_MS);
+  }
+
+  protected async refreshImpact(): Promise<void> {
+    const gear = this.descriptor();
+    if (gear === undefined) {
+      this.resetImpact();
+      this.update();
+      return;
+    }
+    const token = (this.impactToken += 1);
+    this.impactPending = true;
+    this.update();
+
+    const result = await this.edits.previewResolution(
+      gear.id,
+      gear.source,
+      this.followUps(gear.id),
+    );
+    if (token !== this.impactToken) return;
+
+    this.impactPending = false;
+    if (result === undefined) {
+      this.impact = undefined;
+      this.impactDiagnostics = [];
+      this.impactError = "Could not resolve the product with this gear added.";
+      this.update();
+      return;
+    }
+    this.impactError = undefined;
+    this.impactDiagnostics = result.diagnostics ?? [];
+    const current = this.products.current.resolution?.product ?? undefined;
+    const proposed = result.product ?? undefined;
+    if (proposed === null || proposed === undefined) {
+      // The description did not evaluate at all. There is no "after" to subtract
+      // the "before" from, and the diagnostics are the whole answer.
+      this.impact = undefined;
+      this.update();
+      return;
+    }
+    this.impact = impactOf(
+      current ?? undefined,
+      proposed,
+      this.products.current.diagnostics,
+      this.impactDiagnostics,
+    );
+    this.update();
+  }
+
+  /** Errors the product does not have today and would have after this add. */
+  protected newErrors(): readonly Diagnostic[] {
+    const introduced = this.impact?.newDiagnostics ?? this.impactDiagnostics;
+    return introduced.filter((diagnostic) => diagnostic.severity === "error");
   }
 
   protected followUps(gearId: string): ProductEdit[] {
@@ -169,6 +294,7 @@ export class AddGearWidget extends ReactWidget {
   protected render(): React.ReactNode {
     const gear = this.descriptor();
     const open = this.products.current.open;
+    const errors = this.newErrors();
 
     return (
       <div className="gbx-add-gear" data-add-gear-flow>
@@ -200,7 +326,8 @@ export class AddGearWidget extends ReactWidget {
                 {this.renderSection("features", "3. Features", this.renderFeatures())}
                 {this.renderSection("config", "4. Configuration", this.renderConfig())}
                 {this.renderSection("plugins", "5. Plugins", this.renderPlugins(gear))}
-                {this.renderSection("closure", "6. What will be written", this.renderClosure())}
+                {this.renderSection("changes", "6. What changes", this.renderChanges())}
+                {this.renderSection("closure", "7. What will be written", this.renderClosure())}
               </>
             )}
 
@@ -209,6 +336,10 @@ export class AddGearWidget extends ReactWidget {
                 type="button"
                 className="gbx-choice"
                 data-add-gear-submit
+                // Deliberately **not** disabled by resolution errors: adding a
+                // gear before binding it is a normal step, and blocking here would
+                // make that state unreachable. Disabled only when there is nothing
+                // to write, or a write is already going on.
                 disabled={
                   gear === undefined ||
                   this.applying ||
@@ -227,6 +358,15 @@ export class AddGearWidget extends ReactWidget {
               >
                 Cancel
               </button>
+              {errors.length > 0 && (
+                <span className="gbx-add-gear-warning" role="status" data-add-gear-error-warning>
+                  <span className="codicon codicon-warning" />
+                  {errors.length === 1
+                    ? "1 new error after adding"
+                    : `${errors.length} new errors after adding`}
+                  {" — you can still add it and fix them next."}
+                </span>
+              )}
             </div>
           </>
         )}
@@ -272,6 +412,7 @@ export class AddGearWidget extends ReactWidget {
               if (id === "") return;
               this.gearId = id;
               this.title.label = `Add ${id}`;
+              this.resetImpact();
               void this.refreshPreview();
               this.update();
             }}
@@ -328,6 +469,7 @@ export class AddGearWidget extends ReactWidget {
           onClick={() => {
             this.gearId = undefined;
             this.preview = undefined;
+            this.resetImpact();
             this.title.label = AddGearWidget.LABEL;
             this.update();
           }}
@@ -363,6 +505,7 @@ export class AddGearWidget extends ReactWidget {
               aria-label={`Remove ${feature}`}
               onClick={() => {
                 this.features = this.features.filter((f) => f !== feature);
+                this.scheduleImpact();
                 this.update();
               }}
             >
@@ -391,6 +534,7 @@ export class AddGearWidget extends ReactWidget {
               if (feature === "" || this.features.includes(feature)) return;
               this.features = [...this.features, feature];
               this.newFeature = "";
+              this.scheduleImpact();
               this.update();
             }}
           >
@@ -414,6 +558,7 @@ export class AddGearWidget extends ReactWidget {
                 this.config = this.config.map((row, i) =>
                   i === index ? { ...row, key: e.target.value } : row,
                 );
+                this.scheduleImpact();
                 this.update();
               }}
             />
@@ -424,6 +569,7 @@ export class AddGearWidget extends ReactWidget {
                 this.config = this.config.map((row, i) =>
                   i === index ? { ...row, value: e.target.value } : row,
                 );
+                this.scheduleImpact();
                 this.update();
               }}
             />
@@ -432,6 +578,7 @@ export class AddGearWidget extends ReactWidget {
               className="gbx-choice"
               onClick={() => {
                 this.config = this.config.filter((_, i) => i !== index);
+                this.scheduleImpact();
                 this.update();
               }}
             >
@@ -472,6 +619,7 @@ export class AddGearWidget extends ReactWidget {
               this.config = [...this.config, { key, value: this.newConfigValue }];
               this.newConfigKey = "";
               this.newConfigValue = "";
+              this.scheduleImpact();
               this.update();
             }}
           >
@@ -513,6 +661,7 @@ export class AddGearWidget extends ReactWidget {
               aria-label={`Remove ${plugin}`}
               onClick={() => {
                 this.plugins = this.plugins.filter((p) => p !== plugin);
+                this.scheduleImpact();
                 this.update();
               }}
             >
@@ -545,12 +694,165 @@ export class AddGearWidget extends ReactWidget {
               if (plugin === "" || this.plugins.includes(plugin)) return;
               this.plugins = [...this.plugins, plugin];
               this.newPlugin = "";
+              this.scheduleImpact();
               this.update();
             }}
           >
             Add plugin
           </button>
         </label>
+      </div>
+    );
+  }
+
+  /**
+   * Section 6: what the product becomes, not what the file says.
+   *
+   * The rows are the difference between the resolution on screen and the one the
+   * engine computed for the proposed description. Nothing here is derived from
+   * rules this widget knows -- the closure and the binding modes are the engine's
+   * answers, subtracted (`cpt-gearbox-fr-studio: no resolution logic`).
+   */
+  protected renderChanges(): React.ReactNode {
+    if (this.impactError !== undefined) {
+      return (
+        <div className="gbx-error" role="alert" data-add-gear-impact-error>
+          {this.impactError}
+        </div>
+      );
+    }
+    if (this.impact === undefined && this.impactPending) {
+      return <div className="gbx-progress">working out what this changes…</div>;
+    }
+    const introduced = this.impact?.newDiagnostics ?? this.impactDiagnostics;
+    if (this.impact === undefined) {
+      if (introduced.length > 0) {
+        return (
+          <div data-add-gear-impact>
+            <p className="gbx-add-gear-note">
+              The product does not resolve with this gear added.
+            </p>
+            {this.renderImpactDiagnostics(introduced)}
+          </div>
+        );
+      }
+      return <div className="gbx-empty">Select a gear to see what it changes.</div>;
+    }
+
+    const impact = this.impact;
+    return (
+      <div data-add-gear-impact aria-busy={this.impactPending}>
+        {this.impactPending && <div className="gbx-progress">recomputing…</div>}
+        {isEmpty(impact) ? (
+          <div className="gbx-empty" data-add-gear-impact-none>
+            Nothing else changes: no new gears, processes or bindings.
+          </div>
+        ) : (
+          <>
+            {impact.arriving.length > 0 && (
+              <div className="gbx-impact-group" data-add-gear-impact-closure>
+                <div className="gbx-impact-title">
+                  {impact.arriving.length === 1
+                    ? "1 gear joins the closure"
+                    : `${impact.arriving.length} gears join the closure`}
+                </div>
+                {impact.arriving.map((gear) => (
+                  <div className="gbx-kv" key={gear.id} data-impact-gear={gear.id}>
+                    <span className="gbx-id">{gear.id}</span>
+                    <span>{gear.why}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {(impact.processesAdded.length > 0 ||
+              impact.processesRemoved.length > 0 ||
+              impact.moved.length > 0) && (
+              <div className="gbx-impact-group" data-add-gear-impact-processes>
+                <div className="gbx-impact-title">Processes</div>
+                {impact.processesAdded.map((name) => (
+                  <div className="gbx-kv" key={`+${name}`} data-impact-process-added={name}>
+                    <span>new</span>
+                    <span className="gbx-id">{name}</span>
+                  </div>
+                ))}
+                {impact.processesRemoved.map((name) => (
+                  <div className="gbx-kv" key={`-${name}`} data-impact-process-removed={name}>
+                    <span>gone</span>
+                    <span className="gbx-id">{name}</span>
+                  </div>
+                ))}
+                {impact.moved.map((move) => (
+                  <div className="gbx-kv" key={move.gear} data-impact-moved={move.gear}>
+                    <span className="gbx-id">{move.gear}</span>
+                    <span>
+                      moves from {move.from} to {move.to}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {(impact.bindingsAdded.length > 0 || impact.bindingsChanged.length > 0) && (
+              <div className="gbx-impact-group" data-add-gear-impact-bindings>
+                <div className="gbx-impact-title">Contracts</div>
+                {impact.bindingsAdded.map((binding) => (
+                  <div
+                    className="gbx-kv"
+                    key={`+${binding.consumer}|${binding.contract}`}
+                    data-impact-binding-added={binding.contract}
+                  >
+                    <span className="gbx-id">
+                      {binding.consumer} → {binding.contract}
+                    </span>
+                    <span>new, {binding.after}</span>
+                  </div>
+                ))}
+                {impact.bindingsChanged.map((binding) => (
+                  <div
+                    className="gbx-kv"
+                    key={`~${binding.consumer}|${binding.contract}`}
+                    data-impact-binding-changed={binding.contract}
+                  >
+                    <span className="gbx-id">
+                      {binding.consumer} → {binding.contract}
+                    </span>
+                    <span>
+                      was {binding.before}, becomes {binding.after}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {introduced.length > 0 && this.renderImpactDiagnostics(introduced)}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  protected renderImpactDiagnostics(diagnostics: readonly Diagnostic[]): React.ReactNode {
+    return (
+      <div className="gbx-impact-group" data-add-gear-impact-diagnostics>
+        <div className="gbx-impact-title">
+          {diagnostics.length === 1 ? "1 new diagnostic" : `${diagnostics.length} new diagnostics`}
+        </div>
+        {diagnostics.map((diagnostic, index) => (
+          <div
+            className="gbx-kv"
+            key={`${diagnostic.code}-${index}`}
+            data-impact-diagnostic={diagnostic.severity}
+          >
+            <span className="gbx-id">{diagnostic.code}</span>
+            <span>
+              {diagnostic.message}
+              {diagnostic.help !== null && diagnostic.help !== undefined && (
+                <span className="gbx-add-gear-note"> {diagnostic.help}</span>
+              )}
+            </span>
+          </div>
+        ))}
       </div>
     );
   }
@@ -573,8 +875,8 @@ export class AddGearWidget extends ReactWidget {
       <div data-add-gear-closure>
         <pre className="gbx-edit-preview">{this.edits.formatDiff(this.preview)}</pre>
         <p className="gbx-add-gear-note">
-          This is what will be written to the product description. The full resolution
-          closure appears after Add.
+          This is the text that will be written to the product description. What it
+          does to the product is section 6.
         </p>
       </div>
     );
