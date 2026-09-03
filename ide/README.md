@@ -1,9 +1,11 @@
 # Gearbox Studio (Eclipse Theia)
 
-The editor front end for the Gearbox engine. Three views exist today: the **Catalogue**, a
-**Gear detail** panel, and the **co-location Graph**. Product, Explain, Lock and Generate need the
-resolver (M4) and say so in the UI, driven by the engine's own reported capabilities rather than by
-a hard-coded string.
+The editor front end for the Gearbox engine. Domain views today: **Start**, **Catalogue**,
+**Product**, **Inspector**, **Graph**, **Conflicts**, **Lock** and **Generate**. Two working
+contexts are live — **Home** and **Product** — derived from what is actually open; **Gear** is
+declared and reserved until New Gear lands. The terminal is withdrawn (ADR-0011): the package
+stays for dependents, the shell asserts its absence. Conformance prefers visible Start and header
+buttons over palette-only command paths.
 
 ## Running it
 
@@ -72,17 +74,20 @@ there, and reports it as success.
 
 ## What is in the shell, and what was taken out
 
-Explorer, Search, Source Control, a terminal, Problems and the editor stack, plus the six Gearbox
-views. The Explorer shows both repositories, and git decorates it. Taken out: the **Selection** menu (`@theia/monaco`), **Go** (`@theia/editor`), **Run**
+Explorer, Search, Source Control, Problems and the editor stack, plus the Gearbox views above. The
+Explorer shows both repositories, and git decorates it. The **terminal** is suppressed: no shell tab
+at startup, no `Terminal:` command in the palette (ADR-0011 amendment 2026-09-01). Taken out of the
+menu bar and panels: the **Selection** menu (`@theia/monaco`), **Go** (`@theia/editor`), **Run**
 (`@theia/debug`), and the **Debug** and **Testing** views.
 
-The three removed menus and two hidden views all come from packages this application did not choose:
+The removed menus and hidden views come from packages this application did not choose:
 `@theia/plugin-ext` needs `@theia/debug` and `@theia/test` to implement the VS Code debug and testing
 APIs, and Monaco and the editor bring their own menus. So the packages stay and only their
 presentation goes -- `initializeLayout(): NOOP` for a view, `unregisterMenuAction` for a menu -- which
-keeps the command and the keybinding, respects a saved layout, and leaves the view one command away.
-ADR 0011 is the argument; `tests/conformance/adr-0011-ide-shell.spec.ts` is the check that a Theia
-upgrade putting any of them back gets caught by a test rather than by someone noticing.
+keeps the command and the keybinding where that is intended, respects a saved layout, and leaves the
+view one command away only when the whitelist allows it. ADR 0011 is the argument;
+`tests/conformance/adr-0011-ide-shell.spec.ts` is the check that a Theia upgrade putting any of them
+back gets caught by a test rather than by someone noticing.
 
 **Git is not `@theia/git`.** That package stopped being released after `1.61.0-next.8`. In 1.75 the
 Source Control *view* is `@theia/scm` and git itself is the VS Code `vscode.git` extension running in
@@ -113,9 +118,9 @@ never matches a `file:///Users/...` root; and Theia requires its *own* generated
 ## The `.gdl` language
 
 Syntax highlighting is a native Theia contribution
-(`gearbox-studio/src/browser/gdl/`), not a bundled VS Code extension: this app
-has no plugin host, so the `--plugins=local-dir:../plugins` flag in
-`browser-app/package.json` is inert.
+(`gearbox-studio/src/browser/gdl/`), not a bundled VS Code extension for the grammar itself: the
+plugin host exists for git, while `.gdl` colouring stays a native
+`LanguageGrammarDefinitionContribution` so the vocabulary can be generated from the engine.
 
 **The vocabulary it colours is generated, not written.**
 `gearbox-studio/src/browser/gdl/generated/vocabulary.ts` comes from
@@ -147,10 +152,10 @@ export NODE_EXTRA_CA_CERTS=/path/to/corp-ca.pem
 
 **Two of those native modules are load-bearing.** `@theia/core`'s backend requires
 `drivelist/build/Release/drivelist.node` unconditionally, browser target or not, and
-`@theia/terminal` needs `node-pty/build/Release/pty.node` for a shell. Skipping install scripts --
-with `ignore-scripts`, or by leaving npm's `allowScripts` gate unapproved -- produces a backend that
-dies at startup with `Cannot find module`. Neither publishes a darwin-arm64 prebuild, so on Apple
-Silicon both are compiled.
+`@theia/terminal` needs `node-pty/build/Release/pty.node` for its package even though Studio
+suppresses the terminal UI. Skipping install scripts -- with `ignore-scripts`, or by leaving npm's
+`allowScripts` gate unapproved -- produces a backend that dies at startup with `Cannot find module`.
+Neither publishes a darwin-arm64 prebuild, so on Apple Silicon both are compiled.
 
 `node-pty` has a trap of its own: its install script is
 `node scripts/prebuild.js || node-gyp rebuild`, and `prebuild.js` **exits 0 without producing a

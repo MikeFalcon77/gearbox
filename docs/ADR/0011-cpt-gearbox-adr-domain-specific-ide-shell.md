@@ -489,6 +489,42 @@ The editor stack, the Explorer, git, the `.gdl` grammar decision, the packaging 
 * If the two perspectives turn out to be one — if in practice nobody uses the catalogue except while
   editing a product — collapse them. That is a cheaper mistake to correct than the reverse.
 
+## Amendment 2026-09-02: three sessions, Product must open, Home stays honest
+
+**Status: accepted. This continues the 2026-08-31 context model; it reverses nothing about
+perspectives, the terminal, or the whitelist.**
+
+The working contexts are now the user-facing model of Studio: **Home**, **Product**, and
+**Standalone Gear**. `StudioContextService` already names all three; Gear remains declared and
+unreachable until a New Gear scaffold exists. Home must not show New Gear / Open Gear buttons
+before that scaffold lands — a fake fourth Home action is worse than two honest ones. Product UX
+(open, create, resolve, generate, disconnected state) is the urgent work; Gear authoring is later.
+
+**Product `onActivate` must open the Product view.** Home already calls `openView` for Start. Product
+must do the same through `ProductViewContribution.openView({ activate: true, reveal: true })`, not
+`shell.activateWidget` alone. Activating a widget that was never built leaves the centre empty —
+silent success with nothing to see. The Inspector follows selection: choosing a gear, process or
+binding opens it; the person should not have to hunt View for the panel that explains what they
+clicked.
+
+**Disconnected and engine-down.** When the engine process is down or `initialize` has not
+succeeded, New Product, Resolve and Generate are disabled (and the create wizard must not open as
+an empty tab). The UI shows Retry, not only a catalogue toast. A button that looks live while the
+engine cannot answer is the same class of lie as a perspective with no product behind it.
+
+**Toolbar Generate** carries `shortTitle: "Generate"`, matching Resolve — not "Toggle Gearbox
+Generate".
+
+**Catalogue on Home is secondary.** Browse (a panel or a link) is enough; it is not the only story
+of Home and must not dominate Start. Finding gears while composing belongs to the product session
+(`Find Gear…` / Add Gear). **Home has no Product menu** — the submenu stays `when`-gated to the
+product context, and that gate is a requirement, not an incidental implementation detail.
+
+### What this does not change
+
+The whitelist, the withdrawn terminal, the editor stack, and the derivation of context from what is
+actually open stand as written in the amendments above.
+
 ## Traceability
 
 * Requirements: `cpt-gearbox-fr-studio` (the Studio itself), `cpt-gearbox-fr-editor-diagnostics`

@@ -32,9 +32,15 @@ import {
   PRODUCT_PERSPECTIVE,
 } from "./studio-context-service";
 import { CatalogueWidget } from "../catalogue/catalogue-widget";
+import { GearAuthorWidget } from "../gear/gear-author-widget";
 import { ProductWidget } from "../product/product-widget";
 import { StartWidget } from "../start/start-widget";
-import { StartViewContribution } from "../view-contributions";
+import {
+  GearAuthorViewContribution,
+  InspectorViewContribution,
+  ProductViewContribution,
+  StartViewContribution,
+} from "../view-contributions";
 
 
 @injectable()
@@ -45,6 +51,12 @@ export class GearboxPerspectives implements PerspectiveContribution {
   // first activation only -- so on the second visit the placement is a no-op and
   // an `activateWidget` on a widget nobody built does nothing at all, silently.
   @inject(StartViewContribution) protected readonly start!: StartViewContribution;
+  // Same reason as Start: Product's `primaryViews` runs on first activation only,
+  // and a later switch that only `activateWidget`s leaves the centre empty when
+  // nobody has built the Product widget yet (or a restored layout buried it).
+  @inject(ProductViewContribution) protected readonly product!: ProductViewContribution;
+  @inject(GearAuthorViewContribution) protected readonly gear!: GearAuthorViewContribution;
+  @inject(InspectorViewContribution) protected readonly inspector!: InspectorViewContribution;
 
   registerPerspectives(service: PerspectiveService): void {
     service.registerPerspective({
@@ -54,6 +66,11 @@ export class GearboxPerspectives implements PerspectiveContribution {
       // be the catalogue and an empty main area, which read as an application
       // that had failed to load something rather than as a tool waiting to be
       // told what to work on.
+      //
+      // Inspector is opened in `onActivate`, not listed here: putting it in
+      // `viewPlacements` on a first Home activation (no saved layout) is fine,
+      // but a boot-time perspective switch that *only* named Gearbox widgets
+      // made Explorer / SCM look like strays once a saved Home layout existed.
       viewPlacements: new Map<string, ApplicationShell.Area>([
         [StartWidget.ID, "main"],
         [CatalogueWidget.ID, "left"],
@@ -70,7 +87,8 @@ export class GearboxPerspectives implements PerspectiveContribution {
         // idempotent, so the ordinary case costs one lookup.
         void shell
           .activateWidget(CatalogueWidget.ID)
-          .then(() => this.start.openView({ activate: true, reveal: true }));
+          .then(() => this.start.openView({ activate: true, reveal: true }))
+          .then(() => this.inspector.openView({ activate: false, reveal: true }));
       },
     });
     service.registerPerspective({
@@ -94,22 +112,23 @@ export class GearboxPerspectives implements PerspectiveContribution {
       // snapshot, which may have parked an editor on top of Product -- opening a
       // gear's source from the product tree does exactly that -- and restoring
       // that would hide the view the context is for.
-      onActivate: (shell) => {
-        void shell.activateWidget(ProductWidget.ID);
+      //
+      // Opened, not merely activated -- see the Product field above. `openView` is
+      // idempotent, so the ordinary case costs one lookup.
+      onActivate: () => {
+        void this.product.openView({ activate: true, reveal: true });
       },
     });
 
-    // Registered empty, and nothing enters it until gear authoring lands.
-    //
-    // Declared anyway so that `perspectiveFor` is a total mapping rather than a
-    // claim: `switchPerspective` on an unregistered id returns silently, so the
-    // alternative is a context whose layout never applies and never says why.
     service.registerPerspective({
       id: GEAR_PERSPECTIVE,
       label: "Gear",
-      viewPlacements: new Map<string, ApplicationShell.Area>(),
+      viewPlacements: new Map<string, ApplicationShell.Area>([[GearAuthorWidget.ID, "main"]]),
+      primaryViews: { main: GearAuthorWidget.ID },
+      chromeOptions: { collapseAreas: ["left"] },
+      onActivate: () => {
+        void this.gear.openView({ activate: true, reveal: true });
+      },
     });
   }
-
-
 }

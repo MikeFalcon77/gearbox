@@ -26,8 +26,13 @@
 // re-established after the dialog returns, and the dry run is re-run and
 // compared: an answer about a state that has gone is refused rather than applied
 // to whatever is there now.
+//
+// Config, features and profile scalars accumulate in a per-product draft and
+// commit through `applyEdits` once (Apply), so the preview dialog is not one
+// blur away from every field.
 
 import { ConfirmDialog, ConfirmDialogProps } from "@theia/core/lib/browser";
+import { Emitter, Event } from "@theia/core/lib/common/event";
 import type { Message } from "@theia/core/shared/@lumino/messaging";
 import { MessageService } from "@theia/core/lib/common/message-service";
 import { URI } from "@theia/core/lib/common/uri";
@@ -35,6 +40,7 @@ import { MonacoTextModelService } from "@theia/monaco/lib/browser/monaco-text-mo
 import { inject, injectable } from "@theia/core/shared/inversify";
 
 import type { EditGearResult } from "../common/generated/EditGearResult";
+import type { ProductEdit } from "../common/generated/ProductEdit";
 import { GearboxService } from "../common/protocol";
 import { ProductStore } from "./product-store";
 import { ProductSessionService } from "./shell/product-session-service";
@@ -47,6 +53,11 @@ export class ProductEditService {
   @inject(MonacoTextModelService) protected readonly models!: MonacoTextModelService;
   @inject(MessageService) protected readonly messages!: MessageService;
 
+  /** Queued edits for the open product path, awaiting Apply or Discard. */
+  protected drafts = new Map<string, ProductEdit[]>();
+  protected readonly onDraftChangedEmitter = new Emitter<void>();
+  readonly onDraftChanged: Event<void> = this.onDraftChangedEmitter.event;
+
   /** Whether the open product names this gear directly. */
   inProduct(gear: string): boolean {
     const product = this.product.current.resolution?.product;
@@ -58,6 +69,218 @@ export class ProductEditService {
   /** Whether an edit is possible at all right now. */
   get editable(): boolean {
     return this.product.current.open !== undefined;
+  }
+
+  /** Whether the open product has unapplied draft edits. */
+  hasDraft(path?: string): boolean {
+    const target = path ?? this.product.current.open?.path;
+    if (target === undefined) return false;
+    return (this.drafts.get(target)?.length ?? 0) > 0;
+  }
+
+  /** The queued edits for a path (open product when omitted). */
+  draftEdits(path?: string): readonly ProductEdit[] {
+    const target = path ?? this.product.current.open?.path;
+    if (target === undefined) return [];
+    return this.drafts.get(target) ?? [];
+  }
+
+  /**
+   * Queue one edit into the open product's draft.
+   *
+   * Replaces an earlier draft that targets the same config key, feature list, or
+   * profile field. Secret-like config keys are refused here so the form never
+   * holds a value the engine will reject on Apply.
+   */
+  queueDraft(edit: ProductEdit): boolean {
+    const open = this.product.current.open;
+    if (open === undefined) {
+      this.messages.warn("Open a product before editing it.");
+      return false;
+    }
+    if (edit.kind === "set_config" && edit.value != null && isSecretConfigKey(edit.key)) {
+      this.messages.error(
+        `refusing to write config key \`${edit.key}\`: names like this are for external secret references`,
+      );
+      return false;
+    }
+    const next = mergeDraft(this.drafts.get(open.path) ?? [], edit);
+    this.drafts.set(open.path, next);
+    this.onDraftChangedEmitter.fire();
+    return true;
+  }
+
+  /**
+   * Drop the draft for the open product and restore widgets from the store.
+   *
+   * Returns whether there was anything to discard.
+   */
+  discardDraft(path?: string): boolean {
+    const target = path ?? this.product.current.open?.path;
+    if (target === undefined) return false;
+    if (!this.drafts.has(target)) return false;
+    this.drafts.delete(target);
+    this.onDraftChangedEmitter.fire();
+    return true;
+  }
+
+  /**
+   * Dry-run the draft once, confirm once, write once via `applyEdits`.
+   */
+  async applyDraft(): Promise<boolean> {
+    const open = this.product.current.open;
+    if (open === undefined) return false;
+    const edits = this.drafts.get(open.path) ?? [];
+    if (edits.length === 0) {
+      this.messages.info("Nothing to change.");
+      return false;
+    }
+    const applied = await this.applyDescriptionEdit({
+      title: "Apply changes",
+      ok: "Apply",
+      summary: `${edits.length} edit${edits.length === 1 ? "" : "s"} on ${open.label}`,
+      path: open.path,
+      label: open.label,
+      dryRun: () => this.service.applyEdits(open.path, edits, true),
+      commit: () => this.service.applyEdits(open.path, edits, false),
+      log: `apply ${edits.length} draft edit(s)`,
+    });
+    if (applied) {
+      this.drafts.delete(open.path);
+      this.onDraftChangedEmitter.fire();
+    }
+    return applied;
+  }
+
+  /** Saved config overlaid with draft set_config edits for `gear`. */
+  draftConfig(gear: string, saved: Readonly<Record<string, unknown>>): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(saved)) {
+      out[key] = String(value);
+    }
+    for (const edit of this.draftEdits()) {
+      if (edit.kind !== "set_config" || edit.gear !== gear) continue;
+      if (edit.value == null) delete out[edit.key];
+      else out[edit.key] = edit.value;
+    }
+    return out;
+  }
+
+  /** Saved features overlaid with the latest draft set_features for `gear`. */
+  draftFeatures(gear: string, saved: readonly string[]): string[] {
+    let features = [...saved];
+    for (const edit of this.draftEdits()) {
+      if (edit.kind === "set_features" && edit.gear === gear) {
+        features = [...edit.features];
+      }
+    }
+    return features;
+  }
+
+  /** Saved profile field overlaid with draft set_profile_field. */
+  draftProfileField(
+    profile: string,
+    field: string,
+    saved: string | undefined,
+  ): string | undefined {
+    let value = saved;
+    for (const edit of this.draftEdits()) {
+      if (edit.kind === "set_profile_field" && edit.profile === profile && edit.field === field) {
+        value = edit.value ?? undefined;
+      }
+    }
+    return value;
+  }
+
+  /**
+   * Dry-run `addGear` for the Add Gear configurator preview.
+   *
+   * Returns `undefined` when the edit is refused or impossible; the caller shows
+   * the engine's reason via the message service already fired here.
+   */
+  async previewAddGear(gear: string, source: string): Promise<EditGearResult | undefined> {
+    const open = this.product.current.open;
+    if (open === undefined) {
+      this.messages.warn("Open a product before adding gears to it.");
+      return undefined;
+    }
+    if (this.isDirty(open.path)) {
+      this.messages.error(
+        `${open.label} has unsaved changes. Save or revert them first — ` +
+          `writing now would discard your edit.`,
+      );
+      return undefined;
+    }
+    try {
+      return await this.service.addGear(open.path, gear, source, true);
+    } catch (error) {
+      this.messages.error(messageOf(error));
+      return undefined;
+    }
+  }
+
+  /**
+   * Commit an Add Gear configurator result: `addGear`, then optional follow-up
+   * `applyEdits` for features/config. The configurator is the confirmation UI, so
+   * there is no second modal -- the dry-run the panel already showed is the
+   * preview ADR-0010 requires.
+   */
+  async commitAddGear(
+    gear: string,
+    source: string,
+    followUps: readonly ProductEdit[],
+  ): Promise<boolean> {
+    const open = this.product.current.open;
+    if (open === undefined) {
+      this.messages.warn("Open a product before adding gears to it.");
+      return false;
+    }
+    if (this.isDirty(open.path)) {
+      this.messages.error(
+        `${open.label} has unsaved changes. Save or revert them first — ` +
+          `writing now would discard your edit.`,
+      );
+      return false;
+    }
+
+    let preview: EditGearResult;
+    try {
+      preview = await this.service.addGear(open.path, gear, source, true);
+    } catch (error) {
+      this.messages.error(messageOf(error));
+      return false;
+    }
+    if (!preview.changed) {
+      this.messages.info(`${open.label} already names ${gear}.`);
+      return false;
+    }
+
+    // eslint-disable-next-line no-console
+    console.info(`Gearbox: writing add ${gear} to ${open.path}`, new Error("write path").stack);
+    try {
+      await this.service.addGear(open.path, gear, source, false);
+    } catch (error) {
+      this.messages.error(messageOf(error));
+      return false;
+    }
+
+    if (followUps.length > 0) {
+      try {
+        await this.service.applyEdits(open.path, followUps, false);
+      } catch (error) {
+        this.messages.error(messageOf(error));
+        await this.product.reload();
+        return false;
+      }
+    }
+
+    await this.product.reload();
+    return true;
+  }
+
+  /** Line-oriented preview text for an edit dry-run. */
+  formatDiff(preview: EditGearResult): string {
+    return this.diffText(preview);
   }
 
   /**
@@ -130,21 +353,6 @@ export class ProductEditService {
     return true;
   }
 
-  async setConfig(gear: string, key: string, value: string | undefined): Promise<boolean> {
-    const open = this.product.current.open;
-    if (open === undefined) return false;
-    return this.applyDescriptionEdit({
-      title: "Change config",
-      ok: "Apply",
-      summary: `${key} on ${gear}`,
-      path: open.path,
-      label: open.label,
-      dryRun: () => this.service.setConfig(open.path, gear, key, value, true),
-      commit: () => this.service.setConfig(open.path, gear, key, value, false),
-      log: `set config ${key} on ${gear}`,
-    });
-  }
-
   async createProduct(params: {
     path: string;
     id: string;
@@ -187,21 +395,6 @@ export class ProductEditService {
     return true;
   }
 
-  async setFeatures(gear: string, features: readonly string[]): Promise<boolean> {
-    const open = this.product.current.open;
-    if (open === undefined) return false;
-    return this.applyDescriptionEdit({
-      title: "Change features",
-      ok: "Apply",
-      summary: `features on ${gear}`,
-      path: open.path,
-      label: open.label,
-      dryRun: () => this.service.setFeatures(open.path, gear, features, true),
-      commit: () => this.service.setFeatures(open.path, gear, features, false),
-      log: `set features on ${gear}`,
-    });
-  }
-
   async addProfile(
     kind: string,
     id: string,
@@ -233,21 +426,6 @@ export class ProductEditService {
       dryRun: () => this.service.removeProfile(open.path, id, true),
       commit: () => this.service.removeProfile(open.path, id, false),
       log: `remove profile ${id}`,
-    });
-  }
-
-  async setProfileField(id: string, field: string, value: string | undefined): Promise<boolean> {
-    const open = this.product.current.open;
-    if (open === undefined) return false;
-    return this.applyDescriptionEdit({
-      title: "Change profile field",
-      ok: "Apply",
-      summary: `${field} on profile ${id}`,
-      path: open.path,
-      label: open.label,
-      dryRun: () => this.service.setProfileField(open.path, id, field, value, true),
-      commit: () => this.service.setProfileField(open.path, id, field, value, false),
-      log: `set profile ${id} ${field}`,
     });
   }
 
@@ -522,4 +700,33 @@ class EditPreviewDialog extends ConfirmDialog {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Mirror of `gearbox_gdl::edit::is_secret_config_key` for draft-time refusal. */
+function isSecretConfigKey(key: string): boolean {
+  const lower = key.toLowerCase();
+  const exact = ["password", "secret", "token", "key", "credential"];
+  if (exact.includes(lower)) return true;
+  return ["_password", "_secret", "_token", "_key", "_credential"].some((suffix) =>
+    lower.endsWith(suffix),
+  );
+}
+
+/** Replace an earlier draft that targets the same slot; append otherwise. */
+function mergeDraft(existing: ProductEdit[], edit: ProductEdit): ProductEdit[] {
+  const sameSlot = (other: ProductEdit): boolean => {
+    if (edit.kind === "set_config" && other.kind === "set_config") {
+      return other.gear === edit.gear && other.key === edit.key;
+    }
+    if (edit.kind === "set_features" && other.kind === "set_features") {
+      return other.gear === edit.gear;
+    }
+    if (edit.kind === "set_profile_field" && other.kind === "set_profile_field") {
+      return other.profile === edit.profile && other.field === edit.field;
+    }
+    return false;
+  };
+  const without = existing.filter((other) => !sameSlot(other));
+  without.push(edit);
+  return without;
 }

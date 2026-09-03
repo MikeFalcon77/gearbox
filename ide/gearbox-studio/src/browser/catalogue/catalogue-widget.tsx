@@ -11,6 +11,7 @@
 // (`CatalogueViewContribution`) and to the reload command; this only subscribes.
 
 import { codicon, ReactWidget } from "@theia/core/lib/browser";
+import { CommandRegistry } from "@theia/core/lib/common";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 // The shim is `export = React`, so a namespace import is rejected under
 // esModuleInterop; a default import is the form that works.
@@ -23,6 +24,7 @@ import { CatalogueStore } from "../catalogue-store";
 import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
 import { RevealService } from "../reveal-service";
+import { ADD_GEAR } from "../shell/session-command-ids";
 
 @injectable()
 export class CatalogueWidget extends ReactWidget {
@@ -33,6 +35,7 @@ export class CatalogueWidget extends ReactWidget {
   @inject(RevealService) protected readonly reveals!: RevealService;
   @inject(ProductEditService) protected readonly edits!: ProductEditService;
   @inject(ProductStore) protected readonly product!: ProductStore;
+  @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
 
   /**
    * The filter text, and which categories are folded away.
@@ -146,13 +149,16 @@ export class CatalogueWidget extends ReactWidget {
   }
 
   /**
-   * The "in this product" toggle.
+   * The "in this product" control.
    *
    * Only on a projected row: adding a gear needs its id, and a pending row has
    * none -- `GearId` is projected at S2 (ADR
    * `cpt-gearbox-adr-staged-catalogue-loading`). And only when a product is open,
    * because otherwise the control would promise something it cannot do, which is
    * the mistake the Product view's fake links already made once.
+   *
+   * `+` opens the Add Gear configurator with this gear preselected. The check
+   * (already named) still removes via `toggle`, with its preview and confirm.
    *
    * `stopPropagation`, because the row's own click selects it and this button
    * sits inside the row: without it, adding a gear would also move the selection.
@@ -178,7 +184,11 @@ export class CatalogueWidget extends ReactWidget {
         aria-pressed={inside}
         onClick={(event) => {
           event.stopPropagation();
-          void this.edits.toggle(id, row.gear.source);
+          if (inside) {
+            void this.edits.toggle(id, row.gear.source);
+            return;
+          }
+          void this.commands.executeCommand(ADD_GEAR.id, { gearId: id });
         }}
       >
         <span className={`codicon codicon-${inside ? "check" : "add"}`} />

@@ -395,7 +395,8 @@ fn clone_keeps_comments_byte_exact_elsewhere() {
         .lines()
         .filter(|l| l.trim_start().starts_with('#'))
         .count();
-    let cloned = clone_product_text(URI, &source, "clone-id", "Clone Name").expect("cloneable");
+    let cloned =
+        clone_product_text(URI, &source, "clone-id", "Clone Name", None).expect("cloneable");
     let comments_after = cloned
         .lines()
         .filter(|l| l.trim_start().starts_with('#'))
@@ -403,6 +404,32 @@ fn clone_keeps_comments_byte_exact_elsewhere() {
     assert_eq!(comments_after, comments_before);
     assert!(cloned.contains(r#"id = "clone-id""#), "{cloned}");
     assert!(cloned.contains(r#"name = "Clone Name""#), "{cloned}");
+}
+
+#[test]
+fn clone_stamps_version_when_provided() {
+    let source = r#"# keep me
+product(
+    id = "src",
+    name = "Src",
+    version = "0.1.0",
+    sources = [source(id = "s", at = path("."))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [],
+)
+"#;
+    let cloned = clone_product_text(URI, source, "clone-id", "Clone Name", Some("2.0.0"))
+        .expect("cloneable");
+    assert!(cloned.contains(r#"id = "clone-id""#), "{cloned}");
+    assert!(cloned.contains(r#"name = "Clone Name""#), "{cloned}");
+    assert!(cloned.contains(r#"version = "2.0.0""#), "{cloned}");
+    assert!(!cloned.contains(r#"version = "0.1.0""#), "{cloned}");
+    assert!(cloned.contains("# keep me"), "{cloned}");
+    assert!(
+        cloned.contains(r#"source(id = "s", at = path("."))"#),
+        "{cloned}"
+    );
 }
 
 #[test]
@@ -452,4 +479,45 @@ fn computed_profiles_list_is_refused() {
 fn quote_string_escapes_control_chars() {
     assert_eq!(quote_string("a\"b\\c"), r#""a\"b\\c""#);
     assert_eq!(quote_string("a\nb"), "\"a\\nb\"");
+}
+
+#[test]
+fn set_gear_plugins_writes_plugin_list() {
+    let source = r#"product(
+    gears = [
+        use_gear("authn-resolver", source = "gears-rust"),
+    ],
+)
+"#;
+    let edited = set_gear_plugins(
+        URI,
+        source,
+        "authn-resolver",
+        &[
+            "static-authn-plugin".to_owned(),
+            "oidc-authn-plugin".to_owned(),
+        ],
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+    assert!(
+        edited
+            .contains(r#"plugins = [plugin("static-authn-plugin"), plugin("oidc-authn-plugin")]"#),
+        "{edited}"
+    );
+    assert_eq!(
+        set_gear_plugins(
+            URI,
+            &edited,
+            "authn-resolver",
+            &[
+                "static-authn-plugin".to_owned(),
+                "oidc-authn-plugin".to_owned()
+            ],
+        )
+        .expect("editable"),
+        Edit::Unchanged
+    );
 }

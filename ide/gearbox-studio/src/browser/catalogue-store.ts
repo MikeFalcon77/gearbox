@@ -16,6 +16,7 @@
 import { Emitter, Event } from "@theia/core/lib/common/event";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 
+import { EngineConnectionService } from "./shell/engine-connection-service";
 import { SelectionService } from "./shell/selection-service";
 
 import type { CatalogueChanged } from "../common/generated/CatalogueChanged";
@@ -53,6 +54,7 @@ const EMPTY: CatalogueState = {
 @injectable()
 export class CatalogueStore implements GearboxClient {
   @inject(GearboxService) protected readonly service!: GearboxService;
+  @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
 
   protected readonly onChangedEmitter = new Emitter<void>();
   readonly onChanged: Event<void> = this.onChangedEmitter.event;
@@ -302,6 +304,7 @@ export class CatalogueStore implements GearboxClient {
       if (epoch !== this.epoch) {
         return;
       }
+      this.engine.markConnected();
       this.capabilities = init.capabilities;
       this.rootsById = new Map((init.roots ?? []).map((r) => [r.id, r.path]));
       const failedRoots = init.failed_roots ?? [];
@@ -330,6 +333,7 @@ export class CatalogueStore implements GearboxClient {
         return;
       }
       this.streaming = undefined;
+      this.engine.markDisconnected(describe(error));
       this.state = {
         ...this.state,
         status: "error",
@@ -401,6 +405,7 @@ export class CatalogueStore implements GearboxClient {
   }
 
   onEngineExit(reason: string): void {
+    this.engine.markDisconnected(`the engine ${reason}`);
     // Only a load in flight has anything to lose. An engine that exits between
     // loads -- disposed on reconnect, killed on the way out -- is ordinary, and
     // reporting it as a catalogue error would put a red panel in front of a

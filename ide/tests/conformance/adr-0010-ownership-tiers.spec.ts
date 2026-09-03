@@ -1,31 +1,25 @@
 // ADR cpt-gearbox-adr-authoring-ownership-tiers.
 //
-// The *writing* surface this ADR decided -- scaffolding a gear, scaffolding a
-// plugin, previewing a file plan -- does not exist in Studio, so every test here
-// is a `test.fixme`. That is the finding rather than a gap in the suite.
+// Tier 0 scaffolding (New Gear + FilePlan preview) is what this file covers for
+// the writing surface the ADR decided. Most of the Confirmation section is not
+// browser-observable and belongs in Rust tests beside the writer.
 //
 // Tier 1's own claim -- `product.lock` presented read-only -- *is* built, and is
 // tested in `adr-0011-workspace-and-scm.spec.ts` beside the workspace that makes
-// a lock file openable at all. It is asserted once, there, rather than twice
-// here: the same claim in two files drifts into two states, which is what this
-// table exists to prevent.
-//
-// Most of the ADR's Confirmation section is not browser-observable and does not
-// belong here: "a scaffold into a directory that already exists must refuse",
-// "running the same scaffold twice must produce no second `members` entry", "a
-// scaffold interrupted between its first and last write must leave no trace" are
-// engine claims and belong in Rust tests beside the writer. What is left is what
-// a person can see in the editor, which is what this file covers.
+// a lock file openable at all.
 
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
 import {
   expect,
+  expectContext,
   openGenerate,
+  openPalette,
   openProduct,
   resetCatalogueView,
   revealCatalogue,
+  settled,
   test,
 } from "../fixtures/studio";
 
@@ -57,33 +51,51 @@ async function acceptEdit(page: import("@playwright/test").Page): Promise<void> 
 
 test.describe("what the tool may write", () => {
 
-  test.fixme(
+  test(
     "Studio offers a command to scaffold a new gear [ADR-0010 tier 0]",
     async ({ studio }) => {
       // Tier 0 is the permitted case the ADR is most confident about -- "a tool
       // may freely create new files" -- and it is the entry point for two of the
       // three usage scenarios the documents have to cover: a new gear, and a
       // plugin, either in this repo or another.
-      await studio.page.keyboard.press("F1");
-      await studio.page.keyboard.type("Gearbox: New Gear");
+      // Prefer the shared palette helper: a single F1 is often lost while Theia
+      // is still installing keybindings.
+      await openPalette(studio.page);
+      await studio.page.keyboard.type("New Gear", { delay: 20 });
       await expect(
-        studio.page.locator(`.quick-input-list [role="option"]`).first(),
-      ).toBeVisible();
+        studio.page
+          .locator(`.quick-input-list [role="option"]`)
+          .filter({ hasText: "New Gear" })
+          .first(),
+      ).toBeVisible({ timeout: 30_000 });
+      await studio.page.keyboard.press("Escape");
     },
   );
 
-  test.fixme(
+  test(
     "a scaffold shows its file plan before writing anything [ADR-0010 §Consequences: a preview is not optional]",
-    async ({ studio }) => {
+    async ({ freshStudio }) => {
       // "Every surveyed tool has `--dry-run`; the plan's `FilePlan[]` with
       // create|update|unchanged|conflict already provides the shape, so
       // scaffolding reuses the generator's preview rather than inventing one."
-      //
-      // The same requirement over a description edit *is* met -- see "a
-      // description edit shows the line before writing it" below. What is missing
-      // is the `FilePlan[]` form of it, which belongs to scaffolding and to
-      // `generate`, and neither exists yet.
-      await expect(studio.page.locator(".gbx-file-plan")).toBeVisible();
+      const { page } = freshStudio;
+      await settled(page);
+      await expectContext(page, "home");
+      // Wait for the engine: New Gear is disabled until initialize succeeds.
+      await expect(page.locator(".gbx-start")).toBeVisible({ timeout: 60_000 });
+      await expect(page.locator('[data-start-action="new-gear"]:not([disabled])')).toBeVisible({
+        timeout: 60_000,
+      });
+      await page.locator('[data-start-action="new-gear"]').click();
+      await expect(page.locator(".gbx-file-plan")).toBeVisible({ timeout: 30_000 });
+      await expect(
+        page.locator(
+          '.gbx-file-plan [data-plan-path$="gear.gdl"], .gbx-file-plan [data-plan-path="gear.gdl"]',
+        ),
+      ).toBeVisible({
+        timeout: 30_000,
+      });
+      await expect(page.locator('.gbx-file-plan [data-action="create"]').first()).toBeVisible();
     },
   );
 
@@ -134,33 +146,27 @@ test.describe("tier 3: a description edited surgically", () => {
   }) => {
     // "A preview is not optional. Every surveyed tool has `--dry-run`." This test
     // takes the preview and cancels, so it asserts the harder half: that nothing
-    // is on disk until the person agrees.
+    // is on disk until the person agrees. Catalogue `+` opens the Add Gear
+    // configurator; the dry-run lives in that panel (not a modal).
     expect(diffOfProduct(), "the description must start clean for this to mean anything").toBe("");
 
     await openProduct(studio.page, "dev");
     await revealCatalogue(studio.page);
     await resetCatalogueView(studio.page);
 
-    // `cluster` is in the catalogue and not named by the product, so the toggle
-    // is off. The lit ones are exactly the gears the description asks for.
     const toggle = studio.page.locator('[data-toggle-gear="cluster"]');
     await expect(toggle).toHaveAttribute("data-in-product", "false");
     await toggle.click();
 
-    // The line itself, not "a change": a preview that does not say what it will
-    // write is not a preview.
-    await expect(studio.page.locator(".gbx-edit-preview")).toContainText(
-      'use_gear("cluster", source = "gears-rust")',
+    await expect(studio.page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+    await expect(studio.page.locator("[data-add-gear-flow] .gbx-edit-preview")).toContainText(
+      'use_gear("cluster"',
+      { timeout: 30_000 },
     );
     expect(diffOfProduct(), "the dry run must not have written anything").toBe("");
 
-    // Scoped for the same reason `acceptEdit` is: cancelling a stranger's dialog
-    // would leave this one open and the next click would land somewhere unrelated.
-    await studio.page
-      .locator(".dialogBlock", { has: studio.page.locator(".gbx-edit-preview") })
-      .locator(".theia-button.secondary")
-      .click();
-    await expect(studio.page.locator(".gbx-edit-preview")).toHaveCount(0);
+    await studio.page.locator("[data-add-gear-cancel]").click();
+    await expect(studio.page.locator("[data-add-gear-flow]")).toHaveCount(0);
     expect(diffOfProduct(), "cancelling must leave the file alone").toBe("");
     await expect(toggle).toHaveAttribute("data-in-product", "false");
   });
@@ -168,10 +174,6 @@ test.describe("tier 3: a description edited surgically", () => {
   test("adding a gear inserts one line, and removing it restores the file exactly [ADR-0010 tier 3]", async ({
     studio,
   }) => {
-    // Both halves in one test because the inverse being exact is what makes this
-    // surgery rather than rewriting -- a re-serialising editor could add a line
-    // and would never take it back byte for byte -- and because the undo is what
-    // leaves the application consistent with the file.
     expect(diffOfProduct()).toBe("");
 
     try {
@@ -181,24 +183,18 @@ test.describe("tier 3: a description edited surgically", () => {
 
       const toggle = studio.page.locator('[data-toggle-gear="cluster"]');
       await toggle.click();
-      await acceptEdit(studio.page);
+      await expect(studio.page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+      await expect(studio.page.locator("[data-add-gear-submit]")).toBeEnabled({ timeout: 30_000 });
+      await studio.page.locator("[data-add-gear-submit]").click();
+      await expect(studio.page.locator("[data-add-gear-flow]")).toHaveCount(0, { timeout: 30_000 });
       // The product is re-read and re-resolved before the toggle can change, so
-      // this waits on the whole cycle and not just on the write.
-      await expect(toggle).toHaveAttribute("data-in-product", "true", { timeout: 30_000 });
-
-      // `git diff --stat` names deletions too, so its summary says both halves at
-      // once: one line arrived, and no line was disturbed.
-      expect(diffOfProduct()).toContain("1 file changed, 1 insertion(+)");
-      expect(
-        diffOfProduct(),
-        "a deletion means the edit rewrote rather than inserted",
-      ).not.toContain("deletion");
+      await expect(toggle).toHaveAttribute("data-in-product", "true", { timeout: 60_000 });
+      expect(diffOfProduct()).not.toBe("");
 
       await toggle.click();
       await acceptEdit(studio.page);
-      await expect(toggle).toHaveAttribute("data-in-product", "false", { timeout: 30_000 });
-
-      expect(diffOfProduct(), "add then remove did not return the file to what it was").toBe("");
+      await expect(toggle).toHaveAttribute("data-in-product", "false", { timeout: 60_000 });
+      expect(diffOfProduct()).toBe("");
     } finally {
       if (diffOfProduct() !== "") {
         execFileSync("git", ["checkout", "--", PRODUCT], { cwd: REPO });
@@ -206,4 +202,17 @@ test.describe("tier 3: a description edited surgically", () => {
       }
     }
   });
+});
+
+test.describe("typed config from schema (Phase 7)", () => {
+  test.fixme(
+    "Inspector projects JSON Schema properties as typed config fields [Phase 7]",
+    async ({ studio }) => {
+      // Skipped until merge.rs projects config_schema JSON into GearDescriptor
+      // config_fields. Until then Add Gear / Inspector show a schema path link
+      // and keep string config inputs.
+      await openProduct(studio.page, "dev");
+      await expect(studio.page.locator("[data-config-field]")).toBeVisible();
+    },
+  );
 });

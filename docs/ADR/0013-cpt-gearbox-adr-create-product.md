@@ -94,3 +94,53 @@ Implemented in `crates/gearbox-gdl/src/edit_call.rs`, `crates/gearbox-rpc`, `Pro
 * Extends ADR `cpt-gearbox-adr-authoring-ownership-tiers` tier 3 (see amendment 2026-09-01 below).
 * Depends on ADR `cpt-gearbox-adr-multiple-source-roots` for source checkboxes in the wizard.
 * Plan: `docs/plans/gearbox-builder-prototype.md` §9.1 (P0 outcome and editor generalisation).
+
+## Amendment 2026-09-02: wizard paths, honest clone, Open by file
+
+**Status: accepted. This extends the Create/Clone decision; it reverses nothing about
+span-surgical edits, write gates, or `writable_out_root`.**
+
+### Three wizard paths
+
+The create surface is one screen whose first step chooses a path:
+
+* **Blank** — render a template from wizard fields (id, name, version, sources, first profile), as
+  today.
+* **Clone Local** — pick an existing `product.gdl` (native file or folder picker), then stamp and
+  write under the chosen destination.
+* **Clone Git** — `git clone` a *product repository* into the destination (or a staging area under
+  the workspace), then the same local clone surgery on the discovered `product.gdl`. It does
+  **not** enable `git(...)` sources inside the open session; ADR
+  `cpt-gearbox-adr-multiple-source-roots` still refuses those by name. Fetching a gear source is a
+  different problem from cloning a product description.
+
+### Destination is chosen, not assumed
+
+The wizard asks for a **destination folder**. It must not silently take the first workspace root.
+The write still goes through `writable_out_root`: the path must not exist yet, the parent may be
+created under the declared workspace, and the path must not sit inside a source root.
+
+### Clone stamps honestly
+
+Clone surgery stamps `id` and `name`, and may stamp `version` when the person supplies one.
+**Sources are not rewritten** — the UI shows them as a read-only preview of the source file so
+comments and every other line survive. Showing editable source checkboxes that the write would
+ignore is the lie this amendment removes.
+
+### Open Product
+
+Opening a product is either a discovered or recent entry, **or** choosing a `product.gdl` file
+explicitly. Discovered/recent alone is not enough for a product that lives outside the engine's
+walk.
+
+### No `window.prompt`
+
+Adding a profile or a feature uses an in-panel form (id and kind for profiles; a field or list for
+features). A blocking `window.prompt` is not an acceptable control in Studio.
+
+### Draft and batch Apply supersede per-field blur dialogs
+
+Config, features and profile scalar edits accumulate in a `ProductEditService` draft and
+commit through `gearbox/product/applyEdits` with one dry-run and one confirmation on
+**Apply** (and Discard restoring saved values). That supersedes per-field blur preview
+dialogs.

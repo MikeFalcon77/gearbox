@@ -9,8 +9,12 @@
 
 import { ILogger } from "@theia/core/lib/common/logger";
 import { inject, injectable } from "@theia/core/shared/inversify";
+import { execFile } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import { promisify } from "util";
+
+const execFileAsync = promisify(execFile);
 
 import type { CatalogueChanged } from "../common/generated/CatalogueChanged";
 import type { CatalogueDiagnostics } from "../common/generated/CatalogueDiagnostics";
@@ -22,6 +26,7 @@ import type { GeneratePlanResult } from "../common/generated/GeneratePlanResult"
 import type { InitializeResult } from "../common/generated/InitializeResult";
 import type { LockResult } from "../common/generated/LockResult";
 import type { LogParams } from "../common/generated/LogParams";
+import type { ProductEdit } from "../common/generated/ProductEdit";
 import type { ProductLoadResult } from "../common/generated/ProductLoadResult";
 import type { StudioSession } from "../common/protocol";
 import type { ResolveResult } from "../common/generated/ResolveResult";
@@ -321,6 +326,18 @@ export class GearboxServiceImpl implements GearboxService {
     });
   }
 
+  async applyEdits(
+    path: string,
+    edits: readonly ProductEdit[],
+    dryRun: boolean,
+  ): Promise<EditGearResult> {
+    return this.request(method.PRODUCT_APPLY_EDITS, {
+      path,
+      edits: [...edits],
+      dry_run: dryRun,
+    });
+  }
+
   async createProduct(params: {
     path: string;
     id: string;
@@ -343,6 +360,55 @@ export class GearboxServiceImpl implements GearboxService {
       clone_from: params.cloneFrom,
       dry_run: params.dryRun,
     });
+  }
+
+  async scaffoldGear(params: {
+    id: string;
+    name: string;
+    version: string;
+    destinationDir: string;
+    dryRun: boolean;
+  }): Promise<GeneratePlanResult> {
+    return this.request(method.GEAR_SCAFFOLD, {
+      id: params.id,
+      name: params.name,
+      version: params.version,
+      destination_dir: params.destinationDir,
+      dry_run: params.dryRun,
+    });
+  }
+
+  /**
+   * `git clone --depth 1` into `destDir`, then walk a few levels for `product.gdl`.
+   *
+   * Studio-side only: the engine still receives a local path via `clone_from`.
+   */
+  async gitCloneProduct(url: string, ref: string | undefined, destDir: string): Promise<string> {
+    const trimmed = url.trim();
+    if (trimmed === "") {
+      throw new Error("git clone URL is empty");
+    }
+    const absDest = path.resolve(destDir);
+    if (fs.existsSync(absDest)) {
+      throw new Error(`clone destination already exists: ${absDest}`);
+    }
+    fs.mkdirSync(path.dirname(absDest), { recursive: true });
+    const args = ["clone", "--depth", "1"];
+    if (ref !== undefined && ref.trim() !== "") {
+      args.push("--branch", ref.trim());
+    }
+    args.push(trimmed, absDest);
+    try {
+      await execFileAsync("git", args, { maxBuffer: 10 * 1024 * 1024 });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`git clone failed: ${message}`);
+    }
+    const found = findProductGdl(absDest, 4);
+    if (found === undefined) {
+      throw new Error(`no product.gdl under ${absDest}`);
+    }
+    return found;
   }
 
   async validate(product?: string): Promise<ValidateResult> {
@@ -395,4 +461,29 @@ export class GearboxServiceImpl implements GearboxService {
     this.engine = undefined;
     engine?.dispose();
   }
+}
+
+/** Breadth-first search for `product.gdl` under `root`, capped at `maxDepth`. */
+function findProductGdl(root: string, maxDepth: number): string | undefined {
+  const queue: Array<{ dir: string; depth: number }> = [{ dir: root, depth: 0 }];
+  while (queue.length > 0) {
+    const { dir, depth } = queue.shift()!;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.name === ".git") continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isFile() && entry.name === "product.gdl") {
+        return full;
+      }
+      if (entry.isDirectory() && depth < maxDepth) {
+        queue.push({ dir: full, depth: depth + 1 });
+      }
+    }
+  }
+  return undefined;
 }

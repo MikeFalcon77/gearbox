@@ -21,10 +21,12 @@ import { inject, injectable, postConstruct } from "@theia/core/shared/inversify"
 import React from "@theia/core/shared/react";
 
 import type { ProductRef } from "../../common/protocol";
+import { CatalogueStore } from "../catalogue-store";
 import { PendingCreate } from "../create/pending-create";
 import { ProductStore } from "../product-store";
+import { EngineConnectionService } from "../shell/engine-connection-service";
 import { ProductSessionService } from "../shell/product-session-service";
-import { NEW_PRODUCT, OPEN_PRODUCT } from "../shell/session-command-ids";
+import { BROWSE_CATALOGUE, NEW_GEAR, NEW_PRODUCT, OPEN_GEAR, OPEN_PRODUCT } from "../shell/session-command-ids";
 
 @injectable()
 export class StartWidget extends ReactWidget {
@@ -35,6 +37,8 @@ export class StartWidget extends ReactWidget {
   @inject(ProductSessionService) protected readonly session!: ProductSessionService;
   @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
   @inject(PendingCreate) protected readonly pending!: PendingCreate;
+  @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
+  @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
 
   /**
    * Recent products, read once and after every change.
@@ -55,6 +59,7 @@ export class StartWidget extends ReactWidget {
     this.title.closable = false;
     this.addClass("gearbox-start");
     this.toDispose.push(this.products.onChanged(() => this.refresh()));
+    this.toDispose.push(this.engine.onDidChange(() => this.update()));
     this.refresh();
   }
 
@@ -79,6 +84,7 @@ export class StartWidget extends ReactWidget {
     const remembered = this.recent.filter(
       (ref) => !found.some((candidate) => candidate.path === ref.path),
     );
+    const connected = this.engine.isConnected;
 
     return (
       <div className="gbx-start">
@@ -89,11 +95,26 @@ export class StartWidget extends ReactWidget {
           </div>
         </div>
 
+        {!connected && (
+          <div className="gbx-error" role="alert" data-engine-status="disconnected">
+            <div>Engine disconnected: {this.engine.disconnectReason}</div>
+            <button
+              type="button"
+              className="gbx-choice"
+              data-engine-retry
+              onClick={() => void this.catalogue.load()}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         <div className="gbx-start-actions">
           <button
             type="button"
             className="gbx-start-primary"
             data-start-action="create"
+            disabled={!connected}
             onClick={() => void this.commands.executeCommand(NEW_PRODUCT.id)}
           >
             New Product…
@@ -106,10 +127,35 @@ export class StartWidget extends ReactWidget {
           >
             Open Product…
           </button>
+          <button
+            type="button"
+            className="gbx-start-primary"
+            data-start-action="new-gear"
+            disabled={!connected}
+            onClick={() => void this.commands.executeCommand(NEW_GEAR.id)}
+          >
+            New Gear
+          </button>
+          <button
+            type="button"
+            className="gbx-start-primary gbx-start-secondary"
+            data-start-action="open-gear"
+            onClick={() => void this.commands.executeCommand(OPEN_GEAR.id)}
+          >
+            Open Gear…
+          </button>
+          <button
+            type="button"
+            className="gbx-start-link"
+            data-start-action="browse-catalogue"
+            onClick={() => void this.commands.executeCommand(BROWSE_CATALOGUE.id)}
+          >
+            Browse Catalogue
+          </button>
         </div>
 
-        {this.renderList("In this workspace", "workspace", found)}
-        {this.renderList("Recent", "recent", remembered)}
+        {this.renderList("In this workspace", "workspace", found, connected)}
+        {this.renderList("Recent", "recent", remembered, connected)}
 
         {found.length === 0 && remembered.length === 0 && (
           <div className="gbx-empty" data-start-empty>
@@ -125,6 +171,7 @@ export class StartWidget extends ReactWidget {
     label: string,
     kind: string,
     refs: readonly ProductRef[],
+    connected: boolean,
   ): React.ReactNode {
     if (refs.length === 0) return undefined;
     return (
@@ -148,6 +195,7 @@ export class StartWidget extends ReactWidget {
                   className="gbx-start-clone"
                   data-start-action="clone"
                   data-clone-from={ref.path}
+                  disabled={!connected}
                   onClick={() => this.openClone(ref)}
                 >
                   Clone

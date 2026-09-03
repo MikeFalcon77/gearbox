@@ -405,7 +405,13 @@ test.describe("the toolbar names only registered commands", () => {
     expect(inProduct.length, "the product context renders no action").toBeGreaterThan(0);
     for (const id of inProduct) rendered.add(id);
 
-    expect([...rendered].sort()).toEqual([...declared].sort());
+    // Declared may include gear-session commands that this corpus never opens.
+    // Every rendered id must be declared; undeclared buttons are the failure.
+    const undeclared = [...rendered].filter((id) => !declared.has(id));
+    expect(undeclared, `toolbar rendered undeclared commands: ${undeclared.join(", ")}`).toEqual(
+      [],
+    );
+    expect([...rendered].sort().length).toBeGreaterThan(0);
   });
 
   test.fixme("the toggle command reveals a view hidden behind another tab", async ({ studio }) => {

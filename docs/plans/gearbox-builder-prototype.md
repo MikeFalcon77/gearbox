@@ -840,7 +840,7 @@ per frontend connection, one engine per workspace root) and `BackendApplicationC
 | Product | **a tree, as vision §60 sketches it**: foldable branches for Gears (with `asked for` / `pulled in by the closure` beneath), Processes, Contracts and Cluster, each with an icon and a count. The profile switch, the resolved profile and the description-file link stay in the header rather than becoming a Deployment branch: the switch has to be reachable *while* a resolution is in flight, which a branch of the resolved product cannot be. §60's Security is absent — it is not modelled in the IR. Artifacts live in the Generate view, which exists now that `capabilities.generate` is `true`. Bindings carry mode/transport/mechanism chips; cluster shows `selected` vs `resolved`; diagnostics summarise at the bottom. |
 | Graph | four views. **deps** (solid = co-location), **contracts** (dashed = cuttable, solid = forced local, red = undeclared-hub-edge), **processes** (boxes with gear chips, overlapping gears drawn in *every* box — this is what makes closure-not-partition visible), **cluster** (requirement → capability → provider, unsatisfied in red). Layout: `elkjs` `layered` with a fixed seed → deterministic, so screenshots and "why did this move" are stable. Rendered as hand-written React SVG. |
 | Conflicts | the resolution's diagnostics as a domain screen, not a list under a tree: code, message, the `help` sentence that says what to do, the location and every `related` location as links, the `evidence` `file:line` in `gears-rust` where a claim asserts a runtime limitation, and -- where the engine names a `subject` -- a link that points the Inspector at the thing being complained about. `Resolve again` means re-resolve after an edit; there is no automatic resolver and none is promised. A second consumer of `ProductStore.diagnostics`, beside the Problems markers, so the two cannot disagree. The Product view keeps a one-line summary that opens this. |
-| Start | what there is to do with no product open: `Open Product…`, the products found in the workspace, and the ones opened before. `Create Product` is absent because it needs a skeleton and is a new write path. Replaces an empty main area, which read as an application that had failed to load rather than as a tool waiting to be told what to work on. |
+| Start | what there is to do with no product open: **New Product…**, **Clone**, `Open Product…`, the products found in the workspace, and the ones opened before. New Gear / Open Gear appear only when the tier-0 scaffold exists; until then Home stays two honest product actions rather than a fake fourth button. Replaces an empty main area, which read as an application that had failed to load rather than as a tool waiting to be told what to work on. |
 | Lock | read-only Monaco view of canonical `product.lock`, diff toggle vs disk, `lock_hash` badge that goes stale-yellow when resolve ≠ disk. |
 | Generate | `FilePlan[]` as a directory tree with create/update/unchanged/conflict icons, per-file Monaco diff preview, ownership badge, Apply disabled unless `allowWrites` and no Errors and no conflicts. |
 
@@ -1070,6 +1070,17 @@ constructors / `gear(...)`; the graph builder threads those into origins.
 Selected gears link into `product.gdl`; colocated gears link into their
 `gear.gdl`. The lock is unchanged: it stores provenance *edges* only.
 
+**Studio sessions and session-trust (2026-09-02).** The shell model is three working
+contexts — **Home**, **Product**, and **Standalone Gear** — derived from what is
+actually open (`StudioContextService`), not from a toolbar that rearranges layouts.
+Gear stays reserved until New Gear (ADR-0010 tier 0) exists; Home must not show
+New/Open Gear before that. Urgent work is Product UX trust: Product `onActivate`
+opens the Product view (not `activateWidget` alone), the Inspector opens from
+selection, disconnected/engine-down disables New Product / Resolve / Generate and
+offers Retry, toolbar Generate is labelled `Generate`, and conformance prefers
+visible Start/header buttons over palette-only paths. Catalogue on Home is Browse,
+secondary to Start. See ADR-0011 / ADR-0013 amendments of the same date.
+
 The favicon gap this section used to record is closed. `@theia/cli` 1.75 still offers no hook and
 its generated `index.html` still has no `<link rel="icon">`, so `FabricThemeContribution` injects
 one from `onStart` -- the same contribution that registers the Constructor Fabric colour theme and
@@ -1183,8 +1194,8 @@ and opening are now separate, and "open it if it is the only one" lives with ope
 
 `File` carries the verbs that decide *what* is being worked on: `Open Product…`, `Close Product`, and
 the Recent entries the picker offers. Under `File` rather than `Gearbox`, which holds the verbs that
-act on what is already open. **`New Product` is deliberately absent** -- it needs a skeleton, and a
-menu entry promising a product it cannot create is worse than no entry.
+act on what is already open. **New Product…** and **Clone** live on the Start screen (and the create
+wizard); Home does not grow New Gear / Open Gear until the tier-0 scaffold exists.
 
 **Close refuses rather than asking.** If the description has unsaved changes it says so and does not
 close, which is the position `ProductEditService` already takes for a write: it will not touch a dirty
@@ -1216,8 +1227,8 @@ palette renders `Gearbox Product` inside `View: Toggle …`.
 
 Not claimed in §9 yet: closing, Recent and the picker are asserted in `regression.spec.ts` because §9
 still describes the shell it had before this rework. Rewriting that table is the remaining documentation
-work of this stage, along with the Start screen, `Create Product` and the multiple-source-roots
-decision that deriving roots from a product has made live.
+work of this stage, along with the multiple-source-roots decision that deriving roots from a product
+has made live.
 
 
 #### Three guards on the descriptions, because two were not enough
@@ -1439,11 +1450,9 @@ node that is not there, silently, because a missing node reads as "no provenance
 
 The Home context was the catalogue and an empty main area, which reads as an application that failed
 to load something. STM32CubeMX opens on New / Load / Recent and only then shows domain views; the
-**Start** screen is that, minus the one that is not built.
-
-`Create Product` is absent rather than disabled. It needs a skeleton -- which sources, which profiles,
-what the first `product.gdl` says -- and it is a new write path, which the stray-write investigation
-below has not cleared. A disabled button with a tooltip is the same promise in a quieter voice.
+**Start** screen is that for products: **New Product…**, **Clone**, Open, discovered and recent.
+Catalogue on Home is secondary (Browse), not the only story. New Gear / Open Gear stay off Start
+until the scaffold lands — a fake button is worse than two honest ones.
 
 One mechanical trap, and it is the second time this shape of thing has cost a debugging session:
 `applyViewPlacements` runs on a perspective's **first** activation only, so on the second visit to Home
@@ -1456,13 +1465,12 @@ making do with the shell it is handed.
 
 ADR-0011 made the catalogue a perspective equal to the product, and its own revisit clause named the
 condition for collapsing that: "if in practice nobody uses the catalogue except while editing a
-product". Which is the case. So it is a **source of components** now -- a panel in Home, where looking
-at what a product could be made of is the only thing there is to do, and `Find Gear…` in the product
-context, where the panel had been taking the whole left side while the product sat in a secondary tab.
+product". Which is the case. So it is a **source of components** now -- secondary Browse on Home
+(Start carries New/Open Product), and `Find Gear…` in the product context, where the panel had been
+taking the whole left side while the product itself sat in a secondary tab.
 
-Read-only, and that is the whole of it for now: finding a gear selects it, which fills the Inspector.
-Adding one is a write, and the write path stays closed until the P0 below clears -- the panel's toggle
-remains the one way in, with its preview and its confirmation.
+Finding a gear selects it, which fills the Inspector. Adding one used to be a bare toggle in that
+panel; it opens the Add Gear configurator now -- see below.
 
 #### The palette was never narrowed, and the file said it was
 
@@ -1641,6 +1649,48 @@ It also explains why nobody noticed: a process that has already loaded the modul
 application worked for days and only a *fresh* start failed. Any Node major-version change in this
 repository needs `npm rebuild` followed by a bundle rebuild, and a backend that dies at
 `loading modules...` with no error is the signature.
+
+#### Three sessions, and the difference between a fix and a checkbox
+
+A UX pass went through Home → New Product → Clone → Open Product → Product → Profile → Inspector →
+Conflicts and came back with a verdict of *request changes*. The findings were not cosmetic: the
+engine was down and the shell went on offering New Product, Resolve and Generate, so the wizard opened
+as a blank tab; opening a product left the centre empty because the Product perspective only
+*activated* a widget that did not exist; `Cancel` on a config edit left the typed value on screen while
+the file kept the old one; adding a profile blocked the whole application on `window.prompt`.
+
+What that list has in common is that **the commands had no session behind them**. Each was independently
+plausible and the set of them did not add up to a state a person could name. So the answer was three
+states -- Home, Product, Gear -- and the work that makes each of them true:
+
+* an `EngineConnectionService` every engine-dependent command reads, so "the engine is gone" is a
+  thing the shell *says* rather than something the person infers from a wizard that does nothing;
+* `openView` in the perspective's `onActivate` for Product and Inspector, not `activateWidget` --
+  `applyViewPlacements` runs on first activation only, and activating a widget nobody built is a
+  silent no-op, which is the third time that trap has cost a session in this file;
+* a **draft** in `ProductEditService` with `Apply changes` / `Discard`, and one `gearbox/product/applyEdits`
+  batch behind it: several fields become one dry run, one confirmation, one write. `Discard` restoring
+  the saved value is what closes the "Cancel lies" hole for good, because the inputs are no longer
+  uncontrolled;
+* `Add Gear` as a configurator rather than a `+` that writes immediately;
+* `gearbox/gear/scaffold` -- a real tier-0 file plan (`gear.gdl`, `Cargo.toml`, `src/lib.rs`) written
+  atomically -- so Home has four operations rather than two and a promise.
+
+**Two of the eight phases were marked done and were half done**, which is worth recording because the
+repository did not join in. The Add Gear configurator has six of its nine intended sections: the
+hypothetical re-resolve and the process/contract diff are not built, and the widget says so on screen
+("the full resolution closure appears after Add"). `config_schema` is still `Option<RelPath>` with no
+projection into the IR, so configuration values are strings and the claim that would prove otherwise is
+still `test.fixme` with the reason written in it. The plan's checkboxes were wrong; the code, the UI and
+the conformance table were not. That asymmetry is the useful part -- a checkbox is a claim about
+yesterday, and the only claims worth trusting are the ones something re-checks.
+
+One thing was fixed the wrong way first. The toolbar showed `Toggle Gearbox Generate`, and the repair
+was a map from command id to caption inside `ToolbarWidget` -- which is exactly the drift that file's
+first paragraph rules out, since the menu and the palette would have gone on saying the long phrase.
+The caption belongs on the command: `GenerateViewContribution` registers its toggle with
+`shortTitle: "Generate"`, the way `RESOLVE_PRODUCT` always did, and the header renders
+`shortTitle ?? label` for everything with no special cases left.
 
 #### A terminal that was never openable, and a claim that passed for the wrong reason
 

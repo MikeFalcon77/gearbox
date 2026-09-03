@@ -13,6 +13,7 @@ import type { GenerateApplyResult } from "./generated/GenerateApplyResult";
 import type { GenerateFileResult } from "./generated/GenerateFileResult";
 import type { GeneratePlanResult } from "./generated/GeneratePlanResult";
 import type { LockResult } from "./generated/LockResult";
+import type { ProductEdit } from "./generated/ProductEdit";
 import type { ProductLoadResult } from "./generated/ProductLoadResult";
 import type { ResolveResult } from "./generated/ResolveResult";
 import type { ValidateResult } from "./generated/ValidateResult";
@@ -50,7 +51,9 @@ export const method = {
   PRODUCT_ADD_PROFILE: "gearbox/product/addProfile",
   PRODUCT_REMOVE_PROFILE: "gearbox/product/removeProfile",
   PRODUCT_SET_PROFILE_FIELD: "gearbox/product/setProfileField",
+  PRODUCT_APPLY_EDITS: "gearbox/product/applyEdits",
   PRODUCT_CREATE: "gearbox/product/create",
+  GEAR_SCAFFOLD: "gearbox/gear/scaffold",
   VALIDATE: "gearbox/validate",
   GENERATE_PLAN: "gearbox/generate/plan",
   GENERATE_APPLY: "gearbox/generate/apply",
@@ -207,6 +210,14 @@ export interface GearboxService {
     dryRun: boolean,
   ): Promise<EditGearResult>;
 
+  /**
+   * Apply several description edits in one pass, or preview them.
+   *
+   * One dry-run and one write for a draft of config, features and profile
+   * scalars — the Studio's Apply path, not N per-field RPCs.
+   */
+  applyEdits(path: string, edits: readonly ProductEdit[], dryRun: boolean): Promise<EditGearResult>;
+
   createProduct(params: {
     path: string;
     id: string;
@@ -218,6 +229,25 @@ export interface GearboxService {
     cloneFrom?: string;
     dryRun: boolean;
   }): Promise<EditGearResult>;
+
+  /**
+   * Scaffold a new gear crate (`gear.gdl`, `Cargo.toml`, `src/lib.rs`), or
+   * preview the `FilePlan[]` when `dryRun` is true.
+   */
+  scaffoldGear(params: {
+    id: string;
+    name: string;
+    version: string;
+    destinationDir: string;
+    dryRun: boolean;
+  }): Promise<GeneratePlanResult>;
+
+  /**
+   * Shallow-clone a product repository and return the absolute path of the
+   * discovered `product.gdl`. Does not enable `git(...)` sources in a session —
+   * this is only for the Clone Git wizard path.
+   */
+  gitCloneProduct(url: string, ref: string | undefined, destDir: string): Promise<string>;
 
   /** Everything checkable without resolving. `product` omitted checks only the
    * catalogue. */

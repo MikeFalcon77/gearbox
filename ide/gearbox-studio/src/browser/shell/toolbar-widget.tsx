@@ -23,15 +23,22 @@ import { CommandRegistry } from "@theia/core/lib/common";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
+import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
 import { RESOLVE_PRODUCT } from "../view-contributions";
+import { EngineConnectionService } from "./engine-connection-service";
+import { CLOSE_GEAR, CLOSE_PRODUCT, SWITCH_PRODUCT } from "./session-command-ids";
 import { StudioContextService } from "./studio-context-service";
+import { GearSessionService } from "./gear-session-service";
 
 /**
  * Command ids the header may invoke. Quoted here so the regression test can read
  * them from the source rather than from a running registry.
  */
 export const TOOLBAR_COMMAND_IDS = [
+  "gearbox.product.switch",
+  "gearbox.product.close",
+  "gearbox.gear.close",
   "gearbox.product.resolve",
   "gearbox.generate.toggle",
 ] as const;
@@ -50,8 +57,13 @@ export const TOOLBAR_COMMAND_IDS = [
  */
 const ACTIONS: Readonly<Record<string, readonly string[]>> = {
   home: [],
-  product: [RESOLVE_PRODUCT.id, "gearbox.generate.toggle"],
-  gear: [],
+  product: [
+    SWITCH_PRODUCT.id,
+    CLOSE_PRODUCT.id,
+    RESOLVE_PRODUCT.id,
+    "gearbox.generate.toggle",
+  ],
+  gear: [CLOSE_GEAR.id],
 };
 
 @injectable()
@@ -61,6 +73,9 @@ export class ToolbarWidget extends ReactWidget {
   @inject(StudioContextService) protected readonly context!: StudioContextService;
   @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
   @inject(ProductStore) protected readonly products!: ProductStore;
+  @inject(GearSessionService) protected readonly gears!: GearSessionService;
+  @inject(ProductEditService) protected readonly edits!: ProductEditService;
+  @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
 
   @postConstruct()
   protected init(): void {
@@ -73,6 +88,11 @@ export class ToolbarWidget extends ReactWidget {
     // not fire `onDidChangeEnabled`. The store is the fact the handler reads, so a
     // change here is a change of the button -- and of the status text beside it.
     this.toDispose.push(this.products.onChanged(() => this.update()));
+    this.toDispose.push(this.gears.onDidChange(() => this.update()));
+    this.toDispose.push(this.edits.onDraftChanged(() => this.update()));
+    // Same for New Product / Resolve / Generate vs the engine: Theia does not
+    // re-query `isEnabled` when `EngineConnectionService` flips.
+    this.toDispose.push(this.engine.onDidChange(() => this.update()));
     this.update();
   }
 
@@ -82,7 +102,11 @@ export class ToolbarWidget extends ReactWidget {
     return (
       <div className="gbx-toolbar" data-context={context.kind}>
         <div className="gbx-toolbar-subject">
-          {context.kind === "product" ? this.renderProduct() : this.renderHome()}
+          {context.kind === "product"
+            ? this.renderProduct()
+            : context.kind === "gear"
+              ? this.renderGear()
+              : this.renderHome()}
         </div>
         <div className="gbx-toolbar-actions">
           {actions.map((id) => this.actionButton(id))}
@@ -99,6 +123,15 @@ export class ToolbarWidget extends ReactWidget {
    */
   protected renderHome(): React.ReactNode {
     return <span className="gbx-toolbar-empty">No product open</span>;
+  }
+
+  protected renderGear(): React.ReactNode {
+    const gear = this.gears.current;
+    return (
+      <span className="gbx-toolbar-name" data-gear={gear?.label ?? ""}>
+        {gear?.label ?? "Gear"}
+      </span>
+    );
   }
 
   protected renderProduct(): React.ReactNode {
@@ -121,6 +154,11 @@ export class ToolbarWidget extends ReactWidget {
             title="deployment profile"
           >
             {state.profile}
+          </span>
+        )}
+        {this.edits.hasDraft() && (
+          <span className="gbx-badge gbx-toolbar-status" data-status="modified" title="Unapplied draft edits">
+            modified
           </span>
         )}
         {this.renderStatus(state.status, product?.lock_hash !== undefined)}
@@ -179,6 +217,14 @@ export class ToolbarWidget extends ReactWidget {
     const command = this.commands.getCommand(id);
     if (command === undefined) return undefined;
     const enabled = this.commands.isEnabled(id);
+    // `shortTitle` and nothing else. This was briefly a mapping from command id to
+    // caption right here, which is precisely the drift this file's first paragraph
+    // rules out: the header would have said `Generate` while the View menu and the
+    // palette still said `Toggle Gearbox Generate`. Every command the header names
+    // carries its own short title now -- `RESOLVE_PRODUCT`, `SWITCH_PRODUCT`,
+    // `CLOSE_PRODUCT` always did, and `GenerateViewContribution` registers its
+    // toggle with one (ADR-0011 amendment 2026-09-02).
+    const title = command.shortTitle ?? command.label ?? id;
     return (
       <button
         key={id}
@@ -190,7 +236,7 @@ export class ToolbarWidget extends ReactWidget {
         onClick={() => void this.commands.executeCommand(id)}
       >
         {command.iconClass !== undefined && <span className={command.iconClass} />}
-        {command.shortTitle ?? command.label ?? id}
+        {title}
       </button>
     );
   }

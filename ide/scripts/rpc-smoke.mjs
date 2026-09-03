@@ -511,6 +511,21 @@ try {
   });
   check(featuresPreview.changed === true, "setFeatures dry run reports a change");
 
+  const batchPreview = await connection.sendRequest("gearbox/product/applyEdits", {
+    path: product,
+    dry_run: true,
+    edits: [
+      { kind: "set_config", gear: "api-gateway", key: "draft_a", value: "one" },
+      { kind: "set_config", gear: "api-gateway", key: "draft_b", value: "two" },
+    ],
+  });
+  check(batchPreview.changed === true, "applyEdits dry run reports a change");
+  check(batchPreview.written === false, "applyEdits dry run writes nothing");
+  check(
+    batchPreview.after.includes("draft_a") && batchPreview.after.includes("draft_b"),
+    "applyEdits dry run applies both config keys in one pass",
+  );
+
   const profilePreview = await connection.sendRequest("gearbox/product/addProfile", {
     path: product,
     kind: "embedded",

@@ -27,6 +27,7 @@ import type { GeneratePlanResult } from "../../common/generated/GeneratePlanResu
 import { GearboxService } from "../../common/protocol";
 import { CatalogueStore } from "../catalogue-store";
 import { ProductStore } from "../product-store";
+import { EngineConnectionService } from "../shell/engine-connection-service";
 
 export type GenerateStatus = "idle" | "planning" | "ready" | "error";
 
@@ -59,6 +60,7 @@ export class GenerateService {
   @inject(ProductStore) protected readonly product!: ProductStore;
   @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
   @inject(MessageService) protected readonly messages!: MessageService;
+  @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
 
   protected readonly onChangedEmitter = new Emitter<void>();
   readonly onChanged: Event<void> = this.onChangedEmitter.event;
@@ -140,6 +142,9 @@ export class GenerateService {
 
   /** Fetch the plan for whatever is on screen, once per resolution. */
   async ensurePlan(): Promise<void> {
+    if (!this.engine.isConnected) {
+      return;
+    }
     const open = this.product.current.open;
     const profile = this.product.current.profile;
     if (open === undefined || profile === undefined) {
@@ -171,6 +176,10 @@ export class GenerateService {
 
   /** Write the planned tree. No-op when a gate is closed. */
   async apply(): Promise<GenerateApplyResult | undefined> {
+    if (!this.engine.isConnected) {
+      this.messages.warn(this.engine.disconnectReason);
+      return undefined;
+    }
     if (!this.canApply) {
       this.messages.warn(this.blocks.map((b) => b.reason).join("; "));
       return undefined;

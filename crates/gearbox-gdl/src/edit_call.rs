@@ -109,6 +109,51 @@ pub fn set_gear_features(
     })
 }
 
+/// Replace a gear's `plugins = [plugin("..."), ...]` list.
+///
+/// Each entry is a bare `plugin("id")` — profiles and per-plugin config stay
+/// manual in the description until a richer Studio editor lands.
+///
+/// # Errors
+/// As [`set_gear_features`], when the gear is missing or the description does
+/// not parse.
+pub fn set_gear_plugins(
+    uri: &str,
+    source: &str,
+    gear: &str,
+    plugins: &[String],
+) -> Result<Edit, Diagnostics> {
+    let list = named_list_literal(uri, source, "gears")?;
+    let entry = find_gear_entry(source, &list, gear).ok_or_else(|| {
+        refuse(
+            uri,
+            &format!("no `use_gear` naming `{gear}` in `gears`"),
+            "add the gear first, then set its plugins",
+        )
+    })?;
+    let new_entry = if plugins.is_empty() {
+        set_named_arg_on_call(uri, slice(source, entry), "plugins", None)?
+    } else {
+        let rendered = plugins
+            .iter()
+            .map(|p| format!("plugin({})", quote_string(p)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        set_named_arg_on_call(
+            uri,
+            slice(source, entry),
+            "plugins",
+            Some(&format!("[{rendered}]")),
+        )?
+    };
+    if new_entry == slice(source, entry) {
+        return Ok(Edit::Unchanged);
+    }
+    Ok(Edit::Changed {
+        source: replace_span(source, entry, &new_entry),
+    })
+}
+
 /// Insert a deployment profile entry.
 ///
 /// # Errors
@@ -253,7 +298,11 @@ product(
     )
 }
 
-/// Clone a product file, changing only `id` and `name` on the top-level call.
+/// Clone a product file, changing `id` and `name` on the top-level call.
+///
+/// When `version` is `Some`, that argument is stamped too. Sources and every
+/// other line are left untouched — comments survive byte-for-byte outside the
+/// replaced named arguments.
 ///
 /// # Errors
 /// When the source does not parse or has no `product(...)` call.
@@ -262,6 +311,7 @@ pub fn clone_product_text(
     source: &str,
     new_id: &str,
     new_name: &str,
+    version: Option<&str>,
 ) -> Result<String, Diagnostics> {
     let ast = AstModule::parse(uri, source.to_owned(), &dialect()).map_err(|e| {
         refuse(
@@ -280,6 +330,9 @@ pub fn clone_product_text(
     let call_text = slice(source, call_expr_span);
     let mut updated = set_named_arg_on_call(uri, call_text, "id", Some(&quote_string(new_id)))?;
     updated = set_named_arg_on_call(uri, &updated, "name", Some(&quote_string(new_name)))?;
+    if let Some(version) = version {
+        updated = set_named_arg_on_call(uri, &updated, "version", Some(&quote_string(version)))?;
+    }
     Ok(replace_span(source, call_expr_span, &updated))
 }
 

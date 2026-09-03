@@ -26,7 +26,9 @@ import type { ResolvedProcess } from "../../common/generated/ResolvedProcess";
 import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
 import { ProductStore } from "../product-store";
 import { ProductEditService } from "../product-edit-service";
+import { PendingCreateGear } from "../create/pending-create-gear";
 import { ProductSessionService } from "../shell/product-session-service";
+import { ADD_GEAR, NEW_GEAR } from "../shell/session-command-ids";
 import { RevealLink, RevealPathLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
 
@@ -42,9 +44,15 @@ export class ProductWidget extends ReactWidget {
   @inject(ProductSessionService) protected readonly session!: ProductSessionService;
   @inject(RevealService) protected readonly reveals!: RevealService;
   @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
+  @inject(PendingCreateGear) protected readonly pendingGear!: PendingCreateGear;
 
   /** Which branches are folded away. Widget state; nobody else's business. */
   protected collapsed = new Set<string>();
+  /** Bumped when Discard must remount profile inputs from the saved intent. */
+  protected editEpoch = 0;
+  protected addingProfile = false;
+  protected newProfileId = "";
+  protected newProfileKind: "embedded" | "host_workers" | "kubernetes" = "embedded";
 
   @postConstruct()
   protected init(): void {
@@ -55,6 +63,7 @@ export class ProductWidget extends ReactWidget {
     this.title.closable = true;
     this.addClass("gearbox-product");
     this.toDispose.push(this.store.onChanged(() => this.update()));
+    this.toDispose.push(this.edits.onDraftChanged(() => this.update()));
     void this.session.ensureOpen();
     this.update();
   }
@@ -62,6 +71,18 @@ export class ProductWidget extends ReactWidget {
   /** The Conflicts screen, by command, so the panel does not have to be injected. */
   protected showConflicts(): void {
     void this.commands.executeCommand("gearbox.conflicts.toggle");
+  }
+
+  /** New Gear with destination under this product, then Add Gear for selection. */
+  protected createGearForProduct(): void {
+    const open = this.store.current.open;
+    if (open === undefined) return;
+    const productDir = open.path.replace(/\/[^/]+$/, "");
+    this.pendingGear.state = {
+      destinationDir: `${productDir}/gears`,
+      offerAddToProduct: true,
+    };
+    void this.commands.executeCommand(NEW_GEAR.id);
   }
 
   protected render(): React.ReactNode {
@@ -116,6 +137,25 @@ export class ProductWidget extends ReactWidget {
           <span className="gbx-id">{intent?.id}</span>
         </div>
 
+        <div className="gbx-product-actions">
+          <button
+            type="button"
+            className="gbx-start-primary"
+            data-add-gear
+            onClick={() => void this.commands.executeCommand(ADD_GEAR.id)}
+          >
+            Add Gear
+          </button>
+          <button
+            type="button"
+            className="gbx-start-primary gbx-start-secondary"
+            data-create-gear
+            onClick={() => this.createGearForProduct()}
+          >
+            Create Gear
+          </button>
+        </div>
+
         {intent && (
           <>
             <div className="gbx-kv">
@@ -137,12 +177,18 @@ export class ProductWidget extends ReactWidget {
                   type="button"
                   className="gbx-choice"
                   data-add-profile
-                  onClick={() => void this.promptAddProfile()}
+                  onClick={() => {
+                    this.addingProfile = true;
+                    this.newProfileId = "";
+                    this.newProfileKind = "embedded";
+                    this.update();
+                  }}
                 >
                   Add profile…
                 </button>
               </span>
             </div>
+            {this.addingProfile && this.renderAddProfile()}
             {state.profile !== undefined && this.renderProfileEdit(intent.profiles[state.profile], state.profile, intent.default_profile)}
           </>
         )}
@@ -155,31 +201,123 @@ export class ProductWidget extends ReactWidget {
     );
   }
 
+  protected renderAddProfile(): React.ReactNode {
+    return (
+      <div className="gbx-profile-add" data-profile-add>
+        <label>
+          id
+          <input
+            data-profile-new-id
+            value={this.newProfileId}
+            onChange={(e) => {
+              this.newProfileId = e.target.value;
+              this.update();
+            }}
+          />
+        </label>
+        <label>
+          kind
+          <select
+            data-profile-new-kind
+            value={this.newProfileKind}
+            onChange={(e) => {
+              this.newProfileKind = e.target.value as typeof this.newProfileKind;
+              this.update();
+            }}
+          >
+            <option value="embedded">embedded</option>
+            <option value="host_workers">host_workers</option>
+            <option value="kubernetes">kubernetes</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          className="gbx-choice"
+          data-profile-add-confirm
+          onClick={() => void this.confirmAddProfile()}
+        >
+          Add
+        </button>
+        <button
+          type="button"
+          className="gbx-choice"
+          data-profile-add-cancel
+          onClick={() => {
+            this.addingProfile = false;
+            this.update();
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
   protected renderProfileEdit(
     profile: DeploymentProfileDecl | undefined,
     id: string,
     defaultProfile: string,
   ): React.ReactNode {
     if (profile === undefined) return undefined;
-    const fields = profileFields(profile);
+    const fields = profileFields(profile).map(({ wire, label, value }) => ({
+      wire,
+      label,
+      value: this.edits.draftProfileField(id, wire, value ?? undefined),
+    }));
+    const dirty = this.edits.hasDraft();
     return (
-      <div className="gbx-profile-edit" data-profile-edit={id}>
+      <div className="gbx-profile-edit" data-profile-edit={id} key={`profile-${id}-${this.editEpoch}`}>
         <div className="gbx-kv">
           <span>kind</span>
-          <span>{profile.profile}</span>
+          <span title="Profile kind is fixed at creation; remove and re-add to change it.">
+            {profile.profile}
+          </span>
         </div>
         {fields.map(({ wire, label, value }) => (
           <div className="gbx-kv" key={wire}>
-            <span>{label}</span>
+            <label htmlFor={`gbx-profile-${id}-${wire}`}>{label}</label>
             <span>
               <input
-                defaultValue={value ?? ""}
+                id={`gbx-profile-${id}-${wire}`}
+                value={value ?? ""}
+                aria-label={label}
                 data-profile-field={wire}
-                onBlur={(e) => void this.applyProfileField(id, wire, e.target.value || undefined)}
+                onChange={(e) =>
+                  this.edits.queueDraft({
+                    kind: "set_profile_field",
+                    profile: id,
+                    field: wire,
+                    value: e.target.value === "" ? null : e.target.value,
+                  })
+                }
               />
             </span>
           </div>
         ))}
+        {dirty && (
+          <div className="gbx-draft-actions">
+            <button
+              type="button"
+              className="gbx-choice"
+              data-draft-apply
+              onClick={() => void this.edits.applyDraft()}
+            >
+              Apply changes
+            </button>
+            <button
+              type="button"
+              className="gbx-choice"
+              data-draft-discard
+              onClick={() => {
+                this.edits.discardDraft();
+                this.editEpoch++;
+                this.update();
+              }}
+            >
+              Discard
+            </button>
+          </div>
+        )}
         {id !== defaultProfile && (
           <button
             type="button"
@@ -194,20 +332,15 @@ export class ProductWidget extends ReactWidget {
     );
   }
 
-  protected async applyProfileField(
-    id: string,
-    field: string,
-    value: string | undefined,
-  ): Promise<void> {
-    if (!(await this.edits.setProfileField(id, field, value))) return;
-    this.update();
-  }
-
-  protected async promptAddProfile(): Promise<void> {
-    const id = window.prompt("Profile id");
-    if (id === null || id.trim() === "") return;
-    const ok = await this.edits.addProfile("embedded", id.trim(), []);
-    if (ok) this.update();
+  protected async confirmAddProfile(): Promise<void> {
+    const id = this.newProfileId.trim();
+    if (id === "") return;
+    const ok = await this.edits.addProfile(this.newProfileKind, id, []);
+    if (ok) {
+      this.addingProfile = false;
+      this.newProfileId = "";
+      this.update();
+    }
   }
 
   protected renderResolved(product: ResolvedProduct): React.ReactNode {

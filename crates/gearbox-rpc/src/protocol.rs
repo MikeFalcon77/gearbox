@@ -31,7 +31,9 @@ pub mod method {
     pub const PRODUCT_ADD_PROFILE: &str = "gearbox/product/addProfile";
     pub const PRODUCT_REMOVE_PROFILE: &str = "gearbox/product/removeProfile";
     pub const PRODUCT_SET_PROFILE_FIELD: &str = "gearbox/product/setProfileField";
+    pub const PRODUCT_APPLY_EDITS: &str = "gearbox/product/applyEdits";
     pub const PRODUCT_CREATE: &str = "gearbox/product/create";
+    pub const GEAR_SCAFFOLD: &str = "gearbox/gear/scaffold";
     pub const VALIDATE: &str = "gearbox/validate";
     pub const GENERATE_PLAN: &str = "gearbox/generate/plan";
     pub const GENERATE_APPLY: &str = "gearbox/generate/apply";
@@ -401,6 +403,52 @@ pub struct SetProfileFieldParams {
     pub dry_run: bool,
 }
 
+/// One edit in a `gearbox/product/applyEdits` batch.
+///
+/// Applied in order against the same file text, so a draft of several fields
+/// becomes one dry-run, one confirmation, and one write.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[allow(
+    clippy::enum_variant_names,
+    reason = "the shared prefix is the verb, not noise: every variant is an \
+              instruction to set something, and the `kind` tag on the wire is \
+              `set_config`/`set_features`/… . Dropping it would turn instructions \
+              into nouns (`Config` reads as a config, not as setting one) and \
+              would change the protocol the generated TypeScript already speaks."
+)]
+pub enum ProductEdit {
+    SetConfig {
+        gear: String,
+        key: String,
+        #[serde(default)]
+        value: Option<String>,
+    },
+    SetFeatures {
+        gear: String,
+        features: Vec<String>,
+    },
+    SetPlugins {
+        gear: String,
+        plugins: Vec<String>,
+    },
+    SetProfileField {
+        profile: String,
+        field: String,
+        #[serde(default)]
+        value: Option<String>,
+    },
+}
+
+/// `gearbox/product/applyEdits` -- several description edits in one pass.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ApplyEditsParams {
+    pub path: String,
+    #[serde(default)]
+    pub dry_run: bool,
+    pub edits: Vec<ProductEdit>,
+}
+
 /// A source entry written into a new product description.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct CreateSourceEntry {
@@ -424,6 +472,28 @@ pub struct CreateProductParams {
     pub profile_id: String,
     #[serde(default)]
     pub clone_from: Option<String>,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// `gearbox/gear/scaffold` -- tier-0 gear crate under a writable destination.
+///
+/// Writes `{destination_dir}/{id}/gear.gdl`, `Cargo.toml`, and `src/lib.rs`.
+/// Ownership is `GeneratedOnce`: refuse when the gear directory already exists.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ScaffoldGearParams {
+    pub id: String,
+    pub name: String,
+    #[serde(default = "default_product_version")]
+    pub version: String,
+    /// Parent directory; the gear lands in `{destination_dir}/{id}/`.
+    pub destination_dir: String,
+    /// Preview only, like every other write method on this protocol.
+    ///
+    /// One spelling, `dry_run`. An alias for `plan_only` used to sit here "for
+    /// clients that prefer that name" -- there is one client, it is generated
+    /// from this file, and ts-rs could not parse the alias anyway, so it bought a
+    /// build warning and nothing else.
     #[serde(default)]
     pub dry_run: bool,
 }

@@ -145,6 +145,9 @@ export class InspectorWidget extends ReactWidget {
 
   protected newConfigKey = "";
   protected newConfigValue = "";
+  protected newFeature = "";
+  /** Bumped when Discard must remount inputs from the saved intent. */
+  protected editEpoch = 0;
 
   @postConstruct()
   protected init(): void {
@@ -161,6 +164,11 @@ export class InspectorWidget extends ReactWidget {
     this.toDispose.push(this.selection.onDidChange(() => this.update()));
     this.toDispose.push(this.catalogue.onChanged(() => this.update()));
     this.toDispose.push(this.products.onChanged(() => this.update()));
+    this.toDispose.push(
+      this.edits.onDraftChanged(() => {
+        this.update();
+      }),
+    );
     this.update();
   }
 
@@ -257,29 +265,31 @@ export class InspectorWidget extends ReactWidget {
     const picked = intent.selected_gears.find((entry) => entry.gear === gearId);
     if (picked === undefined) return undefined;
 
-    const config = picked.config ?? {};
-    const features = picked.features ?? [];
+    const config = this.edits.draftConfig(gearId, picked.config ?? {});
+    const features = this.edits.draftFeatures(gearId, picked.features ?? []);
+    const dirty = this.edits.hasDraft();
 
     return (
       <div className="gbx-product-edit" data-gear-config={gearId}>
         <div className="gbx-detail-title">in this product</div>
         <div className="gbx-kv">
           <span>config</span>
-          <span className="gbx-config-list">
+          <span className="gbx-config-list" key={`cfg-${gearId}-${this.editEpoch}`}>
             {Object.keys(config).length === 0 && "—"}
             {Object.entries(config).map(([key, value]) => (
               <label key={key} className="gbx-config-row" data-config-key={key}>
                 <code>{key}</code>
                 <input
-                  defaultValue={String(value)}
+                  value={value}
+                  aria-label={key}
                   data-config-edit={key}
-                  onBlur={(e) => void this.applyConfig(gearId, key, e.target.value)}
+                  onChange={(e) => this.queueConfig(gearId, key, e.target.value)}
                 />
                 <button
                   type="button"
                   className="gbx-choice"
                   data-config-remove={key}
-                  onClick={() => void this.applyConfig(gearId, key, undefined)}
+                  onClick={() => this.queueConfig(gearId, key, undefined)}
                 >
                   Remove
                 </button>
@@ -289,23 +299,27 @@ export class InspectorWidget extends ReactWidget {
               type="button"
               className="gbx-choice"
               data-add-config={gearId}
-              onClick={() => void this.applyNewConfig(gearId)}
+              onClick={() => this.queueNewConfig(gearId)}
             >
               Add key
             </button>
             <label className="gbx-config-row">
+              <span className="gbx-sr-only">new config key</span>
               <input
                 data-config-new-key
                 placeholder="key"
+                aria-label="new config key"
                 value={this.newConfigKey}
                 onChange={(e) => {
                   this.newConfigKey = e.target.value;
                   this.update();
                 }}
               />
+              <span className="gbx-sr-only">new config value</span>
               <input
                 data-config-new-value
                 placeholder="value"
+                aria-label="new config value"
                 value={this.newConfigValue}
                 onChange={(e) => {
                   this.newConfigValue = e.target.value;
@@ -327,7 +341,7 @@ export class InspectorWidget extends ReactWidget {
                   className="gbx-feature-remove"
                   aria-label={`Remove ${feature}`}
                   onClick={() =>
-                    void this.applyFeatures(
+                    this.queueFeatures(
                       gearId,
                       features.filter((f) => f !== feature),
                     )
@@ -337,44 +351,93 @@ export class InspectorWidget extends ReactWidget {
                 </button>
               </span>
             ))}
+            <label className="gbx-config-row" data-feature-new>
+              <span className="gbx-sr-only">new feature</span>
+              <input
+                placeholder="feature"
+                aria-label="new feature"
+                value={this.newFeature}
+                onChange={(e) => {
+                  this.newFeature = e.target.value;
+                  this.update();
+                }}
+              />
+              <button
+                type="button"
+                className="gbx-choice"
+                data-add-feature={gearId}
+                onClick={() => this.queueNewFeature(gearId, features)}
+              >
+                Add feature
+              </button>
+            </label>
+          </span>
+        </div>
+        {dirty && (
+          <div className="gbx-draft-actions">
             <button
               type="button"
               className="gbx-choice"
-              data-add-feature={gearId}
-              onClick={() => void this.promptFeature(gearId, features)}
+              data-draft-apply
+              onClick={() => void this.edits.applyDraft()}
             >
-              Add feature…
+              Apply changes
             </button>
-          </span>
-        </div>
+            <button
+              type="button"
+              className="gbx-choice"
+              data-draft-discard
+              onClick={() => this.discardDraft()}
+            >
+              Discard
+            </button>
+          </div>
+        )}
       </div>
     );
   }
 
-  protected async applyNewConfig(gear: string): Promise<void> {
+  protected queueNewConfig(gear: string): void {
     const key = this.newConfigKey.trim();
     if (key === "") return;
     const value = this.newConfigValue;
+    if (!this.queueConfig(gear, key, value === "" ? undefined : value)) return;
     this.newConfigKey = "";
     this.newConfigValue = "";
-    await this.applyConfig(gear, key, value === "" ? undefined : value);
-  }
-
-  protected async applyConfig(gear: string, key: string, value: string | undefined): Promise<void> {
-    if (!(await this.edits.setConfig(gear, key, value))) return;
     this.update();
   }
 
-  protected async applyFeatures(gear: string, features: readonly string[]): Promise<void> {
-    if (!(await this.edits.setFeatures(gear, features))) return;
-    this.update();
+  protected queueConfig(gear: string, key: string, value: string | undefined): boolean {
+    return this.edits.queueDraft({
+      kind: "set_config",
+      gear,
+      key,
+      value: value ?? null,
+    });
   }
 
-  protected async promptFeature(gear: string, current: readonly string[]): Promise<void> {
-    const feature = window.prompt("Feature name");
-    if (feature === null || feature.trim() === "") return;
-    if (current.includes(feature.trim())) return;
-    await this.applyFeatures(gear, [...current, feature.trim()]);
+  protected queueFeatures(gear: string, features: readonly string[]): void {
+    this.edits.queueDraft({
+      kind: "set_features",
+      gear,
+      features: [...features],
+    });
+  }
+
+  protected queueNewFeature(gear: string, current: readonly string[]): void {
+    const feature = this.newFeature.trim();
+    if (feature === "" || current.includes(feature)) return;
+    this.newFeature = "";
+    this.queueFeatures(gear, [...current, feature]);
+  }
+
+  protected discardDraft(): void {
+    this.edits.discardDraft();
+    this.editEpoch++;
+    this.newConfigKey = "";
+    this.newConfigValue = "";
+    this.newFeature = "";
+    this.update();
   }
 
   protected renderProjected(gear: GearDescriptor): React.ReactNode {
@@ -493,6 +556,15 @@ export class InspectorWidget extends ReactWidget {
         )}
 
         {this.renderPath(gear.source, gear.gdl_path)}
+
+        {gear.config_schema !== null && gear.config_schema !== undefined && (
+          <div className="gbx-kv">
+            <span>schema</span>
+            <span className="gbx-links">
+              {this.renderLink(gear.source, gear.config_schema, `schema: ${gear.config_schema}`)}
+            </span>
+          </div>
+        )}
 
         {capabilities && !capabilities.resolve && (
           // Honest about the gap rather than showing an empty panel that reads as

@@ -7,11 +7,10 @@
 // picker in the product context, where the panel had been taking the whole left
 // side while the product sat in a secondary tab.
 //
-// **Read-only, and that is the whole of it for now.** Finding a gear selects it,
-// which fills the Inspector -- what it is, and, if the product names it, why it is
-// here. Adding one is a write, and the write path is closed until the stray-write
-// investigation clears: the toggle in the catalogue panel remains the one way in,
-// unchanged, with its preview and its confirmation.
+// **Adding is a write through the Add Gear configurator.** Finding a gear selects
+// it, which fills the Inspector -- what it is, and, if the product names it, why it
+// is here. The catalogue panel's `+` opens that configurator; removal still uses
+// the panel check with its preview and confirmation.
 //
 // The quick-pick rather than a dialog because Theia's quick input is what people
 // already type into, and because a filter over fourteen rows -- or four hundred --

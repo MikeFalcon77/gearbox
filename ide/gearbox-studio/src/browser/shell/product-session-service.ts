@@ -41,6 +41,7 @@ import { WorkspaceService } from "@theia/workspace/lib/browser/workspace-service
 
 import { CatalogueStore } from "../catalogue-store";
 import { ProductStore } from "../product-store";
+import { GearSessionService } from "./gear-session-service";
 
 /** Where the Recent list lives. Per browser profile, like any other Theia state. */
 const RECENT_KEY = "gearbox.recentProducts";
@@ -62,6 +63,7 @@ export class ProductSessionService {
   @inject(MonacoTextModelService) protected readonly models!: MonacoTextModelService;
   @inject(StorageService) protected readonly storage!: StorageService;
   @inject(WorkspaceService) protected readonly workspace!: WorkspaceService;
+  @inject(GearSessionService) protected readonly gears!: GearSessionService;
 
   /**
    * The open in flight, if any.
@@ -234,6 +236,10 @@ export class ProductSessionService {
   protected async doOpen(ref: ProductRef): Promise<boolean> {
     const directory = parentOf(ref.path);
     const workspace = this.workspaceFor(ref.path, directory);
+
+    if (this.gears.current !== undefined) {
+      await this.gears.close();
+    }
 
     // Step 1: an engine whose workspace is the product's, so a later edit is
     // inside the write boundary before anything reads the description.

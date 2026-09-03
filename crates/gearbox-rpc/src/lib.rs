@@ -23,13 +23,14 @@ use gearbox_ir::{Diagnostic, ExplanationGraph, ProfileId, RelPath, ResolvedProdu
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
 
 use crate::protocol::{
-    AddProfileParams, Capabilities, CatalogueChanged, CatalogueDiagnostics, CatalogueLoadResult,
-    CreateProductParams, EditGearParams, EditGearResult, FailedRoot, GenerateApplyResult,
-    GenerateFileParams, GenerateFileResult, GenerateParams, GeneratePlanResult, InitializeParams,
-    InitializeResult, LockOnDisk, LockParams, LockResult, LogParams, ProductLoadParams,
-    ProductLoadResult, ProgressParams, RemoveProfileParams, ResolveParams, ResolveResult,
-    ResolvedRoot, ServerInfo, SetConfigParams, SetFeaturesParams, SetProfileFieldParams,
-    ValidateParams, ValidateResult, error_code, method,
+    AddProfileParams, ApplyEditsParams, Capabilities, CatalogueChanged, CatalogueDiagnostics,
+    CatalogueLoadResult, CreateProductParams, EditGearParams, EditGearResult, FailedRoot,
+    GenerateApplyResult, GenerateFileParams, GenerateFileResult, GenerateParams,
+    GeneratePlanResult, InitializeParams, InitializeResult, LockOnDisk, LockParams, LockResult,
+    LogParams, ProductEdit, ProductLoadParams, ProductLoadResult, ProgressParams,
+    RemoveProfileParams, ResolveParams, ResolveResult, ResolvedRoot, ScaffoldGearParams,
+    ServerInfo, SetConfigParams, SetFeaturesParams, SetProfileFieldParams, ValidateParams,
+    ValidateResult, error_code, method,
 };
 
 /// Why the server could not run.
@@ -269,10 +270,24 @@ fn dispatch(connection: &Connection, state: &mut State, request: Request) -> Opt
                 Err(e) => invalid_params(id, &e),
             },
         }),
+        method::PRODUCT_APPLY_EDITS => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<ApplyEditsParams>(request) {
+                Ok((id, params)) => edit_apply_edits(state, id, &params),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
         method::PRODUCT_CREATE => Some(match require_ready(state, &id) {
             Some(refusal) => refusal,
             None => match cast::<CreateProductParams>(request) {
                 Ok((id, params)) => create_product(state, id, &params),
+                Err(e) => invalid_params(id, &e),
+            },
+        }),
+        method::GEAR_SCAFFOLD => Some(match require_ready(state, &id) {
+            Some(refusal) => refusal,
+            None => match cast::<ScaffoldGearParams>(request) {
+                Ok((id, params)) => scaffold_gear(state, id, &params),
                 Err(e) => invalid_params(id, &e),
             },
         }),
@@ -665,6 +680,56 @@ fn edit_set_profile_field(
     })
 }
 
+fn edit_apply_edits(state: &mut State, id: RequestId, params: &ApplyEditsParams) -> Response {
+    edit_with(state, id, &params.path, params.dry_run, |uri, before| {
+        apply_product_edits(uri, before, &params.edits)
+    })
+}
+
+/// Fold every edit onto the same text, in order. Fail the whole batch if any
+/// step refuses — nothing is written until the fold succeeds.
+fn apply_product_edits(
+    uri: &str,
+    before: &str,
+    edits: &[ProductEdit],
+) -> Result<gearbox_gdl::edit::Edit, gearbox_ir::Diagnostics> {
+    let mut current = before.to_owned();
+    let mut changed = false;
+    for edit in edits {
+        let step = match edit {
+            ProductEdit::SetConfig { gear, key, value } => {
+                gearbox_gdl::edit::set_gear_config(uri, &current, gear, key, value.as_deref())?
+            }
+            ProductEdit::SetFeatures { gear, features } => {
+                gearbox_gdl::edit::set_gear_features(uri, &current, gear, features)?
+            }
+            ProductEdit::SetPlugins { gear, plugins } => {
+                gearbox_gdl::edit::set_gear_plugins(uri, &current, gear, plugins)?
+            }
+            ProductEdit::SetProfileField {
+                profile,
+                field,
+                value,
+            } => gearbox_gdl::edit::set_profile_field(
+                uri,
+                &current,
+                profile,
+                field,
+                value.as_deref(),
+            )?,
+        };
+        if let Some(next) = step.changed() {
+            next.clone_into(&mut current);
+            changed = true;
+        }
+    }
+    if changed {
+        Ok(gearbox_gdl::edit::Edit::Changed { source: current })
+    } else {
+        Ok(gearbox_gdl::edit::Edit::Unchanged)
+    }
+}
+
 fn edit_with(
     state: &mut State,
     id: RequestId,
@@ -783,7 +848,13 @@ fn create_product(state: &mut State, id: RequestId, params: &CreateProductParams
             }
         };
         let uri = format!("file://{}", PathBuf::from(clone_from).display());
-        match gearbox_gdl::edit::clone_product_text(&uri, &source, &params.id, &params.name) {
+        match gearbox_gdl::edit::clone_product_text(
+            &uri,
+            &source,
+            &params.id,
+            &params.name,
+            Some(params.version.as_str()),
+        ) {
             Ok(text) => text,
             Err(diagnostics) => {
                 return error_with_diagnostics(
@@ -859,6 +930,192 @@ fn create_product(state: &mut State, id: RequestId, params: &CreateProductParams
             diagnostics: Vec::new(),
         },
     )
+}
+
+/// Scaffold a new gear crate: `gear.gdl`, `Cargo.toml`, and `src/lib.rs`.
+///
+/// ADR-0010 tier 0 / `GeneratedOnce`: preview via `FilePlan[]`, refuse when the
+/// destination already exists, write only under `writable_out_root`.
+fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) -> Response {
+    if !state.allow_writes && !params.dry_run {
+        return error(
+            id,
+            error_code::WRITES_NOT_ALLOWED,
+            "this session declared no write capability, so nothing will be written; \
+             pass `allow_writes: true` to `initialize` if the client is meant to create files",
+        );
+    }
+
+    if params.id.trim().is_empty() {
+        return error(id, error_code::EDIT_REFUSED, "gear id must not be empty");
+    }
+    if params.id.contains('/') || params.id.contains('\\') {
+        return error(
+            id,
+            error_code::EDIT_REFUSED,
+            "gear id must be a single path segment, not a nested path",
+        );
+    }
+
+    let gear_dir = PathBuf::from(&params.destination_dir).join(&params.id);
+    if gear_dir.exists() {
+        return error(
+            id,
+            error_code::EDIT_REFUSED,
+            &format!(
+                "`{}` already exists; scaffold refuses to overwrite",
+                gear_dir.display()
+            ),
+        );
+    }
+
+    let parent = gear_dir
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let out_root = match writable_out_root(state, parent) {
+        Ok(path) => path.join(&params.id),
+        Err(refusal) => return error(id, error_code::EDIT_REFUSED, &refusal),
+    };
+
+    let files = match scaffold_gear_files(params) {
+        Ok(files) => files,
+        Err(message) => return error(id, error_code::EDIT_REFUSED, &message),
+    };
+
+    // Refuse to scaffold text that does not evaluate as a gear declaration.
+    let gdl = files
+        .iter()
+        .find(|(rel, _, _)| rel == "gear.gdl")
+        .map_or("", |(_, body, _)| body.as_str());
+    let uri = gearbox_ir::file_uri(&out_root.join("gear.gdl"));
+    let identity = gearbox_gdl::FileIdentity {
+        uri,
+        source: SourceId::new("scaffold").unwrap_or_else(|_| unreachable!("`scaffold` is kebab")),
+        gdl_path: RelPath::new("gear.gdl")
+            .unwrap_or_else(|_| unreachable!("`gear.gdl` is a valid rel path")),
+        load_paths: None,
+    };
+    let outcome = gearbox_gdl::GdlEngine::new().eval_gear(&identity, gdl);
+    if outcome.value.is_none() {
+        return error_with_diagnostics(
+            id,
+            error_code::EDIT_REFUSED,
+            "scaffolded `gear.gdl` does not evaluate as a gear description",
+            outcome.diagnostics.as_slice(),
+        );
+    }
+
+    let mut plans = Vec::with_capacity(files.len());
+    for (rel, body, kind) in &files {
+        let path = RelPath::new(rel).unwrap_or_else(|_| unreachable!("scaffold paths are valid"));
+        let entry = gearbox_ir::FileEntry::text(
+            path.clone(),
+            body.clone(),
+            *kind,
+            gearbox_ir::Ownership::GeneratedOnce,
+        );
+        plans.push(gearbox_ir::FilePlan {
+            path,
+            action: gearbox_ir::FileAction::Create,
+            ownership: gearbox_ir::Ownership::GeneratedOnce,
+            kind: *kind,
+            blake3: entry.digest(),
+            preview_available: true,
+        });
+    }
+
+    if !params.dry_run {
+        if let Err(e) = std::fs::create_dir_all(out_root.join("src")) {
+            return error(
+                id,
+                error_code::EDIT_REFUSED,
+                &format!("cannot create `{}`: {e}", out_root.join("src").display()),
+            );
+        }
+        for (rel, body, _) in &files {
+            let path = out_root.join(rel);
+            if let Err(e) = write_atomically(&path, body) {
+                return error(
+                    id,
+                    error_code::EDIT_REFUSED,
+                    &format!("cannot write `{}`: {e}", path.display()),
+                );
+            }
+        }
+    }
+
+    ok(
+        id,
+        &GeneratePlanResult {
+            plans,
+            diagnostics: Vec::new(),
+            out_root: out_root.display().to_string().replace('\\', "/"),
+            skipped: Vec::new(),
+        },
+    )
+}
+
+/// One file a scaffold will write: its path under the gear directory, its body,
+/// and what kind of file it is.
+///
+/// Named rather than left as a triple because it is threaded through the plan,
+/// the preview and the write, and `(String, String, FileKind)` says nothing about
+/// which `String` is the path.
+type ScaffoldFile = (String, String, gearbox_ir::FileKind);
+
+/// Minimal gear scaffold contents: description, stub crate, empty lib.
+fn scaffold_gear_files(params: &ScaffoldGearParams) -> Result<Vec<ScaffoldFile>, String> {
+    let crate_name = params.id.replace('_', "-");
+    let lib_name = params.id.replace('-', "_");
+    if crate_name.is_empty() || lib_name.is_empty() {
+        return Err("gear id must yield a non-empty crate and lib name".to_owned());
+    }
+
+    let name = gearbox_gdl::edit::quote_string(&params.name);
+    let crate_quoted = gearbox_gdl::edit::quote_string(&crate_name);
+    let lib_quoted = gearbox_gdl::edit::quote_string(&lib_name);
+    let gdl = format!(
+        r#"# Scaffolded gear description for {comment}.
+#
+# Id comes from #[toolkit::gear] once macros land. Until then this file names
+# the package the catalogue will join against.
+
+gear(
+    name = {name},
+    package = cargo(
+        crate_name = {crate_quoted},
+        lib = {lib_quoted},
+        path = ".",
+    ),
+)
+"#,
+        comment = params.name.replace(['\n', '\r'], " "),
+    );
+
+    let cargo = format!(
+        r#"[package]
+name = "{crate_name}"
+version = "{version}"
+edition = "2021"
+
+[lib]
+name = "{lib_name}"
+path = "src/lib.rs"
+"#,
+        version = params.version.replace('"', ""),
+    );
+
+    let lib = format!(
+        "// Scaffolded lib for `{crate_name}`.\n\
+         // Gear macros (#[toolkit::gear], provides/consumes) come next.\n"
+    );
+
+    Ok(vec![
+        ("gear.gdl".to_owned(), gdl, gearbox_ir::FileKind::Text),
+        ("Cargo.toml".to_owned(), cargo, gearbox_ir::FileKind::Toml),
+        ("src/lib.rs".to_owned(), lib, gearbox_ir::FileKind::Rust),
+    ])
 }
 
 /// Whether a path may be written, and why not when it may not.

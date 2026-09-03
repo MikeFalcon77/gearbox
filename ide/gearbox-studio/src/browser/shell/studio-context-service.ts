@@ -32,16 +32,12 @@ import { inject, injectable, postConstruct } from "@theia/core/shared/inversify"
 
 import type { ProductRef } from "../../common/protocol";
 import { ProductStore } from "../product-store";
+import { GearSessionService } from "./gear-session-service";
 
 /**
  * The kinds of work Studio supports, named after the PRD's actors rather than
  * after its own panels: `cpt-gearbox-actor-integrator` composes a product,
  * `cpt-gearbox-actor-gear-author` writes a gear.
- *
- * `gear` is in the type although nothing enters it yet. Declaring it now means
- * every `switch` over a context is already exhaustive, and the compiler will
- * find the ones that need a branch when gear authoring lands -- rather than
- * leaving them to be discovered by a wrong default.
  */
 export type StudioContext =
   | { readonly kind: "home" }
@@ -58,6 +54,7 @@ export const GEAR_PERSPECTIVE = "gearbox.gear";
 @injectable()
 export class StudioContextService implements FrontendApplicationContribution {
   @inject(ProductStore) protected readonly products!: ProductStore;
+  @inject(GearSessionService) protected readonly gears!: GearSessionService;
   @inject(PerspectiveService) protected readonly perspectives!: PerspectiveService;
   @inject(ContextKeyService) protected readonly contextKeys!: ContextKeyService;
 
@@ -86,6 +83,7 @@ export class StudioContextService implements FrontendApplicationContribution {
   protected init(): void {
     this.key = this.contextKeys.createKey<string>(STUDIO_CONTEXT_KEY, this.context.kind);
     this.products.onChanged(() => this.recompute());
+    this.gears.onDidChange(() => this.recompute());
   }
 
   onStart(): void {
@@ -98,12 +96,18 @@ export class StudioContextService implements FrontendApplicationContribution {
    * `ProductStore.onChanged` fires for every resolution, every profile switch and
    * every lock fetch; switching a perspective on each of those would fight the
    * person's own layout. The guard is on the *identity of the object*, not on the
-   * event.
+   * event. Gear sessions win over products when both are somehow set — opening
+   * either closes the other first.
    */
   protected recompute(): void {
+    const gear = this.gears.current;
     const open = this.products.current.open;
     const next: StudioContext =
-      open === undefined ? { kind: "home" } : { kind: "product", product: open };
+      gear !== undefined
+        ? { kind: "gear", root: gear.root }
+        : open === undefined
+          ? { kind: "home" }
+          : { kind: "product", product: open };
     if (sameContext(this.context, next)) {
       return;
     }

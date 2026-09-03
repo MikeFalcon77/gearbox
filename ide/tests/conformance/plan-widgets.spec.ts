@@ -310,7 +310,12 @@ test.describe("the graph's own claims", () => {
       // registers a *toggle*, so after a reload -- where Theia's layout restorer
       // has already brought the graph back -- running the command again would
       // close it.
-      if ((await freshStudio.page.locator(".gbx-svg").count()) === 0) {
+      //
+      // Visibility, not presence: Home's Start screen opens after every ready
+      // (including post-reload), so the Graph widget can sit attached but hidden
+      // behind Start. `count() > 0` would then skip the command and hang on
+      // `waitFor({ visible })`.
+      if (!(await freshStudio.page.locator(".gbx-svg").first().isVisible().catch(() => false))) {
         await runCommand(freshStudio.page, "Gearbox Graph");
       }
       await freshStudio.page.locator(".gbx-svg").waitFor({ state: "visible" });

@@ -388,3 +388,17 @@ existing description uses `writable_path`. Details: ADR `cpt-gearbox-adr-create-
 
 Implemented in `crates/gearbox-gdl/src/edit_call.rs` and the `gearbox/product/*` RPC methods added
 in the same pass.
+
+## Amendment 2026-09-02: Studio surface for tier 0 (New Gear)
+
+**Status: accepted. This names the Studio surface for tier 0; it does not change the ownership
+rule.**
+
+Tier 0 remains what this ADR decided: the tool may create new files once and then hand them over.
+Studio's surface for that is a **Gearbox: New Gear** command, a **FilePlan** preview before any
+write (the same shape generation already uses), and writes that land under the declared **workspace**
+and never inside a source root — the same boundary generation already enforces for
+`writable_out_root`. Existing human-authored Rust stays untouchable (tier 5).
+
+The **Gear** working context (ADR `cpt-gearbox-adr-domain-specific-ide-shell`) becomes reachable
+only after this scaffold exists. Until then Home must not advertise New Gear or Open Gear.

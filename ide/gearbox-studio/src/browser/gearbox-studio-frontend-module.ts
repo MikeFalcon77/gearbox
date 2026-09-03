@@ -39,11 +39,16 @@ import { CataloguePicker } from "./catalogue/catalogue-picker";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import { ConflictsWidget } from "./conflicts/conflicts-widget";
 import { CreateProductWidget } from "./create/create-product-widget";
+import { CreateGearWidget } from "./create/create-gear-widget";
 import { PendingCreate } from "./create/pending-create";
+import { PendingCreateGear } from "./create/pending-create-gear";
 import {
+  AddGearViewContribution,
   CatalogueViewContribution,
   ConflictsViewContribution,
+  CreateGearViewContribution,
   CreateProductViewContribution,
+  GearAuthorViewContribution,
   GenerateViewContribution,
   GraphViewContribution,
   InspectorViewContribution,
@@ -56,12 +61,16 @@ import { InspectorWidget } from "./inspector/inspector-widget";
 import { GenerateWidget } from "./generate/generate-widget";
 import { LockWidget } from "./lock/lock-widget";
 import { ProductWidget } from "./product/product-widget";
+import { GearAuthorWidget } from "./gear/gear-author-widget";
 import { StartWidget } from "./start/start-widget";
+import { AddGearWidget } from "./add-gear/add-gear-widget";
 import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
 import { FabricThemeContribution } from "./theme/fabric-theme-contribution";
 import { GearboxPerspectives } from "./shell/gearbox-perspectives";
 import { LayoutMigration } from "./shell/layout-migration";
+import { GearSessionService } from "./shell/gear-session-service";
 import { ProductSessionService } from "./shell/product-session-service";
+import { EngineConnectionService } from "./shell/engine-connection-service";
 import { SelectionService } from "./shell/selection-service";
 import { SessionCommands } from "./shell/session-commands";
 import { StudioContextService } from "./shell/studio-context-service";
@@ -132,6 +141,7 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // tree used to be two selections, which is why the panel answering "why" was
   // empty in the ordinary case.
   bind(SelectionService).toSelf().inSingletonScope();
+  bind(EngineConnectionService).toSelf().inSingletonScope();
 
   bind(CatalogueStore).toSelf().inSingletonScope();
   // Its own store, not a slice of the catalogue's: the two objects of work do not
@@ -144,6 +154,7 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // wants to edit does not reimplement the four checks.
   bind(ProductEditService).toSelf().inSingletonScope();
   bind(PendingCreate).toSelf().inSingletonScope();
+  bind(PendingCreateGear).toSelf().inSingletonScope();
   // The policy in front of Apply: generate advertised, writes declared, no
   // resolution errors, no conflicts. Named in the UI when they fail.
   bind(GenerateService).toSelf().inSingletonScope();
@@ -177,6 +188,7 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // one of the products in this checkout" -- readable anywhere, editable nowhere
   // else, because both write gates measure from the declared workspace.
   bind(ProductSessionService).toSelf().inSingletonScope();
+  bind(GearSessionService).toSelf().inSingletonScope();
 
   // Why: `File` is where a person looks for "what am I working on", so Open,
   // New and Close live there rather than under `Gearbox`, which holds the verbs
@@ -241,8 +253,7 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
 
   // The catalogue, called rather than browsed: `Find Gear…` selects into the
   // Inspector, which is how the catalogue serves the product context now that its
-  // panel is collapsed there. Read-only -- adding a gear is still the panel's
-  // toggle, with its preview and confirmation.
+  // panel is collapsed there. Adding a gear opens the Add Gear configurator.
   bind(CataloguePicker).toSelf().inSingletonScope();
   bind(CommandContribution).toService(CataloguePicker);
   bind(MenuContribution).toService(CataloguePicker);
@@ -254,6 +265,9 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bindWidget(bind, ConflictsWidget);
   bindWidget(bind, StartWidget);
   bindWidget(bind, CreateProductWidget);
+  bindWidget(bind, CreateGearWidget);
+  bindWidget(bind, GearAuthorWidget);
+  bindWidget(bind, AddGearWidget);
   bindWidget(bind, LockWidget);
   bindWidget(bind, GenerateWidget);
 
@@ -284,7 +298,11 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // so it has nothing of that interface to implement.
   bindViewContribution(bind, ProductViewContribution);
   bindViewContribution(bind, StartViewContribution);
+  bind(FrontendApplicationContribution).toService(StartViewContribution);
   bindViewContribution(bind, CreateProductViewContribution);
+  bindViewContribution(bind, CreateGearViewContribution);
+  bindViewContribution(bind, GearAuthorViewContribution);
+  bindViewContribution(bind, AddGearViewContribution);
   bindViewContribution(bind, ConflictsViewContribution);
   bindViewContribution(bind, LockViewContribution);
   bindViewContribution(bind, GenerateViewContribution);

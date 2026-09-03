@@ -5,6 +5,7 @@ import {
   FrontendApplicationContribution,
   codicon,
 } from "@theia/core/lib/browser";
+import { FrontendApplicationStateService } from "@theia/core/lib/browser/frontend-application-state";
 import {
   ConnectionStatus,
   ConnectionStatusService,
@@ -16,6 +17,8 @@ import { CatalogueStore } from "./catalogue-store";
 import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import { ConflictsWidget } from "./conflicts/conflicts-widget";
 import { CreateProductWidget, type CreateProductState } from "./create/create-product-widget";
+import { CreateGearWidget, type CreateGearState } from "./create/create-gear-widget";
+import { AddGearWidget, type AddGearState } from "./add-gear/add-gear-widget";
 import { GraphWidget } from "./graph/graph-widget";
 import { InspectorWidget } from "./inspector/inspector-widget";
 import { GenerateWidget } from "./generate/generate-widget";
@@ -23,6 +26,11 @@ import { LockWidget } from "./lock/lock-widget";
 import { GearboxMenus } from "./menus";
 import { ProductStore } from "./product-store";
 import { ProductWidget } from "./product/product-widget";
+import { GearAuthorWidget } from "./gear/gear-author-widget";
+import { EngineConnectionService } from "./shell/engine-connection-service";
+import { ADD_GEAR, BROWSE_CATALOGUE } from "./shell/session-command-ids";
+import { SelectionService } from "./shell/selection-service";
+import { STUDIO_CONTEXT_KEY, StudioContextService } from "./shell/studio-context-service";
 import { StartWidget } from "./start/start-widget";
 
 export const RELOAD_CATALOGUE: Command = {
@@ -53,6 +61,7 @@ export class CatalogueViewContribution
   // `CatalogueStore.load()` that calls `initialize` and so respawns the engine
   // a product resolve needs.
   @inject(ProductStore) protected readonly products!: ProductStore;
+  @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
 
   constructor() {
     super({
@@ -108,6 +117,10 @@ export class CatalogueViewContribution
     this.connection.onStatusChange((status) => {
       if (status === ConnectionStatus.OFFLINE) {
         offline = true;
+        // Theia is offline; the engine process behind the socket is gone with it.
+        // Mark that before the reconnect load so New Product / Resolve / Generate
+        // do not stay enabled against a dead session.
+        this.engine.markDisconnected("backend connection lost");
         return;
       }
       // Only the offline-to-online edge. `onStatusChange` also fires for
@@ -129,6 +142,11 @@ export class CatalogueViewContribution
     super.registerCommands(commands);
     commands.registerCommand(RELOAD_CATALOGUE, {
       execute: () => this.store.load(),
+    });
+    // Opens rather than toggles: Start's "Browse Catalogue" must never hide an
+    // already-open panel the way the View toggle would.
+    commands.registerCommand(BROWSE_CATALOGUE, {
+      execute: () => this.openView({ activate: true, reveal: true }),
     });
   }
 
@@ -168,14 +186,25 @@ export class CatalogueViewContribution
 /**
  * The Home screen.
  *
- * Not a `FrontendApplicationContribution`, so it does not open itself at startup:
- * the Home perspective opens it, because whether it belongs on screen is a
- * question about the context rather than about the application starting. Opening
- * it here as well would put it in the main area behind a product that a saved
- * layout had already restored.
+ * Opens itself when the context is Home -- after the shell is `ready`, and again
+ * whenever the context returns to Home. It deliberately does **not** open from
+ * `initializeLayout`: that runs before a saved product layout is restored and
+ * would park Start behind a product the restorer still intends to show.
+ *
+ * The Home perspective's `onActivate` also opens this view, but that path is
+ * skipped when Studio boots already in the Home context (`recompute` sees no
+ * change and never switches perspective). Waiting for `ready` covers the
+ * restorer race the perspective alone cannot: a restored empty main area.
  */
 @injectable()
-export class StartViewContribution extends AbstractViewContribution<StartWidget> {
+export class StartViewContribution
+  extends AbstractViewContribution<StartWidget>
+  implements FrontendApplicationContribution
+{
+  @inject(StudioContextService) protected readonly contexts!: StudioContextService;
+  @inject(FrontendApplicationStateService)
+  protected readonly appState!: FrontendApplicationStateService;
+
   constructor() {
     super({
       widgetId: StartWidget.ID,
@@ -189,10 +218,22 @@ export class StartViewContribution extends AbstractViewContribution<StartWidget>
       // own name sitting in a list of its panels.
     });
   }
+
+  onStart(): void {
+    const openIfHome = (): void => {
+      if (this.contexts.current.kind === "home") {
+        void this.openView({ activate: true, reveal: true });
+      }
+    };
+    this.contexts.onDidChange(openIfHome);
+    void this.appState.reachedState("ready").then(openIfHome);
+  }
 }
 
 @injectable()
 export class CreateProductViewContribution extends AbstractViewContribution<CreateProductWidget> {
+  @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
+
   constructor() {
     super({
       widgetId: CreateProductWidget.ID,
@@ -202,7 +243,105 @@ export class CreateProductViewContribution extends AbstractViewContribution<Crea
     });
   }
 
+  /**
+   * The toggle is gated on the engine too, and that was a hole a claim found.
+   *
+   * `NEW_PRODUCT` refuses while the engine is down, but
+   * `AbstractViewContribution` also registers `View: Toggle New Product`, which
+   * opened the same wizard by the same door -- the blank tab the UX report
+   * described. Gating one command and leaving its twin in the palette is the
+   * palette lesson from ADR-0011 in miniature: a surface is only suppressed on
+   * the surfaces somebody checked.
+   */
+  override registerCommands(commands: CommandRegistry): void {
+    if (this.toggleCommand) {
+      commands.registerCommand(this.toggleCommand, {
+        execute: () => this.toggleView(),
+        isEnabled: () => this.engine.isConnected,
+      });
+    }
+  }
+
   async openCreate(state?: CreateProductState): Promise<void> {
+    const widget = await this.openView({ activate: true, reveal: true });
+    widget.openWith(state);
+  }
+}
+
+@injectable()
+export class CreateGearViewContribution extends AbstractViewContribution<CreateGearWidget> {
+  @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
+
+  constructor() {
+    super({
+      widgetId: CreateGearWidget.ID,
+      widgetName: CreateGearWidget.LABEL,
+      defaultWidgetOptions: { area: "main" },
+      toggleCommandId: "gearbox.gear.create.toggle",
+    });
+  }
+
+  /** Gated like the product wizard's toggle, and for the same reason. */
+  override registerCommands(commands: CommandRegistry): void {
+    if (this.toggleCommand) {
+      commands.registerCommand(this.toggleCommand, {
+        execute: () => this.toggleView(),
+        isEnabled: () => this.engine.isConnected,
+      });
+    }
+  }
+
+  async openCreate(state?: CreateGearState): Promise<void> {
+    const widget = await this.openView({ activate: true, reveal: true });
+    widget.openWith(state);
+  }
+}
+
+@injectable()
+export class GearAuthorViewContribution extends AbstractViewContribution<GearAuthorWidget> {
+  constructor() {
+    super({
+      widgetId: GearAuthorWidget.ID,
+      widgetName: GearAuthorWidget.LABEL,
+      defaultWidgetOptions: { area: "main" },
+      toggleCommandId: "gearbox.gear.author.toggle",
+    });
+  }
+}
+
+@injectable()
+export class AddGearViewContribution extends AbstractViewContribution<AddGearWidget> {
+  @inject(ProductStore) protected readonly products!: ProductStore;
+  @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
+
+  constructor() {
+    super({
+      widgetId: AddGearWidget.ID,
+      widgetName: AddGearWidget.LABEL,
+      defaultWidgetOptions: { area: "main" },
+      toggleCommandId: "gearbox.product.addGear.toggle",
+    });
+  }
+
+  override registerCommands(commands: CommandRegistry): void {
+    super.registerCommands(commands);
+    commands.registerCommand(ADD_GEAR, {
+      execute: (state?: AddGearState) => void this.openAdd(state),
+      isEnabled: () => this.products.current.open !== undefined && this.engine.isConnected,
+    });
+  }
+
+  override registerMenus(menus: MenuModelRegistry): void {
+    super.registerMenus(menus);
+    menus.registerMenuAction(GearboxMenus.GEARBOX_RESOLVE, {
+      commandId: ADD_GEAR.id,
+      label: "Add Gear…",
+      order: "0",
+      when: `${STUDIO_CONTEXT_KEY} == 'product'`,
+    });
+  }
+
+  async openAdd(state?: AddGearState): Promise<void> {
     const widget = await this.openView({ activate: true, reveal: true });
     widget.openWith(state);
   }
@@ -233,6 +372,10 @@ export class InspectorViewContribution
   extends AbstractViewContribution<InspectorWidget>
   implements FrontendApplicationContribution
 {
+  @inject(SelectionService) protected readonly selection!: SelectionService;
+  @inject(FrontendApplicationStateService)
+  protected readonly appState!: FrontendApplicationStateService;
+
   constructor() {
     super({
       widgetId: InspectorWidget.ID,
@@ -242,6 +385,22 @@ export class InspectorViewContribution
       // projected facts it exists to show.
       defaultWidgetOptions: { area: "bottom" },
       toggleCommandId: "gearbox.inspector.toggle",
+    });
+  }
+
+  onStart(): void {
+    // Open when there is something to explain. Catalogue rows without a gear id
+    // are skipped: they have no descriptor join yet, and stealing focus for an
+    // empty "still parsing" panel is worse than waiting for the projected gear.
+    this.selection.onDidChange((current) => {
+      if (current === undefined || current.kind === "catalogue-row") return;
+      void this.openView({ activate: true, reveal: true });
+    });
+    // After reload the layout restorer may leave the bottom strip empty while
+    // `initializeLayout` is skipped (a saved layout exists). Re-open without
+    // stealing focus so `settled()` and the Inspector itself stay reachable.
+    void this.appState.reachedState("ready").then(() => {
+      void this.openView({ activate: false, reveal: true });
     });
   }
 
@@ -263,6 +422,7 @@ export class InspectorViewContribution
 @injectable()
 export class ProductViewContribution extends AbstractViewContribution<ProductWidget> {
   @inject(ProductStore) protected readonly store!: ProductStore;
+  @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
 
   constructor() {
     super({
@@ -284,7 +444,7 @@ export class ProductViewContribution extends AbstractViewContribution<ProductWid
       // what "resolve" means once a product is on screen. Opening one is the
       // toggle command's job.
       execute: () => this.store.reload(),
-      isEnabled: () => this.store.current.open !== undefined,
+      isEnabled: () => this.store.current.open !== undefined && this.engine.isConnected,
     });
   }
 
@@ -363,6 +523,8 @@ export class LockViewContribution extends AbstractViewContribution<LockWidget> {
 
 @injectable()
 export class GenerateViewContribution extends AbstractViewContribution<GenerateWidget> {
+  @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
+
   constructor() {
     super({
       widgetId: GenerateWidget.ID,
@@ -372,6 +534,28 @@ export class GenerateViewContribution extends AbstractViewContribution<GenerateW
       // diff would be a keyhole.
       defaultWidgetOptions: { area: "main" },
       toggleCommandId: "gearbox.generate.toggle",
+    });
+  }
+
+  override registerCommands(commands: CommandRegistry): void {
+    // Own registration so the toggle can refuse when the engine is down.
+    // `super` would register an always-enabled handler we cannot amend after.
+    //
+    // `shortTitle` here rather than a special case in the toolbar: the header
+    // renders `shortTitle ?? label`, so this is the one place that decides the
+    // button says `Generate` while the View menu keeps the toggle's own phrasing.
+    // A mapping from command id to caption inside `ToolbarWidget` would break the
+    // rule that file states in its first paragraph -- actions come from the
+    // registry and cannot drift from the menu.
+    if (this.toggleCommand) {
+      commands.registerCommand({ ...this.toggleCommand, shortTitle: "Generate" }, {
+        execute: () => this.toggleView(),
+        isEnabled: () => this.engine.isConnected,
+      });
+    }
+    this.quickView?.registerItem({
+      label: this.viewLabel,
+      open: () => this.openView({ activate: true }),
     });
   }
 

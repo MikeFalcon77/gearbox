@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **112** — 106 built, 3 not built, 0 broken, 3 not observed.
+Claims: **125** — 120 built, 2 not built, 0 broken, 3 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -30,11 +30,12 @@ Rust, and the ADRs' own Confirmation sections say which.
 
 | Claim | Source | Status | Note |
 |---|---|---|---|
-| Studio offers a command to scaffold a new gear | `ADR-0010 tier 0` | 🚧 not built |  |
-| a scaffold shows its file plan before writing anything | `ADR-0010 §Consequences: a preview is not optional` | 🚧 not built |  |
+| Studio offers a command to scaffold a new gear | `ADR-0010 tier 0` | ✅ built |  |
+| a scaffold shows its file plan before writing anything | `ADR-0010 §Consequences: a preview is not optional` | ✅ built |  |
 | a generated composition crate carries a header naming its generator | `ADR-0010 tier 2` | ✅ built |  |
 | a description edit shows the line before writing it | `ADR-0010 §Consequences: a preview is not optional` | ✅ built |  |
 | adding a gear inserts one line, and removing it restores the file exactly | `ADR-0010 tier 3` | ✅ built |  |
+| Inspector projects JSON Schema properties as typed config fields | `Phase 7` | 🚧 not built |  |
 
 ## `conformance/adr-0011-ide-shell.spec.ts`
 
@@ -66,6 +67,18 @@ Rust, and the ADRs' own Confirmation sections say which.
 | exactly one @theia/core is installed | `ADR-0011 §Confirmation` | ✅ built |  |
 | a contribution base class binds five contribution interfaces at once | `ADR-0011 §Consequences` | ✅ built |  |
 
+## `conformance/adr-0011-session-trust.spec.ts`
+
+| Claim | Source | Status | Note |
+|---|---|---|---|
+| Open Product from Start shows the Product view without View menu | `ADR-0011 §Amendment: Product openView` | ✅ built |  |
+| a dead engine disables the actions that need it, and Retry brings them back | `ADR-0011 §Amendment: disconnected state` | ✅ built |  |
+| toolbar Generate is labelled Generate, not Toggle | `ADR-0011 §Amendment: Generate shortTitle` | ✅ built |  |
+| Discard on a profile field restores the saved value | `ADR-0013 §Amendment: Discard restores` | ✅ built |  |
+| Add profile uses an in-panel form, not window.prompt | `ADR-0013 §Amendment: no window.prompt` | ✅ built |  |
+| Home has no Product menu while Start is showing | `ADR-0011 §Amendment: no Product menu on Home` | ✅ built |  |
+| Inspector opens when a process is selected | `ADR-0011 §Amendment: Inspector from selection` | ✅ built |  |
+
 ## `conformance/adr-0011-workspace-and-scm.spec.ts`
 
 | Claim | Source | Status | Note |
@@ -77,13 +90,23 @@ Rust, and the ADRs' own Confirmation sections say which.
 | git decorates the Explorer | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
 | a product.lock opened as a file is read-only | `PRD cpt-gearbox-fr-lock-read-only` | ✅ built |  |
 
+## `conformance/adr-0013-add-gear.spec.ts`
+
+| Claim | Source | Status | Note |
+|---|---|---|---|
+| Product has an Add Gear button that opens the configurator | `—` | ✅ built |  |
+| catalogue + opens the Add Gear configurator, not an immediate write dialog | `—` | ✅ built |  |
+
 ## `conformance/adr-0013-create-product.spec.ts`
 
 | Claim | Source | Status | Note |
 |---|---|---|---|
 | Create shows preview text, Cancel writes nothing, Create opens the product | `ADR-0013 §Confirmation` | ✅ built |  |
+| mode selector is visible on New Product from Start | `ADR-0013 amendment` | ✅ built |  |
+| Clone Local stamps version into the preview | `ADR-0013 amendment` | ✅ built |  |
 | Clone keeps the source comment line count | `ADR-0013 §Confirmation` | ✅ built |  |
 | a config edit changes one line | `ADR-0013 §Confirmation` | ✅ built |  |
+| draft edits two config keys with one Apply preview; Discard restores | `ADR-0013 §Confirmation` | ✅ built |  |
 | a config key named password is refused with an explanation | `ADR-0013 §Confirmation` | ✅ built |  |
 | an added profile appears in the switcher and resolves | `ADR-0013 §Confirmation` | ✅ built |  |
 
