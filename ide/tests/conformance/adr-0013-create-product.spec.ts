@@ -109,6 +109,50 @@ test.describe("create and clone a product", () => {
     await expect(page.locator('[data-create-modes] [data-create-mode="clone-git"]')).toBeVisible();
   });
 
+  test("the destination is choosable, and sources are relative to it [ADR-0013 §Amendment: destination picker]", async ({
+    freshStudio,
+  }) => {
+    const { page } = freshStudio;
+    await settled(page);
+    await openCreateWizard(page);
+
+    // The affordance the wizard was missing: a folder to put the product in,
+    // rather than "the first workspace root, silently".
+    const browse = page.locator("[data-destination-browse]");
+    await expect(browse).toBeVisible();
+    await expect(browse).toBeEnabled();
+
+    // What the picker is *for*, asserted without opening a modal this suite would
+    // then have to close: the description's own directory decides how `sources`
+    // are written. `relativeSource` used to rebuild the default path and measure
+    // from there, so any other destination produced `at = path(...)` entries
+    // pointing at nothing -- the picker turns that from a typo into one click.
+    const sourceAt = async (): Promise<string> => {
+      const preview = await page.locator(".gbx-create-preview").innerText();
+      return /at = path\("([^"]+)"\)/.exec(preview)?.[1] ?? "";
+    };
+    await expect
+      .poll(async () => (await sourceAt()).length, { timeout: 15_000 })
+      .toBeGreaterThan(0);
+    const shallow = await sourceAt();
+
+    // Relative, not absolute -- the other half of what this found. The corpus is a
+    // sibling of this checkout, and a source named by absolute path is correct on
+    // the machine that generated it and broken for everyone who clones the result.
+    // `payments-demo` names its own source `../../../gears-rust`; that is the form.
+    expect(shallow, "a new product must not name its sources by absolute path").not.toMatch(
+      /^\//,
+    );
+
+    const destination = page.locator("[data-create-destination]");
+    const original = await destination.inputValue();
+    await destination.fill(original.replace(/\/product\.gdl$/, "/deeper/product.gdl"));
+
+    // One directory further down is one `../` further up. Equality would mean the
+    // destination is decoration.
+    await expect.poll(async () => await sourceAt(), { timeout: 15_000 }).toBe(`../${shallow}`);
+  });
+
   test("Clone Local stamps version into the preview [ADR-0013 amendment]", async ({
     freshStudio,
   }) => {

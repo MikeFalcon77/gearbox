@@ -431,7 +431,33 @@ async function revealView(page: Page, command: string, selector: string): Promis
       .then(() => true, () => false);
     if (shown) return;
   }
-  await page.locator(selector).first().waitFor({ state: "visible" });
+
+  // **Bounded, and this line is why the suite could go silent.** After three
+  // failed attempts this used to wait with no timeout at all -- the config sets
+  // no `actionTimeout`, so `waitFor` without one waits forever. A view that never
+  // appears then wedged the whole run: the reporter printed nothing further, no
+  // test was blamed, and even the test timeout did not surface, because the
+  // failure artefacts are captured from the same stuck page.
+  //
+  // Measured while chasing exactly that: `it renders the cluster graph` calls this
+  // for `Gearbox Graph` when the main area holds only `Gearbox Studio` and
+  // `Gearbox Product` -- no graph tab, nothing to click, and the command fallback
+  // did not bring one either. A missing view has to fail like a missing view.
+  const shown = await page
+    .locator(selector)
+    .first()
+    .waitFor({ state: "visible", timeout: 30_000 })
+    .then(() => true, () => false);
+  if (shown) return;
+
+  const tabs = await page
+    .locator(".lm-TabBar li")
+    .allInnerTexts()
+    .then((all) => all.map((t) => t.trim()).filter((t) => t.length > 0));
+  throw new Error(
+    `"${command}" never showed \`${selector}\` after three attempts and a 30s wait. ` +
+      `Tabs on screen: ${JSON.stringify([...new Set(tabs)])}.`,
+  );
 }
 
 /**

@@ -34,10 +34,35 @@ export function trackWriteTrace(work: Promise<void>): void {
   pending.push(work);
 }
 
+/** How long a guard will wait for an in-flight trace before giving up on it. */
+const FLUSH_TIMEOUT_MS = 5_000;
+
+/**
+ * Wait for the appends still in flight -- but never forever.
+ *
+ * Each append is waiting on `jsonValue()` for the stack, which is a round trip
+ * into the page over CDP. When the page it came from is already closing, that
+ * round trip can simply never settle, and an unbounded `Promise.all` in
+ * `afterEach` then wedges the whole run: no test is running, so no test timeout
+ * ever fires, and the reporter goes silent mid-file with nothing to blame.
+ *
+ * A guard that can hang the suite is worse than a guard that admits it lost a
+ * trace, so this races the batch against a timer. The trace file is still the
+ * record; what is bounded here is only the waiting.
+ */
 export async function flushWriteTraces(): Promise<void> {
   const batch = pending;
   pending = [];
-  await Promise.all(batch);
+  if (batch.length === 0) return;
+  let timer: NodeJS.Timeout | undefined;
+  const bound = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, FLUSH_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([Promise.all(batch).then(() => undefined), bound]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 export function readWriteTraces(): string[] {

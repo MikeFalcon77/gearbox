@@ -319,15 +319,27 @@ test.describe("the graph's own claims", () => {
         await runCommand(freshStudio.page, "Gearbox Graph");
       }
       await freshStudio.page.locator(".gbx-svg").waitFor({ state: "visible" });
-      return freshStudio.page.evaluate(() =>
-        Array.from(document.querySelectorAll("[data-gear]"))
-          .map((e) => {
-            const box = (e as SVGGraphicsElement).getBoundingClientRect();
-            return `${e.getAttribute("data-gear")}@${Math.round(box.x)},${Math.round(box.y)}`;
-          })
-          .sort()
-          .join("|"),
-      );
+      const read = (): Promise<string> =>
+        freshStudio.page.evaluate(() =>
+          Array.from(document.querySelectorAll("[data-gear]"))
+            .map((e) => {
+              const box = (e as SVGGraphicsElement).getBoundingClientRect();
+              return `${e.getAttribute("data-gear")}@${Math.round(box.x)},${Math.round(box.y)}`;
+            })
+            .sort()
+            .join("|"),
+        );
+
+      // Laid out, not merely on screen. The SVG becomes visible before its nodes
+      // have positions, so reading straight after `waitFor` samples a graph where
+      // every node is at `0,0` -- which compares equal to nothing and, on a slow
+      // machine, made a claim about *determinism* fail for being early. Waiting
+      // for the layout is not a workaround: an unlaid-out graph is not the thing
+      // this measures.
+      await expect
+        .poll(async () => (await read()).includes("@0,0"), { timeout: 30_000 })
+        .toBe(false);
+      return read();
     };
 
     const before = await positions();

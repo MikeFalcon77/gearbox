@@ -7,7 +7,6 @@
 
 import { ReactWidget } from "@theia/core/lib/browser";
 import { MessageService } from "@theia/core/lib/common/message-service";
-import { URI } from "@theia/core/lib/common/uri";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 import { FileDialogService } from "@theia/filesystem/lib/browser";
@@ -112,12 +111,55 @@ export class CreateProductWidget extends ReactWidget {
     return trimmed === "" ? this.defaultProductPath() : trimmed.replace(/\\/g, "/");
   }
 
+  /** The directory the description lands in -- `productPath()` minus the file. */
+  protected productDir(): string {
+    const path = this.productPath();
+    const cut = path.lastIndexOf("/");
+    return cut <= 0 ? path : path.slice(0, cut);
+  }
+
+  /**
+   * A source root as the new description should name it.
+   *
+   * **Relative where a relative form exists, absolute only where none does** --
+   * the rule the generator already states for `path =` values: a tree that still
+   * resolves after the whole checkout moves is the goal, and a root on another
+   * volume has no relative form at all.
+   *
+   * Two things were wrong here and a claim found both. The distance was measured
+   * from the *default* product directory rather than the chosen one, so any other
+   * destination produced entries pointing at nothing. And `URI.relative` only
+   * expresses descendants: the corpus is a **sibling** of this checkout, so it
+   * returned nothing and every generated product named its sources by absolute
+   * path -- correct on the machine that made it and broken for everyone who
+   * cloned it. `../../../gears-rust` is exactly the form the existing
+   * `payments-demo` uses, and it was the one form this could not produce.
+   */
   protected relativeSource(at: string): string {
-    const productDir = `${this.workspaceRoot()}/products/${this.productId}`;
-    const from = URI.fromFilePath(productDir);
-    const to = URI.fromFilePath(at);
-    const relative = from.relative(to);
-    return relative !== undefined ? relative.fsPath().replace(/\\/g, "/") : at;
+    const from = this.productDir().replace(/\\/g, "/").replace(/\/+$/, "");
+    const to = at.replace(/\\/g, "/").replace(/\/+$/, "");
+    const fromParts = from.split("/");
+    const toParts = to.split("/");
+
+    let shared = 0;
+    while (
+      shared < fromParts.length &&
+      shared < toParts.length &&
+      fromParts[shared] === toParts[shared]
+    ) {
+      shared += 1;
+    }
+
+    // No common root at all -- a different Windows volume, or a path this cannot
+    // reason about. An absolute path that works beats a relative one that does not.
+    if (shared === 0) return to;
+
+    const up = fromParts.slice(shared).map(() => "..");
+    const down = toParts.slice(shared);
+    const relative = [...up, ...down].join("/");
+    // The source *is* the product's own directory: `.` rather than an empty string,
+    // which `path("")` would turn into a refusal one layer down.
+    return relative === "" ? "." : relative;
   }
 
   protected setMode(mode: CreateMode): void {
@@ -198,6 +240,32 @@ export class CreateProductWidget extends ReactWidget {
     });
     if (uri === undefined) return;
     this.cloneFrom = uri.path.fsPath().replace(/\\/g, "/");
+    this.schedulePreview();
+    this.update();
+  }
+
+  /**
+   * Choose the folder the product lands in.
+   *
+   * A folder, not a file: what a person picks is where the product goes, and the
+   * description's name is not theirs to choose -- `product.gdl` is what discovery
+   * looks for. So the dialog selects a directory and this appends the filename.
+   *
+   * The field stays editable beside it. A path is often faster to paste than to
+   * navigate to, and the default has to remain visible and correctable when there
+   * is no dialog worth opening.
+   */
+  protected async browseDestination(): Promise<void> {
+    const uri = await this.fileDialog.showOpenDialog({
+      title: "Folder for the new product",
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+    });
+    if (uri === undefined) return;
+    const folder = uri.path.fsPath().replace(/\\/g, "/").replace(/\/+$/, "");
+    this.destinationTouched = true;
+    this.destination = `${folder}/product.gdl`;
     this.schedulePreview();
     this.update();
   }
@@ -332,16 +400,27 @@ export class CreateProductWidget extends ReactWidget {
           </label>
           <label>
             destination
-            <input
-              data-create-destination
-              value={this.destination}
-              disabled={!connected}
-              onChange={(e) => {
-                this.destinationTouched = true;
-                this.destination = e.target.value;
-                this.schedulePreview();
-              }}
-            />
+            <div className="gbx-create-row">
+              <input
+                data-create-destination
+                value={this.destination}
+                disabled={!connected}
+                onChange={(e) => {
+                  this.destinationTouched = true;
+                  this.destination = e.target.value;
+                  this.schedulePreview();
+                }}
+              />
+              <button
+                type="button"
+                className="theia-button secondary"
+                data-destination-browse
+                disabled={!connected}
+                onClick={() => void this.browseDestination()}
+              >
+                Choose…
+              </button>
+            </div>
           </label>
           {this.mode === "blank" ? (
             <div className="gbx-create-sources">
