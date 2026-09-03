@@ -1744,12 +1744,22 @@ variant became its Rust ident (`AcceptAll`) rather than its wire spelling (`acce
 placeholder offering a value the gear rejects. A projection is only worth what the corpus proves
 about it.
 
-What is **not** built, and must not be claimed: a checkbox changes the description, not the runtime.
-`app_config` never reads `intent.selected_gears[..].config`, and cannot -- `GenerateInput` carries
-only the lock and `ResolvedGear` has no `config` field. Carrying it through moves `lock_hash`, so it
-is its own step, and it is the one M7 needs: `cpt-gearbox-fr-values-schema` wants exactly the three
-facts this projection already produces, and `cpt-gearbox-fr-no-secrets-in-values` wants the `secret`
-flag beside them.
+Carrying the value through to the runtime was its own step, and it turned up the last defect worth
+recording. Once a product's config reached the generator, a key an endpoint derives -- `bind_addr` --
+was overwritten by the projected port **in silence**. The precedence is right, since a hand-written
+port describes a product that was not resolved, but the silence was not: that is `GBX0114`, a
+warning naming the key and the endpoint.
+
+One prediction in the plan was wrong and is worth correcting rather than quietly dropping. Part B was
+supposed to move `lock_hash`; it does not, because the new field is skipped when empty and the demo
+product sets no config. Measured against a worktree at the previous commit, all three profiles hash
+identically. A product that *does* set config gets a different hash, which is the behaviour that was
+actually wanted -- two products differing only in a config value are different products.
+
+What remains is M7's own work: `values.yaml`, `values.schema.json` and the `existingSecret`
+substitution. Both of its inputs now exist -- the values in the lock, and the field types in the
+catalogue, where `cpt-gearbox-fr-values-schema` wants exactly the three facts this projection
+produces and `cpt-gearbox-fr-no-secrets-in-values` wants the `secret` flag beside them.
 
 One thing was fixed the wrong way first. The toolbar showed `Toggle Gearbox Generate`, and the repair
 was a map from command id to caption inside `ToolbarWidget` -- which is exactly the drift that file's

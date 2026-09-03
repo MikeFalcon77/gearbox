@@ -255,14 +255,27 @@ Textual idempotence protects the canonical spellings but not the ones a person m
 `0x1F`, `8_087`, `1e10` and single quotes all normalise on a rewrite, so submitting a whole form
 would quietly erase an operator's hex.
 
-### What this does *not* do
+### The value reaches the runtime, in a second step
 
-**A checkbox changes the description, not yet the runtime.** `app_config` seeds every gear's section
-empty and fills it only from endpoints, consumer wiring, cluster and spawns; nothing reads
-`intent.selected_gears[..].config`, and nothing can — `GenerateInput` carries only the lock, and
-`ResolvedGear` has no `config` field. Carrying it through is a separate change that *does* move
-`lock_hash`, and it is the piece `cpt-gearbox-fr-values-schema` and the Helm work (M7) will build
-on. Until it lands, the UI must not claim otherwise.
+Written first as "a checkbox changes the description, not yet the runtime", which was true for
+exactly one commit. `app_config` seeded every gear's section empty and filled it only from
+endpoints, consumer wiring, cluster and spawns; nothing read `intent.selected_gears[..].config` and
+nothing could, because `GenerateInput` carries the lock and `ResolvedGear` had no `config` field.
+
+`ResolvedGear` carries it now, which is what makes it reachable at all. The description's values go
+in **underneath** the projected facts: a port, a client's wiring and a cluster binding are derived
+from the topology the resolver decided, so a hand-written one would describe a product that was not
+resolved. Losing a written value in silence is a different failure, though, and **`GBX0114`** is
+the answer to it — setting a key an endpoint derives warns, naming the key and the endpoint, at
+warning severity because the product still builds.
+
+`lock_hash` is unchanged for a product that sets no config, since the field is skipped when empty.
+A product that sets one gets a different hash, which is the point: two products differing only in a
+config value are different products.
+
+What is still M7 is the chart itself — `values.yaml`, `values.schema.json` and the
+`existingSecret` substitution `cpt-gearbox-fr-no-secrets-in-values` asks for. Both of that work's
+inputs now exist: the values in the lock, and the field types in the catalogue.
 
 ### Confirmation
 
