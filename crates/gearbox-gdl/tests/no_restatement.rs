@@ -140,7 +140,7 @@ gear(
         package = cargo(crate_name = "p", lib = "p", path = "../p"),
         process_local = True,
     )],
-    config_schema = "schema.json",
+    config_schema = config(rust = "DemoConfig", exposes = ["bind_addr"]),
 )
 "#
     );

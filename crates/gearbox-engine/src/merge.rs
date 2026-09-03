@@ -55,6 +55,7 @@ pub struct Projections<'a> {
     pub contracts_by_trait: &'a BTreeMap<String, ProjectedContract>,
     pub cluster: &'a crate::cluster::ClusterProjection,
     pub plugin: &'a crate::plugin::PluginProjection,
+    pub config: Option<gearbox_ir::ConfigSchema>,
     pub docs: Option<gearbox_ir::GearDocs>,
     pub gts_types: Vec<gearbox_ir::GtsTypeDecl>,
 }
@@ -74,6 +75,7 @@ pub fn merge(
         contracts_by_trait,
         cluster,
         plugin,
+        config,
         docs,
         gts_types,
     } = projections;
@@ -298,7 +300,8 @@ pub fn merge(
         fills: plugin.fills.clone(),
         vendor_selector: plugin.vendor_selector.clone(),
         declared_roles,
-        config_schema: config_schema(decl.config_schema.as_deref(), uri, diagnostics),
+        // Declared curation over projected fields; see `config.rs`.
+        config_schema: config,
         // Found by convention beside the gear and one level up; see `docs.rs`.
         docs,
         gts_types,
@@ -334,31 +337,6 @@ fn lookup<'a>(
         ));
     }
     found
-}
-
-/// The declared `config_schema` path, or `None` with the reason reported.
-///
-/// A path that fails validation used to be dropped with `.ok()`, which left the
-/// gear merged as though the author had never written one -- a catalogue hole
-/// with nothing pointing at it.
-fn config_schema(
-    declared: Option<&str>,
-    uri: &str,
-    diagnostics: &mut Diagnostics,
-) -> Option<RelPath> {
-    let declared = declared?;
-    match RelPath::new(declared) {
-        Ok(path) => Some(path),
-        Err(e) => {
-            diagnostics.push(invalid(
-                uri,
-                format!("`config_schema = \"{declared}\"` is not a usable path: {e}"),
-                "it is relative to the description's own directory and must stay inside the \
-                 source root",
-            ));
-            None
-        }
-    }
 }
 
 /// Convert a declared `cargo(...)` into a catalogue reference.

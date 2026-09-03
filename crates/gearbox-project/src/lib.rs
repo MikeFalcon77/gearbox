@@ -17,6 +17,7 @@
 
 pub mod attribute;
 pub mod cluster;
+pub mod config;
 pub mod contract;
 pub mod gear;
 pub mod gts;
@@ -35,6 +36,7 @@ pub use cluster::{
     ClusterProjectionError, ProjectedClusterProvider, SdkDefaultRule, project_backend_capabilities,
     project_provider_name, project_provider_registry, project_sdk_defaults,
 };
+pub use config::{ConfigField, ConfigRootError, project_config_fields, project_config_root};
 pub use contract::{ProjectedContract, ProjectedProvide, project_contracts, project_provides};
 pub use gear::{ProjectedGear, ProjectedLifecycle, project_gear};
 pub use gts::{GtsError, GtsType, gts_type_from_schema, project_gts_types};

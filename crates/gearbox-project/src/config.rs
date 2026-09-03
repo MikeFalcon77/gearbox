@@ -1,0 +1,500 @@
+//! Projecting a gear's runtime configuration surface out of the struct it
+//! deserializes into.
+//!
+//! **Why this is projected and not declared.** A field's name, type, whether it
+//! is required and what it defaults to are all stated in Rust, and ADR
+//! `cpt-gearbox-adr-macro-projected-catalogue` gives Rust every fact Rust
+//! already expresses. A `gear.gdl` declares only the disjoint remainder, which
+//! for configuration is a product judgement Rust has no way to hold: *which of
+//! these fields is worth putting in front of an integrator*.
+//!
+//! **Who reads the result.** Two consumers, deliberately one model. The Studio
+//! renders a typed control per field; the chart generator owes
+//! `cpt-gearbox-fr-values-schema` a JSON Schema constraining "field exists,
+//! field type, whether field is required" -- which is this struct, field for
+//! field. Deriving them separately is how `Helm values` ends up in the drift
+//! list vision §8 exists to keep it out of. [`ConfigField::secret`] serves the
+//! second requirement of that pair, `cpt-gearbox-fr-no-secrets-in-values`: a
+//! generator cannot write `existingSecret` for a field it cannot tell apart
+//! from a hostname.
+//!
+//! **What is deliberately not projected.** Anything whose value is not a scalar
+//! -- nested structures, lists, `#[serde(flatten)]` maps, a field with a custom
+//! codec -- is reported as [`ConfigFieldType::Complex`] rather than guessed at.
+//! `ApiGatewayConfig` nests seven further structures and `OidcAuthNGearConfig`
+//! more than ten; a form for those is a different project, and the honest answer
+//! meanwhile is to say the shape is not scalar rather than to invent a control
+//! that would write the wrong thing.
+
+use std::path::PathBuf;
+
+use crate::plugin::{
+    free_fn_body, int_literal, last_segment, serde_default_fn, str_literal, struct_literal_fields,
+};
+use gearbox_ir::ConfigFieldType;
+
+use crate::scan::RustFile;
+
+/// One field of a gear's configuration, as Rust states it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigField {
+    /// The name **on the wire**, after `#[serde(rename)]` and `rename_all`.
+    ///
+    /// Not the Rust ident: `TenantConfig::tenant_type` is written `type` in
+    /// every YAML in the corpus, and a control labelled `tenant_type` would
+    /// write a key the gear never reads.
+    pub name: String,
+    pub ty: ConfigFieldType,
+    /// Whether omitting the field is an error.
+    ///
+    /// False when serde would fill it: a container or field `#[serde(default)]`,
+    /// a `default = "fn"`, or an `Option<T>` -- serde's `missing_field` succeeds
+    /// for a type that deserializes from nothing, so an `Option` is optional
+    /// without saying so.
+    pub required: bool,
+    /// The compiled-in default, when it is a literal this can read.
+    pub default: Option<serde_json::Value>,
+    /// The field's doc comment, which is the only prose an operator gets.
+    pub doc: Option<String>,
+    /// The value is a credential slot (`secrecy::SecretString`).
+    pub secret: bool,
+    /// Path relative to the crate's `src/`, and the line of the field.
+    pub relative: PathBuf,
+    pub line: usize,
+}
+
+/// Why the configuration struct could not be identified.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigRootError {
+    /// Several distinct types are deserialized as this gear's config, so which
+    /// one *is* the configuration has no single answer.
+    Ambiguous { roots: Vec<String> },
+}
+
+/// The methods on `GearCtx` that deserialize a gear's configuration.
+///
+/// The join key between a gear and its config type, and the only one there is:
+/// the `Gear` trait has no associated `Config`, so nothing in the type system
+/// records the pairing. Each of these appears at most once per gear in the tree.
+const CONFIG_METHODS: &[&str] = &[
+    "config",
+    "config_or_default",
+    "config_expanded",
+    "config_expanded_or_default",
+];
+
+/// The type a gear deserializes its configuration into, by ident.
+///
+/// **Two spellings, and both are in the tree.** `api-gateway` turbofishes the
+/// type onto the call; `grpc-hub` and the nine others annotate the binding and
+/// let inference carry it:
+///
+/// ```rust,ignore
+/// ctx.config_or_default::<crate::config::ApiGatewayConfig>()   // turbofish
+/// let cfg: GrpcHubConfig = ctx.config_or_default()?;           // annotation
+/// ```
+///
+/// Reading only the first would report "no configuration" for ten of the eleven
+/// configured gears. Looking for `src/config.rs` instead would miss `grpc-hub`,
+/// whose struct lives in `src/gear.rs`.
+///
+/// # Errors
+/// Returns [`ConfigRootError::Ambiguous`] when the crate deserializes more than
+/// one distinct type as its config.
+pub fn project_config_root(files: &[RustFile]) -> Result<Option<String>, ConfigRootError> {
+    let mut found = Vec::new();
+    for file in files {
+        let mut visitor = RootVisitor {
+            files,
+            found: &mut found,
+        };
+        syn::visit::visit_file(&mut visitor, &file.ast);
+    }
+    found.sort();
+    found.dedup();
+
+    match found.len() {
+        0 => Ok(None),
+        1 => Ok(found.into_iter().next()),
+        _ => Err(ConfigRootError::Ambiguous { roots: found }),
+    }
+}
+
+struct RootVisitor<'a> {
+    files: &'a [RustFile],
+    found: &'a mut Vec<String>,
+}
+
+/// Whether a `ctx.config*()` call appears anywhere inside an expression.
+///
+/// A search rather than a match on one shape: `?`, `.await`, `.unwrap()` and
+/// `.expect(..)` all sit between the binding and the call in the tree, and
+/// enumerating the wrappers would leave the next one unread.
+fn calls_config(expr: &syn::Expr) -> bool {
+    struct Search(bool);
+    impl<'ast> syn::visit::Visit<'ast> for Search {
+        fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+            if CONFIG_METHODS.contains(&call.method.to_string().as_str()) {
+                self.0 = true;
+            }
+            syn::visit::visit_expr_method_call(self, call);
+        }
+    }
+    let mut search = Search(false);
+    syn::visit::visit_expr(&mut search, expr);
+    search.0
+}
+
+impl<'ast> syn::visit::Visit<'ast> for RootVisitor<'_> {
+    fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+        if CONFIG_METHODS.contains(&call.method.to_string().as_str())
+            && let Some(turbofish) = call.turbofish.as_ref()
+            && let Some(syn::GenericArgument::Type(ty)) = turbofish.args.first()
+            && let Some(ident) = type_ident(ty)
+        {
+            self.found.push(ident);
+        }
+        syn::visit::visit_expr_method_call(self, call);
+    }
+
+    fn visit_local(&mut self, local: &'ast syn::Local) {
+        // The annotation counts only when it names a struct this crate declares.
+        // Because the call is *searched for* rather than matched, an expression
+        // like `ctx.config::<X>().unwrap().len()` would otherwise record the
+        // binding's `usize`; a config type is a struct, and `usize` is not one.
+        if let syn::Pat::Type(pat) = &local.pat
+            && let Some(init) = local.init.as_ref()
+            && calls_config(&init.expr)
+            && let Some(ident) = type_ident(&pat.ty)
+            && find_struct(self.files, &ident).is_some()
+        {
+            self.found.push(ident);
+        }
+        syn::visit::visit_local(self, local);
+    }
+}
+
+/// The last path segment of a type, which is the ident a struct is found by.
+fn type_ident(ty: &syn::Type) -> Option<String> {
+    match ty {
+        syn::Type::Path(p) => Some(last_segment(&p.path)),
+        syn::Type::Reference(r) => type_ident(&r.elem),
+        _ => None,
+    }
+}
+
+/// The serde attributes this projection reads, from one container or field.
+#[derive(Default)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "each flag is one independent serde attribute; collapsing them into \
+              an enum would claim they are mutually exclusive, and `skip` with \
+              `default` is a pair that occurs"
+)]
+struct SerdeAttrs {
+    default_bare: bool,
+    default_fn: Option<String>,
+    rename: Option<String>,
+    rename_all: Option<String>,
+    /// A custom codec: the wire shape is no longer the Rust type's.
+    with: bool,
+    flatten: bool,
+    skip: bool,
+}
+
+fn serde_attrs(attrs: &[syn::Attribute]) -> SerdeAttrs {
+    let mut out = SerdeAttrs {
+        default_fn: serde_default_fn(attrs),
+        ..SerdeAttrs::default()
+    };
+    for attr in attrs.iter().filter(|a| a.path().is_ident("serde")) {
+        // `parse_nested_meta` errors on forms it does not understand; each arm
+        // records what it recognises and the rest is not a failure worth
+        // reporting, exactly as `serde_default_fn` treats it.
+        drop(attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("default") {
+                // Bare `default` is followed by a comma or by the end of the
+                // list; `default = "fn"` by an `=`. Testing for an empty input
+                // instead would miss `#[serde(default, deny_unknown_fields)]`,
+                // which is how most of the corpus spells it.
+                if !meta.input.peek(syn::Token![=]) {
+                    out.default_bare = true;
+                }
+            } else if meta.path.is_ident("flatten") {
+                out.flatten = true;
+            } else if meta.path.is_ident("skip") {
+                out.skip = true;
+            } else if meta.path.is_ident("with") {
+                out.with = true;
+            } else if meta.path.is_ident("rename")
+                && let Ok(value) = meta.value()
+                && let Ok(lit) = value.parse::<syn::LitStr>()
+            {
+                out.rename = Some(lit.value());
+            } else if meta.path.is_ident("rename_all")
+                && let Ok(value) = meta.value()
+                && let Ok(lit) = value.parse::<syn::LitStr>()
+            {
+                out.rename_all = Some(lit.value());
+            }
+            Ok(())
+        }));
+    }
+    out
+}
+
+/// Apply serde's `rename_all` to one identifier.
+///
+/// The cases are serde's, spelled as serde spells them. An unknown value leaves
+/// the name alone rather than guessing: a wrong rename produces a key the gear
+/// silently never reads, which is worse than no rename at all.
+fn rename_all(value: &str, ident: &str) -> String {
+    use heck::{
+        ToKebabCase as _, ToLowerCamelCase as _, ToShoutyKebabCase as _, ToShoutySnakeCase as _,
+        ToSnakeCase as _, ToUpperCamelCase as _,
+    };
+    match value {
+        "lowercase" => ident.to_lowercase(),
+        "UPPERCASE" => ident.to_uppercase(),
+        "PascalCase" => ident.to_upper_camel_case(),
+        "camelCase" => ident.to_lower_camel_case(),
+        "snake_case" => ident.to_snake_case(),
+        "SCREAMING_SNAKE_CASE" => ident.to_shouty_snake_case(),
+        "kebab-case" => ident.to_kebab_case(),
+        "SCREAMING-KEBAB-CASE" => ident.to_shouty_kebab_case(),
+        _ => ident.to_owned(),
+    }
+}
+
+/// Find a named item by ident across the scanned files.
+fn find_item<'a>(files: &'a [RustFile], ident: &str) -> Option<&'a syn::Item> {
+    files
+        .iter()
+        .flat_map(|f| f.ast.items.iter())
+        .find(|item| match item {
+            syn::Item::Struct(s) => s.ident == ident,
+            syn::Item::Enum(e) => e.ident == ident,
+            _ => false,
+        })
+}
+
+/// The struct an ident names, together with the file it was found in.
+fn find_struct<'a>(
+    files: &'a [RustFile],
+    ident: &str,
+) -> Option<(&'a RustFile, &'a syn::ItemStruct)> {
+    files.iter().find_map(|f| {
+        f.ast.items.iter().find_map(|item| match item {
+            syn::Item::Struct(s) if s.ident == ident => Some((f, s)),
+            _ => None,
+        })
+    })
+}
+
+/// The wire spellings of a unit-only enum, or `None` if it is not one.
+///
+/// A data-carrying variant means the value is not a scalar, so there is no
+/// control for it and `Complex` is the truthful answer.
+fn unit_enum_variants(item: &syn::ItemEnum) -> Option<Vec<String>> {
+    let container = serde_attrs(&item.attrs);
+    item.variants
+        .iter()
+        .map(|variant| {
+            if !matches!(variant.fields, syn::Fields::Unit) {
+                return None;
+            }
+            let attrs = serde_attrs(&variant.attrs);
+            let ident = variant.ident.to_string();
+            Some(attrs.rename.unwrap_or_else(|| {
+                container
+                    .rename_all
+                    .as_deref()
+                    .map_or(ident.clone(), |rule| rename_all(rule, &ident))
+            }))
+        })
+        .collect()
+}
+
+/// Whether a path type is `Option<T>`, and its `T`.
+fn option_inner(ty: &syn::Type) -> Option<&syn::Type> {
+    let syn::Type::Path(p) = ty else { return None };
+    let segment = p.path.segments.last()?;
+    if segment.ident != "Option" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    args.args.iter().find_map(|arg| match arg {
+        syn::GenericArgument::Type(inner) => Some(inner),
+        _ => None,
+    })
+}
+
+/// Classify a field's Rust type into the control it admits.
+fn classify(ty: &syn::Type, files: &[RustFile]) -> (ConfigFieldType, bool) {
+    let Some(ident) = type_ident(ty) else {
+        return (ConfigFieldType::Complex, false);
+    };
+    match ident.as_str() {
+        // A path is a string on the wire, and an operator types one.
+        "String" | "str" | "PathBuf" | "Path" => (ConfigFieldType::Str, false),
+        // The point of the type is that its value is a credential.
+        "SecretString" => (ConfigFieldType::Str, true),
+        "bool" => (ConfigFieldType::Bool, false),
+        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128"
+        | "usize" => (ConfigFieldType::Int, false),
+        "f32" | "f64" => (ConfigFieldType::Float, false),
+        _ => match find_item(files, &ident) {
+            Some(syn::Item::Enum(e)) => unit_enum_variants(e)
+                .map_or((ConfigFieldType::Complex, false), |v| {
+                    (ConfigFieldType::Enum { variants: v }, false)
+                }),
+            // A struct, a collection, or a type from a crate outside the scan.
+            // All three are "no control", and saying so beats guessing.
+            _ => (ConfigFieldType::Complex, false),
+        },
+    }
+}
+
+/// The literal an expression carries, for the field defaults worth showing.
+fn literal_value(expr: &syn::Expr) -> Option<serde_json::Value> {
+    if let Some(s) = str_literal(expr) {
+        return Some(serde_json::Value::String(s));
+    }
+    if let Some(i) = int_literal(expr) {
+        return Some(serde_json::Value::from(i));
+    }
+    match expr {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Bool(b),
+            ..
+        }) => Some(serde_json::Value::Bool(b.value)),
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Float(f),
+            ..
+        }) => f
+            .base10_parse::<f64>()
+            .ok()
+            .and_then(serde_json::Number::from_f64)
+            .map(serde_json::Value::Number),
+        // `Mode::AcceptAll` as a default: the variant name is the useful part.
+        syn::Expr::Path(p) => Some(serde_json::Value::String(last_segment(&p.path))),
+        _ => None,
+    }
+}
+
+/// The `Self { .. }` of `impl Default for <ident>`, as field name to expression.
+fn default_impl_fields<'a>(files: &'a [RustFile], ident: &str) -> Vec<(String, &'a syn::Expr)> {
+    files
+        .iter()
+        .flat_map(|f| f.ast.items.iter())
+        .filter_map(|item| match item {
+            syn::Item::Impl(imp) => Some(imp),
+            _ => None,
+        })
+        .filter(|imp| {
+            imp.trait_
+                .as_ref()
+                .is_some_and(|(_, path, _)| last_segment(path) == "Default")
+                && matches!(&*imp.self_ty, syn::Type::Path(p) if last_segment(&p.path) == ident)
+        })
+        .flat_map(struct_literal_fields)
+        .collect()
+}
+
+/// The doc comment on an item, as one line of prose.
+fn doc_of(attrs: &[syn::Attribute]) -> Option<String> {
+    let lines: Vec<String> = attrs
+        .iter()
+        .filter(|a| a.path().is_ident("doc"))
+        .filter_map(|a| match &a.meta {
+            syn::Meta::NameValue(nv) => str_literal(&nv.value),
+            _ => None,
+        })
+        .map(|line| line.trim().to_owned())
+        .filter(|line| !line.is_empty())
+        .collect();
+    (!lines.is_empty()).then(|| lines.join(" "))
+}
+
+/// Every scalar-or-not field of the gear's configuration struct.
+///
+/// `root` is the struct ident, from [`project_config_root`] or from a
+/// description's `config_schema = config(rust = ...)` escape hatch. Returns an
+/// empty vector when the ident names nothing here, which is what a caller should
+/// report as "not found" rather than as "no configuration".
+#[must_use]
+pub fn project_config_fields(files: &[RustFile], root: &str) -> Vec<ConfigField> {
+    let Some((file, item)) = find_struct(files, root) else {
+        return Vec::new();
+    };
+    let syn::Fields::Named(named) = &item.fields else {
+        // A tuple or unit struct has no named keys, so it has no surface an
+        // operator can set. `ApiContractsConfig` is exactly this.
+        return Vec::new();
+    };
+
+    let container = serde_attrs(&item.attrs);
+    let defaults = default_impl_fields(files, root);
+
+    named
+        .named
+        .iter()
+        .filter_map(|field| {
+            let ident = field.ident.as_ref()?.to_string();
+            let attrs = serde_attrs(&field.attrs);
+            if attrs.skip {
+                return None;
+            }
+
+            let name = attrs.rename.clone().unwrap_or_else(|| {
+                container
+                    .rename_all
+                    .as_deref()
+                    .map_or(ident.clone(), |rule| rename_all(rule, &ident))
+            });
+
+            let optional = option_inner(&field.ty);
+            let (ty, secret) = if attrs.with || attrs.flatten {
+                // A custom codec or a flattened map: the wire shape is not this
+                // type's, so there is nothing honest to render.
+                (ConfigFieldType::Complex, false)
+            } else {
+                classify(optional.unwrap_or(&field.ty), files)
+            };
+
+            let required = !container.default_bare
+                && !attrs.default_bare
+                && attrs.default_fn.is_none()
+                && optional.is_none();
+
+            let default = attrs
+                .default_fn
+                .as_deref()
+                .and_then(|name| free_fn_body(files, name))
+                .or_else(|| {
+                    defaults
+                        .iter()
+                        .find(|(f, _)| *f == ident)
+                        .map(|(_, expr)| *expr)
+                })
+                .and_then(literal_value);
+
+            Some(ConfigField {
+                name,
+                ty,
+                required,
+                default,
+                doc: doc_of(&field.attrs),
+                secret,
+                relative: file.relative.clone(),
+                line: field.ident.as_ref().map_or(0, |i| i.span().start().line),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod config_tests;

@@ -112,6 +112,28 @@ gdl_record! {
 }
 
 gdl_record! {
+    /// `config(rust = ..., exposes = [...])` -- the gear's configuration surface.
+    ///
+    /// A **locator plus a curation**, and neither half restates the other. `rust`
+    /// says which struct the gear deserializes its configuration into, playing
+    /// the same role `sdk` plays for an extension point: nothing in the gear's
+    /// own crate says it, and the projector reads the fields once it is told
+    /// where to look. It is optional because the projector can usually find the
+    /// struct itself, from the single `ctx.config*()` call in `impl Gear::init`.
+    ///
+    /// `exposes` is the half Rust cannot hold: *which* of a struct's fields is
+    /// worth putting in front of an integrator, and in what order.
+    /// `ApiGatewayConfig` declares fourteen and the configuration files in the
+    /// tree set five. Naming a field that does not exist is an error rather than
+    /// a silent omission -- that check is what keeps this from becoming a second
+    /// copy of the struct.
+    ConfigRecord as "gdl_config" {
+        pub rust: Option<String>,
+        pub exposes: Vec<String>,
+    }
+}
+
+gdl_record! {
     /// `lifecycle(entry = ..., stop_timeout = ..., await_ready = ...)`
     LifecycleRecord as "gdl_lifecycle" {
         pub entry: Option<String>,

@@ -59,7 +59,7 @@ pub struct GearDecl {
     /// scanner where to look is not restating the fact it will find.
     pub cluster_plugins: Vec<crate::records::ClusterPluginRecord>,
     pub declared_roles: Vec<RoleRecord>,
-    pub config_schema: Option<String>,
+    pub config_schema: Option<crate::records::ConfigRecord>,
     /// Where the `gear(...)` call was written in the description.
     pub declared_at: Option<gearbox_ir::Location>,
 }

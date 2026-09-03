@@ -35,8 +35,8 @@ use starlark::values::list::UnpackList;
 use starlark::values::none::NoneType;
 
 use crate::records::{
-    CargoRecord, ClusterPluginRecord, ClusterRequireRecord, ConsumeRecord, DocsRecord,
-    EndpointRecord, GrpcRecord, LifecycleRecord, ProvideRecord, RestRecord, RoleRecord,
+    CargoRecord, ClusterPluginRecord, ClusterRequireRecord, ConfigRecord, ConsumeRecord,
+    DocsRecord, EndpointRecord, GrpcRecord, LifecycleRecord, ProvideRecord, RestRecord, RoleRecord,
 };
 use crate::sink::{GdlSink, GearDecl};
 use crate::values::GdlEnum;
@@ -107,6 +107,20 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             design: design.map(str::to_owned),
             adr: adr.map(|l| l.items).unwrap_or_default(),
             openapi: openapi.map(str::to_owned),
+        })
+    }
+
+    /// `config(...)` -- where the gear's configuration lives, and what to show.
+    ///
+    /// See [`ConfigRecord`] for why the locator and the curation belong
+    /// together and why neither restates the other.
+    fn config(
+        #[starlark(require = named)] rust: Option<&str>,
+        #[starlark(require = named)] exposes: Option<UnpackList<String>>,
+    ) -> anyhow::Result<ConfigRecord> {
+        Ok(ConfigRecord {
+            rust: rust.map(str::to_owned),
+            exposes: exposes.map(|l| l.items).unwrap_or_default(),
         })
     }
 
@@ -304,7 +318,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] serves: Option<UnpackList<&'v EndpointRecord>>,
         #[starlark(require = named)] cluster_plugins: Option<UnpackList<&'v ClusterPluginRecord>>,
         #[starlark(require = named)] roles: Option<UnpackList<&'v RoleRecord>>,
-        #[starlark(require = named)] config_schema: Option<&str>,
+        #[starlark(require = named)] config_schema: Option<&'v ConfigRecord>,
         // Accepted only to be refused by name, so the diagnostic can say which
         // attribute owns the fact instead of "unknown argument".
         #[starlark(require = named)] id: Option<&str>,
@@ -373,7 +387,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             declared_roles: roles
                 .map(|l| l.items.into_iter().cloned().collect())
                 .unwrap_or_default(),
-            config_schema: config_schema.map(str::to_owned),
+            config_schema: config_schema.cloned(),
             declared_at: crate::declarative::call_location(eval),
         });
         Ok(NoneType)

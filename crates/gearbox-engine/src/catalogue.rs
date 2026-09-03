@@ -499,6 +499,7 @@ fn project_and_merge(
     };
 
     let plugin = crate::plugin::project(identity, decl, &files, &sdk_files, diagnostics);
+    let config = crate::config::project(identity, decl, &files, diagnostics);
 
     // GTS types a gear *exposes* are the ones declared in its SDK; a type in the
     // main crate is internal and a `gts_id!` reference is not a declaration.
@@ -553,6 +554,7 @@ fn project_and_merge(
             contracts_by_trait: &contracts_by_trait,
             cluster: &cluster,
             plugin: &plugin,
+            config,
             docs,
             gts_types,
         },

@@ -244,6 +244,14 @@ diagnostic_codes! {
     /// is the one outcome worse than refusing.
     GdlUnknownProfile = "GBX0111", Gdl, Error, false, "unknown deployment profile";
 
+    /// A declared `config_schema` names a struct the gear's crate does not
+    /// declare, or the crate deserializes more than one type as its config.
+    ///
+    /// An error for the same reason `GBX0109` is: a locator written by hand and
+    /// pointing at nothing is a typo, and a configuration surface projected from
+    /// the wrong struct would offer fields the gear never reads.
+    GdlConfigStructNotFound = "GBX0112", Gdl, Error, false, "config_schema names no usable struct";
+
     // ---------------------------------------------------------------- GBX02xx
     // GBX0201-GBX0205 are deliberately absent. They compared a `gear.gdl`
     // restatement of the gear id, co-location dependencies, runtime
@@ -316,6 +324,16 @@ diagnostic_codes! {
     /// identified, so this is an error rather than a guess
     /// (`cpt-gearbox-fr-attribute-location`).
     ValidateAttributeAmbiguous = "GBX0211", Validate, Error, false, "gear attribute could not be located unambiguously";
+
+    /// A description exposes a configuration field its gear's struct does not
+    /// declare.
+    ///
+    /// The check that keeps `exposes` from becoming a second copy of the struct.
+    /// A curated list is a product judgement and legitimately declared, but it
+    /// refers to Rust facts, and a reference that no longer resolves is drift --
+    /// detected here rather than surfacing as a control writing a key the gear
+    /// ignores.
+    ValidateConfigFieldUnknown = "GBX0212", Validate, Error, false, "exposed config field is not declared by the gear";
 
     // ---------------------------------------------------------------- GBX03xx
     /// A selected or depended-upon gear is not in the catalogue.

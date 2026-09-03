@@ -64,7 +64,7 @@ pub enum PluginImplError {
 /// Accepts the four spellings the tree uses: a bare literal, `.to_owned()`,
 /// `.to_string()`, `.into()`, and `String::from("...")`. Anything else is not a
 /// compile-time constant and must not be guessed at.
-fn str_literal(expr: &syn::Expr) -> Option<String> {
+pub(crate) fn str_literal(expr: &syn::Expr) -> Option<String> {
     match expr {
         syn::Expr::Lit(syn::ExprLit {
             lit: syn::Lit::Str(s),
@@ -93,7 +93,7 @@ fn str_literal(expr: &syn::Expr) -> Option<String> {
 }
 
 /// Unwrap the integer a literal expression yields, including a negative one.
-fn int_literal(expr: &syn::Expr) -> Option<i64> {
+pub(crate) fn int_literal(expr: &syn::Expr) -> Option<i64> {
     match expr {
         syn::Expr::Lit(syn::ExprLit {
             lit: syn::Lit::Int(i),
@@ -107,7 +107,7 @@ fn int_literal(expr: &syn::Expr) -> Option<i64> {
     }
 }
 
-fn last_segment(path: &syn::Path) -> String {
+pub(crate) fn last_segment(path: &syn::Path) -> String {
     path.segments
         .last()
         .map(|s| s.ident.to_string())
@@ -236,7 +236,7 @@ fn vendor_from_default_impl(files: &[RustFile]) -> VendorDefault {
 }
 
 /// The `Self { .. }` fields of a `fn default()` body.
-fn struct_literal_fields(imp: &syn::ItemImpl) -> Vec<(String, &syn::Expr)> {
+pub(crate) fn struct_literal_fields(imp: &syn::ItemImpl) -> Vec<(String, &syn::Expr)> {
     let Some(func) = imp.items.iter().find_map(|i| match i {
         syn::ImplItem::Fn(f) if f.sig.ident == "default" => Some(f),
         _ => None,
@@ -285,7 +285,7 @@ fn vendor_from_serde_default(files: &[RustFile]) -> VendorDefault {
 }
 
 /// The function name in `#[serde(default = "name")]`, if present.
-fn serde_default_fn(attrs: &[syn::Attribute]) -> Option<String> {
+pub(crate) fn serde_default_fn(attrs: &[syn::Attribute]) -> Option<String> {
     for attr in attrs {
         if !attr.path().is_ident("serde") {
             continue;
@@ -311,7 +311,7 @@ fn serde_default_fn(attrs: &[syn::Attribute]) -> Option<String> {
 }
 
 /// The trailing expression of a free `fn name() -> _`.
-fn free_fn_body<'a>(files: &'a [RustFile], name: &str) -> Option<&'a syn::Expr> {
+pub(crate) fn free_fn_body<'a>(files: &'a [RustFile], name: &str) -> Option<&'a syn::Expr> {
     files
         .iter()
         .flat_map(|f| f.ast.items.iter())

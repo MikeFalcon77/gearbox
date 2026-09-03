@@ -10,6 +10,7 @@
 export const GEAR_FUNCTIONS: readonly string[] = [
   "cargo",
   "cluster_plugin",
+  "config",
   "consume",
   "docs",
   "endpoint",

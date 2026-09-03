@@ -182,6 +182,95 @@ pub struct DeclaredRole {
     pub instance_addressable: bool,
 }
 
+/// The shape of one configuration value, to the precision a control needs.
+///
+/// `Enum` carries its variants **as data**, read from the Rust enum. A gear
+/// author adding an enum, or a variant to one, must not require a new Gearbox
+/// release -- the same reason an extension point keys on a trait's shape rather
+/// than on a list of trait names.
+///
+/// `Complex` is the honest answer for anything that is not a scalar: a nested
+/// structure, a list, a `#[serde(flatten)]` map, or a type declared outside the
+/// crates that were scanned. It carries no control, and inventing one would
+/// write a value the gear rejects.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ConfigFieldType {
+    Str,
+    Bool,
+    Int,
+    Float,
+    /// The wire spellings of a unit-only enum, after `rename_all` and `rename`.
+    Enum {
+        variants: Vec<String>,
+    },
+    Complex,
+}
+
+/// One configuration field a product may set on a gear.
+///
+/// Projected from the gear's config struct, never declared: the name, the type,
+/// whether it is required and what it defaults to are all stated in Rust, and
+/// restating them in a description is the drift ADR
+/// `cpt-gearbox-adr-macro-projected-catalogue` exists to make impossible.
+///
+/// Two consumers read this, and that is why it is one model rather than two: the
+/// Studio renders a typed control per field, and the chart generator owes
+/// `cpt-gearbox-fr-values-schema` a JSON Schema constraining exactly "field
+/// exists, field type, whether field is required".
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+pub struct ConfigFieldDecl {
+    /// The name **on the wire**, after `#[serde(rename)]` and `rename_all`.
+    ///
+    /// Not the Rust ident: `TenantConfig::tenant_type` is written `type` in
+    /// every configuration file in the tree, and a control labelled
+    /// `tenant_type` would write a key the gear never reads.
+    pub name: String,
+
+    #[serde(rename = "type")]
+    pub ty: ConfigFieldType,
+
+    /// Whether omitting the field is an error.
+    pub required: bool,
+
+    /// The compiled-in default, when it is a literal the projector can read.
+    ///
+    /// A placeholder in a control, and the `default` of a values schema. Absent
+    /// means "not readable from here", not "there is none".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "string | number | boolean | null")]
+    pub default: Option<serde_json::Value>,
+
+    /// The field's doc comment, which is the only prose an operator gets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+
+    /// The value is a credential slot.
+    ///
+    /// Read from the Rust type (`secrecy::SecretString`), not guessed from the
+    /// name. `cpt-gearbox-fr-no-secrets-in-values` requires generated values to
+    /// express such a field as a reference to an externally managed secret, and
+    /// a generator cannot do that for a field it cannot tell from a hostname.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub secret: bool,
+}
+
+/// A gear's configuration surface, as its description curates it.
+///
+/// The description contributes one product judgement Rust has no way to hold --
+/// *which* fields are worth putting in front of an integrator -- and the field
+/// facts come from Rust. `ApiGatewayConfig` declares fourteen fields while the
+/// configuration files in the tree set five.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+pub struct ConfigSchema {
+    /// The Rust struct the gear deserializes its configuration into.
+    pub rust: String,
+
+    /// The exposed fields, in the order the description named them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<ConfigFieldDecl>,
+}
+
 /// Where a gear's source comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -220,7 +309,10 @@ pub struct ResolvedSource {
 }
 
 /// Everything known about one gear.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+// `PartialEq` without `Eq`: a descriptor now carries a projected config default,
+// which may be a float, and floats have no total equality. Nothing keys a map on
+// a descriptor -- `GearId` does that -- so the marker was never load-bearing.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 pub struct GearDescriptor {
     pub id: GearId,
 
@@ -308,10 +400,20 @@ pub struct GearDescriptor {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declared_roles: Vec<DeclaredRole>,
 
-    /// An opaque pointer to a runtime configuration schema, carried through to
-    /// the lock and otherwise unused for now.
+    /// The gear's configuration surface, when its description locates one.
+    ///
+    /// Was an opaque `RelPath` pointing at a schema file that nothing ever
+    /// opened. It is now the merge of a locator the description gives and the
+    /// fields projected from the struct that locator names -- see
+    /// [`ConfigSchema`]. Absent means the description declares no
+    /// `config_schema`, which for a gear that reads no configuration is the
+    /// right answer rather than a gap.
+    ///
+    /// Not carried into the lock: `ResolvedGear` records what was *decided*, and
+    /// a catalogue's account of what a gear *can* be configured with is not a
+    /// decision. The previous wording claimed the opposite and was never true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_schema: Option<RelPath>,
+    pub config_schema: Option<ConfigSchema>,
 
     /// Where this gear's own documents live.
     ///
@@ -531,7 +633,7 @@ impl GearDescriptor {
 ///
 /// Ordered maps throughout: iteration order is part of the determinism guarantee,
 /// not an implementation detail.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 pub struct Catalogue {
     pub gears: BTreeMap<GearId, GearDescriptor>,
     pub contracts: BTreeMap<ContractId, ContractDescriptor>,
