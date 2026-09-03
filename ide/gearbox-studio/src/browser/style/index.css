@@ -805,6 +805,27 @@
 .gbx-add-gear-actions { display: flex; gap: 8px; margin-top: 16px; align-items: center; flex-wrap: wrap; }
 .gbx-add-gear-note { opacity: 0.8; line-height: 1.45; margin: 0; }
 
+/* Typed config controls. One row per projected field: name, control, and the
+   field's own doc comment as the only prose an operator gets. */
+.gbx-config-fields { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.gbx-config-field {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 2fr;
+  gap: 4px 8px;
+  align-items: center;
+}
+.gbx-config-field-name { font-weight: 600; }
+.gbx-config-field-doc {
+  grid-column: 1 / -1;
+  opacity: 0.75;
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+.gbx-config-field input[type="checkbox"] { justify-self: start; }
+/* A required field with no default: an asterisk that does not depend on colour. */
+.gbx-config-required::after { content: " *"; color: var(--theia-editorWarning-foreground); }
+.gbx-config-blocked { opacity: 0.75; font-style: italic; }
+
 /* The impact section: one block per kind of change, each with a heading that
    counts. Errors warn beside the button, they do not disable it. */
 .gbx-impact-group { margin-bottom: 12px; }

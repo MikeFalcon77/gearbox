@@ -19,6 +19,7 @@ import {
   openProduct,
   resetCatalogueView,
   revealCatalogue,
+  revealInspector,
   settled,
   test,
 } from "../fixtures/studio";
@@ -205,14 +206,49 @@ test.describe("tier 3: a description edited surgically", () => {
 });
 
 test.describe("typed config from schema (Phase 7)", () => {
-  test.fixme(
-    "Inspector projects JSON Schema properties as typed config fields [Phase 7]",
-    async ({ studio }) => {
-      // Skipped until merge.rs projects config_schema JSON into GearDescriptor
-      // config_fields. Until then Add Gear / Inspector show a schema path link
-      // and keep string config inputs.
-      await openProduct(studio.page, "dev");
-      await expect(studio.page.locator("[data-config-field]")).toBeVisible();
-    },
-  );
+  /**
+   * The claim this file carried as a `test.fixme` for two milestones. What
+   * closed it was not the projection alone but the corpus: `config_schema`
+   * declared by nobody meant there was nothing to project, so the feature would
+   * have been a guess. `tenant-resolver` declares one exposed field now.
+   */
+  test("Inspector projects config struct fields as typed controls [Phase 7]", async ({
+    studio,
+  }) => {
+    const page = studio.page;
+    await openProduct(page, "dev");
+    await revealCatalogue(page);
+    await resetCatalogueView(page);
+    await page.locator(".gearbox-catalogue .gbx-row", { hasText: "api-gateway" }).click();
+    await revealInspector(page);
+
+    // api-gateway declares no `config_schema`, so it gets no typed controls --
+    // absence is the honest answer, not an empty form.
+    await expect(page.locator('[data-gear-config="api-gateway"]')).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(page.locator("[data-config-field]")).toHaveCount(0);
+  });
+
+  /**
+   * The field's *type* decides the control, and the type is read from Rust. A
+   * string field gets a text input rather than the untyped key/value row that
+   * stood here before.
+   */
+  test("a projected string field renders as a typed control [Phase 7]", async ({ studio }) => {
+    const page = studio.page;
+    await openProduct(page, "dev");
+    const add = page.locator("[data-add-gear]");
+    await expect(add).toBeVisible({ timeout: 60_000 });
+    await add.click();
+    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+    await page.locator("[data-add-gear-select]").selectOption("tenant-resolver");
+
+    const field = page.locator('[data-config-field="vendor"]');
+    await expect(field).toBeVisible({ timeout: 60_000 });
+    await expect(field).toHaveAttribute("data-config-field-kind", "str");
+    // The default is projected from `impl Default`, not typed into the gdl.
+    await expect(field.locator("input")).toHaveAttribute("placeholder", "constructorfabric");
+    await page.locator("[data-add-gear-cancel]").click();
+  });
 });

@@ -27,6 +27,7 @@ import React from "@theia/core/shared/react";
 
 import type { ExplanationGraph } from "../../common/generated/ExplanationGraph";
 import type { ExplanationNode } from "../../common/generated/ExplanationNode";
+import type { ConfigValue } from "../../common/generated/ConfigValue";
 import type { GearDescriptor } from "../../common/generated/GearDescriptor";
 import type { Location } from "../../common/generated/Location";
 import type { ProvenanceEdge } from "../../common/generated/ProvenanceEdge";
@@ -35,6 +36,7 @@ import type { Row } from "../../common/protocol";
 import { CatalogueStore } from "../catalogue-store";
 import { Focus, ProductStore } from "../product-store";
 import { ProductEditService } from "../product-edit-service";
+import { ConfigFields } from "../add-gear/config-fields";
 import { RevealLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
 import { Selection, SelectionService } from "../shell/selection-service";
@@ -247,7 +249,7 @@ export class InspectorWidget extends ReactWidget {
     return (
       <>
         {this.renderProjected(row.gear)}
-        {this.renderProductGearEdit(selection, row.gear.id)}
+        {this.renderProductGearEdit(selection, row.gear)}
       </>
     );
   }
@@ -258,7 +260,11 @@ export class InspectorWidget extends ReactWidget {
    * Only when the gear is `selected` in the intent — pulled-in gears are not
    * edited here; their facts live in another `use_gear` entry or in the closure.
    */
-  protected renderProductGearEdit(selection: Selection, gearId: string): React.ReactNode {
+  protected renderProductGearEdit(
+    selection: Selection,
+    descriptor: GearDescriptor,
+  ): React.ReactNode {
+    const gearId = descriptor.id;
     if (selection.kind !== "gear") return undefined;
     const intent = this.products.current.intent;
     if (intent === undefined) return undefined;
@@ -266,17 +272,31 @@ export class InspectorWidget extends ReactWidget {
     if (picked === undefined) return undefined;
 
     const config = this.edits.draftConfig(gearId, picked.config ?? {});
+    // Fields the schema covers get typed controls; the text rows keep everything
+    // else, so a key outside a curated `exposes` is still editable.
+    const fields = descriptor.config_schema?.fields ?? [];
+    const typedKeys = new Set(fields.map((f) => f.name));
+    const untyped = Object.fromEntries(
+      Object.entries(config).filter(([key]) => !typedKeys.has(key)),
+    );
     const features = this.edits.draftFeatures(gearId, picked.features ?? []);
     const dirty = this.edits.hasDraft();
 
     return (
       <div className="gbx-product-edit" data-gear-config={gearId}>
         <div className="gbx-detail-title">in this product</div>
+        {fields.length > 0 && (
+          <ConfigFields
+            fields={fields}
+            values={this.edits.draftConfigValues(gearId, picked.config ?? {})}
+            onChange={(key, value) => this.queueConfig(gearId, key, value)}
+          />
+        )}
         <div className="gbx-kv">
           <span>config</span>
           <span className="gbx-config-list" key={`cfg-${gearId}-${this.editEpoch}`}>
-            {Object.keys(config).length === 0 && "—"}
-            {Object.entries(config).map(([key, value]) => (
+            {Object.keys(untyped).length === 0 && "—"}
+            {Object.entries(untyped).map(([key, value]) => (
               <label key={key} className="gbx-config-row" data-config-key={key}>
                 <code>{key}</code>
                 <input
@@ -407,7 +427,7 @@ export class InspectorWidget extends ReactWidget {
     this.update();
   }
 
-  protected queueConfig(gear: string, key: string, value: string | undefined): boolean {
+  protected queueConfig(gear: string, key: string, value: ConfigValue | undefined): boolean {
     return this.edits.queueDraft({
       kind: "set_config",
       gear,

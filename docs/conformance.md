@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **129** — 123 built, 2 not built, 0 broken, 4 not observed.
+Claims: **130** — 125 built, 1 not built, 0 broken, 4 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -35,7 +35,8 @@ Rust, and the ADRs' own Confirmation sections say which.
 | a generated composition crate carries a header naming its generator | `ADR-0010 tier 2` | ✅ built |  |
 | a description edit shows the line before writing it | `ADR-0010 §Consequences: a preview is not optional` | ✅ built |  |
 | adding a gear inserts one line, and removing it restores the file exactly | `ADR-0010 tier 3` | ✅ built |  |
-| Inspector projects JSON Schema properties as typed config fields | `Phase 7` | 🚧 not built |  |
+| Inspector projects config struct fields as typed controls | `Phase 7` | ✅ built |  |
+| a projected string field renders as a typed control | `Phase 7` | ✅ built |  |
 
 ## `conformance/adr-0011-ide-shell.spec.ts`
 

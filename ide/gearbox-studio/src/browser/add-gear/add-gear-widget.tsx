@@ -20,6 +20,7 @@ import { ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
+import type { ConfigValue } from "../../common/generated/ConfigValue";
 import type { Diagnostic } from "../../common/generated/Diagnostic";
 import type { EditGearResult } from "../../common/generated/EditGearResult";
 import type { GearDescriptor } from "../../common/generated/GearDescriptor";
@@ -27,6 +28,7 @@ import type { ProductEdit } from "../../common/generated/ProductEdit";
 import { CatalogueStore } from "../catalogue-store";
 import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
+import { ConfigFields } from "./config-fields";
 import { type Impact, impactOf, isEmpty } from "./impact";
 
 /**
@@ -58,6 +60,14 @@ export class AddGearWidget extends ReactWidget {
   protected newFeature = "";
   protected newPlugin = "";
   protected config: Array<{ key: string; value: string }> = [];
+  /**
+   * Typed values the operator actually changed.
+   *
+   * Only touched keys, because the panel writes only what it holds: a form that
+   * submitted every field would rewrite values nobody edited, normalising an
+   * operator's `0x1F` or `8_087` on the way through.
+   */
+  protected typed = new Map<string, ConfigValue>();
   protected newConfigKey = "";
   protected newConfigValue = "";
   protected preview: EditGearResult | undefined;
@@ -108,6 +118,7 @@ export class AddGearWidget extends ReactWidget {
     this.features = [];
     this.plugins = [];
     this.config = [];
+    this.typed = new Map();
     this.newFeature = "";
     this.newPlugin = "";
     this.newConfigKey = "";
@@ -268,6 +279,9 @@ export class AddGearWidget extends ReactWidget {
     }
     if (this.plugins.length > 0) {
       edits.push({ kind: "set_plugins", gear: gearId, plugins: [...this.plugins] });
+    }
+    for (const [key, value] of this.typed) {
+      edits.push({ kind: "set_config", gear: gearId, key, value });
     }
     for (const { key, value } of this.config) {
       const trimmed = key.trim();
@@ -546,9 +560,32 @@ export class AddGearWidget extends ReactWidget {
   }
 
   protected renderConfig(): React.ReactNode {
+    // The schema's fields as typed controls, then the untyped rows for anything
+    // it does not cover -- a curated `exposes` is a subset, so a key outside it
+    // may still be one the gear reads.
+    const fields = this.descriptor()?.config_schema?.fields ?? [];
     return (
       <div className="gbx-config-list" data-add-gear-config>
-        {this.config.length === 0 && <div className="gbx-empty">No configuration keys yet.</div>}
+        {fields.length > 0 && (
+          <ConfigFields
+            fields={fields}
+            values={this.typed}
+            onChange={(key, value) => {
+              if (value === undefined) this.typed.delete(key);
+              else this.typed.set(key, value);
+              this.scheduleImpact();
+              this.update();
+            }}
+          />
+        )}
+        {fields.length > 0 && (
+          <p className="gbx-add-gear-note">
+            Other keys, including anything nested, can be set as text below.
+          </p>
+        )}
+        {this.config.length === 0 && fields.length === 0 && (
+          <div className="gbx-empty">No configuration keys yet.</div>
+        )}
         {this.config.map((entry, index) => (
           <label key={`${entry.key}-${index}`} className="gbx-config-row" data-config-key={entry.key}>
             <input

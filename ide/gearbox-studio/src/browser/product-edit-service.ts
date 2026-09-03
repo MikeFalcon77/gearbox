@@ -39,6 +39,7 @@ import { URI } from "@theia/core/lib/common/uri";
 import { MonacoTextModelService } from "@theia/monaco/lib/browser/monaco-text-model-service";
 import { inject, injectable } from "@theia/core/shared/inversify";
 
+import type { ConfigValue } from "../common/generated/ConfigValue";
 import type { EditGearResult } from "../common/generated/EditGearResult";
 import type { ProductEdit } from "../common/generated/ProductEdit";
 import type { ResolveResult } from "../common/generated/ResolveResult";
@@ -173,6 +174,33 @@ export class ProductEditService {
       // `String(...)` for the same reason the saved side above uses it: this map
       // feeds the untyped text rows, and a typed control reads the edit itself.
       else out[edit.key] = String(edit.value);
+    }
+    return out;
+  }
+
+  /**
+   * The same overlay as [`draftConfig`], but keeping the values' types.
+   *
+   * Typed controls need the value, not its spelling: a checkbox cannot read
+   * `"true"` back as checked without guessing, and guessing is how `"false"`
+   * becomes a truthy string. Non-scalars are dropped rather than coerced -- they
+   * have no typed control, and the text rows still show them.
+   */
+  draftConfigValues(
+    gear: string,
+    saved: Readonly<Record<string, unknown>>,
+  ): Map<string, ConfigValue> {
+    const out = new Map<string, ConfigValue>();
+    const keep = (key: string, value: unknown): void => {
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        out.set(key, value);
+      }
+    };
+    for (const [key, value] of Object.entries(saved)) keep(key, value);
+    for (const edit of this.draftEdits()) {
+      if (edit.kind !== "set_config" || edit.gear !== gear) continue;
+      if (edit.value == null) out.delete(edit.key);
+      else keep(edit.key, edit.value);
     }
     return out;
   }
@@ -750,7 +778,7 @@ function messageOf(error: unknown): string {
 }
 
 /** Mirror of `gearbox_gdl::edit::is_secret_config_key` for draft-time refusal. */
-function isSecretConfigKey(key: string): boolean {
+export function isSecretConfigKey(key: string): boolean {
   const lower = key.toLowerCase();
   const exact = ["password", "secret", "token", "key", "credential"];
   if (exact.includes(lower)) return true;
