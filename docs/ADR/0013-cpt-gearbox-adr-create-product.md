@@ -208,3 +208,71 @@ and `ide/gearbox-studio/src/browser/add-gear/`; asserted in
 deliberately: **no** `gear.gdl` in the corpus declares `config_schema` — every match in the tree is
 documentation. A projection built against zero examples would be a guess presented as a feature.
 The Plugins section says so in place of the controls.
+
+**Superseded by the amendment of 2026-09-04 below.** The blocker was the corpus, not the design, and
+the corpus changed.
+
+
+## Amendment 2026-09-04: typed config controls, and what they still do not reach
+
+**Status: accepted. This closes the "not in this pass" note above; it reverses nothing about write
+gates, span-surgical edits, or the four UI gates.**
+
+Nine of the fourteen gears in the corpus now declare `config_schema`, so the projection has
+something true to build against. See ADR `cpt-gearbox-adr-macro-projected-catalogue`, amendment
+2026-09-04, for why the field's *types* are projected and only the *selection* is declared.
+
+### The control follows the type, and the type comes from Rust
+
+A bool renders as a checkbox, an enum as a select over the variants the projector read, a number as
+a numeric input, a string as a text box carrying the struct's own default as its placeholder. The
+Studio knows no enum names: variants arrive as data, so adding one changes no Studio code. A field
+whose shape could not be read says so instead of getting an invented control, and the untyped text
+rows still cover every key a curated `exposes` leaves out.
+
+One renderer serves both Add Gear and the Inspector. A control that disagreed with itself between
+the two panels would be worse than no control.
+
+### Values are written typed, which the wire could not do before
+
+`SetConfigParams.value` and `ProductEdit::SetConfig.value` were `Option<String>`, and the dict
+editor quoted every value at three sites, so a checkbox could only ever have written `"True"` — a
+string that reads like a boolean. They now carry `ConfigValue`, an untagged scalar, and quoting
+moved up out of the span surgeon, which had been the one place deciding that every config value was
+a string.
+
+The evaluator was widened in the same change rather than later: it knew no floats and capped
+integers at `i32`, so a number control could otherwise have written a description that parsed and
+then refused to evaluate, naming neither the range nor the field.
+
+The secret-key heuristic narrows to strings on both sides. A `bool` named `mtls_key` was unwritable
+for a reason that never applied to it.
+
+### A field is written only if it was touched
+
+The panel sends `set_config` for the fields the operator actually changed, never for every row.
+Textual idempotence protects the canonical spellings but not the ones a person may have chosen:
+`0x1F`, `8_087`, `1e10` and single quotes all normalise on a rewrite, so submitting a whole form
+would quietly erase an operator's hex.
+
+### What this does *not* do
+
+**A checkbox changes the description, not yet the runtime.** `app_config` seeds every gear's section
+empty and fills it only from endpoints, consumer wiring, cluster and spawns; nothing reads
+`intent.selected_gears[..].config`, and nothing can — `GenerateInput` carries only the lock, and
+`ResolvedGear` has no `config` field. Carrying it through is a separate change that *does* move
+`lock_hash`, and it is the piece `cpt-gearbox-fr-values-schema` and the Helm work (M7) will build
+on. Until it lands, the UI must not claim otherwise.
+
+### Confirmation
+
+* A gear's exposed fields render as controls typed from its struct, with its projected defaults as
+  placeholders; a nested field is offered none.
+* `GBX0212` names the field when `exposes` drifts from the struct; `GBX0113` names the key, the
+  struct and the expected type when a value does not match.
+* A bool is written as `True`, an integer bare, and both survive a round trip through the evaluator.
+
+Implemented in `crates/gearbox-project/src/config.rs`, `crates/gearbox-engine/src/config.rs` and
+`config_check.rs`, `crates/gearbox-gdl/src/edit_call.rs`, and
+`ide/gearbox-studio/src/browser/add-gear/config-fields.tsx`; asserted in
+`ide/tests/conformance/adr-0010-ownership-tiers.spec.ts`.

@@ -1703,11 +1703,53 @@ Plugins section would understate the closure by exactly the amount the section e
 Building a product is add-a-gear-then-bind-it; blocking the first step until the second is done makes
 the intermediate state unreachable, and that state is where most of the work happens.
 
-The ninth section, typed controls projected from `config_schema`, is **not** being built, and the
-reason is a measurement rather than a preference: of the twelve `gear.gdl` files in the corpus, zero
-declare `config_schema` -- every match in the tree is documentation. A projection built against no
-examples would be a guess wearing the clothes of a feature. The claim stays `test.fixme` and the panel
-says plainly that the fields are strings.
+The ninth section, typed controls projected from `config_schema`, was **not** built, and the reason
+was a measurement rather than a preference: of the twelve `gear.gdl` files in the corpus, zero
+declared `config_schema` -- every match in the tree was documentation. A projection built against no
+examples would be a guess wearing the clothes of a feature.
+
+#### The ninth section, and the measurement that unblocked it
+
+It is built now, and what changed first was the corpus rather than the code. Nine of the fourteen
+`gear.gdl` files declare `config_schema`; the other five are correct to say nothing --
+`gear-orchestrator` reads no configuration at all and only *rejects* a stale key,
+`api-contracts-consumer` ignores its context, and `api-contracts`'s config struct is a unit struct
+nothing deserializes. Two more, `types-registry` and `cluster`, declare configuration with **zero**
+scalar fields between them -- three `Vec`s and a `BTreeMap` -- so they get no controls either. That
+is five gears where absence is the answer, and it was worth counting before building a form.
+
+**The split is the interesting part, and it moved a row of ADR-0002's table.** A field's name, type,
+requiredness, default and doc comment are Rust facts and are projected; what a description declares
+is only *which* fields are worth showing an integrator. `ApiGatewayConfig` has fourteen fields and
+the platform's own configuration files set five. And `exposes` is checked against the struct on every
+load (`GBX0212`), so the selection cannot quietly stop matching -- which is what keeps a curated list
+from decaying into the second copy the ADR exists to prevent.
+
+Finding the struct turned out to need the same lesson the vendor defaults already taught: read
+**both** spellings. The `Gear` trait has no associated `Config`, so the only link is the single
+`ctx.config*()` call in `init` -- written as a turbofish by `api-gateway` and as a binding annotation
+by the other ten. Reading one would have reported "no configuration" for almost the whole corpus, and
+looking for `src/config.rs` instead would have missed `grpc-hub`, whose struct lives in `src/gear.rs`.
+
+Two things surfaced only because the projection ran against real gears. A typed control could not
+write a typed value at all: the wire carried `Option<String>` and the dict editor quoted at three
+sites, so a checkbox would have written `"True"`. And the evaluator knew no floats and capped
+integers at `i32`, so a number control could have produced a description that parsed and then refused
+to evaluate -- the one way this work could have made things worse than the strings it replaced. Both
+were fixed in the commit that introduced the typed wire, not after it.
+
+Reading the nine gears also caught three wrong defaults, all from one arm that took any path
+expression as a string: `None` became `"None"`, a `const` became its own identifier, and an enum
+variant became its Rust ident (`AcceptAll`) rather than its wire spelling (`accept_all`) -- a
+placeholder offering a value the gear rejects. A projection is only worth what the corpus proves
+about it.
+
+What is **not** built, and must not be claimed: a checkbox changes the description, not the runtime.
+`app_config` never reads `intent.selected_gears[..].config`, and cannot -- `GenerateInput` carries
+only the lock and `ResolvedGear` has no `config` field. Carrying it through moves `lock_hash`, so it
+is its own step, and it is the one M7 needs: `cpt-gearbox-fr-values-schema` wants exactly the three
+facts this projection already produces, and `cpt-gearbox-fr-no-secrets-in-values` wants the `secret`
+flag beside them.
 
 One thing was fixed the wrong way first. The toolbar showed `Toggle Gearbox Generate`, and the repair
 was a map from command id to caption inside `ToolbarWidget` -- which is exactly the drift that file's

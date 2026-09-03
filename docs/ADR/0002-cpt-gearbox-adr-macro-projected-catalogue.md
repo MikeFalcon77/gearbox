@@ -362,3 +362,78 @@ This decision directly addresses the following requirements or design elements:
   has to go.
 * `cpt-gearbox-fr-cluster-capability-match` — its inputs are now projected rather than declared, so
   the provider capabilities the resolver matches against cannot disagree with the runtime's.
+
+## Amendment 2026-09-04: `config_schema` becomes a locator, and its fields join the projected column
+
+**Status: accepted. This refines the authority split; it reverses nothing. The projected column
+grows and the declared column shrinks, which is the direction this ADR exists to push.**
+
+The table above places `declared_roles, config_schema` in the declared column with the note
+"forward compatibility and an opaque pointer". For `declared_roles` that still holds. For
+`config_schema` it was a placeholder that turned out to be on the wrong side.
+
+### What moves
+
+A configuration field's **name, type, whether it is required, its default, its doc comment and
+whether it is a credential** are all stated in Rust, in the struct the gear deserializes into.
+Writing them in a description would be exactly the restatement `GBX0210` exists to refuse. They are
+projected.
+
+What a description keeps is the half Rust has no way to hold: **which fields are worth putting in
+front of an integrator, and in what order.** `ApiGatewayConfig` declares fourteen fields and the
+configuration files this platform ships set five. That selection is a product judgement, not a Rust
+fact, and it has no home in the crate.
+
+So `config_schema` stops being a path and becomes a record:
+
+```python
+config_schema = config(exposes = ["bind_addr", "enable_docs", "cors_enabled"]),
+```
+
+`config(rust = "...")` names the struct when the scan cannot. That is the same escape-hatch role
+`sdk = cargo(...)`, `cluster_plugins[].package` and `plugin_interface` already play: telling the
+scanner where to look is not restating the fact it will find.
+
+### The join key, and why it is a call site
+
+The `Gear` trait has no associated `Config` type, so nothing in the type system pairs a gear with
+its configuration. The only machine-readable link is the single `ctx.config*()` call in
+`impl Gear::init`, and it is written **two ways** in this tree -- a turbofish on the call
+(`api-gateway`) and an annotation on the binding (`grpc-hub` and nine others). Reading one spelling
+would have reported "no configuration" for ten of the eleven configured gears, which is the same
+trap `vendor`/`priority` defaults already sprang once. Looking for `src/config.rs` instead would
+miss `grpc-hub`, whose struct lives in `src/gear.rs`.
+
+### `exposes` is checked, not trusted
+
+A curated list refers to Rust facts, so it can drift from them. Naming a field the struct does not
+declare is **`GBX0212`**, and a `config_schema` naming no usable struct is **`GBX0112`**. That check
+is the whole reason a selection is not a second copy: the description states *which*, never *what*,
+and the *which* is verified against the *what* on every load.
+
+### What is deliberately not projected
+
+Anything that is not a scalar -- a nested structure, a list, a `#[serde(flatten)]` map, a field with
+a custom codec, or a type declared outside the scanned crates -- is reported as `Complex` and
+carries no control. `ApiGatewayConfig` nests seven further structures and `OidcAuthNGearConfig` more
+than ten; a form for those is a different problem, and the honest answer meanwhile is to say the
+shape is not scalar rather than to invent a control that would write the wrong thing.
+
+The same rule covers enums: variants travel **as data** read from the enum, so a gear author adding
+one needs no Gearbox release. When the enum is declared outside the scan -- as
+`InternalAuthEnforcement` is, in `libs/toolkit-transport-grpc` -- the field degrades to free text
+rather than having its variants guessed.
+
+### Consequences
+
+* Two consumers read one model, which is the point. The Studio renders a typed control per field;
+  the chart generator owes `cpt-gearbox-fr-values-schema` a JSON Schema constraining "field exists,
+  field type, whether field is required" -- the same three facts, and `secret` is what
+  `cpt-gearbox-fr-no-secrets-in-values` needs to render `existingSecret` instead of a value.
+  Deriving them twice is how `Helm values` gets back onto the drift list in §8.
+* The catalogue now parses a gear's config struct on every load. It costs nothing: `CrateScans`
+  already holds the crate's parsed files for the gear attribute and the extension points, so this is
+  one more walk of an AST that is in memory, with no extra read and no extra `syn` parse.
+* `config_schema` is **not** carried into the lock. `ResolvedGear` records what was *decided*, and a
+  catalogue's account of what a gear *can* be configured with is not a decision. The field's old doc
+  comment claimed the opposite and was never true.
