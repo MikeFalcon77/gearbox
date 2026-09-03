@@ -252,6 +252,20 @@ diagnostic_codes! {
     /// the wrong struct would offer fields the gear never reads.
     GdlConfigStructNotFound = "GBX0112", Gdl, Error, false, "config_schema names no usable struct";
 
+    /// A `config = {...}` value does not match the type its gear declares for
+    /// that field.
+    ///
+    /// An error rather than a warning: unlike an unfamiliar category (GBX0108),
+    /// there is no reading under which the product still works. A `bind_addr`
+    /// set to `True` builds a binary that starts and then fails to deserialize
+    /// its own generated configuration -- the same failure, moved somewhere
+    /// nobody is looking.
+    ///
+    /// Only fields a description exposes are checked. A key outside that list is
+    /// not reported: `exposes` is a curated subset, so a key it omits may still
+    /// be one the gear reads.
+    GdlConfigTypeMismatch = "GBX0113", Gdl, Error, false, "config value does not match the declared field type";
+
     // ---------------------------------------------------------------- GBX02xx
     // GBX0201-GBX0205 are deliberately absent. They compared a `gear.gdl`
     // restatement of the gear id, co-location dependencies, runtime

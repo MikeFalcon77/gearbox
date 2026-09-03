@@ -90,6 +90,9 @@ pub fn validate_at(
         Some(intent) => {
             let uri = product_uri(intent, product_path);
             check_selections(roots, &scan, intent, &uri, &mut diagnostics);
+            // The other join that needs no resolver: a config value against the
+            // type its gear declares for that field.
+            crate::config_check::check(&scan.catalogue, intent, &uri, &mut diagnostics);
             // An unfilled extension point is a product that builds and then
             // finds nothing at runtime. It needs the catalogue and the product
             // and no resolution at all, so validate is where it belongs.

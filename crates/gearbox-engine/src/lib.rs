@@ -13,6 +13,7 @@
 pub mod catalogue;
 pub mod cluster;
 pub mod config;
+pub mod config_check;
 pub mod docs;
 pub mod generate;
 pub mod manifest_check;

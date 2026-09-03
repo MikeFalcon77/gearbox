@@ -105,6 +105,13 @@ pub fn resolve_at(
     };
     let cuts = cuts::classify(catalogue, &closure, &uri, &mut diagnostics);
 
+    // Not a resolver step: a join between the product's config values and the
+    // types the catalogue projected for them, which needs no resolution at all.
+    // It runs here as well as in `validate` because the Add Gear panel resolves
+    // rather than validates, and a check only `validate` performed would never
+    // reach the person setting the value. `Diagnostics::finish` dedups.
+    crate::config_check::check(catalogue, intent, &uri, &mut diagnostics);
+
     // Step 4 -- processes. An unknown profile is reported rather than assumed,
     // because guessing `embedded` would silently resolve the wrong topology.
     // Includes this profile's plugins: a plugin is a gear the description named,
