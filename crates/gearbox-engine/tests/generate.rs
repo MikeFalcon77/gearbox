@@ -356,10 +356,9 @@ impl Drop for Out {
     }
 }
 
-/// A one-file set. Hand-built: nothing in `gears-rust` produces an
-/// `OperatorOwned` or `GeneratedOnce` file, because the only operator-owned
-/// artefact in the whole design is Helm's `values.yaml` and M7 is where that
-/// arrives.
+/// A one-file set. Hand-built for the writer tests: the real `OperatorOwned`
+/// artefact is Helm's `values.yaml`, asserted separately against a generated
+/// prod tree.
 fn one(path: &str, body: &str, ownership: Ownership) -> FileSet {
     let mut set = FileSet::new();
     drop(set.insert(FileEntry::text(
@@ -940,4 +939,71 @@ fn assert_subchart_security_helpers(files: &FileSet, product: &str, sub: &str) {
     );
     assert!(helpers.contains("RuntimeDefault"), "{helpers}");
     assert!(helpers.contains("- all"), "{helpers}");
+}
+
+/// Chart.yaml, values*.yaml and values.schema.json are serialized data.
+///
+/// minijinja would turn a version string or a `$comment` into an accidental
+/// substitution, and a test that only greps the Helm templates would not
+/// catch it. `{{` belongs in templates/; these four files must not have it.
+#[test]
+fn chart_and_values_are_serialized_not_templated() {
+    let Some((lock, files)) = generated("prod") else {
+        return;
+    };
+    let product = lock.product.id.as_str();
+    for path in [
+        format!("helm/{product}/Chart.yaml"),
+        format!("helm/{product}/values.yaml"),
+        format!("helm/{product}/values.generated.yaml"),
+        format!("helm/{product}/values.schema.json"),
+    ] {
+        let body = text(&files.files, &path);
+        for marker in ["<<", "<%", "<#", "{{", "}}"] {
+            assert!(
+                !body.contains(marker),
+                "`{marker}` in `{path}`, which is serialized data:\n{body}"
+            );
+        }
+    }
+}
+
+/// `values.yaml` is the operator's, so a second generate reconciles rather
+/// than overwrites. `values.generated.yaml` is the lock's copy, always ours.
+#[test]
+fn values_yaml_is_operator_owned_and_the_generated_copy_is_not() {
+    let Some((lock, files)) = generated("prod") else {
+        return;
+    };
+    let product = lock.product.id.as_str();
+    let owned = files
+        .files
+        .get(&RelPath::new(format!("helm/{product}/values.yaml")).unwrap())
+        .expect("values.yaml");
+    assert_eq!(owned.ownership, Ownership::OperatorOwned);
+    let generated_copy = files
+        .files
+        .get(&RelPath::new(format!("helm/{product}/values.generated.yaml")).unwrap())
+        .expect("values.generated.yaml");
+    assert_eq!(generated_copy.ownership, Ownership::Generated);
+}
+
+/// The schema rejects a key it does not know and a replicaCount that is not
+/// an integer -- the two `--set` mistakes Helm would otherwise accept.
+#[test]
+fn values_schema_rejects_unknown_keys_and_wrong_types() {
+    let Some((lock, files)) = generated("prod") else {
+        return;
+    };
+    let product = lock.product.id.as_str();
+    let schema: serde_json::Value = serde_json::from_str(text(
+        &files.files,
+        &format!("helm/{product}/values.schema.json"),
+    ))
+    .expect("schema is JSON");
+    assert_eq!(schema["additionalProperties"], false);
+    assert_eq!(schema["type"], "object");
+    let gateway = &schema["properties"]["api-gateway"];
+    assert_eq!(gateway["additionalProperties"], false);
+    assert_eq!(gateway["properties"]["replicaCount"]["type"], "integer");
 }

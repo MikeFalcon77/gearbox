@@ -133,6 +133,13 @@ pub enum GenerateError {
         source: serde_saphyr::ser::Error,
     },
 
+    #[error("could not serialize {what} as JSON")]
+    Json {
+        what: &'static str,
+        #[source]
+        source: serde_json::Error,
+    },
+
     #[error("could not render the lock")]
     Lock(#[from] gearbox_lock::LockError),
 

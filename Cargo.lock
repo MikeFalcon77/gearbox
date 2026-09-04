@@ -782,6 +782,7 @@ dependencies = [
  "gearbox-project",
  "heck",
  "minijinja",
+ "schemars",
  "serde",
  "serde-saphyr",
  "serde_json",

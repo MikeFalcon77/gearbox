@@ -25,6 +25,7 @@ blake3.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 walkdir.workspace = true
+schemars.workspace = true
 
 [dev-dependencies]
 gearbox-project.workspace = true
