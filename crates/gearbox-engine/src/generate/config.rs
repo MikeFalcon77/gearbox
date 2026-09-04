@@ -32,7 +32,25 @@ const CLUSTER_GEAR: &str = "cluster";
 #[derive(Serialize)]
 struct AppConfig {
     server: ServerSection,
+    /// How a worker serves its own REST surface. Absent for a host.
+    ///
+    /// Its **absence is a decision the runtime acts on**: without this section
+    /// the out-of-process runtime takes the legacy gRPC-only path and never
+    /// registers the gear with the directory at all. A lock that says a binding
+    /// resolves `via directory` would then be describing something that cannot
+    /// happen, so this is written whenever the process is a worker.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    oop_http: Option<OopHttpSection>,
     gears: BTreeMap<String, GearSection>,
+}
+
+#[derive(Serialize)]
+struct OopHttpSection {
+    listen_addr: String,
+    advertise_uri: String,
+    /// The runtime defaults this to `false` and refuses to start when the
+    /// advertised host is loopback without it.
+    allow_loopback_advertise: bool,
 }
 
 #[derive(Serialize)]
@@ -121,6 +139,11 @@ pub fn app_config(
                 input.lock.product.id, input.lock.product.profile
             ),
         },
+        oop_http: process.serve.as_ref().map(|serve| OopHttpSection {
+            listen_addr: serve.listen_addr.clone(),
+            advertise_uri: serve.advertise_uri.clone(),
+            allow_loopback_advertise: serve.allow_loopback_advertise,
+        }),
         gears,
     };
 
@@ -249,14 +272,26 @@ fn write_cluster(
 /// rather than its contents that matters: the host builds its spawn table by
 /// iterating the configured gears and reading each one's runtime kind, so a
 /// worker with no entry is a worker nobody starts.
+///
+/// **The entry is created rather than found, and that is the whole point.** A
+/// spawned gear is deliberately *not* linked into the host -- the runtime's
+/// registry discovers gears by `inventory` and takes no notice of
+/// `runtime.type`, so a linked-and-spawned gear runs twice, in-process and as a
+/// child. Configured and linked are therefore different sets, and this is the
+/// one place they differ: the host is configured to start a gear it does not
+/// contain. Looking the section up and skipping when absent, which is what this
+/// did, silently produced a host that started nothing.
 fn write_spawns(process: &ResolvedProcess, gears: &mut BTreeMap<String, GearSection>) {
     if !matches!(process.kind, ProcessKind::Host) {
         return;
     }
     for spawn in &process.spawns {
-        let Some(section) = gears.get_mut(spawn.gear.as_str()) else {
-            continue;
-        };
+        let section = gears
+            .entry(spawn.gear.to_string())
+            .or_insert_with(|| GearSection {
+                runtime: None,
+                config: Map::new(),
+            });
         section.runtime = Some(RuntimeSection {
             kind: "oop",
             execution: execution(spawn),

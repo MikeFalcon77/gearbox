@@ -5,6 +5,7 @@ import type { ProcessId } from "./ProcessId";
 import type { ProcessKind } from "./ProcessKind";
 import type { ResolvedEndpoint } from "./ResolvedEndpoint";
 import type { SpawnSpec } from "./SpawnSpec";
+import type { WorkerServe } from "./WorkerServe";
 
 /**
  * One process in the resolved topology.
@@ -46,6 +47,10 @@ grpc_hub?: GearId | null, needs_db: boolean, cargo_features?: Array<string>,
  * Workers this process starts. Only a host has any.
  */
 spawns?: Array<SpawnSpec>, 
+/**
+ * How this process serves, when it is a worker. Only a worker has one.
+ */
+serve?: WorkerServe | null, 
 /**
  * The container image, when the profile builds images.
  */

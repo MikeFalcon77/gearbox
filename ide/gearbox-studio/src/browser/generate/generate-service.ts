@@ -194,7 +194,6 @@ export class GenerateService {
           plans: outcome.plans,
           diagnostics: outcome.diagnostics,
           out_root: this.state.plan?.out_root ?? "",
-          skipped: this.state.plan?.skipped,
         },
         written: outcome.written,
       });

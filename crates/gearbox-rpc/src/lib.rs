@@ -1152,7 +1152,6 @@ fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) 
             plans,
             diagnostics: Vec::new(),
             out_root: out_root.display().to_string().replace('\\', "/"),
-            skipped: Vec::new(),
         },
     )
 }
@@ -1417,7 +1416,6 @@ struct PreparedGenerate {
     out_root: PathBuf,
     base_root: PathBuf,
     diagnostics: Vec<Diagnostic>,
-    skipped: Vec<String>,
 }
 
 fn prepare_generate(
@@ -1477,11 +1475,6 @@ fn prepare_generate(
         out_root,
         base_root,
         diagnostics: resolved.diagnostics,
-        skipped: generated
-            .skipped
-            .iter()
-            .map(gearbox_ir::ProcessId::to_string)
-            .collect(),
     })
 }
 
@@ -1533,7 +1526,6 @@ fn generate_plan(state: &mut State, id: RequestId, params: &GenerateParams) -> R
                     plans,
                     diagnostics,
                     out_root: prepared.out_root.display().to_string(),
-                    skipped: prepared.skipped,
                 },
             )
         }

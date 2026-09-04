@@ -18,12 +18,15 @@
 //! property of these functions, and it is asserted by testing them from literals
 //! rather than by a manifest that cannot see inside them.
 //!
-//! **What is here and what is not.** M5 covers the embedded profile: the
-//! generated workspace, `rust-toolchain.toml`, the host process crate, and the
-//! runtime configuration. Worker entry points are M6 and Docker and Helm are M7.
-//! A worker process reaching this code is *named* in [`Generated::skipped`]
-//! rather than silently dropped -- a generator that produced four files out of
-//! six and said nothing would be indistinguishable from one that was finished.
+//! **What is here and what is not.** Every process in the lock is generated,
+//! host or worker; Docker and Helm are M7. There used to be a `skipped` list
+//! naming the workers this could not produce, on the argument that a generator
+//! emitting four files out of six and saying nothing is indistinguishable from
+//! a finished one. That argument was right and the list is gone anyway: the
+//! dispatch on [`ProcessKind`] is exhaustive, so a kind this cannot generate is
+//! now a compile error at the `match` rather than a value at run time. The list
+//! should come back the moment something can genuinely be skipped, with a
+//! producer -- an always-empty field is a report nobody can ever read.
 
 mod apply;
 mod config;
@@ -36,7 +39,7 @@ mod workspace;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use gearbox_ir::{FileSet, ProcessId, ProcessKind, ResolvedProduct, SourceId};
+use gearbox_ir::{FileSet, ProcessKind, ResolvedProduct, SourceId};
 
 pub use apply::{ApplyOutcome, apply_generate, base_root_for, plan, summarize};
 
@@ -135,10 +138,6 @@ pub struct GenerateInput<'a> {
 /// What one generation run produced.
 pub struct Generated {
     pub files: FileSet,
-
-    /// Processes this milestone does not know how to generate for, named rather
-    /// than omitted.
-    pub skipped: Vec<ProcessId>,
 }
 
 /// The whole file set for one resolved product.
@@ -149,32 +148,31 @@ pub struct Generated {
 /// output would be wrong rather than merely incomplete.
 pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
     let mut files = FileSet::new();
-    let mut skipped = Vec::new();
 
-    let hosts: Vec<_> = input
-        .lock
-        .processes
-        .iter()
-        .filter(|p| matches!(p.kind, ProcessKind::Host))
-        .collect();
-    for process in &input.lock.processes {
-        if !matches!(process.kind, ProcessKind::Host) {
-            skipped.push(process.name.clone());
-        }
-    }
+    // Every process is a workspace member, host or worker. A generated crate
+    // sitting inside the workspace root without being a member is the failure
+    // Cargo reports as "believes it's in a workspace when it's not".
+    let processes: Vec<_> = input.lock.processes.iter().collect();
 
-    insert(&mut files, workspace::workspace_manifest(&hosts)?)?;
+    insert(&mut files, workspace::workspace_manifest(&processes)?)?;
     insert(&mut files, workspace::toolchain()?)?;
     insert(&mut files, workspace::lock_file(input.lock)?)?;
 
-    for process in hosts {
+    for process in processes {
         insert(&mut files, manifest::process_manifest(input, process)?)?;
-        insert(&mut files, rust::host_main(process)?)?;
+        // The entry point is the only file that differs between the two kinds.
+        // Everything else -- the manifest, the link file, the configuration --
+        // is a function of the process, not of how it is started.
+        let entry = match process.kind {
+            ProcessKind::Host => rust::host_main(process)?,
+            ProcessKind::Worker => rust::worker_main(input, process)?,
+        };
+        insert(&mut files, entry)?;
         insert(&mut files, rust::registered_gears(input, process)?)?;
         insert(&mut files, config::app_config(input, process)?)?;
     }
 
-    Ok(Generated { files, skipped })
+    Ok(Generated { files })
 }
 
 /// Add one entry, refusing rather than overwriting.

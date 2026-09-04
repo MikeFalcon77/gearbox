@@ -181,8 +181,9 @@ pub struct InitializeResult {
 ///
 /// `resolve` and `generate` are advertised once the engine can answer them, so
 /// the client can hide a panel rather than render an empty one that looks like
-/// a bug. Worker entry points (M6) and Docker/Helm (M7) are still missing; they
-/// arrive as `skipped` on a generate plan, not as `generate: false`.
+/// a bug. Docker and Helm (M7) are still missing, and their absence is a smaller
+/// output set rather than a flag: `generate: false` would hide a panel that
+/// answers correctly for everything it does cover.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[expect(
     clippy::struct_excessive_bools,
@@ -689,9 +690,6 @@ pub struct GeneratePlanResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<Diagnostic>,
     pub out_root: String,
-    /// Processes this milestone does not generate (worker entry points are M6).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub skipped: Vec<String>,
 }
 
 /// What an apply did.

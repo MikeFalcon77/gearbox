@@ -15,6 +15,7 @@ use minijinja::{Environment, context};
 use super::{GenerateError, GenerateInput, header, paths};
 
 const MAIN_TEMPLATE: &str = include_str!("templates/main.rs.jinja");
+const WORKER_TEMPLATE: &str = include_str!("templates/worker_main.rs.jinja");
 const REGISTERED_TEMPLATE: &str = include_str!("templates/registered_gears.rs.jinja");
 
 /// Render one template, naming it in any error.
@@ -55,6 +56,40 @@ pub fn host_main(process: &ResolvedProcess) -> Result<FileEntry, GenerateError> 
             process => process.name.as_str(),
             bin_name => process.bin_name.as_str(),
             gear_count => process.gears.len(),
+        },
+    )?;
+
+    Ok(FileEntry::text(
+        paths::rel(&["processes", process.name.as_str(), "src", "main.rs"])?,
+        body,
+        FileKind::Rust,
+        Ownership::Generated,
+    ))
+}
+
+/// `processes/<w>/src/main.rs` for a worker.
+///
+/// A second function rather than a branch inside [`host_main`]: this module's
+/// shape is one function per file it produces, and the two entry points share
+/// no context beyond the header -- a worker needs its directory identity and
+/// its version, which a host has no use for.
+///
+/// # Errors
+/// Returns [`GenerateError::Template`] if the template cannot be rendered.
+pub fn worker_main(
+    input: &GenerateInput<'_>,
+    process: &ResolvedProcess,
+) -> Result<FileEntry, GenerateError> {
+    let body = render(
+        "worker_main.rs",
+        WORKER_TEMPLATE,
+        context! {
+            header => header("//").trim_end(),
+            process => process.name.as_str(),
+            bin_name => process.bin_name.as_str(),
+            gear_count => process.gears.len(),
+            gear_name => process.anchor.as_str(),
+            version => input.lock.product.version.as_str(),
         },
     )?;
 

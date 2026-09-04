@@ -1,0 +1,79 @@
+{{ header }}
+
+mod registered_gears;
+
+use std::path::PathBuf;
+
+use anyhow::Result;
+use clap::Parser;
+use toolkit::bootstrap::oop::{OopRunOptions, run_oop_with_options};
+use toolkit::registry::GearRegistry;
+
+/// The out-of-process worker for `{{ process }}`.
+#[derive(Parser)]
+#[command(name = "{{ bin_name }}")]
+#[command(about = "Generated Gears worker: {{ gear_count }} gear(s) composed by gearbox")]
+struct Cli {
+    /// Path to the configuration file.
+    ///
+    /// The host passes this through `execution.args`, and it is the only
+    /// channel that works: the runtime also reads `TOOLKIT_CONFIG_PATH`, but
+    /// nothing sets it.
+    #[arg(short, long)]
+    config: Option<PathBuf>,
+
+    /// Log verbosity level (-v debug, -vv trace).
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    verbose: u8,
+
+    /// List the gears actually linked into this binary and exit.
+    ///
+    /// The same oracle the host carries, and a worker needs it more: placement
+    /// is a link-time decision, so "which gears are in this binary" is the
+    /// question that says whether the split happened at all.
+    #[arg(long)]
+    list_registered_gears: bool,
+}
+
+/// Print the registry's own inventory, in the order it resolved.
+///
+/// The order is *a* topological order, not a canonical one: the registry seeds
+/// Kahn's algorithm from a `HashMap`, so two runs can legitimately disagree
+/// about gears that do not depend on one another. Compare sorted output.
+fn list_registered_gears() -> Result<()> {
+    let registry = GearRegistry::discover_and_build()?;
+    for entry in registry.gears() {
+        let mut deps: Vec<&str> = entry.deps().to_vec();
+        deps.sort_unstable();
+        println!("{}\t{}", entry.name(), deps.join(","));
+    }
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    // Before anything reads configuration, as in the host: the oracle has to be
+    // answerable for a binary whose configuration is the thing under suspicion.
+    if cli.list_registered_gears {
+        return list_registered_gears();
+    }
+
+    // `..Default::default()` is load-bearing, not tidiness. It is where
+    // `TOOLKIT_DIRECTORY_ENDPOINT` is read, and the host sets that variable when
+    // it spawns this process -- so listing every field explicitly would silently
+    // lose the directory and leave every remote binding unresolvable.
+    let options = OopRunOptions {
+        // The directory identity, verbatim. The runtime takes it from this field
+        // with no configuration override, which is why the lock records the
+        // anchor rather than deriving a name here.
+        gear_name: "{{ gear_name }}".to_owned(),
+        verbose: cli.verbose,
+        config_path: cli.config,
+        version: Some("{{ version }}".to_owned()),
+        ..Default::default()
+    };
+
+    run_oop_with_options(options).await
+}

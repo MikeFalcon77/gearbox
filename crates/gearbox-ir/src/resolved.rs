@@ -160,6 +160,34 @@ pub struct ResolvedEndpoint {
     pub allow_loopback_advertise: bool,
 }
 
+/// Where a worker serves its own REST surface, and how it advertises it.
+///
+/// Only a worker has one. A host's REST-contributing gears mount on its REST
+/// host; a worker has none -- `GBX0312` refuses one -- and serves through the
+/// out-of-process runtime's own listener instead. That listener is configured
+/// by a **top-level** `oop_http` section rather than by any gear's key, which is
+/// why this cannot ride [`ResolvedProcess::listens`].
+///
+/// It is also what makes the worker findable at all: the advertised URI is what
+/// the runtime registers with the directory, and a severed binding resolved
+/// `via directory` has nothing to resolve to without it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct WorkerServe {
+    /// The address the worker binds.
+    pub listen_addr: String,
+
+    /// The address it publishes to the directory.
+    pub advertise_uri: String,
+
+    /// Whether a loopback address may be advertised.
+    ///
+    /// The runtime defaults this to `false` and **refuses to start** when the
+    /// advertised host is loopback without it, so a single-machine profile has
+    /// to say so rather than leave it implied.
+    #[serde(default)]
+    pub allow_loopback_advertise: bool,
+}
+
 /// A worker a host process starts.
 ///
 /// Mirrors the runtime's per-gear execution configuration exactly, because that
@@ -296,6 +324,10 @@ pub struct ResolvedProcess {
     /// Workers this process starts. Only a host has any.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub spawns: Vec<SpawnSpec>,
+
+    /// How this process serves, when it is a worker. Only a worker has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serve: Option<WorkerServe>,
 
     /// The container image, when the profile builds images.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -14,11 +14,12 @@
 //! and the platform currently offers so few severable edges that there is nothing
 //! for one to optimise.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use gearbox_ir::{
     Catalogue, DeploymentProfileDecl, Diagnostic, DiagnosticCode, Diagnostics, Entrypoint, GearId,
-    Location, ProcessId, ProcessKind, ResolvedEndpoint, ResolvedProcess, RuntimeCap,
+    Location, ProcessId, ProcessKind, ResolvedEndpoint, ResolvedProcess, RuntimeCap, SpawnSpec,
+    WorkerServe,
 };
 
 use super::closure::Closure;
@@ -116,8 +117,91 @@ pub fn partition(
     }
 
     assign_endpoints(catalogue, &mut processes);
+    assign_spawns(declaration, &mut processes);
     report_orphans(closure, &processes, uri, diagnostics);
     Partition { processes }
+}
+
+/// The base port a worker's own REST listener is allocated from.
+///
+/// Deliberately above the gears' declared defaults, so a worker's socket does
+/// not sit where a gear's would and a reader can tell the two apart at a glance.
+const WORKER_SERVE_BASE_PORT: u16 = 8090;
+
+/// Give every worker a serving address, and tell the host how to start it.
+///
+/// **Inventing this port is not the same as inventing a gear's.**
+/// [`assign_endpoints`] skips an endpoint with no `default_port` rather than
+/// fabricating one, because the gear has its own default and a made-up number
+/// would silently override it. A worker's listener has no such fallback: the
+/// out-of-process runtime binds what `oop_http` says and advertises it to the
+/// directory, so without an address here the worker serves nothing and the
+/// binding the lock calls `via directory` resolves to nothing.
+///
+/// The two halves are one function because they are one decision: the host's
+/// spawn entry and the worker's address describe the same arrangement, and
+/// splitting them would let a refactor change one without the other.
+fn assign_spawns(declaration: &DeploymentProfileDecl, processes: &mut [ResolvedProcess]) {
+    let mut taken: BTreeSet<u16> = processes
+        .iter()
+        .flat_map(|p| p.listens.iter())
+        .filter_map(|e| e.address.rsplit_once(':').and_then(|(_, p)| p.parse().ok()))
+        .collect();
+
+    // In name order, for the same reason `assign_endpoints` is: the lock is
+    // written in name order, so any other order would let a refactor that
+    // changes no topology still change every port.
+    let mut order: Vec<usize> = (0..processes.len()).collect();
+    order.sort_by(|a, b| processes[*a].name.cmp(&processes[*b].name));
+
+    let mut spawns: Vec<SpawnSpec> = Vec::new();
+    for index in order {
+        if !processes[index].is_worker() {
+            continue;
+        }
+        let Some(port) = next_free_port(WORKER_SERVE_BASE_PORT, &taken) else {
+            continue;
+        };
+        taken.insert(port);
+        let address = format!("{BIND_HOST}:{port}");
+        processes[index].serve = Some(WorkerServe {
+            advertise_uri: format!("http://{address}"),
+            listen_addr: address,
+            // Every profile that spawns workers locally advertises loopback, and
+            // the runtime refuses to start without this said out loud.
+            allow_loopback_advertise: true,
+        });
+
+        // The host starts it by absolute path. `target_dir` is the only place
+        // that path can come from, and `structural::check_worker_paths` has
+        // already reported its absence -- so a missing one leaves the worker
+        // unspawned rather than pointing the host at a guess.
+        if let Some(target_dir) = declaration.target_dir() {
+            spawns.push(SpawnSpec {
+                gear: processes[index].anchor.clone(),
+                executable_path: format!("{target_dir}/debug/{}", processes[index].bin_name),
+                // `--config` is the only channel that works: the runtime reads
+                // `TOOLKIT_CONFIG_PATH` but nothing ever sets it.
+                args: vec![
+                    "--config".to_owned(),
+                    format!("config/{}.yaml", processes[index].name),
+                ],
+                working_directory: None,
+                // Deliberately empty. The host injects `TOOLKIT_DIRECTORY_ENDPOINT`
+                // and `TOOLKIT_MODULE_CONFIG` itself at spawn time, and the
+                // endpoint is only known once its gRPC hub has bound -- recording
+                // a value here would be recording a guess as a decision.
+                environment: BTreeMap::new(),
+            });
+        }
+    }
+
+    if spawns.is_empty() {
+        return;
+    }
+    if let Some(host) = processes.iter_mut().find(|p| !p.is_worker()) {
+        host.spawns = spawns;
+    }
 }
 
 /// The host a generated bind address uses.
@@ -359,6 +443,7 @@ fn build(
         anchor,
         listens: Vec::new(),
         spawns: Vec::new(),
+        serve: None,
         image: None,
         subchart: None,
         service_port: None,

@@ -121,10 +121,6 @@ fn the_embedded_profile_generates_the_documented_output_set() {
         "the embedded profile's output set is the plan's section 7 table minus the \
          Docker and Helm rows, which are M7"
     );
-    assert!(
-        files.skipped.is_empty(),
-        "the embedded profile has no worker"
-    );
 }
 
 #[test]
@@ -612,4 +608,151 @@ fn a_products_config_reaches_the_generated_configuration() {
     assert!(yaml.contains("prefix_path: /cf"), "{yaml}");
     // And the projected socket still wins over anything written by hand.
     assert!(yaml.contains("bind_addr:"), "{yaml}");
+}
+
+/// M6: a `host_workers` profile generates a crate for the worker too.
+///
+/// The `local` profile splits `api-contracts` out of the gateway because its
+/// contract edge is severable — no pin required — so this exercises the shape
+/// the resolver reaches on its own.
+#[test]
+fn a_host_workers_profile_generates_both_processes() {
+    let Some((lock, files)) = generated("local") else {
+        return;
+    };
+
+    let paths: Vec<&str> = files.files.iter().map(|f| f.path.as_str()).collect();
+    for expected in [
+        "processes/gateway/src/main.rs",
+        "processes/api-contracts/src/main.rs",
+        "processes/api-contracts/Cargo.toml",
+        "processes/api-contracts/src/registered_gears.rs",
+        "config/api-contracts.yaml",
+    ] {
+        assert!(
+            paths.contains(&expected),
+            "missing `{expected}` in {paths:?}"
+        );
+    }
+
+    // Every process in the lock produced a crate. There is no "skipped" list to
+    // check any more -- the dispatch on `ProcessKind` is exhaustive, so a kind
+    // this cannot generate is a compile error rather than a silent omission.
+    assert_eq!(
+        paths.iter().filter(|p| p.ends_with("/src/main.rs")).count(),
+        lock.processes.len(),
+        "one entry point per process in {paths:?}"
+    );
+
+    // Both crates are workspace members. A generated crate inside the workspace
+    // root that is not a member is what Cargo reports as "believes it's in a
+    // workspace when it's not".
+    let workspace = text(&files.files, "Cargo.toml");
+    assert!(workspace.contains("processes/gateway"), "{workspace}");
+    assert!(workspace.contains("processes/api-contracts"), "{workspace}");
+
+    // The worker's entry point is the out-of-process runtime, not the host's.
+    let worker_main = text(&files.files, "processes/api-contracts/src/main.rs");
+    assert!(
+        worker_main.contains("run_oop_with_options"),
+        "{worker_main}"
+    );
+    // Its directory identity, taken from the anchor verbatim.
+    assert!(
+        worker_main.contains(r#"gear_name: "api-contracts".to_owned()"#),
+        "{worker_main}"
+    );
+    // The line that keeps `TOOLKIT_DIRECTORY_ENDPOINT` working.
+    assert!(
+        worker_main.contains("..Default::default()"),
+        "{worker_main}"
+    );
+
+    assert_eq!(
+        lock.processes.len(),
+        2,
+        "the local profile is a host and one worker"
+    );
+}
+
+/// The trap the runtime sets and the example server in `gears-rust` falls into:
+/// a gear both linked into the host and marked `oop` runs twice, because the
+/// registry discovers by `inventory` and takes no notice of `runtime.type`.
+/// Placement is a link-time decision, and this asserts we make it there.
+#[test]
+fn a_spawned_gear_is_configured_by_the_host_but_not_linked_into_it() {
+    let Some((_, files)) = generated("local") else {
+        return;
+    };
+
+    let host_links = text(&files.files, "processes/gateway/src/registered_gears.rs");
+    let worker_links = text(
+        &files.files,
+        "processes/api-contracts/src/registered_gears.rs",
+    );
+
+    // The worker links its gear; the host does not. `cf_api_contracts` is the
+    // library identifier -- the crate has no `[lib]`, which is the whole reason
+    // `lib` is declared rather than derived.
+    assert!(
+        worker_links.contains("use cf_api_contracts as _;"),
+        "{worker_links}"
+    );
+    assert!(
+        !host_links.contains("use cf_api_contracts as _;"),
+        "the host must not link a gear it spawns:\n{host_links}"
+    );
+
+    // But the host must still *configure* it, because the runtime builds its
+    // spawn table by iterating configured gears. Configured and linked are
+    // different sets, and this is where they differ.
+    let host_config = text(&files.files, "config/gateway.yaml");
+    assert!(host_config.contains("type: oop"), "{host_config}");
+    assert!(
+        host_config.contains("gbx-api-contracts"),
+        "the executable path comes from the profile's target_dir:\n{host_config}"
+    );
+}
+
+/// Without `oop_http` the runtime silently takes the legacy gRPC-only path and
+/// never registers the gear, which would make the lock's `via directory` a
+/// claim about something that cannot happen.
+#[test]
+fn a_worker_is_configured_to_serve_rest_and_advertise_itself() {
+    let Some((lock, files)) = generated("local") else {
+        return;
+    };
+
+    let worker_config = text(&files.files, "config/api-contracts.yaml");
+    assert!(worker_config.contains("oop_http:"), "{worker_config}");
+    assert!(worker_config.contains("advertise_uri:"), "{worker_config}");
+    // The runtime defaults this to false and refuses to start on a loopback
+    // advertise without it.
+    assert!(
+        worker_config.contains("allow_loopback_advertise: true"),
+        "{worker_config}"
+    );
+
+    // The address is the resolver's, from the same deduplicated pool the
+    // listening ports come from -- not a number the template invented.
+    let worker = lock
+        .processes
+        .iter()
+        .find(|p| p.is_worker())
+        .expect("the local profile has a worker");
+    let serve = worker.serve.as_ref().expect("a worker serves");
+    assert!(
+        worker_config.contains(&serve.listen_addr),
+        "{worker_config}"
+    );
+    let host_ports: Vec<&str> = lock
+        .processes
+        .iter()
+        .flat_map(|p| p.listens.iter())
+        .map(|e| e.address.as_str())
+        .collect();
+    assert!(
+        !host_ports.contains(&serve.listen_addr.as_str()),
+        "the worker took a port a gear already binds: {host_ports:?}"
+    );
 }

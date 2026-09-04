@@ -6,8 +6,4 @@ import type { FilePlan } from "./FilePlan";
  * One line per file, and nothing else: `FilePlan` is a preview line, not a
  * payload. File contents arrive on `gearbox/generate/file`.
  */
-export type GeneratePlanResult = { plans: Array<FilePlan>, diagnostics?: Array<Diagnostic>, out_root: string, 
-/**
- * Processes this milestone does not generate (worker entry points are M6).
- */
-skipped?: Array<string>, };
+export type GeneratePlanResult = { plans: Array<FilePlan>, diagnostics?: Array<Diagnostic>, out_root: string, };

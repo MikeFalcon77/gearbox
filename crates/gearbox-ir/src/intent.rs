@@ -184,6 +184,19 @@ impl DeploymentProfileDecl {
             }
         }
     }
+
+    /// Where worker binaries are built, when this profile spawns any.
+    ///
+    /// Only `host_workers` has one: it is the directory the host builds an
+    /// absolute executable path from. Kubernetes runs images an operator
+    /// deploys, so there is nothing local to point at.
+    #[must_use]
+    pub fn target_dir(&self) -> Option<&str> {
+        match self {
+            Self::HostWorkers { target_dir, .. } => target_dir.as_deref(),
+            Self::Embedded { .. } | Self::Kubernetes { .. } => None,
+        }
+    }
 }
 
 /// One scalar a typed configuration control can write.

@@ -107,7 +107,7 @@ pub fn run(
         // stdout: the machine-readable contract, and the whole of it. A client
         // asking for the plan gets the plan, not the plan plus a summary line.
         Format::Json => println!("{}", serde_json::to_string_pretty(&plans)?),
-        Format::Text => print_plans(&plans, &out_root, dry_run, written, &generated.skipped),
+        Format::Text => print_plans(&plans, &out_root, dry_run, written),
     }
 
     report(&diagnostics);
@@ -129,13 +129,7 @@ fn absolute(path: PathBuf) -> anyhow::Result<PathBuf> {
     Ok(std::env::current_dir()?.join(path))
 }
 
-fn print_plans(
-    plans: &[FilePlan],
-    out_root: &Path,
-    dry_run: bool,
-    written: usize,
-    skipped: &[gearbox_ir::ProcessId],
-) {
+fn print_plans(plans: &[FilePlan], out_root: &Path, dry_run: bool, written: usize) {
     println!(
         "{} {}",
         if dry_run {
@@ -165,16 +159,5 @@ fn print_plans(
     }
     if counts.contains_key(&FileAction::Conflict) {
         println!("  nothing was written: resolve the conflicts above and re-run");
-    }
-
-    // Named, not omitted: a run that generated four of six files and said
-    // nothing would be indistinguishable from a finished one.
-    if !skipped.is_empty() {
-        let names: Vec<&str> = skipped.iter().map(gearbox_ir::ProcessId::as_str).collect();
-        println!(
-            "  {} worker process(es) not generated -- worker entry points are M6: {}",
-            skipped.len(),
-            names.join(", ")
-        );
     }
 }

@@ -189,12 +189,6 @@ export class GenerateWidget extends ReactWidget {
             ))}
           </ul>
         )}
-        {(gen.plan.skipped ?? []).length > 0 && (
-          <div className="gbx-gap">
-            {gen.plan.skipped!.length} worker process(es) not generated — worker
-            entry points are M6: {gen.plan.skipped!.join(", ")}
-          </div>
-        )}
         <div className="gbx-generate-body">
           <div className="gbx-generate-tree" role="tree">
             {treeOf(plans).map((node) => this.renderNode(node, 0))}
