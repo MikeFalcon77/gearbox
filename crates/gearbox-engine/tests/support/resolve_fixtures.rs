@@ -325,6 +325,23 @@ pub fn host_workers(
     intent
 }
 
+/// An intent with one `kubernetes` profile, tunable.
+pub fn kubernetes(gears: &[&str], discovery: gearbox_ir::Discovery) -> ProductIntent {
+    let mut intent = intent(gears);
+    let prod = ProfileId::new("prod").unwrap();
+    intent.profiles.insert(
+        prod.clone(),
+        gearbox_ir::DeploymentProfileDecl::Kubernetes {
+            id: prod,
+            discovery,
+            namespace: None,
+            image_registry: None,
+            declared_at: None,
+        },
+    );
+    intent
+}
+
 /// Force a second process by pinning a gear to one.
 pub fn pin(intent: &mut ProductIntent, name: &str, anchor: &str, replicas: u32) {
     intent.process_pins.push(gearbox_ir::ProcessPin {

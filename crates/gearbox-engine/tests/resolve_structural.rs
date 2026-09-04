@@ -86,10 +86,47 @@ fn host_workers_says_it_is_one_machine() {
     };
     let local = resolve(&cat, &prod, &pid("local"));
     assert!(codes(&local).contains(&DiagnosticCode::GapNoRemoteSpawnBackend));
+    let spawn = local
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::GapNoRemoteSpawnBackend)
+        .expect("GBX0604");
+    assert!(
+        spawn
+            .evidence
+            .as_deref()
+            .unwrap_or_default()
+            .contains("LocalProcessBackend")
+            || spawn
+                .evidence
+                .as_deref()
+                .unwrap_or_default()
+                .contains("bootstrap/run.rs"),
+        "a runtime-gap diagnostic must cite the spawn backend: {:?}",
+        spawn.evidence
+    );
 
     // Kubernetes does not spawn at all, so the note would be wrong there.
     let prod_ = resolve(&cat, &prod, &pid("prod"));
     assert!(!codes(&prod_).contains(&DiagnosticCode::GapNoRemoteSpawnBackend));
+    assert!(
+        codes(&prod_).contains(&DiagnosticCode::GapNoK8sDnsResolver),
+        "static discovery across processes is GBX0603: {:?}",
+        codes(&prod_)
+    );
+    let dns = prod_
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::GapNoK8sDnsResolver)
+        .expect("GBX0603");
+    assert!(
+        dns.evidence
+            .as_deref()
+            .unwrap_or_default()
+            .contains("discovery.rs"),
+        "GBX0603 must cite the resolver set: {:?}",
+        dns.evidence
+    );
 }
 
 #[test]
@@ -212,6 +249,39 @@ fn directory_discovery_without_the_grpc_hub_is_refused() {
         "the help has to say what actually happens: {:?}",
         d.help
     );
+}
+
+#[test]
+fn every_emitted_diagnostic_satisfies_its_invariants() {
+    // `Diagnostic::validate` is not called at construction, so a runtime-gap
+    // without evidence used to ship (GBX0604). This is the check the PRD
+    // required of the emitted set, not of a hand-built fixture.
+    let (Some(cat), Some(prod)) = (catalogue(), product()) else {
+        eprintln!("skipping: fixtures not present");
+        return;
+    };
+    for profile in ["dev", "local", "prod"] {
+        let r = resolve(&cat, &prod, &pid(profile));
+        let problems: Vec<String> = r
+            .diagnostics
+            .iter()
+            .flat_map(|d| d.validate().err().unwrap_or_default())
+            .collect();
+        assert!(
+            problems.is_empty(),
+            "{profile} emitted diagnostics that fail their own invariants: {problems:#?}"
+        );
+    }
+}
+
+#[test]
+fn kubernetes_static_with_one_process_does_not_warn_about_dns() {
+    // Nothing to discover, so pinning would be a lie about a topology that
+    // never consults an address.
+    let cat = support::catalogue_of(vec![support::gear_with_caps("only", &[], &[])]);
+    let intent = support::kubernetes(&["only"], Discovery::Static);
+    let r = resolve(&cat, &intent, &pid("prod"));
+    assert!(!codes(&r).contains(&DiagnosticCode::GapNoK8sDnsResolver));
 }
 
 #[test]

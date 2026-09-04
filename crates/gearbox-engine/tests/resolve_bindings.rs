@@ -143,7 +143,7 @@ fn a_remote_binding_names_where_its_address_comes_from() {
         .expect("a source");
     assert_eq!(
         source,
-        "gears.api-contracts-consumer.consumer_wiring.payment_api"
+        "gears.api-contracts-consumer.config.consumer_wiring.api-contracts"
     );
     assert!(
         static_.bindings[0].endpoint.is_none(),
@@ -152,8 +152,11 @@ fn a_remote_binding_names_where_its_address_comes_from() {
 }
 
 #[test]
-fn the_two_majors_get_distinct_wiring_keys() {
-    // Parallel majors coexist by design, so their overrides must not collide.
+fn two_majors_collapse_to_the_provider_gear_key() {
+    // The runtime keys `consumer_wiring` by provider *gear name*, not by
+    // contract. `PaymentApi@v1` and `@v2` therefore share one override; the
+    // lock used to name them separately and that was a lie -- there is no
+    // way to address the two majors independently through this mechanism.
     require!(cat, prod);
     let r = resolve(&cat, &prod, &pid("prod"));
     let keys: Vec<&str> = r
@@ -161,12 +164,11 @@ fn the_two_majors_get_distinct_wiring_keys() {
         .iter()
         .filter_map(|b| b.endpoint_source.as_deref())
         .collect();
-    assert_eq!(
-        keys,
-        vec![
-            "gears.api-contracts-consumer.consumer_wiring.payment_api",
-            "gears.api-contracts-consumer.consumer_wiring.payment_api_v2",
-        ]
+    assert_eq!(keys.len(), 2, "two severed majors, two bindings: {keys:?}");
+    assert!(
+        keys.iter()
+            .all(|k| *k == "gears.api-contracts-consumer.config.consumer_wiring.api-contracts"),
+        "both bindings must name the provider gear, not the contract: {keys:?}"
     );
 }
 
@@ -290,11 +292,12 @@ fn asking_for_grpc_across_a_boundary_is_downgraded_to_rest() {
 }
 
 #[test]
-fn a_nested_wiring_key_cannot_come_from_the_environment() {
+fn a_nested_hyphenated_provider_cannot_come_from_the_environment() {
     // The runtime's environment remapping converts underscores to hyphens only in
-    // the segment right after the gears prefix, so `payment_api` nested under
+    // the segment right after the gears prefix, so `api-contracts` nested under
     // `consumer_wiring` can never be matched by a variable. An operator planning
-    // to set it at deploy time needs telling.
+    // to set it at deploy time needs telling. The help names the real key, not
+    // a contract-derived one the runtime does not read.
     require!(cat, prod);
     let r = resolve(&cat, &prod, &pid("prod"));
     let d = r
@@ -302,13 +305,10 @@ fn a_nested_wiring_key_cannot_come_from_the_environment() {
         .iter()
         .find(|d| d.code == DiagnosticCode::BindingEnvCannotExpressWiring)
         .expect("GBX0409");
+    let help = d.help.as_deref().unwrap_or_default();
     assert!(
-        d.help
-            .as_deref()
-            .unwrap_or_default()
-            .contains("payment_api"),
-        "the key itself has to appear: {:?}",
-        d.help
+        help.contains("gears.api-contracts-consumer.config.consumer_wiring.api-contracts"),
+        "the key itself has to appear: {help:?}"
     );
 
     // Directory discovery does not read a wiring key at all, so the warning
@@ -319,6 +319,30 @@ fn a_nested_wiring_key_cannot_come_from_the_environment() {
             .diagnostics
             .iter()
             .any(|d| d.code == DiagnosticCode::BindingEnvCannotExpressWiring)
+    );
+}
+
+#[test]
+fn a_single_segment_provider_is_expressible_as_an_environment_variable() {
+    // `provider` has no hyphen, so the nested key is one segment and the
+    // remapping is not the problem. GBX0409 would be a lie on this shape.
+    let cat = support::catalogue_with_declared_edge();
+    let mut intent = support::host_workers(&["host", "provider"], Discovery::Static, Some("t"));
+    support::pin(&mut intent, "worker", "provider", 1);
+    let r = resolve(&cat, &intent, &pid("local"));
+    assert!(
+        r.bindings
+            .iter()
+            .any(|b| b.mechanism == BindingMechanism::ConsumesStatic),
+        "the edge must actually be static for this to mean anything: {:?}",
+        r.bindings
+    );
+    assert!(
+        !r.diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::BindingEnvCannotExpressWiring),
+        "a one-word provider is expressible: {:?}",
+        r.diagnostics
     );
 }
 

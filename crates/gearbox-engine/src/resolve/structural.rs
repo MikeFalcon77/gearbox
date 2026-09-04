@@ -161,12 +161,38 @@ fn check_rest_without_host(
 }
 
 /// Directory discovery needs two gears the description never names.
+///
+/// Kubernetes with static discovery is the other case: addresses are pinned
+/// because the runtime has no cluster-native DNS resolver (GBX0603). That
+/// warning is the counterpart of the Directory checks below -- both exist so
+/// nobody reads a topology as discovering something the runtime cannot.
 fn check_discovery(
     partition: &Partition,
     declaration: &DeploymentProfileDecl,
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) {
+    if matches!(declaration, DeploymentProfileDecl::Kubernetes { .. })
+        && declaration.discovery() == Some(Discovery::Static)
+        && partition.processes.len() >= 2
+    {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::GapNoK8sDnsResolver,
+                "the kubernetes profile pins process addresses statically; no cluster-native \
+                 endpoint resolver exists",
+            )
+            .with_help(
+                "the runtime's EndpointResolver set is Directory, Null, and Static -- there is \
+                 no DNS resolver, so a neighbour's Service name is written into configuration \
+                 rather than discovered",
+            )
+            .with_evidence("libs/toolkit/src/discovery.rs:38")
+            .at(Location(uri)),
+        );
+        return;
+    }
+
     if declaration.discovery() != Some(Discovery::Directory) {
         return;
     }
@@ -283,6 +309,7 @@ fn report_spawn_gap(
             "the runtime implements one spawn backend and it is local; this profile is \
              multi-process, not multi-machine. Use the kubernetes profile for that",
         )
+        .with_evidence("libs/toolkit/src/bootstrap/run.rs:74")
         .at(Location(uri)),
     );
 }

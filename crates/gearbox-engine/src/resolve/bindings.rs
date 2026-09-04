@@ -196,13 +196,12 @@ fn remote(
     let mechanism = BindingMechanism::for_discovery(discovery);
     // Where the address comes from, named rather than resolved: the value itself
     // is a deployment concern, and pinning it here would make the lock
-    // environment-specific.
+    // environment-specific. The static key is the one the runtime actually
+    // reads -- `gears.{consumer}.config.consumer_wiring.{provider}` -- not a
+    // contract-derived name. Two majors of one provider therefore share a
+    // slot; the lock must not pretend they are independently addressable.
     let endpoint_source = match discovery {
-        Discovery::Static => format!(
-            "gears.{}.consumer_wiring.{}",
-            edge.consumer,
-            contract.wiring_key()
-        ),
+        Discovery::Static => static_endpoint_source(&edge.consumer, &edge.provider),
         Discovery::Directory => format!("directory:{provider_process}"),
     };
 
@@ -222,6 +221,16 @@ fn remote(
     }
 }
 
+/// Config key the runtime reads for a static endpoint override.
+///
+/// `StaticEndpointResolver` looks up
+/// `gears.{consumer}.config.consumer_wiring.{provider}`, keyed by the *provider
+/// gear name*, not by `ContractDescriptor::wiring_key`. `PaymentApi@v1` and
+/// `@v2` therefore collapse to one `consumer_wiring.api-contracts` entry.
+fn static_endpoint_source(consumer: &GearId, provider: &GearId) -> String {
+    format!("gears.{consumer}.config.consumer_wiring.{provider}")
+}
+
 fn selection(
     request: Option<BindingRequest>,
     downgraded_by: Option<DiagnosticCode>,
@@ -235,27 +244,21 @@ fn selection(
 /// Report a static endpoint override the environment cannot express.
 ///
 /// The runtime's environment-key remapping turns underscores into hyphens only
-/// in the segment immediately after the gears prefix, so a hyphenated dependency
-/// name nested deeper can never be matched by an environment variable. The
-/// override has to be written into configuration instead -- which the generator
-/// does, but an operator expecting to set it at deploy time needs telling.
-pub fn report_env_limits(
-    catalogue: &Catalogue,
-    bindings: &[ResolvedBinding],
-    uri: &str,
-    diagnostics: &mut Diagnostics,
-) {
+/// in the segment immediately after the gears prefix. Nested keys are not
+/// remapped, so a hyphenated *provider gear name* (`api-contracts`) can never
+/// be matched by an environment variable. A single-segment name (`billing`)
+/// can. The override has to be written into configuration instead -- which the
+/// generator does, but an operator expecting to set it at deploy time needs
+/// telling.
+pub fn report_env_limits(bindings: &[ResolvedBinding], uri: &str, diagnostics: &mut Diagnostics) {
     for binding in bindings
         .iter()
         .filter(|b| b.mechanism == BindingMechanism::ConsumesStatic)
     {
-        let Some(contract) = catalogue.contracts.get(&binding.contract) else {
-            continue;
-        };
-        let key = contract.wiring_key();
-        if !key.contains('_') {
+        if !binding.provider.as_str().contains('-') {
             continue;
         }
+        let key = static_endpoint_source(&binding.consumer, &binding.provider);
         let mut diagnostic = Diagnostic::new(
             DiagnosticCode::BindingEnvCannotExpressWiring,
             format!(
@@ -264,11 +267,12 @@ pub fn report_env_limits(
             ),
         )
         .with_help(format!(
-            "the key is `consumer_wiring.{key}`, and the runtime's environment remapping \
-             converts underscores to hyphens only in the segment right after the gears prefix, \
-             so a nested key with an underscore never matches; the generator writes it into the \
+            "the key is `{key}`, and the runtime's environment remapping converts underscores \
+             to hyphens only in the segment right after the gears prefix, so a nested \
+             hyphenated provider name never matches; the generator writes it into the \
              configuration file instead"
         ))
+        .with_evidence("libs/toolkit/src/bootstrap/config/mod.rs:429")
         .at(Location::file(uri.to_owned()));
         // `subject` is documented as "the graph node this concerns, so a client can
         // select it", and until now nothing set it on any diagnostic --

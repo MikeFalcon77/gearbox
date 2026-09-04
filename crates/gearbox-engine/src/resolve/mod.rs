@@ -145,7 +145,7 @@ pub fn resolve_at(
             &uri,
             &mut diagnostics,
         );
-        bindings::report_env_limits(catalogue, &derived, &uri, &mut diagnostics);
+        bindings::report_env_limits(&derived, &uri, &mut diagnostics);
         derived
     });
 
