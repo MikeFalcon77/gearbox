@@ -2,10 +2,11 @@
 //!
 //! `products/payments-demo/product.gdl` resolved for `dev` is the M5 slice, and
 //! everything here asserts against what that produces from `../gears-rust`
-//! rather than from a fixture. The one thing a fixture is used for is the
-//! `OperatorOwned` path, and the reason is stated where it appears: the whole
-//! design has exactly one operator-owned file -- Helm's `values.yaml` -- and M7
-//! is where that arrives, so there is nothing real for it to be tried against.
+//! rather than from a fixture. Fixtures appear in two places, and both say
+//! why: the `OperatorOwned` path, because Helm's `values.yaml` is the design's
+//! only operator-owned file; and the cluster-secret path, because the demo
+//! product's lock has an empty `cluster` list (no gear requires a primitive),
+//! so a values-file grep on the demo would pass by having nothing to write.
 
 #![allow(
     clippy::unwrap_used,
@@ -13,14 +14,15 @@
     reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
 )]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use gearbox_engine::generate::{GenerateInput, Generated, TemplateSet, base_root_for, generate};
 use gearbox_engine::{SourceRoot, load_catalogue, load_product};
 use gearbox_ir::{
-    FileAction, FileEntry, FileKind, FileSet, GearId, Ownership, ProfileId, RelPath,
-    ResolvedProduct, SourceId,
+    ClusterPrimitive, ClusterResolution, FileAction, FileEntry, FileKind, FileSet, GearId,
+    InclusionReason, Ownership, ProfileId, RelPath, ResolvedClusterBinding, ResolvedGear,
+    ResolvedProduct, Selected, SourceId,
 };
 
 fn gears_rust() -> Option<PathBuf> {
@@ -914,6 +916,15 @@ fn assert_subchart_deployment(files: &FileSet, product: &str, sub: &str) {
     assert!(deploy.contains("POD_NAME"), "{deploy}");
     assert!(deploy.contains("POD_NAMESPACE"), "{deploy}");
     assert!(
+        deploy.contains("nodeSelector"),
+        "Vision §56 hatches must be in the template, not only the schema:\n{deploy}"
+    );
+    assert!(
+        deploy.contains("existingSecret"),
+        "secretKeyRef is gated on the operator naming a Secret:\n{deploy}"
+    );
+    assert!(deploy.contains("secretKeyRef"), "{deploy}");
+    assert!(
         !deploy.contains("<<"),
         "`<<` survived into the Helm template:\n{deploy}"
     );
@@ -1006,4 +1017,129 @@ fn values_schema_rejects_unknown_keys_and_wrong_types() {
     let gateway = &schema["properties"]["api-gateway"];
     assert_eq!(gateway["additionalProperties"], false);
     assert_eq!(gateway["properties"]["replicaCount"]["type"], "integer");
+    for hatch in [
+        "nameOverride",
+        "fullnameOverride",
+        "podAnnotations",
+        "nodeSelector",
+        "tolerations",
+        "affinity",
+        "resources",
+        "extraEnv",
+        "extraVolumes",
+        "extraVolumeMounts",
+        "podSecurityContext",
+        "existingSecret",
+        "secretKeys",
+    ] {
+        assert!(
+            gateway["properties"].get(hatch).is_some(),
+            "schema is missing hatch `{hatch}`"
+        );
+    }
+    assert_eq!(
+        schema["properties"]["global"]["properties"]["imageRegistry"]["type"],
+        "string"
+    );
+    assert_eq!(
+        schema["properties"]["global"]["properties"]["imagePullSecrets"]["type"],
+        "array"
+    );
+}
+
+/// The demo product cannot prove `cpt-gearbox-fr-no-secrets-in-values`.
+///
+/// `ResolvedProduct::cluster` for payments-demo/prod is empty: the product
+/// declares a postgres profile with `${PG_PASSWORD}`, but no gear in the
+/// corpus requires a cluster primitive, so the binding never reaches the
+/// lock. Acceptance greps on the demo values files pass because there is
+/// nothing to write. This test uses a lock fixture with a cluster binding
+/// so the generator is actually exercised.
+#[test]
+fn generated_values_name_a_secret_and_never_contain_one() {
+    let Some((lock, files)) = generated_with_cluster_secret() else {
+        return;
+    };
+    let product = lock.product.id.as_str();
+    for path in [
+        format!("helm/{product}/values.yaml"),
+        format!("helm/{product}/values.generated.yaml"),
+    ] {
+        let body = text(&files.files, &path);
+        assert!(
+            !body.to_ascii_lowercase().contains("password:")
+                && !body.to_ascii_lowercase().contains("apikey:"),
+            "`{path}` must not carry a credential:\n{body}"
+        );
+        assert!(
+            body.contains("existingSecret: payments-demo-pg"),
+            "`{path}` should name the operator's Secret, not invent one:\n{body}"
+        );
+        assert!(
+            body.contains("PG_PASSWORD"),
+            "`{path}` should list the env names the runtime will expand:\n{body}"
+        );
+    }
+
+    let config = text(&files.files, "config/audit.yaml");
+    assert!(
+        config.contains("${PG_PASSWORD}"),
+        "the placeholder has to reach the ConfigMap so secretKeyRef can fill it:\n{config}"
+    );
+    assert!(!config.contains("supersecret"), "{config}");
+}
+
+fn generated_with_cluster_secret() -> Option<(ResolvedProduct, Generated)> {
+    let (mut lock, source_roots) = resolve("prod")?;
+    let root = gears_rust()?;
+    let opened = vec![SourceRoot::open(SourceId::new("gears-rust").unwrap(), &root).unwrap()];
+    let scan = load_catalogue(&opened);
+    let cluster_id = GearId::new("cluster").unwrap();
+    let descriptor = scan.catalogue.gears.get(&cluster_id).cloned()?;
+
+    let crate_dir = descriptor.crate_dir();
+    lock.gears.insert(
+        cluster_id.clone(),
+        ResolvedGear {
+            id: cluster_id.clone(),
+            source: descriptor.source,
+            gdl_path: descriptor.gdl_path,
+            package: descriptor.package,
+            crate_dir,
+            runtime_caps: descriptor.runtime_caps,
+            colocated_deps: descriptor.colocated_deps,
+            selected_by: vec![InclusionReason::Selected],
+            config: BTreeMap::new(),
+        },
+    );
+
+    let process = lock
+        .processes
+        .iter_mut()
+        .find(|p| p.name.as_str() == "audit")
+        .expect("the demo's audit worker");
+    if !process.gears.iter().any(|g| g == &cluster_id) {
+        process.gears.push(cluster_id);
+    }
+    let requester = process.anchor.clone();
+    lock.cluster.push(ResolvedClusterBinding {
+        scope: "main".to_owned(),
+        primitive: ClusterPrimitive::Cache,
+        required_capabilities: BTreeSet::default(),
+        requesters: vec![requester],
+        selected: Selected::honoured("postgres".to_owned()),
+        resolved: ClusterResolution::Provider {
+            name: "postgres".to_owned(),
+        },
+        options: BTreeMap::from([(
+            "connection_string".to_owned(),
+            serde_json::json!(
+                "postgres://payments@${PG_HOST}:5432/payments?password=${PG_PASSWORD}"
+            ),
+        )]),
+        secret_ref: Some("existingSecret:payments-demo-pg".to_owned()),
+    });
+
+    let files = generate_tree(&lock, &source_roots, &out_root());
+    Some((lock, files))
 }

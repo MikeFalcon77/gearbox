@@ -12,8 +12,13 @@
 //! a Service named `{release}-{name}` would be a DNS name nobody dials.
 //! The cluster SDK is stricter still: if the process links the `cluster`
 //! gear, a second Service is named exactly `cluster` on port 50051.
+//!
+//! Secrets never appear in values. `${VAR}` placeholders in the generated
+//! config become `secretKeys`, and `secret_ref = "existingSecret:<name>"`
+//! on a cluster binding becomes `existingSecret`. The chart injects those
+//! names as `secretKeyRef` env; the operator's Secret holds the values.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use gearbox_ir::{FileEntry, FileKind, FileSet, Ownership, ProcessKind, ResolvedProcess};
 use minijinja::context;
@@ -51,7 +56,7 @@ pub fn files(input: &GenerateInput<'_>, files: &FileSet) -> Result<Vec<FileEntry
     let mut out = Vec::new();
 
     out.push(umbrella_chart(input, product, version)?);
-    out.extend(umbrella_values(input)?);
+    out.extend(umbrella_values(input, files)?);
     out.push(umbrella_helpers(product)?);
 
     for process in &input.lock.processes {
@@ -150,10 +155,19 @@ fn subchart_chart(product: &str, sub: &str, version: &str) -> Result<FileEntry, 
 /// The merge base lives in `.gearbox/<product>/.base/`, shared across
 /// profiles. Only Kubernetes emits this chart, so a `dev` generate cannot
 /// clobber a `prod` operator file.
-fn umbrella_values(input: &GenerateInput<'_>) -> Result<Vec<FileEntry>, GenerateError> {
+fn umbrella_values(
+    input: &GenerateInput<'_>,
+    files: &FileSet,
+) -> Result<Vec<FileEntry>, GenerateError> {
     let mut blocks = BTreeMap::new();
     for process in &input.lock.processes {
         let (repository, tag) = split_image(process.image.as_deref().unwrap_or(&process.bin_name));
+        let config_rel = paths::rel(&["config", &format!("{}.yaml", process.name)])?;
+        let keys = files
+            .get(&config_rel)
+            .and_then(FileEntry::as_text)
+            .map(secret_vars)
+            .unwrap_or_default();
         blocks.insert(
             subchart_name(process).to_owned(),
             SubchartValues {
@@ -168,10 +182,27 @@ fn umbrella_values(input: &GenerateInput<'_>) -> Result<Vec<FileEntry>, Generate
                     create: true,
                     name: None,
                 },
+                name_override: None,
+                fullname_override: None,
+                pod_annotations: None,
+                node_selector: None,
+                tolerations: None,
+                affinity: None,
+                resources: None,
+                extra_env: None,
+                extra_volumes: None,
+                extra_volume_mounts: None,
+                pod_security_context: None,
+                existing_secret: existing_secret(process, input),
+                secret_keys: if keys.is_empty() { None } else { Some(keys) },
             },
         );
     }
-    let yaml = serde_saphyr::to_string(&blocks).map_err(|source| GenerateError::Yaml {
+    let values = UmbrellaValues {
+        global: None,
+        subcharts: blocks,
+    };
+    let yaml = serde_saphyr::to_string(&values).map_err(|source| GenerateError::Yaml {
         what: "helm values.yaml",
         source,
     })?;
@@ -203,6 +234,7 @@ fn umbrella_values(input: &GenerateInput<'_>) -> Result<Vec<FileEntry>, Generate
 fn values_schema(input: &GenerateInput<'_>) -> Result<FileEntry, GenerateError> {
     let subchart = draft7_subchart_schema()?;
     let mut properties = serde_json::Map::new();
+    properties.insert("global".to_owned(), global_schema());
     let mut required = Vec::new();
     for process in &input.lock.processes {
         let name = subchart_name(process);
@@ -261,6 +293,20 @@ fn draft7_subchart_schema() -> Result<serde_json::Value, GenerateError> {
     Ok(raw)
 }
 
+fn global_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "imageRegistry": { "type": "string" },
+            "imagePullSecrets": {
+                "type": "array",
+                "items": { "type": "string" }
+            }
+        }
+    })
+}
+
 fn inline_refs(value: &mut serde_json::Value, defs: &serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
@@ -287,6 +333,10 @@ fn inline_refs(value: &mut serde_json::Value, defs: &serde_json::Value) {
 
 /// Shared by the values files (serde) and `values.schema.json` (schemars),
 /// so a field cannot appear in one and not the other.
+///
+/// Optional hatches are omitted from the default YAML so a first generate
+/// stays small, but they stay in the schema so `--set` of an unknown key
+/// still fails and a documented hatch still type-checks.
 #[derive(serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(deny_unknown_fields)]
@@ -295,6 +345,52 @@ struct SubchartValues {
     replica_count: u32,
     image: ImageValues,
     service_account: ServiceAccountValues,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name_override: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fullname_override: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pod_annotations: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    node_selector: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tolerations: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    affinity: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resources: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra_env: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra_volumes: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra_volume_mounts: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pod_security_context: Option<serde_json::Value>,
+    /// Name of a Secret the operator already created. Never a credential.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    existing_secret: Option<String>,
+    /// Env names taken from `${VAR}` placeholders in this process's config.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    secret_keys: Option<Vec<String>>,
+}
+
+#[derive(serde::Serialize)]
+struct UmbrellaValues {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    global: Option<GlobalValues>,
+    #[serde(flatten)]
+    subcharts: BTreeMap<String, SubchartValues>,
+}
+
+#[derive(serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+struct GlobalValues {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    image_registry: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    image_pull_secrets: Option<Vec<String>>,
 }
 
 #[derive(serde::Serialize, schemars::JsonSchema)]
@@ -456,6 +552,57 @@ fn indent_block(text: &str, spaces: usize) -> String {
     out
 }
 
+/// Env names the runtime will try to expand out of this process's config.
+///
+/// Scanned from the generated YAML rather than from a field table, because
+/// the postgres plugin, toolkit-db and static-credstore all share `${VAR}`
+/// / `${VAR:-default}` and the `ConfigMap` is what the binary actually loads.
+/// A placeholder the process will not expand is still harmless as env.
+fn secret_vars(config: &str) -> Vec<String> {
+    let mut found = BTreeSet::new();
+    let mut rest = config;
+    while let Some(start) = rest.find("${") {
+        rest = &rest[start + 2..];
+        let Some(end) = rest.find('}') else {
+            break;
+        };
+        let inner = &rest[..end];
+        let name = inner.split_once(':').map_or(inner, |(name, _)| name);
+        if is_env_name(name) {
+            found.insert(name.to_owned());
+        }
+        rest = &rest[end + 1..];
+    }
+    found.into_iter().collect()
+}
+
+fn is_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_uppercase() || c == '_' => {
+            chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        }
+        _ => false,
+    }
+}
+
+/// `secret_ref = "existingSecret:<name>"` is the lock spelling of a Secret
+/// the operator already created. Any other shape stays in config only:
+/// a vault path is not a Kubernetes object name.
+fn existing_secret(process: &ResolvedProcess, input: &GenerateInput<'_>) -> Option<String> {
+    input.lock.cluster.iter().find_map(|binding| {
+        if !binding.requesters.iter().any(|gear| process.contains(gear)) {
+            return None;
+        }
+        binding
+            .secret_ref
+            .as_deref()?
+            .strip_prefix("existingSecret:")
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+    })
+}
+
 fn split_image(image: &str) -> (String, String) {
     match image.rsplit_once(':') {
         Some((repo, tag)) if !repo.is_empty() && !tag.contains('/') => {
@@ -578,6 +725,17 @@ mod tests {
                 "localhost:5000/gbx-api-gateway".to_owned(),
                 "latest".to_owned()
             )
+        );
+    }
+
+    #[test]
+    fn secret_vars_reads_plain_and_defaulted_placeholders() {
+        let config = "connection_string: postgres://u:${PG_PASSWORD}@${PG_HOST:-db}/payments\n\
+                      token: ${not_an_env}\n\
+                      other: ${i}\n";
+        assert_eq!(
+            secret_vars(config),
+            vec!["PG_HOST".to_owned(), "PG_PASSWORD".to_owned()]
         );
     }
 }
