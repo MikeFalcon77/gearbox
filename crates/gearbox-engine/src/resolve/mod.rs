@@ -125,7 +125,8 @@ pub fn resolve_at(
         selected: &selected,
     };
     let partition = if let Some(declaration) = intent.profiles.get(profile) {
-        let partition = partition::partition(&input, declaration, &uri, &mut diagnostics);
+        let partition =
+            partition::partition(&input, declaration, &intent.version, &uri, &mut diagnostics);
         // Step 5 -- what the runtime will refuse, said before a binary exists.
         structural::check(catalogue, &partition, declaration, &uri, &mut diagnostics);
         partition
@@ -136,7 +137,7 @@ pub fn resolve_at(
 
     // Step 6 -- bindings, derived from placement rather than declared.
     let bindings = intent.profiles.get(profile).map_or_else(Vec::new, |d| {
-        let derived = bindings::derive(
+        let mut derived = bindings::derive(
             catalogue,
             &cuts,
             &partition,
@@ -145,6 +146,7 @@ pub fn resolve_at(
             &uri,
             &mut diagnostics,
         );
+        bindings::pin_static_endpoints(&mut derived, &partition, d);
         bindings::report_env_limits(&derived, &uri, &mut diagnostics);
         derived
     });

@@ -330,14 +330,26 @@ pub struct ResolvedProcess {
     pub serve: Option<WorkerServe>,
 
     /// The container image, when the profile builds images.
+    ///
+    /// `{image_registry}/{bin_name}:{product.version}`, or `{bin_name}:{version}`
+    /// when the profile named no registry. A pure function of the lock, which is
+    /// why it is resolved rather than left for a template to invent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
 
     /// The chart subdirectory, when the profile generates a chart.
+    ///
+    /// Equal to the process name. Helm looks for subcharts under `charts/`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subchart: Option<String>,
 
-    /// The service port other processes reach this one on.
+    /// The port neighbours dial for contract traffic, when the profile
+    /// generates a chart.
+    ///
+    /// A projection of `listens` / `serve`, not an independent fact. A process
+    /// may listen on several sockets (REST and gRPC); this is the REST one,
+    /// because that is the transport a severed declared edge actually carries.
+    /// The Service still declares every port.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_port: Option<u16>,
 }

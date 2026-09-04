@@ -73,6 +73,7 @@ pub struct Inputs<'a> {
 pub fn partition(
     input: &Inputs<'_>,
     declaration: &DeploymentProfileDecl,
+    product_version: &str,
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) -> Partition {
@@ -116,8 +117,9 @@ pub fn partition(
         }
     }
 
-    assign_endpoints(catalogue, &mut processes);
+    assign_endpoints(catalogue, declaration, &mut processes);
     assign_spawns(declaration, &mut processes);
+    assign_chart_fields(declaration, product_version, &mut processes);
     report_orphans(closure, &processes, uri, diagnostics);
     Partition { processes }
 }
@@ -163,13 +165,16 @@ fn assign_spawns(declaration: &DeploymentProfileDecl, processes: &mut [ResolvedP
             continue;
         };
         taken.insert(port);
-        let address = format!("{BIND_HOST}:{port}");
+        let host = bind_host(declaration);
+        let address = format!("{host}:{port}");
+        let loopback = allows_loopback(declaration);
         processes[index].serve = Some(WorkerServe {
             advertise_uri: format!("http://{address}"),
             listen_addr: address,
-            // Every profile that spawns workers locally advertises loopback, and
-            // the runtime refuses to start without this said out loud.
-            allow_loopback_advertise: true,
+            // Kubernetes advertises a Service DNS name (rewritten in
+            // `assign_chart_fields`); a one-machine profile has to say loopback
+            // is allowed or the runtime refuses to start.
+            allow_loopback_advertise: loopback,
         });
 
         // The host starts it by absolute path. `target_dir` is the only place
@@ -206,12 +211,22 @@ fn assign_spawns(declaration: &DeploymentProfileDecl, processes: &mut [ResolvedP
 
 /// The host a generated bind address uses.
 ///
-/// Loopback, not `0.0.0.0`: every profile M5 generates for runs on one machine,
-/// and a process that binds every interface by default is a decision nobody
-/// asked for. The Kubernetes profile needs the opposite and will have to say so
-/// here rather than in a template, because the address is a resolved fact the
-/// lock records once and every generator then reads.
-const BIND_HOST: &str = "127.0.0.1";
+/// Loopback on one-machine profiles: a process that binds every interface by
+/// default is a decision nobody asked for. Kubernetes is the opposite -- a
+/// Service cannot deliver a packet to `127.0.0.1` inside the pod -- so the
+/// address is resolved here rather than patched in a template. The lock records
+/// the fact once and every generator reads it.
+fn bind_host(declaration: &DeploymentProfileDecl) -> &'static str {
+    if matches!(declaration, DeploymentProfileDecl::Kubernetes { .. }) {
+        "0.0.0.0"
+    } else {
+        "127.0.0.1"
+    }
+}
+
+fn allows_loopback(declaration: &DeploymentProfileDecl) -> bool {
+    !matches!(declaration, DeploymentProfileDecl::Kubernetes { .. })
+}
 
 /// Fill each process's `listens` from what its gears declare they `serve`.
 ///
@@ -226,8 +241,14 @@ const BIND_HOST: &str = "127.0.0.1";
 /// then falls back to whatever its own config default is, which is a worse
 /// answer than a resolved one but a much better answer than a fabricated port
 /// the description never mentioned.
-fn assign_endpoints(catalogue: &Catalogue, processes: &mut [ResolvedProcess]) {
+fn assign_endpoints(
+    catalogue: &Catalogue,
+    declaration: &DeploymentProfileDecl,
+    processes: &mut [ResolvedProcess],
+) {
     let mut taken: BTreeSet<u16> = BTreeSet::new();
+    let host = bind_host(declaration);
+    let loopback = allows_loopback(declaration);
 
     // By process name, not by construction order: the lock is written in name
     // order, so assigning in any other order would let a resolver refactor that
@@ -259,14 +280,84 @@ fn assign_endpoints(catalogue: &Catalogue, processes: &mut [ResolvedProcess]) {
                     name: served.name.clone(),
                     gear: gear.clone(),
                     config_key: config_key.clone(),
-                    address: format!("{BIND_HOST}:{port}"),
+                    address: format!("{host}:{port}"),
                     advertise_uri: None,
-                    allow_loopback_advertise: true,
+                    allow_loopback_advertise: loopback,
                 });
             }
         }
         processes[index].listens = listens;
     }
+}
+
+/// Image, subchart and service port -- only when the profile builds images.
+///
+/// `service_port` is a projection of `listens` / `serve`, not an independent
+/// fact. A process may listen on REST and gRPC; neighbours dial REST, because
+/// that is the transport a severed declared edge actually carries. The Service
+/// still lists every port.
+fn assign_chart_fields(
+    declaration: &DeploymentProfileDecl,
+    product_version: &str,
+    processes: &mut [ResolvedProcess],
+) {
+    let DeploymentProfileDecl::Kubernetes {
+        namespace,
+        image_registry,
+        ..
+    } = declaration
+    else {
+        return;
+    };
+    let namespace = namespace.as_deref().unwrap_or("default");
+    for process in processes.iter_mut() {
+        process.subchart = Some(process.name.to_string());
+        process.image = Some(image_ref(
+            image_registry.as_deref(),
+            &process.bin_name,
+            product_version,
+        ));
+        process.service_port = contract_port(process);
+        if let Some(uri) = cluster_dns(process, namespace)
+            && let Some(serve) = process.serve.as_mut()
+        {
+            serve.advertise_uri = uri;
+            serve.allow_loopback_advertise = false;
+        }
+    }
+}
+
+fn image_ref(registry: Option<&str>, bin_name: &str, version: &str) -> String {
+    match registry {
+        Some(registry) if !registry.is_empty() => format!("{registry}/{bin_name}:{version}"),
+        _ => format!("{bin_name}:{version}"),
+    }
+}
+
+/// The port neighbours dial for contract traffic: a worker's own listener, or
+/// the host's REST socket rather than its gRPC one.
+fn contract_port(process: &ResolvedProcess) -> Option<u16> {
+    if let Some(serve) = &process.serve {
+        return parse_port(&serve.listen_addr);
+    }
+    process
+        .listens
+        .iter()
+        .find(|endpoint| endpoint.name == "rest")
+        .or_else(|| process.listens.first())
+        .and_then(|endpoint| parse_port(&endpoint.address))
+}
+
+pub(crate) fn cluster_dns(process: &ResolvedProcess, namespace: &str) -> Option<String> {
+    let name = process.subchart.as_deref()?;
+    let port = process.service_port?;
+    Some(format!(
+        "http://{name}.{namespace}.svc.cluster.local:{port}"
+    ))
+}
+
+fn parse_port(address: &str) -> Option<u16> {
+    address.rsplit_once(':')?.1.parse().ok()
 }
 
 /// `preferred` if it is free, else the next free port above it.

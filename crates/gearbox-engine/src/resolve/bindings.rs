@@ -221,6 +221,46 @@ fn remote(
     }
 }
 
+/// Fill `endpoint` for static discovery under Kubernetes.
+///
+/// Directory discovery finds the address at runtime; writing one into the lock
+/// would record a guess as a decision. Static discovery under Kubernetes is
+/// the opposite: the only resolver the runtime has is a pinned URI, and the
+/// URI is a pure function of the process's Service DNS name. One-machine
+/// static profiles still leave this empty -- their address is a local spawn
+/// concern, not a cluster name.
+pub fn pin_static_endpoints(
+    bindings: &mut [ResolvedBinding],
+    partition: &Partition,
+    declaration: &DeploymentProfileDecl,
+) {
+    if !matches!(
+        declaration,
+        DeploymentProfileDecl::Kubernetes {
+            discovery: Discovery::Static,
+            ..
+        }
+    ) {
+        return;
+    }
+    let namespace = match declaration {
+        DeploymentProfileDecl::Kubernetes { namespace, .. } => {
+            namespace.as_deref().unwrap_or("default")
+        }
+        _ => return,
+    };
+    for binding in bindings.iter_mut().filter(|b| b.is_remote()) {
+        let Some(provider) = partition
+            .processes
+            .iter()
+            .find(|process| process.name == binding.provider_process)
+        else {
+            continue;
+        };
+        binding.endpoint = super::partition::cluster_dns(provider, namespace);
+    }
+}
+
 /// Config key the runtime reads for a static endpoint override.
 ///
 /// `StaticEndpointResolver` looks up

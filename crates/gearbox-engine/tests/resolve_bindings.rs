@@ -125,8 +125,9 @@ fn a_local_binding_carries_no_endpoint() {
 
 #[test]
 fn a_remote_binding_names_where_its_address_comes_from() {
-    // The source, not the value: an address is a deployment concern, and pinning
-    // one would make the lock environment-specific.
+    // Directory discovery names a lookup; kubernetes static names a config key
+    // *and* pins the Service DNS, because that is the only resolver the runtime
+    // has. Pinning a directory address would record a guess as a decision.
     require!(cat, prod);
 
     let directory = resolve(&cat, &prod, &pid("local"));
@@ -135,6 +136,10 @@ fn a_remote_binding_names_where_its_address_comes_from() {
         .as_deref()
         .expect("a source");
     assert!(source.starts_with("directory:"), "{source}");
+    assert!(
+        directory.bindings.iter().all(|b| b.endpoint.is_none()),
+        "directory discovery must not pin an address the resolver did not decide"
+    );
 
     let static_ = resolve(&cat, &prod, &pid("prod"));
     let source = static_.bindings[0]
@@ -145,9 +150,13 @@ fn a_remote_binding_names_where_its_address_comes_from() {
         source,
         "gears.api-contracts-consumer.config.consumer_wiring.api-contracts"
     );
+    let endpoint = static_.bindings[0]
+        .endpoint
+        .as_deref()
+        .expect("kubernetes static pins the Service DNS name");
     assert!(
-        static_.bindings[0].endpoint.is_none(),
-        "the value belongs to the deployment, not the lock"
+        endpoint.contains(".svc.cluster.local:"),
+        "the pinned address is cluster DNS, not a local spawn: {endpoint}"
     );
 }
 

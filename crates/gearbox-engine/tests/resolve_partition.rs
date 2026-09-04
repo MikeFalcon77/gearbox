@@ -273,5 +273,71 @@ fn the_partition_is_stable_across_runs() {
     }
 }
 
+#[test]
+fn kubernetes_fills_the_chart_fields_and_binds_every_interface() {
+    // image / subchart / service_port exist only when the profile builds
+    // images. BIND_HOST is 0.0.0.0 here because a Service cannot deliver a
+    // packet to 127.0.0.1 inside the pod -- and that fact belongs in the lock,
+    // not in a template.
+    require!(cat, prod);
+    let local = resolve(&cat, &prod, &pid("local"));
+    for process in &local.partition.processes {
+        assert!(process.image.is_none(), "{process:?}");
+        assert!(process.subchart.is_none(), "{process:?}");
+        assert!(process.service_port.is_none(), "{process:?}");
+        for endpoint in &process.listens {
+            assert!(
+                endpoint.address.starts_with("127.0.0.1:"),
+                "{}",
+                endpoint.address
+            );
+        }
+    }
+
+    let prod_ = resolve(&cat, &prod, &pid("prod"));
+    let gateway = prod_
+        .partition
+        .processes
+        .iter()
+        .find(|p| p.anchor.as_str() == "api-gateway")
+        .expect("the host");
+    assert_eq!(
+        gateway.image.as_deref(),
+        Some("registry.example.com/payments/gbx-api-gateway:0.1.0")
+    );
+    assert_eq!(gateway.subchart.as_deref(), Some(gateway.name.as_str()));
+    assert_eq!(
+        gateway.service_port,
+        Some(8087),
+        "neighbours dial REST, not the gRPC hub: listens={:?}",
+        gateway.listens
+    );
+    for endpoint in &gateway.listens {
+        assert!(
+            endpoint.address.starts_with("0.0.0.0:"),
+            "{}",
+            endpoint.address
+        );
+        assert!(!endpoint.allow_loopback_advertise);
+    }
+
+    let worker = prod_
+        .partition
+        .processes
+        .iter()
+        .find(|p| p.is_worker() && p.anchor.as_str() == "api-contracts")
+        .expect("the contracts worker");
+    let serve = worker.serve.as_ref().expect("a worker serves");
+    assert!(!serve.allow_loopback_advertise);
+    assert!(
+        serve.advertise_uri.contains(&format!(
+            "{}.payments.svc.cluster.local:",
+            worker.subchart.as_deref().unwrap()
+        )),
+        "{}",
+        serve.advertise_uri
+    );
+}
+
 #[path = "support/resolve_fixtures.rs"]
 mod support;
