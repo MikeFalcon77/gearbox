@@ -39,6 +39,12 @@
 //! - `docker/Dockerfile`: `header`, `rust_channel`, `crate_name`, `bin_name`,
 //!   `process`, `out_rel`, `uid`, `ports`
 //! - `docker/dockerignore`: `header`, `secret_dirs`
+//! - `helm/helpers.tpl`: `name`
+//! - `helm/deployment.yaml`: `name`, `process`, `config_filename`, `http_port`,
+//!   `liveness_path`, `readiness_path`, `uid`, `home_dir`, `container_ports`
+//! - `helm/service.yaml`: `name`, `service_name`, `ports`, `cluster_service`
+//! - `helm/configmap.yaml`: `name`, `config_filename`, `config_yaml`
+//! - `helm/serviceaccount.yaml`: `name`
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -94,6 +100,13 @@ impl TemplateSet {
             "registered_gears.rs" => Some(include_str!("templates/registered_gears.rs.jinja")),
             "docker/Dockerfile" => Some(include_str!("templates/docker/Dockerfile.jinja")),
             "docker/dockerignore" => Some(include_str!("templates/docker/dockerignore.jinja")),
+            "helm/helpers.tpl" => Some(include_str!("templates/helm/helpers.tpl.jinja")),
+            "helm/deployment.yaml" => Some(include_str!("templates/helm/deployment.yaml.jinja")),
+            "helm/service.yaml" => Some(include_str!("templates/helm/service.yaml.jinja")),
+            "helm/configmap.yaml" => Some(include_str!("templates/helm/configmap.yaml.jinja")),
+            "helm/serviceaccount.yaml" => {
+                Some(include_str!("templates/helm/serviceaccount.yaml.jinja"))
+            }
             _ => None,
         }
     }
@@ -198,6 +211,38 @@ pub fn render(
         })
 }
 
+/// Render a Helm template, with minijinja delimiters moved off `{{ }}`.
+///
+/// Helm has already claimed the default Jinja markers. The generator uses
+/// `<< >>` / `<% %>` / `<# #>` so a `{{ include }}` in the source is still
+/// a `{{ include }}` in the chart. The mirror of [`super::rust`]'s test:
+/// `{{` must survive, `<<` must not.
+pub fn render_helm(
+    what: &'static str,
+    source: &str,
+    ctx: minijinja::Value,
+) -> Result<String, GenerateError> {
+    let mut env = Environment::new();
+    env.set_undefined_behavior(UndefinedBehavior::Strict);
+    let syntax = minijinja::syntax::SyntaxConfig::builder()
+        .variable_delimiters("<<", ">>")
+        .block_delimiters("<%", "%>")
+        .comment_delimiters("<#", "#>")
+        .build()
+        .map_err(|source| GenerateError::Template {
+            what,
+            source: Box::new(source),
+        })?;
+    env.set_syntax(syntax);
+    env.add_template(what, source)
+        .and_then(|()| env.get_template(what)?.render(ctx))
+        .map(|body| format!("{}\n", body.trim_end()))
+        .map_err(|source| GenerateError::Template {
+            what,
+            source: Box::new(source),
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,6 +255,11 @@ mod tests {
             "registered_gears.rs",
             "docker/Dockerfile",
             "docker/dockerignore",
+            "helm/helpers.tpl",
+            "helm/deployment.yaml",
+            "helm/service.yaml",
+            "helm/configmap.yaml",
+            "helm/serviceaccount.yaml",
         ] {
             assert!(
                 TemplateSet::builtin(key).is_some(),

@@ -860,3 +860,84 @@ fn a_kubernetes_profile_generates_a_dockerfile_per_process() {
         );
     }
 }
+
+/// The chart is an umbrella with one subchart per process, because Helm
+/// looks for subcharts under `charts/` and each process is a separate
+/// workload, Service, `ConfigMap` and `ServiceAccount`.
+#[test]
+fn a_kubernetes_profile_generates_an_umbrella_and_a_subchart_per_process() {
+    let Some((lock, files)) = generated("prod") else {
+        return;
+    };
+    let product = lock.product.id.as_str();
+    let chart = text(&files.files, &format!("helm/{product}/Chart.yaml"));
+    assert!(chart.contains("apiVersion: v2"), "{chart}");
+    assert!(
+        !chart.contains("<<"),
+        "Chart.yaml is serialized data, not a template:\n{chart}"
+    );
+    for process in &lock.processes {
+        let sub = process.subchart.as_deref().unwrap_or(process.name.as_str());
+        assert!(
+            chart.contains(&format!("condition: {sub}.enabled")),
+            "{chart}"
+        );
+        assert_subchart_deployment(&files.files, product, sub);
+        assert_subchart_security_helpers(&files.files, product, sub);
+        let values = text(&files.files, &format!("helm/{product}/values.yaml"));
+        assert!(values.contains(&format!("{sub}:")), "{values}");
+        assert!(values.contains("enabled: true"), "{values}");
+    }
+
+    let gateway_config = text(&files.files, "config/api-gateway.yaml");
+    assert!(
+        gateway_config.contains("home_dir: /var/lib/gearbox"),
+        "readOnlyRootFilesystem makes ~ unwritable:\n{gateway_config}"
+    );
+}
+
+fn assert_subchart_deployment(files: &FileSet, product: &str, sub: &str) {
+    let deploy = text(
+        files,
+        &format!("helm/{product}/charts/{sub}/templates/deployment.yaml"),
+    );
+    assert!(
+        deploy.contains("checksum/config"),
+        "subPath mounts do not update in place:\n{deploy}"
+    );
+    assert!(deploy.contains("subPath:"), "{deploy}");
+    assert!(deploy.contains("path: /healthz"), "{deploy}");
+    assert!(deploy.contains("path: /readyz"), "{deploy}");
+    assert!(
+        !deploy.contains("path: /health\n"),
+        "/health is liveness-hostile (503 on a sick dependency):\n{deploy}"
+    );
+    assert!(deploy.contains("POD_NAME"), "{deploy}");
+    assert!(deploy.contains("POD_NAMESPACE"), "{deploy}");
+    assert!(
+        !deploy.contains("<<"),
+        "`<<` survived into the Helm template:\n{deploy}"
+    );
+    assert!(
+        deploy.contains("{{ include"),
+        "Helm's `{{ }}` did not survive:\n{deploy}"
+    );
+}
+
+fn assert_subchart_security_helpers(files: &FileSet, product: &str, sub: &str) {
+    let helpers = text(
+        files,
+        &format!("helm/{product}/charts/{sub}/templates/_helpers.tpl"),
+    );
+    assert!(helpers.contains("runAsNonRoot: true"), "{helpers}");
+    assert!(
+        helpers.contains("readOnlyRootFilesystem: true"),
+        "{helpers}"
+    );
+    assert!(
+        helpers.contains("allowPrivilegeEscalation: false"),
+        "{helpers}"
+    );
+    assert!(helpers.contains("RuntimeDefault"), "{helpers}");
+    assert!(helpers.contains("- all"), "{helpers}");
+}

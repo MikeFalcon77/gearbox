@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: << service_name >>
+  labels:
+    {{- include "<< name >>.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "<< name >>.selectorLabels" . | nindent 4 }}
+  ports:
+<% for port in ports %>
+    - name: << port.name >>
+      port: << port.port >>
+      targetPort: << port.port >>
+      protocol: TCP
+<% endfor %>
+<% if cluster_service %>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cluster
+  labels:
+    {{- include "<< name >>.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "<< name >>.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: grpc
+      port: << cluster_port >>
+      targetPort: << cluster_port >>
+      protocol: TCP
+<% endif %>

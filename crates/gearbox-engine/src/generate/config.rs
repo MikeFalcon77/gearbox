@@ -128,17 +128,19 @@ pub fn app_config(
     write_cluster(input, process, &mut gears);
     write_spawns(process, &mut gears);
 
+    let home_dir = if input.lock.kubernetes.is_some() {
+        // `readOnlyRootFilesystem` makes `~` unwritable; the chart mounts an
+        // emptyDir here. The path is a generator fact, not a lock one: the
+        // runtime only cares that `create_dir_all` succeeds.
+        super::K8S_HOME_DIR.to_owned()
+    } else {
+        format!(
+            "~/.cf-gears/{}/{}",
+            input.lock.product.id, input.lock.product.profile
+        )
+    };
     let config = AppConfig {
-        server: ServerSection {
-            // Scoped per product and profile. Two products sharing
-            // `~/.cf-gears` would share every gear's SQLite file, and the
-            // symptom of that is data appearing in the wrong product rather
-            // than an error.
-            home_dir: format!(
-                "~/.cf-gears/{}/{}",
-                input.lock.product.id, input.lock.product.profile
-            ),
-        },
+        server: ServerSection { home_dir },
         oop_http: process.serve.as_ref().map(|serve| OopHttpSection {
             listen_addr: serve.listen_addr.clone(),
             advertise_uri: serve.advertise_uri.clone(),

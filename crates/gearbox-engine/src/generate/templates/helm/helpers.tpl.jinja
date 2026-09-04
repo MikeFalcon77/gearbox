@@ -1,0 +1,59 @@
+{{- define "<< name >>.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "<< name >>.fullname" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- if contains $name .Release.Name }}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "<< name >>.chart" -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "<< name >>.labels" -}}
+helm.sh/chart: {{ include "<< name >>.chart" . }}
+{{ include "<< name >>.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{- define "<< name >>.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "<< name >>.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{- define "<< name >>.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "<< name >>.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}
+
+{{- define "<< name >>.containerSecurityContext" -}}
+runAsNonRoot: true
+readOnlyRootFilesystem: true
+allowPrivilegeEscalation: false
+seccompProfile:
+  type: RuntimeDefault
+capabilities:
+  drop:
+    - all
+{{- end }}
+
+{{- define "<< name >>.podSecurityContext" -}}
+runAsNonRoot: true
+runAsUser: << uid >>
+fsGroup: << uid >>
+{{- end }}

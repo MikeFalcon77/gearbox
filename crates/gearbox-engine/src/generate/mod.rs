@@ -19,8 +19,8 @@
 //! rather than by a manifest that cannot see inside them.
 //!
 //! **What is here and what is not.** Every process in the lock is generated,
-//! host or worker. Dockerfiles are emitted for a Kubernetes profile; Helm is
-//! M7's next slice. There used to be a `skipped` list
+//! host or worker. Dockerfiles and a Helm chart are emitted for a Kubernetes
+//! profile. There used to be a `skipped` list
 //! naming the workers this could not produce, on the argument that a generator
 //! emitting four files out of six and saying nothing is indistinguishable from
 //! a finished one. That argument was right and the list is gone anyway: the
@@ -32,6 +32,7 @@
 mod apply;
 mod config;
 mod docker;
+mod helm;
 mod manifest;
 mod merge3;
 mod paths;
@@ -46,6 +47,19 @@ use gearbox_ir::{FileSet, ProcessKind, ResolvedProduct, SourceId};
 
 pub use apply::{ApplyOutcome, apply_generate, base_root_for, plan, summarize};
 pub use templates::TemplateSet;
+
+/// Numeric uid the image and the chart agree on.
+///
+/// Distroless/nonroot convention. The Dockerfile `USER`s this and the
+/// chart's `runAsUser` / `fsGroup` match it, so a volume the pod mounts
+/// is writable by the process that runs.
+pub(crate) const NONROOT_UID: u32 = 65532;
+
+/// Where a Kubernetes process keeps `server.home_dir`.
+///
+/// `~` is unwritable under `readOnlyRootFilesystem`; the chart mounts an
+/// emptyDir at this path.
+pub(crate) const K8S_HOME_DIR: &str = "/var/lib/gearbox";
 
 /// Why generation could not produce a usable tree.
 ///
@@ -200,6 +214,9 @@ pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
     }
 
     for entry in docker::files(input)? {
+        insert(&mut files, entry)?;
+    }
+    for entry in helm::files(input, &files)? {
         insert(&mut files, entry)?;
     }
 

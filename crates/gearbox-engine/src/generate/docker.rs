@@ -26,12 +26,7 @@ use minijinja::context;
 use super::paths::{self, relative, to_slash};
 use super::templates;
 use super::workspace;
-use super::{GenerateError, GenerateInput, header};
-
-/// Distroless/nonroot convention. Numeric so the image does not depend on
-/// `/etc/passwd` agreeing with a name, and so Kubernetes `runAsNonRoot`
-/// has a uid to keep.
-const NONROOT_UID: u32 = 65532;
+use super::{GenerateError, GenerateInput, NONROOT_UID, header};
 
 /// Every Docker artefact for this lock, or none if the profile does not
 /// build images.
