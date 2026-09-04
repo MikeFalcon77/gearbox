@@ -53,6 +53,21 @@ test.describe("the lock", () => {
   }) => {
     await openProduct(studio.page, "dev");
     await revealLock(studio.page);
+    // Refreshed before reading, for the reason the last test in this file gives:
+    // the store fetches the lock once per resolution and nothing watches the
+    // file, so a comparison established by an earlier spec is still on screen.
+    // Without this the assertion passes alone and fails in a full run -- which
+    // is not the claim disagreeing, it is the claim reading someone else's
+    // answer.
+    await studio.page.locator("[data-lock-refresh]").click();
+    // The refresh re-fetches, so the widget is momentarily empty. Waiting for
+    // the hash to come back is what makes the read below about the new answer
+    // rather than about whatever was on screen mid-flight.
+    await expect(studio.page.locator("[data-lock-text-hash]")).toHaveAttribute(
+      "data-lock-text-hash",
+      /^blake3:/,
+      { timeout: 30_000 },
+    );
     const lock = await lockShown(studio.page);
     expect(lock.hash).toMatch(/^blake3:/);
     // Both come from the same resolution, so a mismatch would mean the two

@@ -526,24 +526,38 @@ fn tenant_resolver_projects_its_single_vendor_field() {
     );
 }
 
-/// Two gears whose configuration is entirely non-scalar. Reporting zero
-/// controls is the correct answer, not a gap to be filled with string boxes.
+/// A gear whose whole configuration is one map gets no typed controls at all,
+/// and that is the right answer rather than a gap to fill with string boxes.
+///
+/// **`cluster` and not `types-registry`, and the difference is a lesson.** This
+/// asserted both until `types-registry` grew an `allow_compatibility_force:
+/// bool` upstream and the test failed for a change that was none of its
+/// business. A corpus test may assert what the projector reads; it may not
+/// assert what someone else's struct is allowed to contain.
 #[test]
-fn types_registry_and_cluster_offer_no_scalar_controls() {
-    let registry = require!(tree("gears/system/types-registry/types-registry"));
-    let fields = project_config_fields(&registry, "TypesRegistryConfig");
+fn a_configuration_that_is_all_collections_offers_no_controls() {
+    let cluster = require!(tree("gears/system/cluster/cluster"));
+    let fields = project_config_fields(&cluster, "ClusterConfig");
     assert!(!fields.is_empty(), "the struct is found");
     assert!(
         fields.iter().all(|f| f.ty == ConfigFieldType::Complex),
         "expected every field complex, got {fields:?}"
     );
+}
 
-    let cluster = require!(tree("gears/system/cluster/cluster"));
-    let fields = project_config_fields(&cluster, "ClusterConfig");
-    assert!(
-        fields.iter().all(|f| f.ty == ConfigFieldType::Complex),
-        "expected every field complex, got {fields:?}"
-    );
+/// The collection fields of `types-registry` carry no control, whatever else
+/// the struct grows around them.
+#[test]
+fn a_vec_field_in_the_real_corpus_is_complex() {
+    let files = require!(tree("gears/system/types-registry/types-registry"));
+    let fields = project_config_fields(&files, "TypesRegistryConfig");
+    for name in ["entity_id_fields", "schema_id_fields", "entities"] {
+        assert_eq!(
+            named(&fields, name).ty,
+            ConfigFieldType::Complex,
+            "`{name}` is a list and carries no control"
+        );
+    }
 }
 
 #[test]
