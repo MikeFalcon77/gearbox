@@ -939,8 +939,11 @@ Eight widgets exist against the real engine: **Catalogue** (tree by category, st
 **Lock**, **Generate** and **Start**.
 `capabilities.generate` is `true` now that M5 is on the wire; the view appeared the same way the
 resolver notice disappeared -- driven from the engine's own capability, not from a hard-coded
-string. Docker and Helm (M7) are still missing, and their absence is a smaller output set rather than
-a flag — `generate: false` would hide a panel that answers correctly for everything it does cover.
+string. Docker and Helm land for a Kubernetes profile (M7): a Dockerfile per process, an umbrella
+chart with one subchart per process, `values.yaml` as `OperatorOwned`, and `values.schema.json`
+with `additionalProperties: false`. Their absence on `dev`/`local` is still a smaller output set
+rather than a flag — `generate: false` would hide a panel that answers correctly for everything it
+does cover.
 There used to be a `skipped` list on a generate plan for the worker entry points; M6 removed it,
 because nothing is skipped any more.
 
@@ -978,7 +981,7 @@ named for the claim and carrying its source; `test.fixme` marks a documented cla
 implemented. The run writes `docs/conformance.md`, which is the authoritative version of this
 section. A hand-maintained count in prose is what drifted here in five places, so it is not
 maintained by hand any more. What the table cannot say: there is no Electron shell; M6 generates its
-worker processes but has not been run live; M7 and M9 are not started. The toolbar and the two perspectives ADR-0011 asked for are built: Theia 1.75's
+worker processes but has not been run live; M9 is not started. The toolbar and the two perspectives ADR-0011 asked for are built: Theia 1.75's
 `PerspectiveService` carries them, the switch sits in `.gbx-toolbar` beside the menu, and the
 browser target never needed a `hideTopPanel` override.
 
@@ -1759,10 +1762,24 @@ product sets no config. Measured against a worktree at the previous commit, all 
 identically. A product that *does* set config gets a different hash, which is the behaviour that was
 actually wanted -- two products differing only in a config value are different products.
 
-What remains is M7's own work: `values.yaml`, `values.schema.json` and the `existingSecret`
-substitution. Both of its inputs now exist -- the values in the lock, and the field types in the
-catalogue, where `cpt-gearbox-fr-values-schema` wants exactly the three facts this projection
-produces and `cpt-gearbox-fr-no-secrets-in-values` wants the `secret` flag beside them.
+What remains of that work after M7 is the live `kind` install, which this repository does not
+run: `helm lint` and `helm template` plus the schema `--set` rejection are the acceptance. The
+demo product's lock still has an empty `cluster` list -- no corpus gear requires a primitive --
+so `existingSecret` is asserted against a lock fixture, not against `payments-demo`.
+
+#### M7
+
+A Kubernetes profile now emits a Dockerfile per process, an umbrella chart with
+one subchart per process, `values.yaml` as `OperatorOwned`, and
+`values.schema.json` with `additionalProperties: false`. `dev`'s `lock_hash` is
+byte-identical to the commit before this milestone. `local` moved because
+`GBX0604` now carries the evidence its own `requires_evidence` flag always
+demanded -- the same `Diagnostic::validate()` pass that `GBX0603` needed -- not
+because image, subchart or Service DNS leaked off Kubernetes. `prod` moved for
+those plus the filled `endpoint` values that make `consumer_wiring` real.
+
+The live `kind` install is still out of scope; `helm lint` / `helm template`
+and the schema `--set` rejection are the acceptance that ran.
 
 One thing was fixed the wrong way first. The toolbar showed `Toggle Gearbox Generate`, and the repair
 was a map from command id to caption inside `ToolbarWidget` -- which is exactly the drift that file's
@@ -1945,7 +1962,7 @@ workspace-member entries. Nothing else in that repo changes.
 | **M4** — **done** | Resolver + explain + lock | all three profiles diff clean against `fixtures/*/product.lock`; every GBX03xx–06xx code reachable; determinism loop | M8a |
 | **M5** — **done** | Crate + config generators; **embedded runs** | acceptance §12 step 2 in full | — |
 | **M6** — **partly done** (§9.1) | Host-workers | generated worker crate, host spawn table and `oop_http` serving config all land, and both binaries compile. The live run — host spawns worker, `wire_outcome=Remote` — is not done, and `payments-audit` is not written: the corpus supplied a severable pair already | M7 |
-| **M7** | Docker + Helm + `values.schema.json` | acceptance §12 step 4 in full | M6 |
+| **M7** — **done** | Docker + Helm + `values.schema.json` | acceptance §12 step 4 minus `kubeconform`/`kind` (neither is installed); `helm lint`/`helm template`, schema `--set` rejection, GBX0603, ConfigMap `api-contracts` | M6 |
 | **M8a** — **done** | JSON-RPC + TS types | `node ide/scripts/rpc-smoke.mjs` drives initialize → catalogue over real framing, 15/15; `cargo test -p gearbox-rpc`; stdout carries nothing but JSON-RPC | from M1 |
 | **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Inspector, Graph, Product, Conflicts, Lock, Generate, Start, the product header and the two working contexts are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Electron is still open | after M4 + M8a |
 | **M9** | **DESIGN + ADRs** (§14) — written *after* the prototype runs | reviewed against `docs/checklists/{DESIGN,ADR}.md`; every claim cites either a `gearbox-builder` symbol or a `gears-rust` `file:line`; every §13 gap has a home | — |

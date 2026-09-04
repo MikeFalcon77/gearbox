@@ -897,6 +897,30 @@ fn a_kubernetes_profile_generates_an_umbrella_and_a_subchart_per_process() {
     );
 }
 
+/// `prod` is the first profile that writes `consumer_wiring`, because that is
+/// the first profile whose bindings cross a process boundary *and* have an
+/// endpoint. The key is the provider gear's name -- the runtime looks up
+/// `gears.{consumer}.config.consumer_wiring.{dep_gear}` -- not the contract.
+#[test]
+fn a_kubernetes_worker_wires_the_provider_gear_not_the_contract() {
+    let Some((_, files)) = generated("prod") else {
+        return;
+    };
+    let audit = text(&files.files, "config/audit.yaml");
+    assert!(
+        audit.contains("consumer_wiring:"),
+        "audit is the remote consumer; without this it dials nothing:\n{audit}"
+    );
+    assert!(
+        audit.contains("api-contracts:"),
+        "the runtime keys consumer_wiring by the provider gear, not PaymentApi:\n{audit}"
+    );
+    assert!(
+        !audit.contains("payment_api:"),
+        "a contract-derived key is the defect M7 step 1 closed:\n{audit}"
+    );
+}
+
 fn assert_subchart_deployment(files: &FileSet, product: &str, sub: &str) {
     let deploy = text(
         files,

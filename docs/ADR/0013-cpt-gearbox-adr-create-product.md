@@ -273,9 +273,10 @@ warning severity because the product still builds.
 A product that sets one gets a different hash, which is the point: two products differing only in a
 config value are different products.
 
-What is still M7 is the chart itself — `values.yaml`, `values.schema.json` and the
-`existingSecret` substitution `cpt-gearbox-fr-no-secrets-in-values` asks for. Both of that work's
-inputs now exist: the values in the lock, and the field types in the catalogue.
+M7 landed the chart itself — `values.yaml` (`OperatorOwned`), `values.schema.json`, and
+`existingSecret` / `secretKeys` for `cpt-gearbox-fr-no-secrets-in-values`. The inputs this
+amendment produced -- values in the lock, field types in the catalogue -- are what the
+schema is assembled from.
 
 ### Confirmation
 
