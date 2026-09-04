@@ -1,0 +1,260 @@
+//! Per-process Dockerfiles, a context-root `.dockerignore`, and `build.sh`.
+//!
+//! Emitted only for a Kubernetes profile. A `host_workers` tree really does
+//! run on one machine; putting a Dockerfile next to it would describe a
+//! deployment the lock did not decide.
+//!
+//! **The build context is the common ancestor of this output tree and the
+//! source roots**, not the generated directory. `processes/<p>/Cargo.toml`
+//! carries path dependencies of the form `../../../../../../gears-rust/...`,
+//! which `docker build` from `.gearbox/<product>/<profile>/` cannot see.
+//! That fact is written into `.dockerignore` (as a comment) and into
+//! `build.sh` (as the directory it actually passes to `docker build`),
+//! because leaving it as an operator guess is how images fail with a
+//! missing crate an hour later.
+//!
+//! `.dockerignore` cannot live at the context root: [`generate`](super::generate)
+//! may not write outside `out_root`. The file is generated next to the
+//! Dockerfiles and `build.sh` points `BuildKit` at it with `--ignorefile`.
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+use gearbox_ir::{FileEntry, FileKind, Ownership, ResolvedProcess};
+use minijinja::context;
+
+use super::paths::{self, relative, to_slash};
+use super::templates;
+use super::workspace;
+use super::{GenerateError, GenerateInput, header};
+
+/// Distroless/nonroot convention. Numeric so the image does not depend on
+/// `/etc/passwd` agreeing with a name, and so Kubernetes `runAsNonRoot`
+/// has a uid to keep.
+const NONROOT_UID: u32 = 65532;
+
+/// Every Docker artefact for this lock, or none if the profile does not
+/// build images.
+///
+/// # Errors
+/// Returns [`GenerateError`] when a template cannot render, when a path
+/// inside `out_root` is not a valid relative path, or when the output tree
+/// and the source roots share no relative path (so there is no context a
+/// Dockerfile `COPY` could name).
+pub fn files(input: &GenerateInput<'_>) -> Result<Vec<FileEntry>, GenerateError> {
+    if input.lock.kubernetes.is_none() {
+        return Ok(Vec::new());
+    }
+
+    let context = build_context(input)?;
+    let out_rel = rel_from(&context, input.out_root)?;
+
+    let mut files = Vec::new();
+    for process in &input.lock.processes {
+        files.push(dockerfile(input, process, &out_rel)?);
+    }
+    files.push(dockerignore(input, &context)?);
+    files.push(build_script(input, &context)?);
+    Ok(files)
+}
+
+fn dockerfile(
+    input: &GenerateInput<'_>,
+    process: &ResolvedProcess,
+    out_rel: &str,
+) -> Result<FileEntry, GenerateError> {
+    let body = templates::render(
+        "docker/Dockerfile",
+        input.templates.get("docker/Dockerfile")?,
+        context! {
+            header => header("#").trim_end(),
+            rust_channel => workspace::rust_channel(),
+            crate_name => process.crate_name.as_str(),
+            bin_name => process.bin_name.as_str(),
+            process => process.name.as_str(),
+            out_rel => out_rel,
+            uid => NONROOT_UID,
+            ports => expose_ports(process),
+        },
+    )?;
+
+    Ok(FileEntry::text(
+        paths::rel(&["docker", process.name.as_str(), "Dockerfile"])?,
+        body,
+        FileKind::Dockerfile,
+        Ownership::Generated,
+    ))
+}
+
+fn dockerignore(input: &GenerateInput<'_>, context: &Path) -> Result<FileEntry, GenerateError> {
+    let mut secret_dirs = Vec::new();
+    for root in input.source_roots.values() {
+        secret_dirs.push(format!("{}/", rel_from(context, &root.join("config"))?));
+    }
+    secret_dirs.sort();
+    secret_dirs.dedup();
+
+    let body = templates::render(
+        "docker/dockerignore",
+        input.templates.get("docker/dockerignore")?,
+        context! {
+            header => header("#").trim_end(),
+            secret_dirs => secret_dirs,
+        },
+    )?;
+
+    Ok(FileEntry::text(
+        paths::rel(&["docker", ".dockerignore"])?,
+        body,
+        FileKind::Text,
+        Ownership::Generated,
+    ))
+}
+
+/// Companion script so the operator does not have to reconstruct the
+/// context path. Not a template: the relative walk is computed, not
+/// styled, and an overlay that got the depth wrong would produce an
+/// image that cannot see `gears-rust`.
+fn build_script(input: &GenerateInput<'_>, context: &Path) -> Result<FileEntry, GenerateError> {
+    let from_docker = input.out_root.join("docker");
+    let to_context = match relative(&from_docker, context) {
+        Some(rel) => to_slash(&rel),
+        None => to_slash(context),
+    };
+
+    let mut body = String::new();
+    body.push_str("#!/bin/sh\n");
+    body.push_str(&header("#"));
+    body.push_str(
+        "#\n\
+         # The build context is the common ancestor of this tree and the\n\
+         # gears-rust sources. Generated Cargo.toml path-deps walk up out of\n\
+         # .gearbox/; `docker build` from this directory cannot see them.\n\
+         #\n\
+         # Docker reads .dockerignore from the context root by default. Ours\n\
+         # cannot live there -- generate() may not write outside out_root --\n\
+         # so BuildKit's --ignorefile points at the generated copy.\n\
+         #\n\
+         # Usage: ./build.sh [process ...]\n\
+         #   with no arguments, every process is built.\n",
+    );
+    body.push_str("set -eu\n");
+    body.push_str("SCRIPT_DIR=$(CDPATH= cd -- \"$(dirname \"$0\")\" && pwd)\n");
+    body.push_str("CONTEXT=$(CDPATH= cd -- \"$SCRIPT_DIR/");
+    body.push_str(&to_context);
+    body.push_str("\" && pwd)\n");
+    body.push_str("export DOCKER_BUILDKIT=1\n");
+    body.push_str("build_one() {\n");
+    body.push_str("  name=$1\n");
+    body.push_str("  image=$2\n");
+    body.push_str("  docker build \\\n");
+    body.push_str("    --ignorefile \"$SCRIPT_DIR/.dockerignore\" \\\n");
+    body.push_str("    -f \"$SCRIPT_DIR/$name/Dockerfile\" \\\n");
+    body.push_str("    -t \"$image\" \\\n");
+    body.push_str("    \"$CONTEXT\"\n");
+    body.push_str("}\n\n");
+
+    body.push_str("if [ \"$#\" -eq 0 ]; then\n");
+    for process in &input.lock.processes {
+        let image = process
+            .image
+            .clone()
+            .unwrap_or_else(|| format!("{}:{}", process.bin_name, input.lock.product.version));
+        body.push_str("  build_one ");
+        body.push_str(process.name.as_str());
+        body.push(' ');
+        body.push_str(&sh_single(&image));
+        body.push('\n');
+    }
+    body.push_str("  exit 0\n");
+    body.push_str("fi\n\n");
+    body.push_str("for name in \"$@\"; do\n");
+    body.push_str("  case \"$name\" in\n");
+    for process in &input.lock.processes {
+        let image = process
+            .image
+            .clone()
+            .unwrap_or_else(|| format!("{}:{}", process.bin_name, input.lock.product.version));
+        body.push_str("    ");
+        body.push_str(process.name.as_str());
+        body.push_str(") build_one ");
+        body.push_str(process.name.as_str());
+        body.push(' ');
+        body.push_str(&sh_single(&image));
+        body.push_str(" ;;\n");
+    }
+    body.push_str("    *) echo \"unknown process: $name\" >&2; exit 1 ;;\n");
+    body.push_str("  esac\n");
+    body.push_str("done\n");
+
+    Ok(FileEntry::text(
+        paths::rel(&["docker", "build.sh"])?,
+        body,
+        FileKind::Shell,
+        Ownership::Generated,
+    ))
+}
+
+fn build_context(input: &GenerateInput<'_>) -> Result<PathBuf, GenerateError> {
+    let mut paths: Vec<&Path> = vec![input.out_root];
+    paths.extend(input.source_roots.values().map(PathBuf::as_path));
+    paths::common_ancestor(paths).ok_or_else(|| GenerateError::UnreachableDockerContext {
+        out_root: input.out_root.display().to_string(),
+    })
+}
+
+fn rel_from(from: &Path, target: &Path) -> Result<String, GenerateError> {
+    let rel = relative(from, target).ok_or_else(|| GenerateError::UnreachableDockerContext {
+        out_root: target.display().to_string(),
+    })?;
+    let rendered = to_slash(&rel);
+    if rendered.is_empty() {
+        Ok(".".to_owned())
+    } else {
+        Ok(rendered)
+    }
+}
+
+fn expose_ports(process: &ResolvedProcess) -> Vec<u16> {
+    let mut ports = BTreeSet::new();
+    for endpoint in &process.listens {
+        if let Some(port) = port_of(&endpoint.address) {
+            ports.insert(port);
+        }
+    }
+    if let Some(serve) = &process.serve
+        && let Some(port) = port_of(&serve.listen_addr)
+    {
+        ports.insert(port);
+    }
+    ports.into_iter().collect()
+}
+
+fn port_of(address: &str) -> Option<u16> {
+    address.rsplit(':').next()?.parse().ok()
+}
+
+/// Quote a string for a POSIX single-quoted word.
+fn sh_single(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn port_of_reads_the_last_colon_segment() {
+        assert_eq!(port_of("0.0.0.0:8087"), Some(8087));
+        assert_eq!(port_of("127.0.0.1:50051"), Some(50051));
+        assert_eq!(port_of("not-a-port"), None);
+    }
+
+    #[test]
+    fn sh_single_quotes_an_image_reference() {
+        assert_eq!(
+            sh_single("registry.example.com/payments/gbx-api-gateway:0.1.0"),
+            "'registry.example.com/payments/gbx-api-gateway:0.1.0'"
+        );
+    }
+}

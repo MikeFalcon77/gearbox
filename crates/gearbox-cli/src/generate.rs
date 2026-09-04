@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use gearbox_engine::generate::{GenerateInput, base_root_for, summarize};
+use gearbox_engine::generate::{GenerateInput, TemplateSet, base_root_for, summarize};
 use gearbox_ir::{Diagnostic, FileAction, FilePlan, ProfileId};
 
 use crate::{Format, open_roots, report};
@@ -87,10 +87,12 @@ pub fn run(
         .iter()
         .map(|root| (root.id.clone(), root.root.clone()))
         .collect();
+    let templates = TemplateSet::load_for_product(&product_file)?;
     let generated = gearbox_engine::generate(&GenerateInput {
         lock: &lock,
         source_roots: &source_roots,
         out_root: &out_root,
+        templates,
     })?;
 
     let (plans, apply_diagnostics, written) = if dry_run {
@@ -107,7 +109,15 @@ pub fn run(
         // stdout: the machine-readable contract, and the whole of it. A client
         // asking for the plan gets the plan, not the plan plus a summary line.
         Format::Json => println!("{}", serde_json::to_string_pretty(&plans)?),
-        Format::Text => print_plans(&plans, &out_root, dry_run, written),
+        Format::Text => {
+            print_plans(&plans, &out_root, dry_run, written);
+            if !generated.overridden_templates.is_empty() {
+                println!(
+                    "  overrode templates: {}",
+                    generated.overridden_templates.join(", ")
+                );
+            }
+        }
     }
 
     report(&diagnostics);

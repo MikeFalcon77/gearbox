@@ -19,7 +19,8 @@
 //! rather than by a manifest that cannot see inside them.
 //!
 //! **What is here and what is not.** Every process in the lock is generated,
-//! host or worker; Docker and Helm are M7. There used to be a `skipped` list
+//! host or worker. Dockerfiles are emitted for a Kubernetes profile; Helm is
+//! M7's next slice. There used to be a `skipped` list
 //! naming the workers this could not produce, on the argument that a generator
 //! emitting four files out of six and saying nothing is indistinguishable from
 //! a finished one. That argument was right and the list is gone anyway: the
@@ -30,10 +31,12 @@
 
 mod apply;
 mod config;
+mod docker;
 mod manifest;
 mod merge3;
 mod paths;
 mod rust;
+mod templates;
 mod workspace;
 
 use std::collections::BTreeMap;
@@ -42,6 +45,7 @@ use std::path::{Path, PathBuf};
 use gearbox_ir::{FileSet, ProcessKind, ResolvedProduct, SourceId};
 
 pub use apply::{ApplyOutcome, apply_generate, base_root_for, plan, summarize};
+pub use templates::TemplateSet;
 
 /// Why generation could not produce a usable tree.
 ///
@@ -91,6 +95,16 @@ pub enum GenerateError {
         source: Box<minijinja::Error>,
     },
 
+    #[error(
+        "no template named `{key}`; the override contract is the path under templates/ without .jinja"
+    )]
+    UnknownTemplate { key: String },
+
+    #[error(
+        "the output tree `{out_root}` and the source roots share no relative path, so there is no docker build context a COPY could name"
+    )]
+    UnreachableDockerContext { out_root: String },
+
     #[error("could not serialize {what}")]
     Toml {
         what: &'static str,
@@ -133,11 +147,24 @@ pub struct GenerateInput<'a> {
 
     /// Absolute output root, conventionally `.gearbox/<product>/<profile>/`.
     pub out_root: &'a Path,
+
+    /// Template sources, builtins plus any product overlay.
+    ///
+    /// Loaded by the caller: this function must not consult the filesystem,
+    /// and a `--dry-run` that read `templates/` itself would be answering
+    /// about a different tree than the one `apply` writes from.
+    pub templates: TemplateSet,
 }
 
 /// What one generation run produced.
 pub struct Generated {
     pub files: FileSet,
+
+    /// Template keys the product overlaid, in sorted order.
+    ///
+    /// Empty in the ordinary case. Reported so an unexpected Dockerfile or
+    /// chart has a visible cause rather than looking like a generator change.
+    pub overridden_templates: Vec<String>,
 }
 
 /// The whole file set for one resolved product.
@@ -164,7 +191,7 @@ pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
         // Everything else -- the manifest, the link file, the configuration --
         // is a function of the process, not of how it is started.
         let entry = match process.kind {
-            ProcessKind::Host => rust::host_main(process)?,
+            ProcessKind::Host => rust::host_main(input, process)?,
             ProcessKind::Worker => rust::worker_main(input, process)?,
         };
         insert(&mut files, entry)?;
@@ -172,7 +199,14 @@ pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
         insert(&mut files, config::app_config(input, process)?)?;
     }
 
-    Ok(Generated { files })
+    for entry in docker::files(input)? {
+        insert(&mut files, entry)?;
+    }
+
+    Ok(Generated {
+        files,
+        overridden_templates: input.templates.overridden(),
+    })
 }
 
 /// Add one entry, refusing rather than overwriting.

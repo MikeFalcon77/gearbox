@@ -1454,10 +1454,21 @@ fn prepare_generate(
         .iter()
         .map(|root| (root.id.clone(), root.root.clone()))
         .collect();
+    let templates = match gearbox_engine::TemplateSet::load_for_product(Path::new(path)) {
+        Ok(templates) => templates,
+        Err(e) => {
+            return Err(error(
+                id.clone(),
+                error_code::GENERATE_REFUSED,
+                &format!("could not load template overrides: {e}"),
+            ));
+        }
+    };
     let generated = match gearbox_engine::generate(&gearbox_engine::generate::GenerateInput {
         lock: &resolved.product,
         source_roots: &source_roots,
         out_root: &out_root,
+        templates,
     }) {
         Ok(generated) => generated,
         Err(e) => {

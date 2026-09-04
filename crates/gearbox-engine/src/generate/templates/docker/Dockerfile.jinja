@@ -1,0 +1,17 @@
+{{ header }}
+FROM rust:{{ rust_channel }}-bookworm AS build
+WORKDIR /src
+COPY . .
+WORKDIR /src/{{ out_rel }}
+RUN cargo build --release --package {{ crate_name }}
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --uid {{ uid }} --system --no-create-home app
+COPY --from=build --chown={{ uid }}:{{ uid }} /src/{{ out_rel }}/target/release/{{ bin_name }} /usr/local/bin/{{ bin_name }}
+COPY --from=build --chown={{ uid }}:{{ uid }} /src/{{ out_rel }}/config/{{ process }}.yaml /etc/gearbox/{{ process }}.yaml
+USER {{ uid }}
+{% for port in ports %}EXPOSE {{ port }}
+{% endfor %}CMD ["{{ bin_name }}", "--config", "/etc/gearbox/{{ process }}.yaml"]

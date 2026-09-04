@@ -29,7 +29,9 @@ pub mod validate;
 
 pub use catalogue::{CatalogueScan, Continue, LoadEvent, load_catalogue, load_catalogue_staged};
 pub use cluster::ClusterProjection;
-pub use generate::{GenerateError, GenerateInput, Generated, apply_generate, generate};
+pub use generate::{
+    GenerateError, GenerateInput, Generated, TemplateSet, apply_generate, generate,
+};
 pub use merge::{MergedGear, Projections, merge};
 pub use plugin::PluginProjection;
 pub use plugin_select::{PointResolution, check as check_plugins};

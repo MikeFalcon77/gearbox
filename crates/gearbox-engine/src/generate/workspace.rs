@@ -14,6 +14,13 @@ use super::{GenerateError, header, paths};
 /// invisible until the day they stop agreeing.
 const CHANNEL: &str = "1.97.0";
 
+/// The rustc channel the generated crates -- and therefore their
+/// Dockerfiles -- pin. One function so a Dockerfile cannot drift from
+/// `rust-toolchain.toml` by restating the literal.
+pub const fn rust_channel() -> &'static str {
+    CHANNEL
+}
+
 /// The Rust edition written into every generated manifest.
 ///
 /// Written out as a literal, and this is the single most consequential literal

@@ -16,7 +16,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use gearbox_engine::generate::{GenerateInput, Generated, base_root_for, generate};
+use gearbox_engine::generate::{GenerateInput, Generated, TemplateSet, base_root_for, generate};
 use gearbox_engine::{SourceRoot, load_catalogue, load_product};
 use gearbox_ir::{
     FileAction, FileEntry, FileKind, FileSet, GearId, Ownership, ProfileId, RelPath,
@@ -84,13 +84,22 @@ fn out_root() -> PathBuf {
 fn generated(profile: &str) -> Option<(ResolvedProduct, Generated)> {
     let (lock, source_roots) = resolve(profile)?;
     let out = out_root();
-    let files = generate(&GenerateInput {
-        lock: &lock,
-        source_roots: &source_roots,
-        out_root: &out,
-    })
-    .expect("generation succeeds for the demo product");
+    let files = generate_tree(&lock, &source_roots, &out);
     Some((lock, files))
+}
+
+fn generate_tree(
+    lock: &ResolvedProduct,
+    source_roots: &BTreeMap<SourceId, PathBuf>,
+    out: &Path,
+) -> Generated {
+    generate(&GenerateInput {
+        lock,
+        source_roots,
+        out_root: out,
+        templates: TemplateSet::new(),
+    })
+    .expect("generation succeeds for the demo product")
 }
 
 fn text<'a>(files: &'a FileSet, path: &str) -> &'a str {
@@ -267,19 +276,9 @@ fn generation_is_deterministic() {
     };
     let (second, source_roots) = resolve("dev").unwrap();
     let out = out_root();
-    let again = generate(&GenerateInput {
-        lock: &second,
-        source_roots: &source_roots,
-        out_root: &out,
-    })
-    .unwrap();
+    let again = generate_tree(&second, &source_roots, &out);
 
-    let one = generate(&GenerateInput {
-        lock: &first,
-        source_roots: &source_roots,
-        out_root: &out,
-    })
-    .unwrap();
+    let one = generate_tree(&first, &source_roots, &out);
 
     let digests = |g: &Generated| -> Vec<(String, String)> {
         g.files
@@ -594,13 +593,7 @@ fn a_products_config_reaches_the_generated_configuration() {
         .iter()
         .map(|r| (r.id.clone(), r.root.clone()))
         .collect();
-    let files = generate(&GenerateInput {
-        lock: &lock,
-        source_roots: &roots,
-        out_root: &out_root(),
-    })
-    .expect("generation succeeds")
-    .files;
+    let files = generate_tree(&lock, &roots, &out_root()).files;
 
     let yaml = text(&files, "config/api-gateway.yaml");
     // A real boolean, not the string the wire used to force.
@@ -755,4 +748,115 @@ fn a_worker_is_configured_to_serve_rest_and_advertise_itself() {
         !host_ports.contains(&serve.listen_addr.as_str()),
         "the worker took a port a gear already binds: {host_ports:?}"
     );
+}
+
+/// A product-local template is the file that actually renders.
+///
+/// Without this the override contract is a comment: a house-style
+/// Dockerfile would look like a generator change, and there would be no
+/// test that could fail when `get` started ignoring the overlay.
+#[test]
+fn a_product_template_overrides_the_builtin() {
+    let Some((lock, source_roots)) = resolve("dev") else {
+        return;
+    };
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "main.rs".to_owned(),
+        "{{ header }}\nfn main() { /* product-local */ }\n".to_owned(),
+    );
+    let generated = generate(&GenerateInput {
+        lock: &lock,
+        source_roots: &source_roots,
+        out_root: &out_root(),
+        templates: TemplateSet::from_overrides(overrides),
+    })
+    .expect("generation succeeds with an overlay");
+    let main = text(&generated.files, "processes/api-gateway/src/main.rs");
+    assert!(
+        main.contains("/* product-local */"),
+        "the overlay did not win:\n{main}"
+    );
+    assert!(
+        !main.contains("run_server"),
+        "the builtin host main survived the overlay:\n{main}"
+    );
+    assert_eq!(generated.overridden_templates, ["main.rs"]);
+}
+
+/// Dockerfiles are a Kubernetes artefact: non-root, ca-certificates, the
+/// `--config` the runtime actually reads, and EXPOSE from the process's
+/// own sockets rather than a number the template invented.
+///
+/// The build context is the common ancestor of this tree and the source
+/// roots -- generated Cargo.toml path-deps walk out of `.gearbox/` -- and
+/// that fact is written into `build.sh` and `.dockerignore` because
+/// leaving it as an operator guess is how images fail with a missing crate.
+#[test]
+fn a_kubernetes_profile_generates_a_dockerfile_per_process() {
+    let Some((lock, files)) = generated("prod") else {
+        return;
+    };
+
+    for process in &lock.processes {
+        let path = format!("docker/{}/Dockerfile", process.name);
+        let body = text(&files.files, &path);
+        let entry = files
+            .files
+            .get(&RelPath::new(&path).unwrap())
+            .expect("just read");
+        assert_eq!(entry.kind, FileKind::Dockerfile, "{path}");
+        assert!(body.contains("USER 65532"), "{path}:\n{body}");
+        assert!(body.contains("ca-certificates"), "{path}:\n{body}");
+        assert!(
+            body.contains(&format!(
+                r#"CMD ["{}", "--config", "/etc/gearbox/{}.yaml"]"#,
+                process.bin_name, process.name
+            )),
+            "{path}:\n{body}"
+        );
+        for endpoint in &process.listens {
+            if let Some(port) = endpoint.address.rsplit(':').next() {
+                assert!(
+                    body.contains(&format!("EXPOSE {port}")),
+                    "{path} missing EXPOSE {port}:\n{body}"
+                );
+            }
+        }
+        if let Some(serve) = &process.serve
+            && let Some(port) = serve.listen_addr.rsplit(':').next()
+        {
+            assert!(
+                body.contains(&format!("EXPOSE {port}")),
+                "{path} missing worker EXPOSE {port}:\n{body}"
+            );
+        }
+    }
+
+    let ignore = text(&files.files, "docker/.dockerignore");
+    assert!(ignore.contains("**/target/"), "{ignore}");
+    assert!(ignore.contains("**/.git/"), "{ignore}");
+    assert!(
+        ignore.contains("gears-rust/config/"),
+        "the corpus config/ (unignored secrets) must be excluded:\n{ignore}"
+    );
+    assert!(
+        !ignore.contains("**/config/"),
+        "a blanket config/ ignore would drop the generated --config file:\n{ignore}"
+    );
+
+    let script = text(&files.files, "docker/build.sh");
+    assert!(script.starts_with("#!/bin/sh\n"), "{script}");
+    assert!(script.contains("docker build"), "{script}");
+    assert!(
+        script.contains("--ignorefile"),
+        "generate() cannot write .dockerignore at the context root:\n{script}"
+    );
+    for process in &lock.processes {
+        assert!(
+            script.contains(process.name.as_str()),
+            "build.sh does not name {}:\n{script}",
+            process.name
+        );
+    }
 }

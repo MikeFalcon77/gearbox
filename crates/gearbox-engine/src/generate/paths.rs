@@ -64,6 +64,49 @@ pub fn relative(from: &Path, target: &Path) -> Option<PathBuf> {
     Some(out)
 }
 
+/// Longest common prefix of absolute paths, as components.
+///
+/// The docker build context is this directory: generated `Cargo.toml`
+/// path-deps walk from the output tree into the source roots, so only an
+/// ancestor of both is a context `COPY . .` can use. Returns `None` when
+/// any path is relative, when the set is empty, or when the paths share
+/// no prefix (different Windows drive letters).
+///
+/// Refuses to consult the filesystem: `..` in an input is a path that has
+/// not been canonicalized, and agreeing with `relative` means a Dockerfile
+/// `COPY` cannot name a different directory than the manifest's `path =`.
+pub fn common_ancestor<'a, I>(paths: I) -> Option<PathBuf>
+where
+    I: IntoIterator<Item = &'a Path>,
+{
+    let mut iter = paths.into_iter();
+    let first = iter.next()?;
+    if !first.is_absolute() {
+        return None;
+    }
+    let mut prefix: Vec<Component<'_>> = first.components().collect();
+    for path in iter {
+        if !path.is_absolute() {
+            return None;
+        }
+        let other: Vec<Component<'_>> = path.components().collect();
+        let shared = prefix
+            .iter()
+            .zip(other.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+        prefix.truncate(shared);
+        if prefix.is_empty() {
+            return None;
+        }
+    }
+    let mut out = PathBuf::new();
+    for component in prefix {
+        out.push(component);
+    }
+    Some(out)
+}
+
 /// A path inside the generated tree, as a `RelPath`.
 ///
 /// Always `/`-separated, whatever the host: the generated manifests and the
@@ -142,5 +185,24 @@ mod tests {
         // `RelPath` rejects `..`; the generator must never produce a path that
         // writes outside the output root (GBX0702's condition).
         assert!(rel(&["..", "escape"]).is_err());
+    }
+
+    #[test]
+    fn common_ancestor_stops_at_the_last_shared_component() {
+        let a = Path::new("/a/b/c/d");
+        let b = Path::new("/a/b/x");
+        assert_eq!(common_ancestor([a, b]), Some(PathBuf::from("/a/b")));
+    }
+
+    #[test]
+    fn common_ancestor_of_one_path_is_itself() {
+        let path = Path::new("/a/b");
+        assert_eq!(common_ancestor([path]), Some(PathBuf::from("/a/b")));
+    }
+
+    #[test]
+    fn common_ancestor_refuses_a_relative_input() {
+        assert!(common_ancestor([Path::new("/a"), Path::new("b")]).is_none());
+        assert!(common_ancestor(Vec::<&Path>::new()).is_none());
     }
 }

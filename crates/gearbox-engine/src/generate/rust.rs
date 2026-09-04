@@ -10,47 +10,22 @@
 use std::collections::BTreeSet;
 
 use gearbox_ir::{FileEntry, FileKind, Ownership, ResolvedProcess};
-use minijinja::{Environment, context};
+use minijinja::context;
 
+use super::templates;
 use super::{GenerateError, GenerateInput, header, paths};
-
-const MAIN_TEMPLATE: &str = include_str!("templates/main.rs.jinja");
-const WORKER_TEMPLATE: &str = include_str!("templates/worker_main.rs.jinja");
-const REGISTERED_TEMPLATE: &str = include_str!("templates/registered_gears.rs.jinja");
-
-/// Render one template, naming it in any error.
-///
-/// The result always ends in exactly one newline. minijinja strips the
-/// template's own trailing newline, and a Rust file without one is a file
-/// `rustfmt --check` and half the tools in the ecosystem complain about.
-fn render(
-    what: &'static str,
-    source: &str,
-    ctx: minijinja::Value,
-) -> Result<String, GenerateError> {
-    let mut env = Environment::new();
-    // `Undefined` is an error rather than an empty string: a template variable
-    // this module forgot to pass would otherwise render as a hole in a Rust
-    // file, and the compiler's complaint would be about syntax rather than
-    // about the missing fact.
-    env.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
-    env.add_template(what, source)
-        .and_then(|()| env.get_template(what)?.render(ctx))
-        .map(|body| format!("{}\n", body.trim_end()))
-        .map_err(|source| GenerateError::Template {
-            what,
-            source: Box::new(source),
-        })
-}
 
 /// `processes/<p>/src/main.rs`.
 ///
 /// # Errors
 /// Returns [`GenerateError::Template`] if the template cannot be rendered.
-pub fn host_main(process: &ResolvedProcess) -> Result<FileEntry, GenerateError> {
-    let body = render(
+pub fn host_main(
+    input: &GenerateInput<'_>,
+    process: &ResolvedProcess,
+) -> Result<FileEntry, GenerateError> {
+    let body = templates::render(
         "main.rs",
-        MAIN_TEMPLATE,
+        input.templates.get("main.rs")?,
         context! {
             header => header("//").trim_end(),
             process => process.name.as_str(),
@@ -80,9 +55,9 @@ pub fn worker_main(
     input: &GenerateInput<'_>,
     process: &ResolvedProcess,
 ) -> Result<FileEntry, GenerateError> {
-    let body = render(
+    let body = templates::render(
         "worker_main.rs",
-        WORKER_TEMPLATE,
+        input.templates.get("worker_main.rs")?,
         context! {
             header => header("//").trim_end(),
             process => process.name.as_str(),
@@ -153,9 +128,9 @@ pub fn registered_gears(
         }
     }
 
-    let body = render(
+    let body = templates::render(
         "registered_gears.rs",
-        REGISTERED_TEMPLATE,
+        input.templates.get("registered_gears.rs")?,
         context! {
             header => header("//").trim_end(),
             idents => idents.iter().collect::<Vec<_>>(),
@@ -188,9 +163,9 @@ mod tests {
     /// not have, so the property is asserted rather than assumed.
     #[test]
     fn no_delimiters_survive_rendering() {
-        let rendered = render(
+        let rendered = templates::render(
             "registered_gears.rs",
-            REGISTERED_TEMPLATE,
+            templates::TemplateSet::builtin("registered_gears.rs").expect("builtin"),
             context! {
                 header => "// generated",
                 idents => vec!["api_gateway", "mini_chat::infra::plugins::static_audit"],
@@ -214,9 +189,9 @@ mod tests {
     /// means a hole the compiler reports as a syntax error somewhere unrelated.
     #[test]
     fn an_undefined_variable_is_an_error() {
-        let result = render(
+        let result = templates::render(
             "registered_gears.rs",
-            REGISTERED_TEMPLATE,
+            templates::TemplateSet::builtin("registered_gears.rs").expect("builtin"),
             context! { header => "// generated" },
         );
         assert!(result.is_err(), "a missing `idents` should not render");
