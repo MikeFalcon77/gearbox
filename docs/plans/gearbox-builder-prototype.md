@@ -404,8 +404,9 @@ arrive via `colocated_deps` closure, which is exactly the fact the Graph widget 
 **What shipped in M2, and where it differs from the example above.**
 `products/payments-demo/product.gdl` exists and evaluates
 (`gearbox product --file products/payments-demo/product.gdl`). It lists the four slice gears rather
-than five: `payments-audit` is the new custom gear and arrives with M6, so a `use_gear` naming it
-today would reference a gear no source provides. Its cluster scope is `event-broker`, the one profile
+than five: `payments-audit` was to be the new custom gear, and it never arrived — M6 turned out not
+to need it, because the description's own severable edge already splits `api-contracts` into a second
+process. A `use_gear` naming it would still reference a gear no source provides. Its cluster scope is `event-broker`, the one profile
 name a real `impl ClusterProfile` supplies.
 
 Three surface decisions settled by implementing it:
@@ -938,8 +939,10 @@ Eight widgets exist against the real engine: **Catalogue** (tree by category, st
 **Lock**, **Generate** and **Start**.
 `capabilities.generate` is `true` now that M5 is on the wire; the view appeared the same way the
 resolver notice disappeared -- driven from the engine's own capability, not from a hard-coded
-string. Worker entry points (M6) and Docker/Helm (M7) are still missing and arrive as `skipped` on
-a generate plan, not as `generate: false`.
+string. Docker and Helm (M7) are still missing, and their absence is a smaller output set rather than
+a flag — `generate: false` would hide a panel that answers correctly for everything it does cover.
+There used to be a `skipped` list on a generate plan for the worker entry points; M6 removed it,
+because nothing is skipped any more.
 
 Also built since this section was written, and not planned here: the `Contribution` base class ADR
 0011 asks for; the menu narrowing that removes Selection and Go and fills a Gearbox submenu;
@@ -974,8 +977,8 @@ there is none yet.
 named for the claim and carrying its source; `test.fixme` marks a documented claim that is not
 implemented. The run writes `docs/conformance.md`, which is the authoritative version of this
 section. A hand-maintained count in prose is what drifted here in five places, so it is not
-maintained by hand any more. What the table cannot say: there is no Electron shell; M6, M7 and M9
-are not started. The toolbar and the two perspectives ADR-0011 asked for are built: Theia 1.75's
+maintained by hand any more. What the table cannot say: there is no Electron shell; M6 generates its
+worker processes but has not been run live; M7 and M9 are not started. The toolbar and the two perspectives ADR-0011 asked for are built: Theia 1.75's
 `PerspectiveService` carries them, the switch sits in `.gbx-toolbar` beside the menu, and the
 browser target never needed a `hideTopPanel` override.
 
@@ -1768,6 +1771,49 @@ The caption belongs on the command: `GenerateViewContribution` registers its tog
 `shortTitle: "Generate"`, the way `RESOLVE_PRODUCT` always did, and the header renders
 `shortTitle ?? label` for everything with no special cases left.
 
+#### M6, and the gear it turned out not to need
+
+The milestone reads "new gear lands and passes its own test *by hand first*; then generated worker
+crate". The first half was skipped, and the measurement is why: `products/payments-demo` resolved
+for `local` already produces a worker. `api-contracts` leaves the gateway because its contract edge
+is **severable** — the pin `process("audit", ...)` is scoped to `prod` and had nothing to do with
+it. So the generator had a real second process to build against without anyone writing Rust.
+
+It is also the right one. `api-contracts` / `api-contracts-consumer` is the only pair in
+`gears-rust` using `#[toolkit::provides]` / `#[toolkit::consumes]`, which makes it the only contract
+severable over REST through the directory with no change to a gear's source. The resolver picked it
+unaided.
+
+Three things were missing, and each was inert without the other two, which is why none of them had
+been noticed. `ResolvedProcess::spawns` was hard-coded empty and nothing ever wrote it, so
+`write_spawns` and its `runtime: {type: oop}` section were correct and dead. A worker had no address
+at all: its gears mount on a REST host in the monolith and a worker has none, so it serves through
+the out-of-process runtime's own listener — a top-level `oop_http` section, not a gear key, and
+without it the runtime silently takes the legacy gRPC path and never registers. And `write_spawns`
+looked its gear section up and skipped when absent, which it always was.
+
+That last one is worth keeping. **A spawned gear is deliberately not linked into the host**: the
+runtime discovers gears through `inventory` and takes no notice of `runtime.type`, so a gear both
+linked and marked `oop` runs twice — in-process and as a child. The example server in `gears-rust`
+has exactly that bug for `calculator`. Configured and linked are therefore different sets, and the
+host's config is the one place they differ: it is configured to start a gear it does not contain.
+The generator gets this right because `registered_gears.rs` is built from `process.gears` and the
+partition already removed the anchor, but that is now asserted rather than relied upon.
+
+`Generated::skipped` is gone rather than emptied. The dispatch on `ProcessKind` is exhaustive, so a
+kind this cannot generate is a compile error at the `match` instead of a value at run time — and the
+field reached the Studio, where it told operators that worker entry points were unbuilt. An
+always-empty report is one nobody can read.
+
+**What is deliberately not done:** the live run of §12 step 3, and `payments-audit`. The reason is
+not caution. `oop_http` is fully implemented in the runtime and covered by its own tests, but
+**nothing in `gears-rust` uses it** — the runtime's own design note says there are no checked-in
+`oop_http` configs, and its one real worker, `calculator-oop`, takes the legacy gRPC path. A
+generated REST worker would be that path's first consumer anywhere. The generation is verifiable
+offline; the run is pioneering, and the risk is not in this repository.
+
+Both generated binaries do compile against the real tree, which is the same bar M5 held.
+
 #### A terminal that was never openable, and a claim that passed for the wrong reason
 
 The shell stopped opening a `zsh` at the bottom of a fresh window. That was asked for: a shell nobody
@@ -1898,7 +1944,7 @@ workspace-member entries. Nothing else in that repo changes.
 | **M3** — **done** | `gearbox validate` | `gearbox validate --root ../gears-rust` → 0 errors, and with `--product` → 0 errors on the real product; GBX0208 and GBX0301 each proved against the real tree (`bss-ledger` is undescribed, `api-gatewey` is a typo); GBX0209 proved on temporary trees because the repository has no wrong declaration to point at; GBX0207 retired with a differential test in its place | M2, M8a |
 | **M4** — **done** | Resolver + explain + lock | all three profiles diff clean against `fixtures/*/product.lock`; every GBX03xx–06xx code reachable; determinism loop | M8a |
 | **M5** — **done** | Crate + config generators; **embedded runs** | acceptance §12 step 2 in full | — |
-| **M6** | Host-workers | new gear lands and passes its own test *by hand first*; then generated worker crate; host spawns worker; remote REST binding resolves via directory | M7 |
+| **M6** — **partly done** (§9.1) | Host-workers | generated worker crate, host spawn table and `oop_http` serving config all land, and both binaries compile. The live run — host spawns worker, `wire_outcome=Remote` — is not done, and `payments-audit` is not written: the corpus supplied a severable pair already | M7 |
 | **M7** | Docker + Helm + `values.schema.json` | acceptance §12 step 4 in full | M6 |
 | **M8a** — **done** | JSON-RPC + TS types | `node ide/scripts/rpc-smoke.mjs` drives initialize → catalogue over real framing, 15/15; `cargo test -p gearbox-rpc`; stdout carries nothing but JSON-RPC | from M1 |
 | **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Inspector, Graph, Product, Conflicts, Lock, Generate, Start, the product header and the two working contexts are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Electron is still open | after M4 + M8a |
