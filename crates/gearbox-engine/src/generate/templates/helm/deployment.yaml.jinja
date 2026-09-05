@@ -10,6 +10,13 @@ metadata:
   {{- end }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  {{- with .Values.revisionHistoryLimit }}
+  revisionHistoryLimit: {{ . }}
+  {{- end }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "<< name >>.selectorLabels" . | nindent 6 }}
@@ -36,6 +43,21 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "<< name >>.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.initContainers }}
+      initContainers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- if and .Values.global .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- range .Values.global.imagePullSecrets }}
@@ -135,12 +157,23 @@ spec:
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+        {{- with .Values.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       volumes:
         - name: config
           configMap:
             name: {{ include "<< name >>.fullname" . }}-config
         - name: home
+          {{- if eq .Values.homeVolume.type "persistentVolumeClaim" }}
+          persistentVolumeClaim:
+            claimName: {{ required "homeVolume.claimName is required when homeVolume.type is persistentVolumeClaim" .Values.homeVolume.claimName }}
+          {{- else if .Values.homeVolume.sizeLimit }}
+          emptyDir:
+            sizeLimit: {{ .Values.homeVolume.sizeLimit }}
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

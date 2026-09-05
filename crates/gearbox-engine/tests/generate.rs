@@ -1498,3 +1498,100 @@ fn probe_timings_are_values_and_probe_paths_are_not() {
         "a startup probe suppresses liveness, so it must be opt-in:\n{deployment}"
     );
 }
+
+/// The home volume names its kind, because Helm merges values rather than
+/// replacing them.
+///
+/// With the default written as the Kubernetes shape -- `{emptyDir: {}}` -- an
+/// operator who set `{persistentVolumeClaim: {...}}` got a volume carrying
+/// *both* sources, which the API server rejects. Seen in the rendered manifest.
+/// A discriminator the operator overwrites makes that unrepresentable.
+#[test]
+fn the_home_volume_is_chosen_by_a_field_not_by_a_shape() {
+    let Some((lock, files)) = generated("prod") else {
+        return;
+    };
+    let product = lock.product.id.as_str();
+    let values = text(&files.files, &format!("helm/{product}/values.yaml"));
+    assert!(values.contains("type: emptyDir"), "{values}");
+    assert!(
+        !values.contains("emptyDir: {}"),
+        "the Kubernetes shape as a default is what merged wrongly:\n{values}"
+    );
+
+    let sub = lock.processes[0]
+        .subchart
+        .as_deref()
+        .unwrap_or(lock.processes[0].name.as_str());
+    let deployment = text(
+        &files.files,
+        &format!("helm/{product}/charts/{sub}/templates/deployment.yaml"),
+    );
+    assert!(
+        deployment.contains(r#"eq .Values.homeVolume.type "persistentVolumeClaim""#),
+        "{deployment}"
+    );
+    // A claim with no name would render a Deployment that cannot schedule; the
+    // failure belongs at `helm template`, where someone is watching.
+    assert!(
+        deployment.contains("required \"homeVolume.claimName"),
+        "{deployment}"
+    );
+}
+
+/// The escape hatches an ordinary production chart is expected to have.
+///
+/// Each was absent, and absent meant "replace the template": there was no
+/// `type` line on the Service at all, no annotations on the `ServiceAccount` --
+/// which is how all three managed Kubernetes offerings hand a pod its cloud
+/// identity -- and no rollout, scheduling or sidecar controls anywhere.
+#[test]
+fn the_chart_exposes_the_hatches_a_house_policy_needs() {
+    let Some((lock, files)) = generated("prod") else {
+        return;
+    };
+    let product = lock.product.id.as_str();
+    let schema: serde_json::Value = serde_json::from_str(text(
+        &files.files,
+        &format!("helm/{product}/values.schema.json"),
+    ))
+    .expect("valid JSON");
+    let sub = lock.processes[0]
+        .subchart
+        .as_deref()
+        .unwrap_or(lock.processes[0].name.as_str());
+    let properties = &schema["properties"][sub]["properties"];
+
+    for hatch in [
+        "service",
+        "homeVolume",
+        "automountServiceAccountToken",
+        "strategy",
+        "terminationGracePeriodSeconds",
+        "priorityClassName",
+        "topologySpreadConstraints",
+        "revisionHistoryLimit",
+        "initContainers",
+        "extraContainers",
+    ] {
+        assert!(
+            properties.get(hatch).is_some(),
+            "schema is missing hatch `{hatch}`"
+        );
+    }
+    assert!(
+        properties["serviceAccount"]["properties"]
+            .get("annotations")
+            .is_some(),
+        "without these no managed Kubernetes can give the pod an identity"
+    );
+
+    // Nothing in a generated topology talks to the API server -- the resolver set
+    // is Directory, Null and Static, which is what GBX0603 reports -- so the
+    // token would be an unused credential in every pod.
+    let values = text(&files.files, &format!("helm/{product}/values.yaml"));
+    assert!(
+        values.contains("automountServiceAccountToken: false"),
+        "{values}"
+    );
+}

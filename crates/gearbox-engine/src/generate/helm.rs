@@ -177,6 +177,7 @@ fn umbrella_values(
                 service_account: ServiceAccountValues {
                     create: true,
                     name: None,
+                    annotations: None,
                 },
                 name_override: None,
                 fullname_override: None,
@@ -196,6 +197,24 @@ fn umbrella_values(
                 liveness_probe: ProbeValues::liveness(),
                 readiness_probe: ProbeValues::readiness(),
                 startup_probe: ProbeValues::startup(),
+                service: ServiceValues {
+                    kind: "ClusterIP".to_owned(),
+                    annotations: None,
+                    session_affinity: None,
+                },
+                home_volume: HomeVolumeValues {
+                    kind: HomeVolumeKind::EmptyDir,
+                    size_limit: None,
+                    claim_name: None,
+                },
+                automount_service_account_token: false,
+                strategy: None,
+                termination_grace_period_seconds: None,
+                priority_class_name: None,
+                topology_spread_constraints: None,
+                revision_history_limit: None,
+                init_containers: None,
+                extra_containers: None,
                 existing_secret: existing_secret(process, input),
                 secret_keys: if keys.is_empty() { None } else { Some(keys) },
             },
@@ -446,6 +465,36 @@ struct SubchartValues {
     /// passes, and guessing a budget for someone else's slowest dependency is
     /// how a chart ships a hidden outage. Turning it on is one flag.
     startup_probe: ProbeValues,
+    /// The Service this process is reached through.
+    service: ServiceValues,
+    /// The volume mounted at the runtime's `home_dir`.
+    home_volume: HomeVolumeValues,
+    /// Whether the pod gets a Kubernetes API token mounted.
+    ///
+    /// `false`, which is a hardening rather than an inconvenience: nothing in a
+    /// generated topology talks to the API server. The runtime's resolver set is
+    /// Directory, Null and Static -- the absence of a cluster-native one is what
+    /// GBX0603 reports -- so the token would be an unused credential inside every
+    /// pod, which is the kind of thing a policy scanner is right to flag.
+    automount_service_account_token: bool,
+    /// Rollout strategy. Free-form: `RollingUpdate` percentages and `Recreate`
+    /// have different shapes and Kubernetes owns both.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    strategy: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    termination_grace_period_seconds: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    priority_class_name: Option<String>,
+    /// Spread constraints, the standard way to survive a zone failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    topology_spread_constraints: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    revision_history_limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    init_containers: Option<serde_json::Value>,
+    /// Sidecars the operator adds -- a log shipper, a proxy, a secrets agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra_containers: Option<serde_json::Value>,
     /// Name of a Secret the operator already created. Never a credential.
     #[serde(skip_serializing_if = "Option::is_none")]
     existing_secret: Option<String>,
@@ -500,6 +549,68 @@ struct ImageValues {
     repository: String,
     tag: String,
     pull_policy: String,
+}
+
+/// The volume mounted at the runtime's `home_dir`.
+///
+/// `readOnlyRootFilesystem` makes this load-bearing rather than decorative: the
+/// runtime calls `create_dir_all` on `server.home_dir`, and with the root
+/// filesystem read-only that path has to be a mount.
+///
+/// **A discriminator rather than the Kubernetes volume-source shape, and the
+/// reason is Helm's merge.** Values are merged, not replaced: an operator who
+/// writes a `persistentVolumeClaim` source over a default `emptyDir` source gets
+/// *both* keys, and Kubernetes rejects a volume with two sources. Measured on the
+/// rendered manifest. Naming the choice in a field the operator overwrites makes
+/// the wrong result unrepresentable instead of merely documented.
+#[derive(serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct HomeVolumeValues {
+    #[serde(rename = "type")]
+    kind: HomeVolumeKind,
+    /// `emptyDir` only. A quantity such as `1Gi`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size_limit: Option<String>,
+    /// `persistentVolumeClaim` only, and required there.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    claim_name: Option<String>,
+}
+
+#[allow(
+    dead_code,
+    reason = "`PersistentVolumeClaim` is written by operators in values.yaml, never by us; \
+              it exists so the schema offers the choice and rejects a third spelling"
+)]
+#[derive(serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+enum HomeVolumeKind {
+    EmptyDir,
+    PersistentVolumeClaim,
+}
+
+/// The process Service.
+///
+/// The *name* is deliberately absent: the lock dials neighbours at
+/// `http://{subchart}.{namespace}.svc.cluster.local`, so renaming the Service
+/// would point every consumer at a DNS name that answers nothing. `type` and
+/// `annotations` are safe to move because they change how the same name is
+/// reached, not what it is.
+#[derive(serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ServiceValues {
+    /// `ClusterIP` unless the operator says otherwise.
+    ///
+    /// There was no way to say otherwise: the template emitted no `type` line at
+    /// all, so an internal load balancer -- the ordinary way to expose a gateway
+    /// inside a corporate network -- was unreachable without a new template.
+    #[serde(rename = "type")]
+    kind: String,
+    /// Annotations on the Service, where a cloud's load-balancer controller reads
+    /// its configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    annotations: Option<BTreeMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_affinity: Option<String>,
 }
 
 /// One probe's schedule, without its address.
@@ -615,6 +726,16 @@ struct ServiceAccountValues {
     create: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
+    /// Annotations on the `ServiceAccount`.
+    ///
+    /// **This is how every managed Kubernetes hands a pod its cloud identity** --
+    /// IRSA on EKS, Workload Identity on GKE, the AAD label pair on AKS all read
+    /// an annotation here. Without it the chart could not be used on any of the
+    /// three without replacing the template, which made "no secrets in values"
+    /// harder to honour rather than easier: the alternative to a workload
+    /// identity is a static key in a Secret.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    annotations: Option<BTreeMap<String, String>>,
 }
 
 fn umbrella_helpers(product: &str) -> Result<FileEntry, GenerateError> {

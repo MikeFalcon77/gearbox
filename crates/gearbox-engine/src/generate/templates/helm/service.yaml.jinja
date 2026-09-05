@@ -4,11 +4,21 @@ metadata:
   name: << service_name >>
   labels:
     {{- include "<< name >>.labels" . | nindent 4 }}
-  {{- with (include "<< name >>.annotations" . | trim) }}
+  {{- $ann := include "<< name >>.annotations" . | trim }}
+  {{- if or $ann .Values.service.annotations }}
   annotations:
+    {{- with $ann }}
     {{- . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.service.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   {{- end }}
 spec:
+  type: {{ .Values.service.type }}
+  {{- with .Values.service.sessionAffinity }}
+  sessionAffinity: {{ . }}
+  {{- end }}
   selector:
     {{- include "<< name >>.selectorLabels" . | nindent 4 }}
   ports:
