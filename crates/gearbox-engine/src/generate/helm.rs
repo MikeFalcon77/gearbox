@@ -188,7 +188,8 @@ fn umbrella_values(
                 extra_env: None,
                 extra_volumes: None,
                 extra_volume_mounts: None,
-                pod_security_context: None,
+                pod_security_context: Some(restricted_pod_security_context()),
+                container_security_context: Some(restricted_container_security_context()),
                 existing_secret: existing_secret(process, input),
                 secret_keys: if keys.is_empty() { None } else { Some(keys) },
             },
@@ -364,8 +365,25 @@ struct SubchartValues {
     extra_volumes: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     extra_volume_mounts: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pod_security_context: Option<serde_json::Value>,
+    /// The pod's security context, written out rather than hidden in a helper.
+    ///
+    /// **Emitted with the restricted defaults filled in, and that is the point.**
+    /// It used to live in `_helpers.tpl` as literal template text, which made it
+    /// unreachable: the only escape was a non-empty `.Values.podSecurityContext`,
+    /// and an empty map is falsy in Helm, so there was no way to say "omit this".
+    /// A cluster that assigns UIDs itself -- `OpenShift` under `restricted-v2`
+    /// rejects a pod that names its own `runAsUser` -- could not run this chart at
+    /// all without replacing the template.
+    ///
+    /// As a value it is merged, schema-described, and deletable. The default is
+    /// unchanged, so a chart nobody edits is as locked down as it was.
+    pod_security_context: Option<PodSecurityContext>,
+    /// The container's security context. Same reasoning, worse starting point.
+    ///
+    /// This one had no `.Values` escape at all: the template called the helper
+    /// unconditionally, so `readOnlyRootFilesystem` and the dropped capabilities
+    /// were not adjustable by any means short of a replacement template.
+    container_security_context: Option<ContainerSecurityContext>,
     /// Name of a Secret the operator already created. Never a credential.
     #[serde(skip_serializing_if = "Option::is_none")]
     existing_secret: Option<String>,
@@ -409,6 +427,64 @@ struct ImageValues {
     repository: String,
     tag: String,
     pull_policy: String,
+}
+
+/// The pod's security context.
+///
+/// **No `deny_unknown_fields`, unlike its neighbours, and the asymmetry is the
+/// point.** Kubernetes owns this schema, not Gearbox: an operator who needs
+/// `runAsGroup`, `supplementalGroups`, `seLinuxOptions` or a field added in a
+/// release after this one must be able to write it without waiting for us. The
+/// closed set that `cpt-gearbox-fr-values-schema` asks for is the set of *our*
+/// keys; inside a Kubernetes object the API server is the authority that was
+/// going to check it anyway.
+///
+/// Typed rather than a free-form `serde_json::Value` because our YAML serializer
+/// is pinned to the dialect `gears-rust` reads, and it renders a
+/// `serde_json::Number` as the private newtype `serde_json` wraps it in --
+/// `runAsUser: {"$serde_json::private::Number": "65532"}`. Measured, not feared.
+#[derive(serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct PodSecurityContext {
+    run_as_non_root: bool,
+    run_as_user: u32,
+    fs_group: u32,
+}
+
+/// The container's security context. Open for the same reason.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "the shape is Kubernetes's SecurityContext, and three of its fields are booleans; \
+              grouping them into an enum would stop this serializing to the object the API expects"
+)]
+#[derive(serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ContainerSecurityContext {
+    run_as_non_root: bool,
+    read_only_root_filesystem: bool,
+    allow_privilege_escalation: bool,
+    seccomp_profile: SeccompProfile,
+    capabilities: Capabilities,
+}
+
+#[derive(serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct SeccompProfile {
+    /// Serialized as `type`, which is a Rust keyword.
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+#[derive(serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct Capabilities {
+    /// `ALL`, in capitals, because the admission controller compares case-sensitively.
+    ///
+    /// The template this replaced wrote `all`. Pod Security Admission matches the
+    /// dropped capability against the literal `ALL`, so a chart carrying the
+    /// lowercase spelling is refused by the very `restricted` profile it was
+    /// written to satisfy -- while looking, in a diff, exactly right.
+    drop: Vec<String>,
 }
 
 #[derive(serde::Serialize, schemars::JsonSchema)]
@@ -462,7 +538,6 @@ fn subchart_templates(
     let common = context! {
         name => name,
         process => process.name.as_str(),
-        uid => NONROOT_UID,
     };
 
     let helpers = templates::render_helm(
@@ -480,7 +555,6 @@ fn subchart_templates(
             http_port => http_port,
             liveness_path => liveness_path.as_str(),
             readiness_path => readiness_path.as_str(),
-            uid => NONROOT_UID,
             home_dir => K8S_HOME_DIR,
             container_ports => &ports,
         },
@@ -709,6 +783,30 @@ fn rest_prefix(input: &GenerateInput<'_>, process: &ResolvedProcess) -> String {
     }
 }
 
+/// The restricted Pod Security Standard, as data.
+fn restricted_pod_security_context() -> PodSecurityContext {
+    PodSecurityContext {
+        run_as_non_root: true,
+        run_as_user: NONROOT_UID,
+        fs_group: NONROOT_UID,
+    }
+}
+
+/// The container half of the same standard.
+fn restricted_container_security_context() -> ContainerSecurityContext {
+    ContainerSecurityContext {
+        run_as_non_root: true,
+        read_only_root_filesystem: true,
+        allow_privilege_escalation: false,
+        seccomp_profile: SeccompProfile {
+            kind: "RuntimeDefault".to_owned(),
+        },
+        capabilities: Capabilities {
+            drop: vec!["ALL".to_owned()],
+        },
+    }
+}
+
 fn probe_path(prefix: &str, route: &str) -> String {
     if prefix.is_empty() {
         route.to_owned()
@@ -727,14 +825,17 @@ mod tests {
         let rendered = templates::render_helm(
             "helm/helpers.tpl",
             source,
-            context! { name => "api-gateway", uid => 65532u32 },
+            context! { name => "api-gateway" },
         )
         .expect("render");
         assert!(
             rendered.contains("{{ include \"api-gateway.chart\" . }}"),
             "{rendered}"
         );
-        assert!(rendered.contains("runAsUser: 65532"), "{rendered}");
+        assert!(
+            rendered.contains(r#"define "api-gateway.serviceAccountName""#),
+            "`<< name >>` must be substituted throughout, not only once:\n{rendered}"
+        );
         assert!(
             !rendered.contains("<<"),
             "`<<` survived into the Helm template:\n{rendered}"

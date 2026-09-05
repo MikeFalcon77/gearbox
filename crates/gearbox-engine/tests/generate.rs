@@ -884,7 +884,7 @@ fn a_kubernetes_profile_generates_an_umbrella_and_a_subchart_per_process() {
             "{chart}"
         );
         assert_subchart_deployment(&files.files, product, sub);
-        assert_subchart_security_helpers(&files.files, product, sub);
+        assert_subchart_security_defaults(&files.files, product, sub);
         let values = text(&files.files, &format!("helm/{product}/values.yaml"));
         assert!(values.contains(&format!("{sub}:")), "{values}");
         assert!(values.contains("enabled: true"), "{values}");
@@ -958,22 +958,49 @@ fn assert_subchart_deployment(files: &FileSet, product: &str, sub: &str) {
     );
 }
 
-fn assert_subchart_security_helpers(files: &FileSet, product: &str, sub: &str) {
+/// The restricted Pod Security Standard is still the default -- but as values.
+///
+/// It used to be literal text in `_helpers.tpl`, where an operator could not
+/// reach it. Asserting on `values.yaml` now, and asserting the template *reads*
+/// the value rather than re-stating the standard, is what keeps the default
+/// strict without making it unreachable: a template that hardcoded these again
+/// would pass a grep of the rendered output and fail this.
+fn assert_subchart_security_defaults(files: &FileSet, product: &str, sub: &str) {
+    let values = text(files, &format!("helm/{product}/values.yaml"));
+    for field in [
+        "runAsNonRoot: true",
+        "runAsUser: 65532",
+        "fsGroup: 65532",
+        "readOnlyRootFilesystem: true",
+        "allowPrivilegeEscalation: false",
+        "RuntimeDefault",
+    ] {
+        assert!(values.contains(field), "values must default to `{field}`");
+    }
+
     let helpers = text(
         files,
         &format!("helm/{product}/charts/{sub}/templates/_helpers.tpl"),
     );
-    assert!(helpers.contains("runAsNonRoot: true"), "{helpers}");
     assert!(
-        helpers.contains("readOnlyRootFilesystem: true"),
-        "{helpers}"
+        !helpers.contains("readOnlyRootFilesystem"),
+        "a security context in the template is one an operator cannot edit:\n{helpers}"
+    );
+
+    let deploy = text(
+        files,
+        &format!("helm/{product}/charts/{sub}/templates/deployment.yaml"),
+    );
+    // `with`, not `if`: an operator who empties the map means "omit the block",
+    // and that is exactly what a cluster assigning its own UIDs needs to say.
+    assert!(
+        deploy.contains("{{- with .Values.podSecurityContext }}"),
+        "{deploy}"
     );
     assert!(
-        helpers.contains("allowPrivilegeEscalation: false"),
-        "{helpers}"
+        deploy.contains("{{- with .Values.containerSecurityContext }}"),
+        "{deploy}"
     );
-    assert!(helpers.contains("RuntimeDefault"), "{helpers}");
-    assert!(helpers.contains("- all"), "{helpers}");
 }
 
 /// Chart.yaml, values*.yaml and values.schema.json are serialized data.
@@ -1053,6 +1080,7 @@ fn values_schema_rejects_unknown_keys_and_wrong_types() {
         "extraVolumes",
         "extraVolumeMounts",
         "podSecurityContext",
+        "containerSecurityContext",
         "existingSecret",
         "secretKeys",
     ] {
@@ -1299,5 +1327,49 @@ fn the_image_registry_is_a_value_of_its_own() {
     assert!(
         deployment.contains("$registry = .Values.global.imageRegistry"),
         "{deployment}"
+    );
+}
+
+/// No `serde_json::Value` reaches the YAML serializer carrying a number.
+///
+/// The YAML writer is pinned to the dialect `gears-rust` reads, and it does not
+/// understand the private newtype `serde_json` wraps numbers in. A field typed
+/// as `serde_json::Value` therefore serializes `65532` as
+/// `{"$serde_json::private::Number": "65532"}` -- valid YAML, silently wrong,
+/// and only visible if someone reads the file. Several values fields still have
+/// that type and are simply never populated today; this fails the moment one is.
+#[test]
+fn generated_yaml_carries_no_serde_json_internals() {
+    let Some((lock, files)) = generated("prod") else {
+        return;
+    };
+    let product = lock.product.id.as_str();
+    for name in ["values.yaml", "values.generated.yaml"] {
+        let body = text(&files.files, &format!("helm/{product}/{name}"));
+        assert!(
+            !body.contains("$serde_json"),
+            "{name} leaked serde_json's private number encoding:\n{body}"
+        );
+    }
+}
+
+/// `drop: [ALL]`, in capitals, or Pod Security Admission refuses the pod.
+///
+/// PSA compares the dropped capability against the literal `ALL`. The template
+/// this replaced wrote `all`, so the chart failed the `restricted` profile it
+/// existed to satisfy -- and looked correct in every review.
+#[test]
+fn dropped_capabilities_use_the_spelling_admission_checks() {
+    let Some((lock, files)) = generated("prod") else {
+        return;
+    };
+    let values = text(
+        &files.files,
+        &format!("helm/{}/values.yaml", lock.product.id.as_str()),
+    );
+    assert!(values.contains("- ALL"), "{values}");
+    assert!(
+        !values.contains("- all"),
+        "lowercase `all` is not what admission matches:\n{values}"
     );
 }

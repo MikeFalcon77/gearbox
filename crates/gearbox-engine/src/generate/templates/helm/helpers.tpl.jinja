@@ -40,20 +40,3 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
-
-{{- define "<< name >>.containerSecurityContext" -}}
-runAsNonRoot: true
-readOnlyRootFilesystem: true
-allowPrivilegeEscalation: false
-seccompProfile:
-  type: RuntimeDefault
-capabilities:
-  drop:
-    - all
-{{- end }}
-
-{{- define "<< name >>.podSecurityContext" -}}
-runAsNonRoot: true
-runAsUser: << uid >>
-fsGroup: << uid >>
-{{- end }}
