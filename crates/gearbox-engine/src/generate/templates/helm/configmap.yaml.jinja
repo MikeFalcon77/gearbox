@@ -4,6 +4,10 @@ metadata:
   name: {{ include "<< name >>.fullname" . }}-config
   labels:
     {{- include "<< name >>.labels" . | nindent 4 }}
+  {{- with (include "<< name >>.annotations" . | trim) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
 data:
   << config_filename >>: |
 << config_yaml >>

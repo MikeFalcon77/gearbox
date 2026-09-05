@@ -181,6 +181,9 @@ fn umbrella_values(
                 name_override: None,
                 fullname_override: None,
                 pod_annotations: None,
+                common_labels: None,
+                common_annotations: None,
+                pod_labels: None,
                 node_selector: None,
                 tolerations: None,
                 affinity: None,
@@ -196,7 +199,17 @@ fn umbrella_values(
         );
     }
     let values = UmbrellaValues {
-        global: None,
+        // Emitted empty rather than omitted. `global` is where a house policy
+        // puts the labels it requires on everything, and a key absent from the
+        // file an operator edits is a key nobody finds. `imageRegistry` stays
+        // unset on purpose: each image already carries the registry the profile
+        // named, and repeating it here would dress an override up as a fact.
+        global: Some(GlobalValues {
+            image_registry: None,
+            image_pull_secrets: None,
+            common_labels: Some(BTreeMap::new()),
+            common_annotations: Some(BTreeMap::new()),
+        }),
         subcharts: blocks,
     };
     let yaml = serde_saphyr::to_string(&values).map_err(|source| GenerateError::Yaml {
@@ -234,7 +247,7 @@ fn umbrella_values(
 fn values_schema(input: &GenerateInput<'_>) -> Result<FileEntry, GenerateError> {
     let subchart = draft7_subchart_schema()?;
     let mut properties = serde_json::Map::new();
-    properties.insert("global".to_owned(), global_schema());
+    properties.insert("global".to_owned(), global_schema()?);
     let mut required = Vec::new();
     for process in &input.lock.processes {
         let name = subchart_name(process);
@@ -268,13 +281,39 @@ fn values_schema(input: &GenerateInput<'_>) -> Result<FileEntry, GenerateError> 
 /// follow `$ref` the way schemars 1 emits it. Inline the `$defs` so the
 /// schema we hand Helm is a tree of `type`/`properties` only.
 fn draft7_subchart_schema() -> Result<serde_json::Value, GenerateError> {
-    let mut raw =
-        serde_json::to_value(schemars::schema_for!(SubchartValues)).map_err(|source| {
-            GenerateError::Json {
-                what: "the subchart values schema",
-                source,
-            }
-        })?;
+    let mut raw = draft7(
+        serde_json::to_value(schemars::schema_for!(SubchartValues)),
+        "the subchart values schema",
+    )?;
+    // Helm copies `global` onto every subchart's values. Refusing it would
+    // make `helm template` fail on a chart that did not set global at all.
+    if let Some(properties) = raw.get_mut("properties").and_then(|p| p.as_object_mut()) {
+        properties.insert("global".to_owned(), serde_json::json!({ "type": "object" }));
+    }
+    Ok(raw)
+}
+
+/// The umbrella's `global` block, derived from the struct that writes it.
+///
+/// **Hand-written once, and it drifted the first time a field was added.** The
+/// literal `json!` this replaced still described only `imageRegistry` and
+/// `imagePullSecrets`, so `helm lint` rejected the very `commonLabels` the
+/// generator had just written into `values.yaml` -- a chart refusing its own
+/// output. Deriving it from [`GlobalValues`] makes that unrepresentable.
+fn global_schema() -> Result<serde_json::Value, GenerateError> {
+    draft7(
+        serde_json::to_value(schemars::schema_for!(GlobalValues)),
+        "the global values schema",
+    )
+}
+
+/// schemars emits 2020-12; Helm's validator reads draft-07 and does not follow
+/// `$ref`, so definitions are inlined and the dialect markers dropped.
+fn draft7(
+    schema: Result<serde_json::Value, serde_json::Error>,
+    what: &'static str,
+) -> Result<serde_json::Value, GenerateError> {
+    let mut raw = schema.map_err(|source| GenerateError::Json { what, source })?;
     let defs = raw
         .as_object_mut()
         .and_then(|object| object.remove("$defs"))
@@ -285,26 +324,7 @@ fn draft7_subchart_schema() -> Result<serde_json::Value, GenerateError> {
         object.remove("description");
     }
     inline_refs(&mut raw, &defs);
-    // Helm copies `global` onto every subchart's values. Refusing it would
-    // make `helm template` fail on a chart that did not set global at all.
-    if let Some(properties) = raw.get_mut("properties").and_then(|p| p.as_object_mut()) {
-        properties.insert("global".to_owned(), serde_json::json!({ "type": "object" }));
-    }
     Ok(raw)
-}
-
-fn global_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-            "imageRegistry": { "type": "string" },
-            "imagePullSecrets": {
-                "type": "array",
-                "items": { "type": "string" }
-            }
-        }
-    })
 }
 
 fn inline_refs(value: &mut serde_json::Value, defs: &serde_json::Value) {
@@ -351,6 +371,25 @@ struct SubchartValues {
     fullname_override: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pod_annotations: Option<serde_json::Value>,
+    /// Labels for this subchart's resources only.
+    ///
+    /// The narrower half of the pair: `global.commonLabels` covers the product,
+    /// this covers one process. Both are merged on top of the standard
+    /// `app.kubernetes.io/*` set rather than replacing it -- a policy label and a
+    /// selector label are not competing for the same slot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    common_labels: Option<BTreeMap<String, String>>,
+    /// Annotations for this subchart's resources only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    common_annotations: Option<BTreeMap<String, String>>,
+    /// Labels on the pod template alone, not on the objects around it.
+    ///
+    /// Distinct from `commonLabels` because service meshes and cost tooling
+    /// select on pods. Never merged into `selectorLabels`: a Deployment's
+    /// selector is immutable after creation, so a label that reached it would
+    /// make the next `helm upgrade` fail rather than roll.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pod_labels: Option<BTreeMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     node_selector: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -408,6 +447,17 @@ struct GlobalValues {
     image_registry: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     image_pull_secrets: Option<Vec<String>>,
+    /// Labels put on every resource of every subchart.
+    ///
+    /// A house policy that demands `cost-center` or `owner` on everything it
+    /// deploys had no way to say so: the label set was literal text in
+    /// `_helpers.tpl`, and adding one key meant replacing the whole helper. Here
+    /// once, at the umbrella, because "every resource" is what the policy says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    common_labels: Option<BTreeMap<String, String>>,
+    /// Annotations put on every resource of every subchart.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    common_annotations: Option<BTreeMap<String, String>>,
 }
 
 #[derive(serde::Serialize, schemars::JsonSchema)]

@@ -4,6 +4,10 @@ metadata:
   name: << service_name >>
   labels:
     {{- include "<< name >>.labels" . | nindent 4 }}
+  {{- with (include "<< name >>.annotations" . | trim) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
 spec:
   selector:
     {{- include "<< name >>.selectorLabels" . | nindent 4 }}
@@ -22,6 +26,10 @@ metadata:
   name: cluster
   labels:
     {{- include "<< name >>.labels" . | nindent 4 }}
+  {{- with (include "<< name >>.annotations" . | trim) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
 spec:
   selector:
     {{- include "<< name >>.selectorLabels" . | nindent 4 }}

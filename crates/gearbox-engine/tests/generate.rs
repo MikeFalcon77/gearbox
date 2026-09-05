@@ -1089,14 +1089,27 @@ fn values_schema_rejects_unknown_keys_and_wrong_types() {
             "schema is missing hatch `{hatch}`"
         );
     }
-    assert_eq!(
-        schema["properties"]["global"]["properties"]["imageRegistry"]["type"],
-        "string"
-    );
-    assert_eq!(
-        schema["properties"]["global"]["properties"]["imagePullSecrets"]["type"],
-        "array"
-    );
+    // `["string", "null"]`, not `"string"`: the field is optional and the schema
+    // is now derived from the struct rather than hand-written beside it. The
+    // hand-written copy is what let `global` drift until `helm lint` rejected
+    // the `commonLabels` the generator itself had written, so a looser but
+    // truthful type is the trade being made deliberately.
+    let global = &schema["properties"]["global"]["properties"];
+    for (key, expected) in [("imageRegistry", "string"), ("imagePullSecrets", "array")] {
+        let ty = &global[key]["type"];
+        let admits = ty == expected
+            || ty
+                .as_array()
+                .is_some_and(|kinds| kinds.iter().any(|kind| kind == expected));
+        assert!(admits, "global.{key} should admit {expected}, got {ty}");
+    }
+    for key in ["commonLabels", "commonAnnotations"] {
+        assert!(
+            global.get(key).is_some(),
+            "the derived schema must carry `global.{key}`, or `helm lint` \
+             rejects the values this generator writes"
+        );
+    }
 }
 
 /// The demo product cannot prove `cpt-gearbox-fr-no-secrets-in-values`.
@@ -1371,5 +1384,71 @@ fn dropped_capabilities_use_the_spelling_admission_checks() {
     assert!(
         !values.contains("- all"),
         "lowercase `all` is not what admission matches:\n{values}"
+    );
+}
+
+/// Every resource carries the house labels, and every resource means every one.
+///
+/// A policy that requires `cost-center` on everything is satisfied by three
+/// resources out of four exactly as well as by none. The label set used to be
+/// literal text in `_helpers.tpl`, so adding a key meant replacing the helper --
+/// and a replacement is what the operator was supposed to be spared.
+///
+/// Asserted on the templates rather than on rendered output because `helm` is
+/// not a build dependency; the render was measured by hand, and this is what
+/// keeps a fifth resource from being added without its labels.
+#[test]
+fn the_house_label_hooks_reach_all_four_resources() {
+    let Some((lock, files)) = generated("prod") else {
+        return;
+    };
+    let product = lock.product.id.as_str();
+    let sub = lock.processes[0]
+        .subchart
+        .as_deref()
+        .unwrap_or(lock.processes[0].name.as_str());
+
+    for resource in ["deployment", "service", "configmap", "serviceaccount"] {
+        let body = text(
+            &files.files,
+            &format!("helm/{product}/charts/{sub}/templates/{resource}.yaml"),
+        );
+        assert!(
+            body.contains(&format!(r#"include "{sub}.labels""#)),
+            "{resource}.yaml does not carry the shared labels:\n{body}"
+        );
+        assert!(
+            body.contains(&format!(r#"include "{sub}.annotations""#)),
+            "{resource}.yaml does not carry the shared annotations:\n{body}"
+        );
+    }
+
+    let helpers = text(
+        &files.files,
+        &format!("helm/{product}/charts/{sub}/templates/_helpers.tpl"),
+    );
+    assert!(helpers.contains(".commonLabels"), "{helpers}");
+    assert!(helpers.contains(".commonAnnotations"), "{helpers}");
+
+    // The umbrella writes the block empty rather than omitting it: a key absent
+    // from the file the operator edits is a key nobody finds.
+    let values = text(&files.files, &format!("helm/{product}/values.yaml"));
+    assert!(values.contains("global:"), "{values}");
+    assert!(values.contains("commonLabels:"), "{values}");
+
+    // The selector is immutable after creation; a label reaching it would make
+    // the next upgrade fail rather than roll.
+    let deployment = text(
+        &files.files,
+        &format!("helm/{product}/charts/{sub}/templates/deployment.yaml"),
+    );
+    let selector = deployment
+        .split("matchLabels:")
+        .nth(1)
+        .and_then(|rest| rest.split("template:").next())
+        .expect("a selector");
+    assert!(
+        !selector.contains("commonLabels") && !selector.contains("podLabels"),
+        "the selector must stay exactly the standard set:\n{selector}"
     );
 }

@@ -26,6 +26,21 @@ helm.sh/chart: {{ include "<< name >>.chart" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- with .Values.global }}{{- with .commonLabels }}
+{{ toYaml . }}
+{{- end }}{{- end }}
+{{- with .Values.commonLabels }}
+{{ toYaml . }}
+{{- end }}
+{{- end }}
+
+{{- define "<< name >>.annotations" -}}
+{{- with .Values.global }}{{- with .commonAnnotations }}
+{{ toYaml . }}
+{{- end }}{{- end }}
+{{- with .Values.commonAnnotations }}
+{{ toYaml . }}
+{{- end }}
 {{- end }}
 
 {{- define "<< name >>.selectorLabels" -}}
