@@ -648,6 +648,27 @@ the file left untouched.
 - **Rationale**: Regeneration that destroys environment-specific values is regeneration nobody runs
   twice.
 
+#### The generated chart fits a house policy without a fork
+
+- [ ] `p1` - **ID**: `cpt-gearbox-fr-chart-fits-house-policy`
+
+Every deployment decision the generated chart makes that a cluster owner may legitimately need to
+change — security contexts, labels and annotations on every resource, service type and annotations,
+service-account annotations, probe schedules, the volume backing the runtime's home directory,
+rollout and scheduling controls, and the image registry — **MUST** be expressed as a chart value
+rather than as template text, and the values schema **MUST** admit one unvalidated object per
+subchart for a template the operator has replaced.
+
+- **Rationale**: `cpt-gearbox-actor-integrator` must not need a fork of the platform monorepo, and a
+  decision that lives in template text can only be changed by replacing the template — which is the
+  fork, one file at a time. The concrete case that settled it: `runAsUser` and `fsGroup` were pinned
+  in `_helpers.tpl` with an escape that did not work, so a cluster that assigns UIDs itself could
+  not run the chart at all.
+- **Verification Method**: Render the chart with an overriding values file and inspect every emitted
+  document, not a sample: a policy label satisfied on three resources out of four is not satisfied.
+- **Actors**: `cpt-gearbox-actor-integrator`, `cpt-gearbox-actor-helm`,
+  `cpt-gearbox-actor-platform-engineer`
+
 #### A new gear or plugin is scaffolded from a template
 
 - [ ] `p2` - **ID**: `cpt-gearbox-fr-scaffold-gear`

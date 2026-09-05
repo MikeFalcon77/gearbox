@@ -22,10 +22,19 @@
 //! | `registered_gears.rs` | `processes/<p>/src/registered_gears.rs` |
 //! | `docker/Dockerfile` | `docker/<p>/Dockerfile` |
 //! | `docker/dockerignore` | `docker/.dockerignore` |
+//! | `helm/helpers.tpl` | `helm/<product>/charts/<sub>/templates/_helpers.tpl` |
+//! | `helm/deployment.yaml` | `helm/<product>/charts/<sub>/templates/deployment.yaml` |
+//! | `helm/service.yaml` | `helm/<product>/charts/<sub>/templates/service.yaml` |
+//! | `helm/configmap.yaml` | `helm/<product>/charts/<sub>/templates/configmap.yaml` |
+//! | `helm/serviceaccount.yaml` | `helm/<product>/charts/<sub>/templates/serviceaccount.yaml` |
 //!
-//! Helm keys arrive with the chart generator. An overlay for a key this
-//! build does not yet render is kept and reported (so the operator can see
-//! it was read) and otherwise unused.
+//! An overlay for a key this build does not render is kept and reported (so
+//! the operator can see it was read) and otherwise unused.
+//!
+//! **A replaced Helm template reads its own settings from `custom`.** The values
+//! schema is closed, so a house template cannot invent a top-level key; the one
+//! object nothing validates is `<subchart>.custom`, and that is where a value
+//! this generator never heard of belongs.
 //!
 //! # Context per key
 //!
@@ -39,12 +48,63 @@
 //! - `docker/Dockerfile`: `header`, `rust_channel`, `crate_name`, `bin_name`,
 //!   `process`, `out_rel`, `uid`, `ports`
 //! - `docker/dockerignore`: `header`, `secret_dirs`
-//! - `helm/helpers.tpl`: `name`
+//! - `helm/helpers.tpl`: `name`, `process`
 //! - `helm/deployment.yaml`: `name`, `process`, `config_filename`, `http_port`,
-//!   `liveness_path`, `readiness_path`, `uid`, `home_dir`, `container_ports`
-//! - `helm/service.yaml`: `name`, `service_name`, `ports`, `cluster_service`
+//!   `liveness_path`, `readiness_path`, `home_dir`, `container_ports`
+//! - `helm/service.yaml`: `name`, `service_name`, `ports`, `cluster_service`,
+//!   `cluster_port`
 //! - `helm/configmap.yaml`: `name`, `config_filename`, `config_yaml`
 //! - `helm/serviceaccount.yaml`: `name`
+//!
+//! This table is checked against the code by
+//! `every_helm_context_variable_is_documented`. It had drifted -- it omitted
+//! `process`, `cluster_port` and a since-removed `uid` -- and a table an overlay
+//! author is told to trust must not be a table nobody verifies.
+//!
+//! The Helm keys receive *fewer* variables than a chart needs, on purpose:
+//! everything an operator may change is a Helm value, so it is named as
+//! `.Values.x` in the template and never appears here. What arrives through
+//! `<< >>` is what the lock decided and the operator may not contradict -- a
+//! probe route, a Service name a neighbour dials, the port a process listens on.
+
+/// The variables each Helm key's context carries, as the module docs list them.
+///
+/// Duplicated from the docs on purpose: a table in a comment cannot be compared
+/// against anything, and this one had already drifted -- it omitted `process` and
+/// `cluster_port` while still promising a `uid` that no longer exists. An overlay
+/// author is told the table is the contract, so the contract has to be checkable.
+#[cfg(test)]
+const HELM_CONTEXT_DOC: &[(&str, &[&str])] = &[
+    ("helm/helpers.tpl", &["name", "process"]),
+    (
+        "helm/deployment.yaml",
+        &[
+            "name",
+            "process",
+            "config_filename",
+            "http_port",
+            "liveness_path",
+            "readiness_path",
+            "home_dir",
+            "container_ports",
+        ],
+    ),
+    (
+        "helm/service.yaml",
+        &[
+            "name",
+            "service_name",
+            "ports",
+            "cluster_service",
+            "cluster_port",
+        ],
+    ),
+    (
+        "helm/configmap.yaml",
+        &["name", "config_filename", "config_yaml"],
+    ),
+    ("helm/serviceaccount.yaml", &["name"]),
+];
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -246,6 +306,56 @@ pub fn render_helm(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every `<< >>` name a builtin Helm template uses is in the documented list.
+    ///
+    /// The module's context table is what an overlay author is told to write
+    /// against, and it had drifted in the direction that hurts: `uid` and
+    /// `cluster_port` were passed and used, and named nowhere, so a house
+    /// template could not have known they existed. Reading the names out of the
+    /// templates makes the omission impossible to repeat.
+    #[test]
+    fn every_helm_context_variable_is_documented() {
+        // Jinja's own vocabulary, plus loop bindings, which are not context.
+        const NOT_CONTEXT: &[&str] = &["for", "in", "endfor", "if", "endif", "else", "port"];
+
+        for (key, documented) in HELM_CONTEXT_DOC {
+            let source = TemplateSet::builtin(key).expect("a builtin");
+            for used in helm_variables(source) {
+                if NOT_CONTEXT.contains(&used.as_str()) {
+                    continue;
+                }
+                assert!(
+                    documented.contains(&used.as_str()),
+                    "`{key}` uses `{used}`, which the context table does not list"
+                );
+            }
+        }
+    }
+
+    /// The root identifiers named inside `<< >>` and `<% %>`.
+    ///
+    /// Only the segment before the first `.`: `port.name` is the loop binding
+    /// `port`, not a context variable of its own.
+    fn helm_variables(source: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        for (open, close) in [("<<", ">>"), ("<%", "%>")] {
+            let mut rest = source;
+            while let Some(start) = rest.find(open) {
+                let after = &rest[start + open.len()..];
+                let Some(end) = after.find(close) else { break };
+                for word in after[..end].split(|c: char| !c.is_alphanumeric() && c != '_') {
+                    if let Some(first) = word.chars().next()
+                        && (first.is_alphabetic() || first == '_')
+                    {
+                        found.push(word.to_owned());
+                    }
+                }
+                rest = &after[end + close.len()..];
+            }
+        }
+        found
+    }
 
     #[test]
     fn every_declared_key_has_a_builtin() {

@@ -898,6 +898,15 @@ fn indent_block(text: &str, spaces: usize) -> String {
 /// the postgres plugin, toolkit-db and static-credstore all share `${VAR}`
 /// / `${VAR:-default}` and the `ConfigMap` is what the binary actually loads.
 /// A placeholder the process will not expand is still harmless as env.
+///
+/// **A gear is never asked, and must never be asked, where its secrets come
+/// from.** A gear knows it needs a password in its configuration struct; whether
+/// that password arrives from an environment variable, a Kubernetes Secret, a
+/// file or a vault agent is a fact about somebody's cluster, and a catalogue
+/// that recorded it would be a catalogue that stopped describing the gear. So
+/// the deployment half is derived here, from what the *product* wrote and this
+/// run generated -- not declared in `gear.gdl`, which is why no amount of
+/// searching the catalogue will find it.
 fn secret_vars(config: &str) -> Vec<String> {
     let mut found = BTreeSet::new();
     let mut rest = config;
