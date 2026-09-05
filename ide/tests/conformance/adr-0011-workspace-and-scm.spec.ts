@@ -161,14 +161,17 @@ test.describe("what the workspace makes checkable", () => {
     // Implemented long before it could be reached: with no workspace there was no
     // way to open a `product.lock` at all, so `ReadOnlyLockEditorProvider` sat
     // unverified.
-    // Both names: Studio generate writes `.gearbox/studio/` beside the
-    // CLI default `.gearbox/payments-demo/`, so Theia no longer collapses the
-    // chain into one `.gearbox/payments-demo/dev` row. Expanding `.gearbox`
-    // then `payments-demo` reaches the lock in either layout.
+    // Every segment down to the profile is a hint, and the last one is why.
+    // Theia collapses a single-child chain into one `.gearbox/payments-demo/dev`
+    // row and stops collapsing the moment a sibling appears -- which is what a
+    // second `gearbox generate --profile prod`, or the `.base/` cache an
+    // operator-owned file creates, does to this tree. Naming `dev` walks both
+    // layouts; naming only the two parents walked the collapsed one and dead-ended
+    // in the expanded one.
     const lock = await revealInExplorer(
       studio.page,
       "gearbox-builder",
-      [".gearbox", "payments-demo"],
+      [".gearbox", "payments-demo", "dev"],
       "product.lock",
     );
     await lock.dblclick();

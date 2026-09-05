@@ -26,7 +26,7 @@ use serde::Serialize;
 
 use super::paths;
 use super::templates;
-use super::{GenerateError, GenerateInput, K8S_HOME_DIR, NONROOT_UID, header};
+use super::{GenerateError, GenerateInput, K8S_HOME_DIR, NONROOT_UID, header, operator_header};
 
 const CLUSTER_SERVICE: &str = "cluster";
 const CLUSTER_PORT: u16 = 50051;
@@ -206,18 +206,21 @@ fn umbrella_values(
         what: "helm values.yaml",
         source,
     })?;
-    let body = format!("{}\n{yaml}", header("#"));
     let product = input.lock.product.id.as_str();
+    // Same values, different headers, and the headers are not decoration: one
+    // file is overwritten without asking and the other is merged. Handing both
+    // the `do not edit` banner would tell an operator not to use the only file
+    // this design asks them to use.
     Ok(vec![
         FileEntry::text(
             paths::rel(&["helm", product, "values.yaml"])?,
-            body.clone(),
+            format!("{}\n{yaml}", operator_header("#", "values.generated.yaml")),
             FileKind::Yaml,
             Ownership::OperatorOwned,
         ),
         FileEntry::text(
             paths::rel(&["helm", product, "values.generated.yaml"])?,
-            body,
+            format!("{}\n{yaml}", header("#")),
             FileKind::Yaml,
             Ownership::Generated,
         ),

@@ -1167,3 +1167,79 @@ fn generated_with_cluster_secret() -> Option<(ResolvedProduct, Generated)> {
     let files = generate_tree(&lock, &source_roots, &out_root());
     Some((lock, files))
 }
+
+/// A host's probes follow `prefix_path`, and a worker's never do.
+///
+/// This is the defect that makes the platform's own hand-written chart
+/// undeployable: it probes `/health` while its `ConfigMap` sets
+/// `prefix_path: "/cf"`, so the kubelet gets a 404 and the pod never passes
+/// readiness. The demo product sets no prefix, so without injecting one here the
+/// prefixed branch is dark and a regression to "always unprefixed" would keep
+/// every other test green.
+///
+/// The worker half matters just as much and for the opposite reason: an
+/// out-of-process gear serves its probes from the runtime's own listener, which
+/// has no prefix to inherit. Prefixing a worker would break what works.
+#[test]
+fn host_probes_follow_the_rest_prefix_and_worker_probes_do_not() {
+    let Some(root) = gears_rust() else {
+        eprintln!("skipping: ../gears-rust not present");
+        return;
+    };
+    let opened = vec![SourceRoot::open(SourceId::new("gears-rust").unwrap(), &root).unwrap()];
+    let scan = load_catalogue(&opened);
+
+    let path = product_gdl();
+    let product = load_product(&path, None);
+    let mut intent = product.intent.expect("the product evaluates");
+    intent
+        .selected_gears
+        .iter_mut()
+        .find(|s| s.gear.as_str() == "api-gateway")
+        .expect("the demo product names api-gateway")
+        .config
+        .insert(
+            "prefix_path".to_owned(),
+            serde_json::Value::String("/cf".to_owned()),
+        );
+
+    let profile = ProfileId::new("prod").unwrap();
+    let resolution =
+        gearbox_engine::resolve::resolve_at(&scan.catalogue, &intent, &profile, Some(&path));
+    let sources = opened
+        .iter()
+        .map(|r| (r.id.clone(), r.to_resolved()))
+        .collect();
+    let lock =
+        gearbox_engine::resolve::product::assemble(&scan.catalogue, &intent, &resolution, sources);
+    let roots = opened
+        .iter()
+        .map(|r| (r.id.clone(), r.root.clone()))
+        .collect();
+    let files = generate(&GenerateInput {
+        lock: &lock,
+        source_roots: &roots,
+        out_root: &out_root(),
+        templates: TemplateSet::new(),
+    })
+    .expect("generation succeeds")
+    .files;
+
+    let host = text(
+        &files,
+        "helm/payments-demo/charts/api-gateway/templates/deployment.yaml",
+    );
+    assert!(host.contains("path: /cf/healthz"), "{host}");
+    assert!(host.contains("path: /cf/readyz"), "{host}");
+
+    // A worker mounts nothing on the gateway, so its probes stay at the root.
+    let worker = text(
+        &files,
+        "helm/payments-demo/charts/audit/templates/deployment.yaml",
+    );
+    assert!(worker.contains("path: /healthz"), "{worker}");
+    assert!(
+        !worker.contains("/cf/"),
+        "a worker must not inherit the host's prefix:\n{worker}"
+    );
+}
