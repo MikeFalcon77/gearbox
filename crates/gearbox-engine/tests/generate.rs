@@ -1452,3 +1452,49 @@ fn the_house_label_hooks_reach_all_four_resources() {
         "the selector must stay exactly the standard set:\n{selector}"
     );
 }
+
+/// Probe timings are the operator's; the probe address is the lock's.
+///
+/// Before this the block was three lines of template with no schedule at all, so
+/// a process slow to start in somebody else's cluster was killed and restarted
+/// forever and the only cure was replacing the template. The path stays out of
+/// values because it is derived: the REST host's `prefix_path` moves `/healthz`
+/// to `/cf/healthz`, and a path an operator could type is a path that can
+/// disagree with the configuration this same run generated.
+#[test]
+fn probe_timings_are_values_and_probe_paths_are_not() {
+    let Some((lock, files)) = generated("prod") else {
+        return;
+    };
+    let product = lock.product.id.as_str();
+    let values = text(&files.files, &format!("helm/{product}/values.yaml"));
+
+    for probe in ["livenessProbe:", "readinessProbe:", "startupProbe:"] {
+        assert!(values.contains(probe), "{probe} missing:\n{values}");
+    }
+    assert!(values.contains("periodSeconds: 10"), "{values}");
+    assert!(values.contains("failureThreshold: 30"), "{values}");
+    assert!(
+        !values.contains("/healthz") && !values.contains("/readyz"),
+        "a probe path in values is one that can contradict the config:\n{values}"
+    );
+
+    let sub = lock.processes[0]
+        .subchart
+        .as_deref()
+        .unwrap_or(lock.processes[0].name.as_str());
+    let deployment = text(
+        &files.files,
+        &format!("helm/{product}/charts/{sub}/templates/deployment.yaml"),
+    );
+    // `omit "enabled"`: the flag decides whether the probe exists, and would be
+    // an unknown field if it reached the manifest.
+    assert!(
+        deployment.contains(r#"omit .Values.livenessProbe "enabled""#),
+        "{deployment}"
+    );
+    assert!(
+        deployment.contains("{{- if .Values.startupProbe.enabled }}"),
+        "a startup probe suppresses liveness, so it must be opt-in:\n{deployment}"
+    );
+}

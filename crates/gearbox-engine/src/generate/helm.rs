@@ -193,6 +193,9 @@ fn umbrella_values(
                 extra_volume_mounts: None,
                 pod_security_context: Some(restricted_pod_security_context()),
                 container_security_context: Some(restricted_container_security_context()),
+                liveness_probe: ProbeValues::liveness(),
+                readiness_probe: ProbeValues::readiness(),
+                startup_probe: ProbeValues::startup(),
                 existing_secret: existing_secret(process, input),
                 secret_keys: if keys.is_empty() { None } else { Some(keys) },
             },
@@ -423,6 +426,26 @@ struct SubchartValues {
     /// unconditionally, so `readOnlyRootFilesystem` and the dropped capabilities
     /// were not adjustable by any means short of a replacement template.
     container_security_context: Option<ContainerSecurityContext>,
+    /// Liveness probe timings. The route and port are not here on purpose.
+    ///
+    /// **The operator owns the timings; the lock owns the address.** A path in
+    /// values is a path that can disagree with the configuration this same run
+    /// generated -- the REST host's `prefix_path` moves `/healthz` to
+    /// `/cf/healthz`, and a chart that let someone type the old one would fail
+    /// readiness for a reason no diff explains.
+    ///
+    /// Timings were not adjustable at all before: a process slow to start in
+    /// somebody else's cluster was restarted forever, and the only cure was
+    /// replacing the template.
+    liveness_probe: ProbeValues,
+    /// Readiness probe timings.
+    readiness_probe: ProbeValues,
+    /// Startup probe, off by default.
+    ///
+    /// Off because a startup probe that exists suppresses liveness until it
+    /// passes, and guessing a budget for someone else's slowest dependency is
+    /// how a chart ships a hidden outage. Turning it on is one flag.
+    startup_probe: ProbeValues,
     /// Name of a Secret the operator already created. Never a credential.
     #[serde(skip_serializing_if = "Option::is_none")]
     existing_secret: Option<String>,
@@ -477,6 +500,54 @@ struct ImageValues {
     repository: String,
     tag: String,
     pull_policy: String,
+}
+
+/// One probe's schedule, without its address.
+///
+/// Kubernetes' own defaults, written out rather than left implicit, because a
+/// value an operator cannot see is a value they cannot tune -- and tuning these
+/// is the entire reason the block exists.
+#[derive(serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ProbeValues {
+    enabled: bool,
+    initial_delay_seconds: u32,
+    period_seconds: u32,
+    timeout_seconds: u32,
+    failure_threshold: u32,
+    /// Only meaningful for readiness; Kubernetes requires 1 for the other two.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    success_threshold: Option<u32>,
+}
+
+impl ProbeValues {
+    fn liveness() -> Self {
+        Self {
+            enabled: true,
+            initial_delay_seconds: 0,
+            period_seconds: 10,
+            timeout_seconds: 1,
+            failure_threshold: 3,
+            success_threshold: None,
+        }
+    }
+
+    fn readiness() -> Self {
+        Self {
+            success_threshold: Some(1),
+            ..Self::liveness()
+        }
+    }
+
+    /// Thirty failures at ten seconds: five minutes to start, then liveness takes
+    /// over. A budget only someone who turns this on has any business choosing.
+    fn startup() -> Self {
+        Self {
+            enabled: false,
+            failure_threshold: 30,
+            ..Self::liveness()
+        }
+    }
 }
 
 /// The pod's security context.
