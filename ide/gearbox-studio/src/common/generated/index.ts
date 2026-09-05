@@ -59,6 +59,7 @@ export * from "./GenerateParams";
 export * from "./GeneratePlanResult";
 export * from "./GrpcProjection";
 export * from "./GtsTypeDecl";
+export * from "./ImageRef";
 export * from "./InclusionReason";
 export * from "./InitializeParams";
 export * from "./InitializeResult";

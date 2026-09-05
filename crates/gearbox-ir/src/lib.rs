@@ -47,7 +47,8 @@ pub use requirement::{
 };
 pub use resolved::{
     BindingMechanism, BindingRequest, Choice, ClusterResolution, CutBlocker, CutCandidate,
-    CutSavings, Entrypoint, InclusionReason, KubernetesSettings, LOCK_SCHEMA_VERSION, ProcessKind,
-    ResolvedBinding, ResolvedBindingMode, ResolvedClusterBinding, ResolvedEndpoint, ResolvedGear,
-    ResolvedProcess, ResolvedProduct, ResolvedProductHeader, Selected, SpawnSpec, WorkerServe,
+    CutSavings, Entrypoint, ImageRef, InclusionReason, KubernetesSettings, LOCK_SCHEMA_VERSION,
+    ProcessKind, ResolvedBinding, ResolvedBindingMode, ResolvedClusterBinding, ResolvedEndpoint,
+    ResolvedGear, ResolvedProcess, ResolvedProduct, ResolvedProductHeader, Selected, SpawnSpec,
+    WorkerServe,
 };

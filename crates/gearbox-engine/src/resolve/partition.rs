@@ -18,8 +18,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use gearbox_ir::{
     Catalogue, DeploymentProfileDecl, Diagnostic, DiagnosticCode, Diagnostics, Entrypoint, GearId,
-    Location, ProcessId, ProcessKind, ResolvedEndpoint, ResolvedProcess, RuntimeCap, SpawnSpec,
-    WorkerServe,
+    ImageRef, Location, ProcessId, ProcessKind, ResolvedEndpoint, ResolvedProcess, RuntimeCap,
+    SpawnSpec, WorkerServe,
 };
 
 use super::closure::Closure;
@@ -327,10 +327,13 @@ fn assign_chart_fields(
     }
 }
 
-fn image_ref(registry: Option<&str>, bin_name: &str, version: &str) -> String {
-    match registry {
-        Some(registry) if !registry.is_empty() => format!("{registry}/{bin_name}:{version}"),
-        _ => format!("{bin_name}:{version}"),
+fn image_ref(registry: Option<&str>, bin_name: &str, version: &str) -> ImageRef {
+    ImageRef {
+        registry: registry
+            .filter(|registry| !registry.is_empty())
+            .map(str::to_owned),
+        repository: bin_name.to_owned(),
+        tag: version.to_owned(),
     }
 }
 

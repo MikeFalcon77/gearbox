@@ -1243,3 +1243,61 @@ fn host_probes_follow_the_rest_prefix_and_worker_probes_do_not() {
         "a worker must not inherit the host's prefix:\n{worker}"
     );
 }
+
+/// The registry stays out of `repository`, so a mirror override composes.
+///
+/// Helm's convention is that a site sets `global.imageRegistry` once and every
+/// image moves to its mirror. That works only when the per-image value it
+/// replaces is the registry alone. This generator used to fold the registry into
+/// `repository` and split it back out by looking for the last colon, which put
+/// *both* registries in the rendered reference --
+/// `mirror.corp/registry.example.com/payments/gbx-audit:0.1.0`, an image that
+/// does not exist anywhere. Measured before the fix, not deduced.
+///
+/// Asserting on the values rather than on a rendered chart because `helm` is not
+/// a build dependency; the template's composition is pinned separately by
+/// `assert_subchart_deployment`.
+#[test]
+fn the_image_registry_is_a_value_of_its_own() {
+    let Some((lock, files)) = generated("prod") else {
+        return;
+    };
+    let product = lock.product.id.as_str();
+    let values = text(&files.files, &format!("helm/{product}/values.yaml"));
+
+    assert!(
+        values.contains("registry: registry.example.com/payments"),
+        "the registry must be its own key:\n{values}"
+    );
+    assert!(
+        values.contains("repository: gbx-audit"),
+        "the repository must not carry the registry:\n{values}"
+    );
+    for process in &lock.processes {
+        let image = process.image.as_ref().expect("kubernetes builds images");
+        assert!(
+            !image.repository.contains('/'),
+            "`{}` still carries a registry",
+            image.repository
+        );
+    }
+
+    // The template's two-source composition: the per-image registry by default,
+    // `global.imageRegistry` when the operator sets one.
+    let sub = lock.processes[0]
+        .subchart
+        .as_deref()
+        .unwrap_or(lock.processes[0].name.as_str());
+    let deployment = text(
+        &files.files,
+        &format!("helm/{product}/charts/{sub}/templates/deployment.yaml"),
+    );
+    assert!(
+        deployment.contains("$registry := .Values.image.registry"),
+        "{deployment}"
+    );
+    assert!(
+        deployment.contains("$registry = .Values.global.imageRegistry"),
+        "{deployment}"
+    );
+}

@@ -331,11 +331,10 @@ pub struct ResolvedProcess {
 
     /// The container image, when the profile builds images.
     ///
-    /// `{image_registry}/{bin_name}:{product.version}`, or `{bin_name}:{version}`
-    /// when the profile named no registry. A pure function of the lock, which is
-    /// why it is resolved rather than left for a template to invent.
+    /// A pure function of the lock, which is why it is resolved rather than left
+    /// for a template to invent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image: Option<String>,
+    pub image: Option<ImageRef>,
 
     /// The chart subdirectory, when the profile generates a chart.
     ///
@@ -369,6 +368,46 @@ impl ResolvedProcess {
     #[must_use]
     pub const fn is_replicated(&self) -> bool {
         self.replicas > 1
+    }
+}
+
+/// A container image, in the three parts a chart addresses separately.
+///
+/// **Three fields rather than one string, because the chart needs them apart and
+/// the resolver is the only place that still knows where the seams are.** Helm's
+/// conventional `global.imageRegistry` re-prefixes every image so a site can
+/// mirror them; that composes only if `repository` is the registry-less name.
+/// Holding one `registry/repo:tag` string meant the generator had to split it
+/// back apart by guessing at punctuation -- and guessing wrong, since a registry
+/// may carry a port and a repository may carry slashes. Splitting a string this
+/// crate assembled two functions earlier is a smell in any case: the parts were
+/// known, and were thrown away.
+///
+/// `tag` is the product version; a digest is not expressible and is deliberately
+/// left to the operator's `image.tag` override rather than half-modelled here.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ImageRef {
+    /// The registry and any namespace under it, without a trailing slash.
+    ///
+    /// `None` when the profile named none, which is what an operator building
+    /// locally gets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry: Option<String>,
+
+    /// The image name, never carrying the registry.
+    pub repository: String,
+
+    pub tag: String,
+}
+
+impl ImageRef {
+    /// The single string `docker build -t` and `docker pull` take.
+    #[must_use]
+    pub fn reference(&self) -> String {
+        match &self.registry {
+            Some(registry) => format!("{registry}/{}:{}", self.repository, self.tag),
+            None => format!("{}:{}", self.repository, self.tag),
+        }
     }
 }
 

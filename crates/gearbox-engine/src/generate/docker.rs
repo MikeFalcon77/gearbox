@@ -151,10 +151,7 @@ fn build_script(input: &GenerateInput<'_>, context: &Path) -> Result<FileEntry, 
 
     body.push_str("if [ \"$#\" -eq 0 ]; then\n");
     for process in &input.lock.processes {
-        let image = process
-            .image
-            .clone()
-            .unwrap_or_else(|| format!("{}:{}", process.bin_name, input.lock.product.version));
+        let image = image_reference(process, input);
         body.push_str("  build_one ");
         body.push_str(process.name.as_str());
         body.push(' ');
@@ -166,10 +163,7 @@ fn build_script(input: &GenerateInput<'_>, context: &Path) -> Result<FileEntry, 
     body.push_str("for name in \"$@\"; do\n");
     body.push_str("  case \"$name\" in\n");
     for process in &input.lock.processes {
-        let image = process
-            .image
-            .clone()
-            .unwrap_or_else(|| format!("{}:{}", process.bin_name, input.lock.product.version));
+        let image = image_reference(process, input);
         body.push_str("    ");
         body.push_str(process.name.as_str());
         body.push_str(") build_one ");
@@ -188,6 +182,23 @@ fn build_script(input: &GenerateInput<'_>, context: &Path) -> Result<FileEntry, 
         FileKind::Shell,
         Ownership::Generated,
     ))
+}
+
+/// The tag `docker build -t` gets, whole.
+///
+/// Docker wants the one string the chart deliberately keeps in three parts. It
+/// is reassembled here rather than held that way in the lock, because only one
+/// of the two consumers wants it joined -- and the chart's need to prefix a
+/// mirror registry is the need that cannot be met by splitting a string back up.
+///
+/// A profile that builds no images leaves `image` unset; falling back to
+/// `{bin_name}:{version}` keeps `build.sh` usable there rather than emitting a
+/// script with a hole in it.
+fn image_reference(process: &ResolvedProcess, input: &GenerateInput<'_>) -> String {
+    process.image.as_ref().map_or_else(
+        || format!("{}:{}", process.bin_name, input.lock.product.version),
+        gearbox_ir::ImageRef::reference,
+    )
 }
 
 fn build_context(input: &GenerateInput<'_>) -> Result<PathBuf, GenerateError> {

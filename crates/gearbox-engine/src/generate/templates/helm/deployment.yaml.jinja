@@ -46,11 +46,11 @@ spec:
       {{- end }}
       containers:
         - name: << process >>
+          {{- $registry := .Values.image.registry }}
           {{- if and .Values.global .Values.global.imageRegistry }}
-          image: "{{ .Values.global.imageRegistry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          {{- else }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          {{- $registry = .Values.global.imageRegistry }}
           {{- end }}
+          image: "{{ with $registry }}{{ . }}/{{ end }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - --config

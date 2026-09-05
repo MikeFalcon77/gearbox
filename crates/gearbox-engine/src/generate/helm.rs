@@ -161,7 +161,7 @@ fn umbrella_values(
 ) -> Result<Vec<FileEntry>, GenerateError> {
     let mut blocks = BTreeMap::new();
     for process in &input.lock.processes {
-        let (repository, tag) = split_image(process.image.as_deref().unwrap_or(&process.bin_name));
+        let image = image_values(process, input);
         let config_rel = paths::rel(&["config", &format!("{}.yaml", process.name)])?;
         let keys = files
             .get(&config_rel)
@@ -173,11 +173,7 @@ fn umbrella_values(
             SubchartValues {
                 enabled: true,
                 replica_count: process.replicas,
-                image: ImageValues {
-                    repository,
-                    tag,
-                    pull_policy: "IfNotPresent".to_owned(),
-                },
+                image,
                 service_account: ServiceAccountValues {
                     create: true,
                     name: None,
@@ -400,6 +396,16 @@ struct GlobalValues {
 #[serde(rename_all = "camelCase")]
 #[schemars(deny_unknown_fields)]
 struct ImageValues {
+    /// The registry, kept out of `repository` so `global.imageRegistry` composes.
+    ///
+    /// A site that mirrors images sets `global.imageRegistry` once and expects
+    /// every image to move. That works only if the per-image value it replaces is
+    /// this field; with the registry folded into `repository`, the template
+    /// produced `mirror.corp/registry.example.com/payments/gbx-audit` and the
+    /// pull failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    registry: Option<String>,
+    /// The image name, never carrying the registry.
     repository: String,
     tag: String,
     pull_policy: String,
@@ -606,12 +612,38 @@ fn existing_secret(process: &ResolvedProcess, input: &GenerateInput<'_>) -> Opti
     })
 }
 
-fn split_image(image: &str) -> (String, String) {
-    match image.rsplit_once(':') {
-        Some((repo, tag)) if !repo.is_empty() && !tag.contains('/') => {
-            (repo.to_owned(), tag.to_owned())
-        }
-        _ => (image.to_owned(), "latest".to_owned()),
+/// The three parts of the image, taken from the lock rather than parsed back out.
+///
+/// The lock holds them apart ([`gearbox_ir::ImageRef`]) precisely so this
+/// function does not have to guess where a registry ends and a repository begins
+/// -- a guess that has no correct form, since a registry may carry a port and a
+/// repository may carry slashes.
+///
+/// A profile that builds no images leaves `image` unset. Naming the binary and
+/// the product version is the same answer `build.sh` gives there, so a chart
+/// generated for such a profile is at least self-consistent.
+fn image_values(process: &ResolvedProcess, input: &GenerateInput<'_>) -> ImageValues {
+    let (registry, repository, tag) = process.image.as_ref().map_or_else(
+        || {
+            (
+                None,
+                process.bin_name.clone(),
+                input.lock.product.version.clone(),
+            )
+        },
+        |image| {
+            (
+                image.registry.clone(),
+                image.repository.clone(),
+                image.tag.clone(),
+            )
+        },
+    );
+    ImageValues {
+        registry,
+        repository,
+        tag,
+        pull_policy: "IfNotPresent".to_owned(),
     }
 }
 
@@ -713,22 +745,24 @@ mod tests {
         );
     }
 
+    /// A registry with a port survives, which is what parsing could never promise.
+    ///
+    /// `localhost:5000/gbx-audit:0.1.0` has two colons and only the second is a
+    /// tag separator. The parser this replaced answered that case by giving up --
+    /// it returned the whole string as a repository and invented the tag `latest`
+    /// -- and no rule over the string alone does better, because `host:port` and
+    /// `repo:tag` are the same shape. The lock never joined them, so nothing here
+    /// has to take them apart.
     #[test]
-    fn split_image_uses_the_last_colon() {
-        assert_eq!(
-            split_image("registry.example.com/payments/gbx-api-gateway:0.1.0"),
-            (
-                "registry.example.com/payments/gbx-api-gateway".to_owned(),
-                "0.1.0".to_owned()
-            )
-        );
-        assert_eq!(
-            split_image("localhost:5000/gbx-api-gateway"),
-            (
-                "localhost:5000/gbx-api-gateway".to_owned(),
-                "latest".to_owned()
-            )
-        );
+    fn a_registry_with_a_port_stays_whole() {
+        let image = gearbox_ir::ImageRef {
+            registry: Some("localhost:5000".to_owned()),
+            repository: "gbx-audit".to_owned(),
+            tag: "0.1.0".to_owned(),
+        };
+        assert_eq!(image.reference(), "localhost:5000/gbx-audit:0.1.0");
+        assert_eq!(image.registry.as_deref(), Some("localhost:5000"));
+        assert_eq!(image.repository, "gbx-audit");
     }
 
     #[test]

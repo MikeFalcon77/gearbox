@@ -301,9 +301,22 @@ fn kubernetes_fills_the_chart_fields_and_binds_every_interface() {
         .iter()
         .find(|p| p.anchor.as_str() == "api-gateway")
         .expect("the host");
+    let image = gateway
+        .image
+        .as_ref()
+        .expect("a kubernetes profile builds images");
+    // Asserted in parts, not as the joined reference: keeping the registry out of
+    // `repository` is the whole point, and a test on `reference()` alone would
+    // pass just as well with them folded back together.
     assert_eq!(
-        gateway.image.as_deref(),
-        Some("registry.example.com/payments/gbx-api-gateway:0.1.0")
+        image.registry.as_deref(),
+        Some("registry.example.com/payments")
+    );
+    assert_eq!(image.repository, "gbx-api-gateway");
+    assert_eq!(image.tag, "0.1.0");
+    assert_eq!(
+        image.reference(),
+        "registry.example.com/payments/gbx-api-gateway:0.1.0"
     );
     assert_eq!(gateway.subchart.as_deref(), Some(gateway.name.as_str()));
     assert_eq!(
