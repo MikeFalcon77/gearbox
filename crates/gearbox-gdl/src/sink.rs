@@ -77,6 +77,13 @@ pub struct ProductDecl {
     pub version: String,
     pub default_profile: String,
     pub sources: Vec<crate::records::SourceRecord>,
+    /// Where this product's template overlay lives, when it says.
+    ///
+    /// Absent means the convention: a `templates/` directory beside the
+    /// description. Declaring it exists so the directory can live *outside* the
+    /// product -- one house template set shared by twenty products rather than
+    /// twenty copies of it, which is what the convention alone forced.
+    pub templates: Option<crate::records::SourceAtRecord>,
     pub profiles: Vec<crate::records::ProfileRecord>,
     pub gears: Vec<crate::records::UseGearRecord>,
     pub bindings: Vec<crate::records::BindRecord>,

@@ -117,6 +117,7 @@ pub fn build(
         cluster_scopes: build_cluster_scopes(uri, decl, &profiles, diagnostics),
         process_pins: build_process_pins(uri, decl, &profiles, diagnostics),
         preferences: build_preferences(uri, decl, diagnostics),
+        templates: build_templates(uri, decl, diagnostics),
         sources,
         profiles,
         default_profile,
@@ -141,6 +142,41 @@ fn build_profiles(uri: &str, decl: &ProductDecl, diagnostics: &mut Diagnostics) 
         }
     }
     profiles
+}
+
+/// The declared template overlay, or `None` for the convention beside the file.
+///
+/// Refuses `git(...)` and `registry(...)` by name rather than reporting an
+/// unknown argument: both are spellable, and a message saying which one was
+/// written and why it cannot work is worth more than a parse error. Fetching is
+/// the reason -- `generate` is a pure function of the lock, and a template set
+/// pulled over the network at generation time would make `--dry-run` a preview
+/// of whatever the remote said this morning.
+fn build_templates(uri: &str, decl: &ProductDecl, diagnostics: &mut Diagnostics) -> Option<String> {
+    let record = decl.templates.as_ref()?;
+    match record.kind.as_str() {
+        "path" => {
+            let at = non_empty(record.at.as_deref());
+            if at.is_none() {
+                diagnostics.push(invalid(
+                    uri,
+                    "`templates` declares `path()` with no directory".to_owned(),
+                    "write `templates = path(\"../../house-templates\")`; the path is relative \
+                     to the product description and may point outside it",
+                ));
+            }
+            at
+        }
+        other => {
+            diagnostics.push(invalid(
+                uri,
+                format!("`templates` uses `{other}()`, which generation cannot read"),
+                "use `path(\"...\")`; a template set fetched at generation time would make \
+                 `--dry-run` a preview of whatever the remote said at the time",
+            ));
+            None
+        }
+    }
 }
 
 fn build_sources(

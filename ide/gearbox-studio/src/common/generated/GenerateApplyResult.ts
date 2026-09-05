@@ -5,4 +5,8 @@ import type { FilePlan } from "./FilePlan";
 /**
  * What an apply did.
  */
-export type GenerateApplyResult = { plans: Array<FilePlan>, diagnostics?: Array<Diagnostic>, written: number, };
+export type GenerateApplyResult = { plans: Array<FilePlan>, diagnostics?: Array<Diagnostic>, written: number, 
+/**
+ * Template keys whose builtin this product replaced.
+ */
+overridden_templates?: Array<string>, };

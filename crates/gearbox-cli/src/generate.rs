@@ -87,7 +87,7 @@ pub fn run(
         .iter()
         .map(|root| (root.id.clone(), root.root.clone()))
         .collect();
-    let templates = TemplateSet::load_for_product(&product_file)?;
+    let templates = TemplateSet::load_for_product(&product_file, intent.templates.as_deref())?;
     let generated = gearbox_engine::generate(&GenerateInput {
         lock: &lock,
         source_roots: &source_roots,

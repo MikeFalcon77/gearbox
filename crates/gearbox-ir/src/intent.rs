@@ -477,6 +477,24 @@ pub struct ProductIntent {
 
     pub sources: BTreeMap<SourceId, SourceDecl>,
 
+    /// The product's template overlay directory, relative to the description.
+    ///
+    /// **Declared so it can point outside the product.** The overlay was found by
+    /// convention alone -- a `templates/` directory beside `product.gdl` -- which
+    /// works for one product and forces a house that keeps twenty to hold twenty
+    /// copies of the same chart. A path names one directory the whole fleet can
+    /// share.
+    ///
+    /// Absent keeps the convention, and the convention's forgiveness with it: an
+    /// absent `templates/` is the ordinary case, not an error. A path written
+    /// here is the opposite -- someone meant it, so a directory that is not there
+    /// is reported rather than silently ignored.
+    ///
+    /// Only `path(...)` is expressible. `git(...)` would make generation fetch,
+    /// and `generate` is a pure function of the lock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub templates: Option<String>,
+
     pub profiles: BTreeMap<ProfileId, DeploymentProfileDecl>,
 
     pub default_profile: ProfileId,

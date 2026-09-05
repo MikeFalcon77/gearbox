@@ -123,6 +123,11 @@ pub enum GenerateError {
     UnknownTemplate { key: String },
 
     #[error(
+        "the product declares `templates = path(\"{declared}\")`, but `{at}` is not a directory"
+    )]
+    MissingTemplateDir { declared: String, at: String },
+
+    #[error(
         "the output tree `{out_root}` and the source roots share no relative path, so there is no docker build context a COPY could name"
     )]
     UnreachableDockerContext { out_root: String },

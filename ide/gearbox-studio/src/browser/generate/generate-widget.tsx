@@ -169,6 +169,19 @@ export class GenerateWidget extends ReactWidget {
                 {gen.written} written
               </span>
             )}
+            {/* An unexpected chart must have a visible cause. The engine has
+                always known which builtins a product replaced; the RPC path
+                dropped it, so this panel showed a house template and a stock one
+                as the same thing. */}
+            {(gen.plan.overridden_templates ?? []).length > 0 && (
+              <span
+                className="gbx-badge"
+                data-overridden={(gen.plan.overridden_templates ?? []).join(",")}
+                title={`Product templates replace: ${(gen.plan.overridden_templates ?? []).join(", ")}`}
+              >
+                {(gen.plan.overridden_templates ?? []).length} overridden
+              </span>
+            )}
           </div>
           <button
             className="gbx-choice gbx-choice-on"

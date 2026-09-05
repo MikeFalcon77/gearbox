@@ -194,6 +194,10 @@ export class GenerateService {
           plans: outcome.plans,
           diagnostics: outcome.diagnostics,
           out_root: this.state.plan?.out_root ?? "",
+          // The apply recomputes this, so take its answer rather than the plan's:
+          // a product whose `templates = path(...)` changed between the two would
+          // otherwise keep reporting the overlay it no longer uses.
+          overridden_templates: outcome.overridden_templates,
         },
         written: outcome.written,
       });

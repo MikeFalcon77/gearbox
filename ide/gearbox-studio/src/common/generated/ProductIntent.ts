@@ -17,7 +17,25 @@ export type ProductIntent = { id: string, display_name: string, version: string,
 /**
  * Where the product description was read from.
  */
-gdl_path: RelPath, sources: { [key in SourceId]: SourceDecl }, profiles: { [key in ProfileId]: DeploymentProfileDecl }, default_profile: ProfileId, 
+gdl_path: RelPath, sources: { [key in SourceId]: SourceDecl }, 
+/**
+ * The product's template overlay directory, relative to the description.
+ *
+ * **Declared so it can point outside the product.** The overlay was found by
+ * convention alone -- a `templates/` directory beside `product.gdl` -- which
+ * works for one product and forces a house that keeps twenty to hold twenty
+ * copies of the same chart. A path names one directory the whole fleet can
+ * share.
+ *
+ * Absent keeps the convention, and the convention's forgiveness with it: an
+ * absent `templates/` is the ordinary case, not an error. A path written
+ * here is the opposite -- someone meant it, so a directory that is not there
+ * is reported rather than silently ignored.
+ *
+ * Only `path(...)` is expressible. `git(...)` would make generation fetch,
+ * and `generate` is a pure function of the lock.
+ */
+templates?: string | null, profiles: { [key in ProfileId]: DeploymentProfileDecl }, default_profile: ProfileId, 
 /**
  * The gears asked for directly. Their co-location closures bring in more.
  */

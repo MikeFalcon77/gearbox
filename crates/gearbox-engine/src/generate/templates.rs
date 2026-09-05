@@ -134,21 +134,45 @@ impl TemplateSet {
         Self { overrides }
     }
 
-    /// Walk `<dir of product.gdl>/templates/` for `*.jinja` files.
+    /// Walk the product's overlay directory for `*.jinja` files.
     ///
-    /// Missing directory is empty, not an error: that is every product that
-    /// has not opted into an overlay. A file that cannot be read *is* an
-    /// error -- generating from a truncated override would produce a chart
-    /// the operator cannot explain.
+    /// `declared` is `ProductIntent::templates` -- the directory the description
+    /// named, resolved against the description's own directory so it may point
+    /// outside the product. That is the whole reason it can be declared: the
+    /// convention holds the overlay beside `product.gdl`, which makes a house
+    /// that keeps twenty products keep twenty copies of the same chart.
+    ///
+    /// **The two cases fail differently, on purpose.** An absent `templates/`
+    /// directory is every product that never opted in, so it is emptiness rather
+    /// than an error. A *declared* directory that is not there is someone's
+    /// intent gone wrong -- silently generating the builtin chart would hand them
+    /// a chart they did not ask for and no reason why -- so it is reported.
+    ///
+    /// A file that cannot be read is an error either way: generating from a
+    /// truncated override produces a chart the operator cannot explain.
     ///
     /// # Errors
-    /// Returns [`GenerateError::Io`] when the directory cannot be walked or a
-    /// file cannot be read.
-    pub fn load_for_product(product_file: &Path) -> Result<Self, GenerateError> {
+    /// Returns [`GenerateError::MissingTemplateDir`] when a declared directory
+    /// does not exist, and [`GenerateError::Io`] when a directory cannot be
+    /// walked or a file cannot be read.
+    pub fn load_for_product(
+        product_file: &Path,
+        declared: Option<&str>,
+    ) -> Result<Self, GenerateError> {
         let Some(parent) = product_file.parent() else {
             return Ok(Self::new());
         };
-        load_overrides(&parent.join("templates"))
+        let Some(declared) = declared else {
+            return load_overrides(&parent.join("templates"));
+        };
+        let dir = parent.join(declared);
+        if !dir.is_dir() {
+            return Err(GenerateError::MissingTemplateDir {
+                declared: declared.to_owned(),
+                at: dir.display().to_string(),
+            });
+        }
+        load_overrides(&dir)
     }
 
     /// The compiled-in source for `key`, if this build has one.
@@ -389,7 +413,7 @@ mod tests {
 
     #[test]
     fn a_missing_directory_is_an_empty_overlay() {
-        let set = TemplateSet::load_for_product(Path::new("/no/such/product.gdl")).unwrap();
+        let set = TemplateSet::load_for_product(Path::new("/no/such/product.gdl"), None).unwrap();
         assert!(set.is_empty());
     }
 
@@ -409,8 +433,58 @@ mod tests {
         let nested = dir.join("templates/docker");
         std::fs::create_dir_all(&nested).unwrap();
         std::fs::write(nested.join("Dockerfile.jinja"), "FROM overlay\n").unwrap();
-        let set = TemplateSet::load_for_product(&dir.join("product.gdl")).unwrap();
+        let set = TemplateSet::load_for_product(&dir.join("product.gdl"), None).unwrap();
         assert_eq!(set.get("docker/Dockerfile").unwrap(), "FROM overlay\n");
         std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    /// A declared overlay may live outside the product, which is the point.
+    ///
+    /// The convention holds it beside `product.gdl`, so a house with twenty
+    /// products keeps twenty copies of one chart. `templates = path("../house")`
+    /// makes them share a directory -- and `..` is exactly what the convention
+    /// could not express.
+    #[test]
+    fn a_declared_overlay_may_sit_outside_the_product() {
+        let root = std::env::temp_dir().join(format!("gbx-declared-{}", std::process::id()));
+        let product = root.join("products/payments");
+        let house = root.join("house-templates/helm");
+        std::fs::create_dir_all(&product).unwrap();
+        std::fs::create_dir_all(&house).unwrap();
+        std::fs::write(house.join("service.yaml.jinja"), "house service\n").unwrap();
+
+        let set = TemplateSet::load_for_product(
+            &product.join("product.gdl"),
+            Some("../../house-templates"),
+        )
+        .unwrap();
+        assert_eq!(set.get("helm/service.yaml").unwrap(), "house service\n");
+        assert_eq!(set.overridden(), vec!["helm/service.yaml"]);
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    /// A declared directory that is not there is reported; an undeclared one is not.
+    ///
+    /// The asymmetry is the whole reason declaring is worth having. Nobody meant
+    /// the absent `templates/` beside their description -- that is every product
+    /// that never opted in. Someone did mean the path they wrote, so generating
+    /// the builtin chart instead would hand them a chart they did not ask for and
+    /// no reason why.
+    #[test]
+    fn a_declared_directory_that_is_missing_is_an_error() {
+        let err = TemplateSet::load_for_product(
+            Path::new("/no/such/product.gdl"),
+            Some("../house-templates"),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, GenerateError::MissingTemplateDir { .. }),
+            "{err:?}"
+        );
+        assert!(
+            TemplateSet::load_for_product(Path::new("/no/such/product.gdl"), None)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

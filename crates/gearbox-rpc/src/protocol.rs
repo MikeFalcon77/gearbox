@@ -690,6 +690,13 @@ pub struct GeneratePlanResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<Diagnostic>,
     pub out_root: String,
+    /// Template keys whose builtin this product replaced.
+    ///
+    /// An unexpected chart or Dockerfile must have a visible cause. The CLI has
+    /// always printed this line; the RPC path computed it and threw it away, so
+    /// Studio showed a plan with no way to tell a house template from a builtin.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overridden_templates: Vec<String>,
 }
 
 /// What an apply did.
@@ -699,6 +706,9 @@ pub struct GenerateApplyResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<Diagnostic>,
     pub written: u32,
+    /// Template keys whose builtin this product replaced.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overridden_templates: Vec<String>,
 }
 
 /// `gearbox/generate/file` -- the two sides of one planned file.

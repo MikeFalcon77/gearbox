@@ -420,6 +420,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] name: Option<&str>,
         #[starlark(require = named)] version: &str,
         #[starlark(require = named)] sources: UnpackList<&'v SourceRecord>,
+        #[starlark(require = named)] templates: Option<&'v SourceAtRecord>,
         #[starlark(require = named)] profiles: UnpackList<&'v ProfileRecord>,
         #[starlark(require = named)] default_profile: &str,
         #[starlark(require = named)] gears: UnpackList<&'v UseGearRecord>,
@@ -435,6 +436,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             version: version.to_owned(),
             default_profile: default_profile.to_owned(),
             sources: sources.items.into_iter().cloned().collect(),
+            templates: templates.cloned(),
             profiles: profiles.items.into_iter().cloned().collect(),
             gears: gears.items.into_iter().cloned().collect(),
             bindings: bindings

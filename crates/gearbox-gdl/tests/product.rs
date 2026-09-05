@@ -442,3 +442,48 @@ fn a_process_with_zero_replicas_is_refused() {
     let (_, _, messages) = eval(&src);
     assert!(messages.contains("does not run"), "{messages}");
 }
+
+/// A product may name a template overlay, and may put it outside itself.
+///
+/// The overlay used to be found only by convention -- a `templates/` directory
+/// beside the description -- which works for one product and makes a house that
+/// keeps twenty hold twenty copies of the same chart. Naming a path lets one
+/// directory serve the fleet, and `..` is exactly what the convention could not
+/// express.
+#[test]
+fn a_product_may_declare_where_its_templates_live() {
+    let (intent, codes, messages) = eval(&product(r#"templates = path("../../house-templates"),"#));
+    assert!(codes.is_empty(), "{codes:?} {messages}");
+    assert_eq!(
+        intent.unwrap().templates.as_deref(),
+        Some("../../house-templates")
+    );
+
+    // Undeclared keeps the convention, and says so by being absent rather than
+    // by naming `templates/` -- the fallback is the loader's, not the schema's.
+    let (intent, codes, _) = eval(&product(""));
+    assert!(codes.is_empty(), "{codes:?}");
+    assert_eq!(intent.unwrap().templates, None);
+}
+
+/// `git()` is refused by name, not as an unknown argument.
+///
+/// It is spellable, so a reader will try it. The refusal has to say why it
+/// cannot work: generation is a pure function of the lock, and a template set
+/// fetched while generating would make `--dry-run` a preview of whatever the
+/// remote said at the time.
+#[test]
+fn a_fetched_template_set_is_refused_with_its_reason() {
+    let (intent, codes, messages) = eval(&product(
+        r#"templates = git(url = "https://example.com/house.git", tag = "v1"),"#,
+    ));
+    assert!(
+        codes.contains(&DiagnosticCode::GdlEval),
+        "{codes:?} {messages}"
+    );
+    assert!(messages.contains("git()"), "{messages}");
+    // No intent: `eval_product` withholds the value whenever a diagnostic is an
+    // error, so a description naming a template set nobody can read resolves to
+    // nothing rather than to a product quietly using the builtins.
+    assert!(intent.is_none());
+}

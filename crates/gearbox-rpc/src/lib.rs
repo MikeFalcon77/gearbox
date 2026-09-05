@@ -421,6 +421,13 @@ fn product_load(id: RequestId, params: &ProductLoadParams) -> Response {
 /// One resolution, and everything two callers need from it.
 struct Resolved {
     product: ResolvedProduct,
+    /// `templates = path(...)`, as the description wrote it.
+    ///
+    /// Carried here rather than read off the lock because it is an input to
+    /// generation, not a resolution decision: the lock says what the product
+    /// resolves to, and which directory the chart templates came from does not
+    /// change that answer.
+    templates: Option<String>,
     explanation: ExplanationGraph,
     /// The description's diagnostics plus the resolution's.
     diagnostics: Vec<Diagnostic>,
@@ -496,6 +503,7 @@ fn resolve_once(
     diagnostics.extend(resolution.diagnostics.as_slice().iter().cloned());
     Ok(Resolved {
         product,
+        templates: intent.templates,
         explanation,
         diagnostics,
         profile,
@@ -1152,6 +1160,9 @@ fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) 
             plans,
             diagnostics: Vec::new(),
             out_root: out_root.display().to_string().replace('\\', "/"),
+            // Scaffolding renders no product templates, so nothing can be
+            // overridden here -- an empty list is the truth, not a stub.
+            overridden_templates: Vec::new(),
         },
     )
 }
@@ -1416,6 +1427,12 @@ struct PreparedGenerate {
     out_root: PathBuf,
     base_root: PathBuf,
     diagnostics: Vec<Diagnostic>,
+    /// Keys whose builtin the product replaced.
+    ///
+    /// The CLI has always printed this and the RPC path dropped it, so a chart
+    /// that came out looking wrong had a visible cause in one client and none in
+    /// the other. An unexpected Dockerfile should say who wrote it.
+    overridden_templates: Vec<String>,
 }
 
 fn prepare_generate(
@@ -1454,7 +1471,10 @@ fn prepare_generate(
         .iter()
         .map(|root| (root.id.clone(), root.root.clone()))
         .collect();
-    let templates = match gearbox_engine::TemplateSet::load_for_product(Path::new(path)) {
+    let templates = match gearbox_engine::TemplateSet::load_for_product(
+        Path::new(path),
+        resolved.templates.as_deref(),
+    ) {
         Ok(templates) => templates,
         Err(e) => {
             return Err(error(
@@ -1486,6 +1506,7 @@ fn prepare_generate(
         out_root,
         base_root,
         diagnostics: resolved.diagnostics,
+        overridden_templates: generated.overridden_templates,
     })
 }
 
@@ -1537,6 +1558,7 @@ fn generate_plan(state: &mut State, id: RequestId, params: &GenerateParams) -> R
                     plans,
                     diagnostics,
                     out_root: prepared.out_root.display().to_string(),
+                    overridden_templates: prepared.overridden_templates,
                 },
             )
         }
@@ -1579,6 +1601,7 @@ fn generate_apply(state: &mut State, id: RequestId, params: &GenerateParams) -> 
                     plans: outcome.plans,
                     diagnostics,
                     written: u32::try_from(outcome.written).unwrap_or(u32::MAX),
+                    overridden_templates: prepared.overridden_templates,
                 },
             )
         }

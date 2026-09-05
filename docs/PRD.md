@@ -657,13 +657,18 @@ change — security contexts, labels and annotations on every resource, service 
 service-account annotations, probe schedules, the volume backing the runtime's home directory,
 rollout and scheduling controls, and the image registry — **MUST** be expressed as a chart value
 rather than as template text, and the values schema **MUST** admit one unvalidated object per
-subchart for a template the operator has replaced.
+subchart for a template the operator has replaced. A product **MUST** be able to declare where its
+template overlay lives, including a directory outside its own, and a declared directory that does
+not exist **MUST** be reported rather than silently ignored.
 
 - **Rationale**: `cpt-gearbox-actor-integrator` must not need a fork of the platform monorepo, and a
   decision that lives in template text can only be changed by replacing the template — which is the
   fork, one file at a time. The concrete case that settled it: `runAsUser` and `fsGroup` were pinned
   in `_helpers.tpl` with an escape that did not work, so a cluster that assigns UIDs itself could
-  not run the chart at all.
+  not run the chart at all. The overlay must be declarable rather than found only beside the
+  description, because a house that keeps twenty products would otherwise keep twenty copies of one
+  chart; and the asymmetry in how the two are missing is deliberate — nobody meant the absent
+  convention directory, and everybody meant the path they wrote.
 - **Verification Method**: Render the chart with an overriding values file and inspect every emitted
   document, not a sample: a policy label satisfied on three resources out of four is not satisfied.
 - **Actors**: `cpt-gearbox-actor-integrator`, `cpt-gearbox-actor-helm`,
