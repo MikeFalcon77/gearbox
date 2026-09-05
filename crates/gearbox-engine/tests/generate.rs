@@ -1595,3 +1595,40 @@ fn the_chart_exposes_the_hatches_a_house_policy_needs() {
         "{values}"
     );
 }
+
+/// One open door in a closed schema, so a replaced template has somewhere to read.
+///
+/// `additionalProperties: false` is what `cpt-gearbox-fr-values-schema` asks for
+/// and it earns its keep -- a misspelled `replicaCount` is refused. But it also
+/// refused every key a *house* template might read, so a site could override
+/// `helm/deployment.yaml` and then have nowhere to put the values that template
+/// needed. `custom` is unchecked; everything around it stays closed.
+#[test]
+fn custom_is_open_and_everything_around_it_is_closed() {
+    let Some((lock, files)) = generated("prod") else {
+        return;
+    };
+    let product = lock.product.id.as_str();
+    let schema: serde_json::Value = serde_json::from_str(text(
+        &files.files,
+        &format!("helm/{product}/values.schema.json"),
+    ))
+    .expect("valid JSON");
+    let sub = lock.processes[0]
+        .subchart
+        .as_deref()
+        .unwrap_or(lock.processes[0].name.as_str());
+
+    assert_eq!(schema["properties"][sub]["additionalProperties"], false);
+    let custom = &schema["properties"][sub]["properties"]["custom"];
+    assert_eq!(custom["type"], "object");
+    assert_ne!(
+        custom["additionalProperties"], false,
+        "a closed `custom` would be no door at all: {custom}"
+    );
+
+    // Written out empty rather than omitted: a door nobody can see is a door
+    // nobody opens.
+    let values = text(&files.files, &format!("helm/{product}/values.yaml"));
+    assert!(values.contains("custom: {}"), "{values}");
+}

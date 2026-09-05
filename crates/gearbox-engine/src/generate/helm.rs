@@ -215,6 +215,7 @@ fn umbrella_values(
                 revision_history_limit: None,
                 init_containers: None,
                 extra_containers: None,
+                custom: BTreeMap::new(),
                 existing_secret: existing_secret(process, input),
                 secret_keys: if keys.is_empty() { None } else { Some(keys) },
             },
@@ -495,6 +496,20 @@ struct SubchartValues {
     /// Sidecars the operator adds -- a log shipper, a proxy, a secrets agent.
     #[serde(skip_serializing_if = "Option::is_none")]
     extra_containers: Option<serde_json::Value>,
+    /// Values this generator makes no promises about.
+    ///
+    /// **The one open door in a deliberately closed schema, and it exists for
+    /// the replaced template.** `additionalProperties: false` is what
+    /// `cpt-gearbox-fr-values-schema` asks for, and it works: an operator who
+    /// misspells `replicaCount` is told so. But it also refused every key a
+    /// *house* template might read, so a site could override
+    /// `helm/deployment.yaml` and then have nowhere to put the values that
+    /// template needed -- a corporate chart with no corporate settings.
+    ///
+    /// Everything outside this key stays closed. Inside it nothing is checked,
+    /// and that is the honest bargain: Gearbox does not know what a template it
+    /// did not write is reading.
+    custom: BTreeMap<String, serde_json::Value>,
     /// Name of a Secret the operator already created. Never a credential.
     #[serde(skip_serializing_if = "Option::is_none")]
     existing_secret: Option<String>,
