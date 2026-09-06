@@ -345,18 +345,20 @@ fn project_and_merge(
     // at `cargo build` on a crate the reader did not write (GBX0209).
     crate::manifest_check::check(root, identity, decl, scans, diagnostics);
 
-    let crate_dir = match crate::merge::crate_dir(&root.root, &identity.gdl_path, &package.path) {
-        Ok(dir) => dir,
-        Err(e) => {
-            diagnostics.push(crate::merge::bad_crate_path(
-                &identity.uri,
-                "package",
-                &package.path,
-                &e,
-            ));
-            return None;
-        }
-    };
+    let crate_dir =
+        match crate::merge::crate_dir(root, &identity.gdl_path, &package.path, &package.crate_name)
+        {
+            Ok(dir) => dir,
+            Err(e) => {
+                diagnostics.push(crate::merge::bad_crate_path(
+                    &identity.uri,
+                    "package",
+                    &package.path,
+                    &e,
+                ));
+                return None;
+            }
+        };
     let label = format!("{} ({})", package.crate_name, crate_dir.display());
 
     let files = match scans.get(&crate_dir) {
@@ -415,7 +417,7 @@ fn project_and_merge(
         .map(|p| &p.sdk)
         .chain(decl.consumes.iter().map(|c| &c.sdk))
         .filter_map(|sdk| {
-            crate::merge::crate_dir(&root.root, &identity.gdl_path, &sdk.path)
+            crate::merge::crate_dir(root, &identity.gdl_path, &sdk.path, &sdk.crate_name)
                 .map_err(|e| {
                     diagnostics.push(crate::merge::bad_crate_path(
                         &identity.uri,
@@ -468,14 +470,15 @@ fn project_and_merge(
 
     // Cluster: profiles come free from the crate scan above; providers cost one
     // extra scan per declared plugin crate, which only `cluster` itself declares.
-    let cluster = crate::cluster::project(&root.root, identity, decl, &files, scans, diagnostics);
+    let cluster = crate::cluster::project(root, identity, decl, &files, scans, diagnostics);
     // Plugin facts cost one SDK scan, and only for gears that declare `sdk`.
     // The SDK crate is scanned once and shared: both the plugin projection and
     // the GTS one read it, and it is the expensive step.
     let sdk_files = match decl.sdk.as_ref() {
         None => std::sync::Arc::from(Vec::new()),
         Some(sdk) => {
-            let Ok(sdk_dir) = crate::merge::crate_dir(&root.root, &identity.gdl_path, &sdk.path)
+            let Ok(sdk_dir) =
+                crate::merge::crate_dir(root, &identity.gdl_path, &sdk.path, &sdk.crate_name)
             else {
                 // Already reported where the sdk dirs were collected above.
                 return None;

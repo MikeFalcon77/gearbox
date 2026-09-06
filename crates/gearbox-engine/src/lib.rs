@@ -21,6 +21,7 @@ pub mod merge;
 pub mod plugin;
 pub mod plugin_select;
 pub mod product;
+pub mod registry;
 pub mod resolve;
 pub mod scans;
 pub mod secrets;

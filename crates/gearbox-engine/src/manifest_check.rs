@@ -93,19 +93,23 @@ pub fn check(
     diagnostics: &mut Diagnostics,
 ) {
     for declared in declared_crates(decl) {
-        let dir =
-            match crate::merge::crate_dir(&root.root, &identity.gdl_path, &declared.record.path) {
-                Ok(dir) => dir,
-                Err(e) => {
-                    diagnostics.push(crate::merge::bad_crate_path(
-                        &identity.uri,
-                        &declared.field,
-                        &declared.record.path,
-                        &e,
-                    ));
-                    continue;
-                }
-            };
+        let dir = match crate::merge::crate_dir(
+            root,
+            &identity.gdl_path,
+            &declared.record.path,
+            &declared.record.crate_name,
+        ) {
+            Ok(dir) => dir,
+            Err(e) => {
+                diagnostics.push(crate::merge::bad_crate_path(
+                    &identity.uri,
+                    &declared.field,
+                    &declared.record.path,
+                    &e,
+                ));
+                continue;
+            }
+        };
 
         let manifest = match scans.manifest(&dir) {
             Ok(manifest) => manifest,

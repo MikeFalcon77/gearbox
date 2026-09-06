@@ -15,7 +15,7 @@
 //!    and its unique `impl ClusterCacheBackend` yields the capabilities
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use gearbox_gdl::GearDecl;
 use gearbox_gdl::engine::FileIdentity;
@@ -44,7 +44,7 @@ pub struct ClusterProjection {
 /// and are skipped entirely when a description declares no `cluster_plugins` --
 /// which is every gear but `cluster` itself.
 pub fn project(
-    root: &Path,
+    root: &crate::SourceRoot,
     identity: &FileIdentity,
     decl: &GearDecl,
     files: &[RustFile],
@@ -81,7 +81,7 @@ struct Plugin {
 }
 
 fn providers(
-    root: &Path,
+    root: &crate::SourceRoot,
     identity: &FileIdentity,
     decl: &GearDecl,
     files: &[RustFile],
@@ -94,7 +94,12 @@ fn providers(
     // is what the registry names it by.
     let mut plugins: BTreeMap<String, Plugin> = BTreeMap::new();
     for record in &decl.cluster_plugins {
-        let dir = match crate::merge::crate_dir(root, &identity.gdl_path, &record.package.path) {
+        let dir = match crate::merge::crate_dir(
+            root,
+            &identity.gdl_path,
+            &record.package.path,
+            &record.package.crate_name,
+        ) {
             Ok(dir) => dir,
             Err(e) => {
                 diagnostics.push(crate::merge::bad_crate_path(

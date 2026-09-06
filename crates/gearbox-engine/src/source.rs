@@ -80,6 +80,20 @@ pub struct SourceRoot {
     pub root: PathBuf,
     /// The location as the operator wrote it, preserved for the lock.
     pub declared_location: String,
+
+    /// Sibling crates reachable from this root, by crate name.
+    ///
+    /// **Empty for a directory root, and populated for a registry one.** A
+    /// `gear.gdl` locates its SDK with `path = "../../authn-resolver-sdk"`,
+    /// which is true inside the monorepo and meaningless inside an unpacked
+    /// package -- the sibling is a separate published crate, sitting wherever
+    /// cargo put it. The same declaration carries `crate_name`, so identity is
+    /// enough; this is the table that turns identity back into a directory.
+    ///
+    /// Consulted only when it has the name. A directory root therefore behaves
+    /// exactly as before, which matters: resolving by name everywhere would stop
+    /// a wrong path with a right name from being caught.
+    pub siblings: std::collections::BTreeMap<String, std::path::PathBuf>,
 }
 
 impl SourceRoot {
@@ -106,6 +120,7 @@ impl SourceRoot {
             id,
             root,
             declared_location,
+            siblings: std::collections::BTreeMap::new(),
         })
     }
 

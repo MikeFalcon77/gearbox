@@ -126,11 +126,19 @@ test.describe("Git, from the VS Code extension", () => {
         .innerText()
         .catch(() => "");
       const seen = [...panel.matchAll(/CHANGES\s+(\d+)/g)].at(-1);
-      return seen ? Number(seen[1]) : -1;
+      // No number means no changes -- which is what a clean checkout looks like,
+      // and is a perfectly good baseline. Returning a sentinel here made the
+      // claim fail on a tree with nothing modified.
+      return seen ? Number(seen[1]) : 0;
     };
 
+    // Deliberately no assertion on `before`. An earlier version required it to
+    // be positive, as a guard against a degenerate pass -- and thereby tied the
+    // claim to how many files happened to be edited, which is exactly the
+    // fragility this test was rewritten to remove. The guard was never needed:
+    // a provider that registered and read nothing shows a number that does not
+    // move, and `before + 1` catches that whatever `before` is.
     const before = await changeCount();
-    expect(before).toBeGreaterThan(0);
     await withDirtyRepo(join(IDE, ".."), async () => {
       await expect.poll(changeCount, { timeout: 60_000 }).toBe(before + 1);
     });

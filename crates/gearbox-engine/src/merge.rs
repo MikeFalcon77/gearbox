@@ -13,7 +13,6 @@
 //! retired.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
 
 use gearbox_gdl::GearDecl;
 use gearbox_gdl::engine::FileIdentity;
@@ -756,15 +755,24 @@ const CLUSTER_GEAR_NAME: &str = "cluster";
 /// # Errors
 /// Returns the [`gearbox_ir::IdError`] from [`RelPath::resolve`].
 pub fn crate_dir(
-    source_root: &Path,
+    root: &crate::SourceRoot,
     gdl_path: &RelPath,
     package_path: &str,
+    crate_name: &str,
 ) -> Result<std::path::PathBuf, gearbox_ir::IdError> {
+    // Identity first, and only where identity is available. A registry root
+    // knows where each fetched package landed; a directory root's table is
+    // empty and the path is all there is. Looking the name up everywhere would
+    // be worse than it sounds -- a description with a wrong path and a right
+    // crate name would start resolving, and GBX0209 would never catch it.
+    if let Some(dir) = root.siblings.get(crate_name) {
+        return Ok(dir.clone());
+    }
     let joined = gdl_path.parent().resolve(package_path)?;
     Ok(if joined.is_here() {
-        source_root.to_path_buf()
+        root.root.clone()
     } else {
-        source_root.join(joined.as_str())
+        root.root.join(joined.as_str())
     })
 }
 
