@@ -559,6 +559,10 @@ pub enum ClusterResolution {
     /// for the primitives that have no dedicated backend, and it is engaged by
     /// leaving the key out of configuration.
     SdkCasDefault { over_cache: String },
+
+    /// No registered provider satisfies the primitive. Recorded so the lock
+    /// does not invent an empty provider name that later looks like a choice.
+    Unsatisfied,
 }
 
 impl ClusterResolution {
@@ -571,6 +575,7 @@ impl ClusterResolution {
     pub fn effective_provider(&self) -> &str {
         match self {
             Self::Provider { name } | Self::SdkCasDefault { over_cache: name } => name,
+            Self::Unsatisfied => "",
         }
     }
 }

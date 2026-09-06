@@ -19,8 +19,11 @@ pub mod product;
 pub mod profile;
 pub mod structural;
 
+use std::collections::BTreeSet;
+
 use gearbox_ir::{
-    Catalogue, Diagnostic, DiagnosticCode, Diagnostics, Location, ProductIntent, ProfileId,
+    Catalogue, Diagnostic, DiagnosticCode, Diagnostics, GearId, Location, Preference,
+    ProductIntent, ProfileId,
 };
 
 /// A profile the description does not declare.
@@ -116,13 +119,41 @@ pub fn resolve_at(
     // because guessing `embedded` would silently resolve the wrong topology.
     // Includes this profile's plugins: a plugin is a gear the description named,
     // and a process seeded without it leaves it in the product and in no binary.
+    for preference in &intent.preferences {
+        match preference {
+            Preference::ExistingInfrastructure | Preference::Isolate { .. } => {}
+            Preference::FewerProcesses => {
+                diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::PreferenceNotHonoured,
+                        "`prefer.fewer_processes` is recorded but the resolver does not honour it",
+                    )
+                    .with_help(
+                        "remove it, or wait until process packing is implemented; it does not \
+                         change the topology today",
+                    )
+                    .at(Location::file(&uri)),
+                );
+            }
+        }
+    }
+
     let selected = closure::seeds(intent, profile);
+    let isolates: BTreeSet<GearId> = intent
+        .preferences
+        .iter()
+        .filter_map(|preference| match preference {
+            Preference::Isolate { gear } => Some(gear.clone()),
+            Preference::ExistingInfrastructure | Preference::FewerProcesses => None,
+        })
+        .collect();
     let input = partition::Inputs {
         catalogue,
         closure: &closure,
         cuts: &cuts,
         scoped: &scoped,
         selected: &selected,
+        isolates: &isolates,
     };
     let partition = if let Some(declaration) = intent.profiles.get(profile) {
         let partition =

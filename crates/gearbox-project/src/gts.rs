@@ -143,15 +143,23 @@ pub fn project_gts_types(files: &[RustFile]) -> Result<Vec<GtsType>, GtsError> {
 /// A token scan rather than an AST walk: the macro can appear at item, statement
 /// or expression position, and all that matters is that it is there.
 fn file_uses_unsupported_macro(file: &RustFile) -> bool {
-    file.ast.items.iter().any(|item| match item {
-        syn::Item::Macro(m) => m
-            .mac
-            .path
-            .segments
-            .last()
-            .is_some_and(|s| s.ident == "struct_to_gts_schema"),
-        _ => false,
-    })
+    struct Finder(bool);
+    impl<'ast> syn::visit::Visit<'ast> for Finder {
+        fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+            if mac
+                .path
+                .segments
+                .last()
+                .is_some_and(|s| s.ident == "struct_to_gts_schema")
+            {
+                self.0 = true;
+            }
+            syn::visit::visit_macro(self, mac);
+        }
+    }
+    let mut finder = Finder(false);
+    syn::visit::Visit::visit_file(&mut finder, &file.ast);
+    finder.0
 }
 
 /// A GTS type declared by a JSON schema file.

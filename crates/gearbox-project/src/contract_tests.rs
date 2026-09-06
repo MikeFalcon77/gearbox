@@ -40,7 +40,7 @@ fn transports_of(contracts: &[ProjectedContract], ident: &str) -> Vec<&'static s
 /// The api-contracts SDK from the sibling checkout, if present.
 fn api_contracts_sdk() -> Option<Vec<RustFile>> {
     let dir = crate::test_corpus::corpus("examples/toolkit/api-contracts/api-contracts-sdk")?;
-    scan_crate(&dir).ok()
+    Some(scan_crate(&dir).unwrap_or_else(|e| panic!("scan api-contracts-sdk: {e}")))
 }
 
 #[test]

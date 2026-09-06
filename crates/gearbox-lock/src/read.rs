@@ -48,12 +48,11 @@ pub fn read(input: &str) -> Result<ResolvedProduct, LockError> {
         });
     }
 
-    let product: ResolvedProduct = toml::from_str(input)?;
+    let mut product: ResolvedProduct = toml::from_str(input)?;
     let expected = product.product.lock_hash.clone();
 
-    let mut canonical = product.clone();
-    canonicalize_order(&mut canonical);
-    let found = compute_hash(&canonical)?;
+    canonicalize_order(&mut product);
+    let found = compute_hash(&product)?;
 
     if found != expected {
         return Err(LockError::HashMismatch { expected, found });

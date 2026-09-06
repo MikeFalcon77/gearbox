@@ -62,7 +62,11 @@ pub fn scan_crate(crate_dir: &Path) -> Result<Vec<RustFile>, ScanError> {
             ));
         }
         Ok(meta) if meta.is_dir() => {}
-        _ => return Err(ScanError::NoSrc(crate_dir.to_path_buf())),
+        Ok(_) => return Err(ScanError::NoSrc(crate_dir.to_path_buf())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ScanError::NoSrc(crate_dir.to_path_buf()));
+        }
+        Err(e) => return Err(ScanError::Read(src, e)),
     }
 
     // Walk errors are *not* dropped. An unreadable subdirectory would otherwise
@@ -87,6 +91,16 @@ pub fn scan_crate(crate_dir: &Path) -> Result<Vec<RustFile>, ScanError> {
 
     let mut files = Vec::with_capacity(paths.len());
     for path in paths {
+        let meta =
+            std::fs::symlink_metadata(&path).map_err(|e| ScanError::Read(path.clone(), e))?;
+        if meta.file_type().is_symlink() {
+            return Err(ScanError::Walk(
+                path,
+                "source file is a symlink; a crate may only be read through real files inside \
+                 its source root"
+                    .to_owned(),
+            ));
+        }
         let text = std::fs::read_to_string(&path).map_err(|e| ScanError::Read(path.clone(), e))?;
         let ast = syn::parse_file(&text).map_err(|e| ScanError::Parse(path.clone(), e))?;
         let relative = path.strip_prefix(&src).unwrap_or(&path).to_path_buf();

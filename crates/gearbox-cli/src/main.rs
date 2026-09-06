@@ -291,20 +291,22 @@ fn plugins(
     // `plugins` listed extension points out of a half-loaded catalogue and
     // exited 0. `catalogue` and `validate` both report them; there is no reason
     // this command should not.
-    report(scan.catalogue.diagnostics.as_slice());
-    if scan.catalogue.diagnostics.has_errors() {
-        return Ok(ExitCode::FAILURE);
+    if let Some(code) = refuse_catalogue_errors(&scan.catalogue) {
+        return Ok(code);
     }
 
     if let Some(file) = product_file {
         return Ok(resolve_plugins(&scan.catalogue, file));
     }
-    list_plugins(&scan.catalogue, gear);
-    Ok(ExitCode::SUCCESS)
+    if list_plugins(&scan.catalogue, gear) {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::FAILURE)
+    }
 }
 
 /// What each host *could* use. The answer to "which implementations exist".
-fn list_plugins(catalogue: &gearbox_ir::Catalogue, only: Option<&str>) {
+fn list_plugins(catalogue: &gearbox_ir::Catalogue, only: Option<&str>) -> bool {
     let mut any = false;
     for host in catalogue.gears.values() {
         if host.extension_points.is_empty() {
@@ -353,9 +355,14 @@ fn list_plugins(catalogue: &gearbox_ir::Catalogue, only: Option<&str>) {
     }
 
     if !any {
+        if let Some(id) = only {
+            eprintln!("no gear named `{id}` declares a plugin extension point");
+            return false;
+        }
         println!("no gear declares a plugin extension point");
         println!("(a host declares `sdk = cargo(...)`; the points are read from that crate)");
     }
+    true
 }
 
 /// What each host *will* use, per profile.
@@ -610,6 +617,9 @@ fn resolve_product(
 ) -> anyhow::Result<ExitCode> {
     let opened = open_roots(roots, source_id)?;
     let scan = load_catalogue(&opened);
+    if let Some(code) = refuse_catalogue_errors(&scan.catalogue) {
+        return Ok(code);
+    }
 
     // Canonicalized so every diagnostic's `file://` URI points at a real path an
     // editor can open. A relative one renders and does nothing, which is the
@@ -861,6 +871,17 @@ fn print_summary(scan: &gearbox_engine::CatalogueScan) {
     }
 }
 
+/// Catalogue load errors used to be ignored by `resolve` and `generate`, so a
+/// duplicate gear still produced a lock. `plugins` already fails closed; these
+/// commands share that gate.
+pub(crate) fn refuse_catalogue_errors(catalogue: &gearbox_ir::Catalogue) -> Option<ExitCode> {
+    report(catalogue.diagnostics.as_slice());
+    catalogue
+        .diagnostics
+        .has_errors()
+        .then_some(ExitCode::FAILURE)
+}
+
 /// Print diagnostics to stderr, most severe first.
 pub(crate) fn report(diagnostics: &[Diagnostic]) {
     if diagnostics.is_empty() {
@@ -939,5 +960,21 @@ fn describe_preference(preference: &gearbox_ir::Preference) -> String {
         gearbox_ir::Preference::ExistingInfrastructure => "existing-infrastructure".to_owned(),
         gearbox_ir::Preference::FewerProcesses => "fewer-processes".to_owned(),
         gearbox_ir::Preference::Isolate { gear } => format!("isolate {gear}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::list_plugins;
+    use gearbox_ir::Catalogue;
+
+    #[test]
+    fn a_named_gear_miss_is_failure() {
+        assert!(!list_plugins(&Catalogue::default(), Some("no-such-gear")));
+    }
+
+    #[test]
+    fn listing_with_no_hosts_is_still_success() {
+        assert!(list_plugins(&Catalogue::default(), None));
     }
 }

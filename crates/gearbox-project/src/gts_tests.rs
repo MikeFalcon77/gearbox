@@ -24,7 +24,7 @@ fn file(src: &str) -> RustFile {
 
 fn tree(rel: &str) -> Option<Vec<RustFile>> {
     let dir = crate::test_corpus::corpus(rel)?;
-    scan_crate(&dir).ok()
+    Some(scan_crate(&dir).unwrap_or_else(|e| panic!("scan {rel}: {e}")))
 }
 
 /// Verbatim from `cluster-sdk/src/gts.rs`.
@@ -66,6 +66,20 @@ fn a_reference_is_not_a_declaration() {
     assert!(
         project_gts_types(&[file(src)]).unwrap().is_empty(),
         "none of these declares a type"
+    );
+}
+
+#[test]
+fn an_unsupported_macro_inside_a_function_is_still_found() {
+    let src = r#"
+        fn declare() {
+            struct_to_gts_schema!(Thing, "cf.thing.v1~");
+        }
+    "#;
+    let err = project_gts_types(&[file(src)]).unwrap_err();
+    assert!(
+        matches!(err, GtsError::UnsupportedMacro { .. }),
+        "got {err}"
     );
 }
 

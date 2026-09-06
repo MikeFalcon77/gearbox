@@ -67,6 +67,8 @@ pub struct Inputs<'a> {
     pub scoped: &'a ProfileScoped<'a>,
     /// The gears the description named, as opposed to those reached from them.
     pub selected: &'a BTreeSet<GearId>,
+    /// Gears `prefer.isolate` asked to run in their own process.
+    pub isolates: &'a BTreeSet<GearId>,
 }
 
 /// Assign gears to processes for one profile.
@@ -118,7 +120,7 @@ pub fn partition(
     }
 
     assign_endpoints(catalogue, declaration, &mut processes);
-    assign_spawns(declaration, &mut processes);
+    assign_spawns(declaration, &mut processes, uri, diagnostics);
     assign_chart_fields(declaration, product_version, &mut processes);
     report_orphans(closure, &processes, uri, diagnostics);
     Partition { processes }
@@ -143,7 +145,12 @@ const WORKER_SERVE_BASE_PORT: u16 = 8090;
 /// The two halves are one function because they are one decision: the host's
 /// spawn entry and the worker's address describe the same arrangement, and
 /// splitting them would let a refactor change one without the other.
-fn assign_spawns(declaration: &DeploymentProfileDecl, processes: &mut [ResolvedProcess]) {
+fn assign_spawns(
+    declaration: &DeploymentProfileDecl,
+    processes: &mut [ResolvedProcess],
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) {
     let mut taken: BTreeSet<u16> = processes
         .iter()
         .flat_map(|p| p.listens.iter())
@@ -182,9 +189,10 @@ fn assign_spawns(declaration: &DeploymentProfileDecl, processes: &mut [ResolvedP
         // already reported its absence -- so a missing one leaves the worker
         // unspawned rather than pointing the host at a guess.
         if let Some(target_dir) = declaration.target_dir() {
+            let profile = cargo_profile_dir(declaration);
             spawns.push(SpawnSpec {
                 gear: processes[index].anchor.clone(),
-                executable_path: format!("{target_dir}/debug/{}", processes[index].bin_name),
+                executable_path: format!("{target_dir}/{profile}/{}", processes[index].bin_name),
                 // `--config` is the only channel that works: the runtime reads
                 // `TOOLKIT_CONFIG_PATH` but nothing ever sets it.
                 args: vec![
@@ -204,8 +212,33 @@ fn assign_spawns(declaration: &DeploymentProfileDecl, processes: &mut [ResolvedP
     if spawns.is_empty() {
         return;
     }
-    if let Some(host) = processes.iter_mut().find(|p| !p.is_worker()) {
+    if let Some(host) = processes
+        .iter_mut()
+        .find(|p| matches!(p.kind, ProcessKind::Host))
+    {
         host.spawns = spawns;
+        return;
+    }
+    diagnostics.push(
+        Diagnostic::error(
+            DiagnosticCode::TopologyNoHost,
+            "workers have no host process to spawn them",
+            "keep a `ProcessKind::Host` in this profile, or name the host on `host_workers`",
+        )
+        .at(Location::file(uri.to_owned())),
+    );
+}
+
+/// Which Cargo profile directory the host should exec.
+///
+/// Kubernetes images are release artefacts; one-machine profiles run what
+/// `cargo build` (debug) just produced next to the generated tree.
+fn cargo_profile_dir(declaration: &DeploymentProfileDecl) -> &'static str {
+    match declaration {
+        DeploymentProfileDecl::Kubernetes { .. } => "release",
+        DeploymentProfileDecl::Embedded { .. } | DeploymentProfileDecl::HostWorkers { .. } => {
+            "debug"
+        }
     }
 }
 
@@ -389,6 +422,7 @@ fn split(
         cuts,
         scoped,
         selected,
+        isolates,
     } = *input;
     // Candidates to move out: the provider of every severable edge, plus
     // anything the description pinned to its own process.
@@ -397,6 +431,7 @@ fn split(
         .iter()
         .map(|e| e.provider.clone())
         .chain(scoped.process_pins.iter().map(|p| p.anchor.clone()))
+        .chain(isolates.iter().cloned())
         .filter(|g| closure.contains(g))
         .collect();
 
@@ -408,7 +443,7 @@ fn split(
         .cloned()
         .collect();
     let host_gears = topo_sort(catalogue, closure, &host_seeds);
-    worker_anchors.retain(|a| !host_gears.contains(a) || is_pinned(scoped, a));
+    worker_anchors.retain(|a| !host_gears.contains(a) || is_forced_out(scoped, isolates, a));
 
     let mut processes = Vec::new();
     if let Some(anchor) = pick_anchor(catalogue, &host_gears) {
@@ -448,8 +483,8 @@ fn split(
     processes
 }
 
-fn is_pinned(scoped: &ProfileScoped<'_>, gear: &GearId) -> bool {
-    scoped.process_pins.iter().any(|p| p.anchor == *gear)
+fn is_forced_out(scoped: &ProfileScoped<'_>, isolates: &BTreeSet<GearId>, gear: &GearId) -> bool {
+    isolates.contains(gear) || scoped.process_pins.iter().any(|p| p.anchor == *gear)
 }
 
 /// The gear a process is named and identified by.

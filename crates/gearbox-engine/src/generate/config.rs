@@ -13,10 +13,11 @@
 //! restated one, and so a change in a platform default reaches the generated
 //! product instead of being frozen into it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use gearbox_ir::{
-    ClusterResolution, FileEntry, FileKind, Ownership, ProcessKind, ResolvedProcess, SpawnSpec,
+    Catalogue, ClusterResolution, FileEntry, FileKind, GearId, Ownership, ProcessKind,
+    ResolvedProcess, SpawnSpec,
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -108,10 +109,17 @@ pub fn app_config(
         .iter()
         .map(|id| {
             let config = input.lock.gears.get(id).map_or_else(Map::new, |gear| {
-                gear.config
+                let mut config: Map<String, Value> = gear
+                    .config
                     .iter()
                     .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect()
+                    .collect();
+                // Secrets are already gone: `generate` redacts the whole product
+                // before any of this runs, so there is nothing here to find.
+                if let Some(catalogue) = input.catalogue {
+                    drop_unknown_keys(catalogue, id, &mut config);
+                }
+                config
             });
             (
                 id.to_string(),
@@ -162,6 +170,18 @@ pub fn app_config(
     ))
 }
 
+/// Drop keys the projected schema does not name.
+///
+/// The resolver already reports [`gearbox_ir::DiagnosticCode::GdlUnknownConfigKey`];
+/// this is the generator's half of the same rule, so a lock that still carries
+/// a typo cannot write a file `deny_unknown_fields` will refuse.
+fn drop_unknown_keys(catalogue: &Catalogue, id: &GearId, config: &mut Map<String, Value>) {
+    let Some(schema) = catalogue.gear(id).and_then(|g| g.config_schema.as_ref()) else {
+        return;
+    };
+    let known: BTreeSet<&str> = schema.fields.iter().map(|f| f.name.as_str()).collect();
+    config.retain(|key, _| known.contains(key.as_str()));
+}
 /// Each socket the resolver assigned, under the gear's own configuration key.
 ///
 /// The key comes from the gear's `serves` declaration, not from a table here:

@@ -11,12 +11,14 @@
 //! person is actually standing when they set a value. `Diagnostics::finish`
 //! sorts and dedups, so a caller that ran both reports each finding once.
 //!
-//! **Only exposed fields are checked.** `exposes` is a curated subset, so a key
-//! it omits may still be one the gear reads; reporting those would punish a
-//! description for being selective, which is the thing curation is for.
+//! **Unknown keys are errors.** Generated YAML is deserialized with
+//! `deny_unknown_fields`, so a key the projected schema does not name produces
+//! a file the runtime refuses at startup. A field the gear reads belongs in
+//! the schema; a typo must not reach the file.
 
 use gearbox_ir::{
-    Catalogue, ConfigFieldType, Diagnostic, DiagnosticCode, Diagnostics, Location, ProductIntent,
+    Catalogue, ConfigFieldType, Diagnostic, DiagnosticCode, Diagnostics, GearSelection, Location,
+    ProductIntent,
 };
 
 /// What a JSON value is, named as a diagnostic should name it.
@@ -112,8 +114,26 @@ pub fn check(
 
         for (key, value) in &selection.config {
             let Some(field) = schema.fields.iter().find(|f| &f.name == key) else {
+                diagnostics.push(
+                    Diagnostic::error(
+                        DiagnosticCode::GdlUnknownConfigKey,
+                        format!(
+                            "`{}` config key `{key}` is not declared by `{}`",
+                            selection.gear, schema.rust
+                        ),
+                        format!(
+                            "remove `{key}`, or add it to the gear's configuration schema so \
+                             generated YAML will deserialize"
+                        ),
+                    )
+                    .at(location(selection, uri)),
+                );
                 continue;
             };
+            if field.secret && !literal_secret_is_allowed(value) {
+                diagnostics.push(literal_secret(&selection.gear, key, selection, uri));
+                continue;
+            }
             let Some(expected) = mismatch(&field.ty, value) else {
                 continue;
             };
@@ -131,7 +151,78 @@ pub fn check(
                 .at(location(selection, uri)),
             );
         }
+
+        check_plugin_secrets(catalogue, selection, uri, diagnostics);
     }
+}
+
+/// A plugin's configuration, checked for credentials and for nothing else.
+///
+/// **Deliberately narrower than the check above.** A plugin is where a
+/// `client_secret` would go, so the credential rule has to reach it. The
+/// unknown-key rule cannot follow yet: `oidc-authn-plugin` exposes only `vendor`
+/// and `priority`, while the demo product sets `issuer` on it, so extending
+/// `GBX0115` here would turn the shipped product red until the corpus declares
+/// that field. That is a change to `gears-rust`, not to this check.
+///
+/// A plugin's configuration also never reaches the lock -- `resolve::product`
+/// reads `selected_gears` and does not descend -- so this rule serves the
+/// description, which is the file a credential would be committed in.
+fn check_plugin_secrets(
+    catalogue: &Catalogue,
+    selection: &GearSelection,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    for plugin in &selection.plugins {
+        let Some(schema) = catalogue
+            .gears
+            .get(&plugin.gear)
+            .and_then(|gear| gear.config_schema.as_ref())
+        else {
+            continue;
+        };
+        for (key, value) in &plugin.config {
+            let secret = schema
+                .fields
+                .iter()
+                .any(|field| &field.name == key && field.secret);
+            if secret && !literal_secret_is_allowed(value) {
+                diagnostics.push(literal_secret(&plugin.gear, key, selection, uri));
+            }
+        }
+    }
+}
+
+/// Only `${VAR}` may stand where a credential is declared.
+///
+/// A non-string is never a reference, so it is always a literal -- an integer
+/// token is still a token.
+fn literal_secret_is_allowed(value: &serde_json::Value) -> bool {
+    matches!(value, serde_json::Value::String(raw) if crate::secrets::is_env_placeholder(raw))
+}
+
+/// The refusal, naming the variable the generator would read.
+///
+/// The help spells the exact environment name rather than describing the shape,
+/// because the author's next action is to type it and a wrong guess produces a
+/// product that resolves and then starts with an empty password.
+fn literal_secret(
+    gear: &gearbox_ir::GearId,
+    key: &str,
+    selection: &GearSelection,
+    uri: &str,
+) -> Diagnostic {
+    let name = crate::secrets::secret_env_name(gear, key);
+    Diagnostic::error(
+        DiagnosticCode::GdlLiteralSecret,
+        format!("`{gear}` config key `{key}` is a credential and must not be written here"),
+        format!(
+            "write `{key} = \"${{{name}}}\"` and put the value in the environment or a Secret; \
+             a description is committed, and `product.lock` is generated from it"
+        ),
+    )
+    .at(location(selection, uri))
 }
 
 /// Where a diagnostic about one selection points.

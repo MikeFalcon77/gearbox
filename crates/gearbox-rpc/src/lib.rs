@@ -19,8 +19,12 @@ pub mod protocol;
 #[path = "preview_tests.rs"]
 mod preview_tests;
 
+#[cfg(test)]
+#[path = "write_gate_tests.rs"]
+mod write_gate_tests;
+
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use gearbox_engine::{Continue, LoadEvent, SourceRoot, default_source_ids, load_catalogue_staged};
 use gearbox_ir::{Diagnostic, ExplanationGraph, ProfileId, RelPath, ResolvedProduct, SourceId};
@@ -925,28 +929,40 @@ fn create_product(state: &mut State, id: RequestId, params: &CreateProductParams
         );
     }
 
-    let path = PathBuf::from(&params.path);
+    let requested = PathBuf::from(&params.path);
+    let parent_input = requested
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let parent = match writable_out_root(state, parent_input) {
+        Ok(path) => path,
+        Err(refusal) => return error(id, error_code::EDIT_REFUSED, &refusal),
+    };
+    let Some(file_name) = requested.file_name() else {
+        return error(
+            id,
+            error_code::EDIT_REFUSED,
+            &format!("`{}` does not name a file", params.path),
+        );
+    };
+    let path = parent.join(file_name);
     if path.exists() {
         return error(
             id,
             error_code::EDIT_REFUSED,
             &format!(
                 "`{}` already exists; create refuses to overwrite",
-                params.path
+                path.display()
             ),
         );
     }
 
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    if let Err(refusal) = writable_out_root(state, parent) {
-        return error(id, error_code::EDIT_REFUSED, &refusal);
-    }
-
     let after = if let Some(clone_from) = params.clone_from.as_deref() {
-        let source = match std::fs::read_to_string(clone_from) {
+        let source_path = PathBuf::from(clone_from);
+        if let Err(refusal) = writable_path(state, &source_path) {
+            return error(id, error_code::EDIT_REFUSED, &refusal);
+        }
+        let source = match std::fs::read_to_string(&source_path) {
             Ok(text) => text,
             Err(e) => {
                 return error(
@@ -1013,7 +1029,7 @@ fn create_product(state: &mut State, id: RequestId, params: &CreateProductParams
     }
 
     if !params.dry_run {
-        if let Err(e) = std::fs::create_dir_all(parent) {
+        if let Err(e) = std::fs::create_dir_all(&parent) {
             return error(
                 id,
                 error_code::EDIT_REFUSED,
@@ -1066,26 +1082,22 @@ fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) 
         );
     }
 
-    let gear_dir = PathBuf::from(&params.destination_dir).join(&params.id);
-    if gear_dir.exists() {
+    let dest_dir = PathBuf::from(&params.destination_dir);
+    let parent = match writable_out_root(state, &dest_dir) {
+        Ok(path) => path,
+        Err(refusal) => return error(id, error_code::EDIT_REFUSED, &refusal),
+    };
+    let out_root = parent.join(&params.id);
+    if out_root.exists() {
         return error(
             id,
             error_code::EDIT_REFUSED,
             &format!(
                 "`{}` already exists; scaffold refuses to overwrite",
-                gear_dir.display()
+                out_root.display()
             ),
         );
     }
-
-    let parent = gear_dir
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let out_root = match writable_out_root(state, parent) {
-        Ok(path) => path.join(&params.id),
-        Err(refusal) => return error(id, error_code::EDIT_REFUSED, &refusal),
-    };
 
     let files = match scaffold_gear_files(params) {
         Ok(files) => files,
@@ -1307,15 +1319,25 @@ fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
         .canonicalize()
         .map_err(|e| format!("cannot canonicalize `{}`: {e}", existing.display()))?;
 
+    let Some(workspace) = state.workspace.as_ref().and_then(|w| w.canonicalize().ok()) else {
+        return Err("no workspace was declared, so no output root is writable".to_owned());
+    };
+    if !canonical_existing.starts_with(&workspace) {
+        return Err(format!(
+            "`{}` is outside the declared workspace",
+            path.display()
+        ));
+    }
+
     // Rebuild the full path under the canonical ancestor so `starts_with`
     // compares like-for-like. The suffix is the components that do not exist
-    // yet -- the ones generation is about to create.
+    // yet -- the ones generation is about to create. Joining them raw would
+    // let `missing/../../../outside` pass `starts_with` and then
+    // `create_dir_all` walk out of the workspace; each `..` is applied
+    // against the ancestor and refused if it would leave the workspace.
     let suffix = absolute.strip_prefix(&existing).unwrap_or(Path::new(""));
-    let resolved = if suffix.as_os_str().is_empty() {
-        canonical_existing
-    } else {
-        canonical_existing.join(suffix)
-    };
+    let resolved = join_lexically(&workspace, canonical_existing, suffix)
+        .ok_or_else(|| format!("`{}` is outside the declared workspace", path.display()))?;
 
     // Source roots first: they may sit *beside* the workspace (the gears-rust
     // slice is a sibling of this repository), and "do not write next to human
@@ -1332,9 +1354,6 @@ fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
         }
     }
 
-    let Some(workspace) = state.workspace.as_ref().and_then(|w| w.canonicalize().ok()) else {
-        return Err("no workspace was declared, so no output root is writable".to_owned());
-    };
     if !resolved.starts_with(&workspace) {
         return Err(format!(
             "`{}` is outside the declared workspace",
@@ -1343,6 +1362,28 @@ fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
     }
 
     Ok(resolved)
+}
+
+/// Join `suffix` onto `ancestor` without letting `..` leave `workspace`.
+///
+/// `Path::join` keeps `..` as a component, so a later `starts_with` on the
+/// unresolved path is not a containment check. `normalize_lexically` is
+/// unstable on the toolchain this crate builds with, so the walk is done here.
+fn join_lexically(workspace: &Path, ancestor: PathBuf, suffix: &Path) -> Option<PathBuf> {
+    let mut resolved = ancestor;
+    for component in suffix.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => resolved.push(part),
+            Component::ParentDir => {
+                if !resolved.pop() || !resolved.starts_with(workspace) {
+                    return None;
+                }
+            }
+            Component::Prefix(_) | Component::RootDir => return None,
+        }
+    }
+    Some(resolved)
 }
 
 /// The lock at `path` against the one just resolved.
@@ -1359,7 +1400,18 @@ fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
 /// them: a second implementation of "what changed" would be a second answer, and
 /// a lock exists to have one.
 fn compare_to_disk(path: &Path, resolved: &ResolvedProduct) -> Option<LockOnDisk> {
-    let canonical = std::fs::read_to_string(path).ok()?;
+    let canonical = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            return Some(LockOnDisk {
+                canonical: String::new(),
+                lock_hash: String::new(),
+                changes: Vec::new(),
+                unreadable: Some(e.to_string()),
+            });
+        }
+    };
     match gearbox_lock::read(&canonical) {
         Ok(on_disk) => {
             let diff = gearbox_lock::diff(&on_disk, resolved);
@@ -1489,6 +1541,7 @@ fn prepare_generate(
         source_roots: &source_roots,
         out_root: &out_root,
         templates,
+        catalogue: state.catalogue.as_ref(),
     }) {
         Ok(generated) => generated,
         Err(e) => {
@@ -1501,11 +1554,16 @@ fn prepare_generate(
     };
 
     let base_root = gearbox_engine::generate::base_root_for(&out_root);
+    let mut diagnostics = resolved.diagnostics;
+    // See `Generated::diagnostics`: computing this and dropping it is exactly
+    // what made a house template invisible in Studio for a milestone.
+    diagnostics.extend(generated.diagnostics.as_slice().iter().cloned());
+
     Ok(PreparedGenerate {
         files: generated.files,
         out_root,
         base_root,
-        diagnostics: resolved.diagnostics,
+        diagnostics,
         overridden_templates: generated.overridden_templates,
     })
 }
@@ -1997,6 +2055,6 @@ fn invalid_params(id: RequestId, e: &ExtractError<Request>) -> Response {
     error(
         id,
         lsp_server::ErrorCode::InvalidParams as i32,
-        &format!("{e:?}"),
+        &e.to_string(),
     )
 }

@@ -135,9 +135,9 @@ fn build_script(input: &GenerateInput<'_>, context: &Path) -> Result<FileEntry, 
     );
     body.push_str("set -eu\n");
     body.push_str("SCRIPT_DIR=$(CDPATH= cd -- \"$(dirname \"$0\")\" && pwd)\n");
-    body.push_str("CONTEXT=$(CDPATH= cd -- \"$SCRIPT_DIR/");
-    body.push_str(&to_context);
-    body.push_str("\" && pwd)\n");
+    body.push_str("CONTEXT=$(CDPATH= cd -- ");
+    body.push_str(&context_cd(&to_context));
+    body.push_str(" && pwd)\n");
     body.push_str("export DOCKER_BUILDKIT=1\n");
     body.push_str("build_one() {\n");
     body.push_str("  name=$1\n");
@@ -245,6 +245,19 @@ fn sh_single(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+/// The directory `cd` argument for the build context.
+///
+/// An absolute context is used as-is. A relative one is resolved from the
+/// generated `docker/` directory, not prefixed raw onto `SCRIPT_DIR` --
+/// `$SCRIPT_DIR//abs` is how an absolute `to_context` used to break the script.
+fn context_cd(to_context: &str) -> String {
+    if Path::new(to_context).is_absolute() {
+        sh_single(to_context)
+    } else {
+        format!("\"$SCRIPT_DIR/\"{}", sh_single(to_context))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +275,11 @@ mod tests {
             sh_single("registry.example.com/payments/gbx-api-gateway:0.1.0"),
             "'registry.example.com/payments/gbx-api-gateway:0.1.0'"
         );
+    }
+
+    #[test]
+    fn context_cd_does_not_prefix_an_absolute_path() {
+        assert_eq!(context_cd("/workspace/src"), "'/workspace/src'");
+        assert_eq!(context_cd("../.."), "\"$SCRIPT_DIR/\"'../..'");
     }
 }

@@ -33,7 +33,20 @@ use starlark::eval::{Evaluator, FileLoader};
 use starlark::syntax::AstModule;
 use starlark::values::FrozenHeapName;
 
+use gearbox_ir::Diagnostics;
+
 use crate::declarative::{dialect, scan_forbidden_tokens};
+
+/// Sentinel the parent evaluation matches so it does not also emit GBX0102
+/// for a fragment whose GBX0103 diagnostics are already recorded.
+pub const FORBIDDEN_RECORDED: &str = "contains a construct GDL does not permit";
+
+/// GDL is declarative: no loops, no recursion. A deep stack or a large heap
+/// is a runaway fragment, not a legitimate description.
+pub fn apply_eval_limits(eval: &mut Evaluator) {
+    let _callstack = eval.set_max_callstack_size(64);
+    let _heap = eval.set_max_heap_size(4 * 1024 * 1024);
+}
 
 /// What every loader in one evaluation shares.
 ///
@@ -55,6 +68,10 @@ struct LoadState {
     /// alone cannot see that `a.gdl` is already on the stack when `b.gdl` loads
     /// it back.
     in_flight: BTreeSet<PathBuf>,
+    /// Forbidden-construct findings from fragments, kept here so the parent
+    /// evaluation can surface them as GBX0103 with the fragment's own spans
+    /// instead of a stringified GBX0102 on the loading file.
+    diagnostics: Diagnostics,
 }
 
 /// Resolves `load()` paths within one source root.
@@ -88,6 +105,12 @@ impl<'a> GdlLoader<'a> {
             globals,
             state: Rc::new(RefCell::new(LoadState::default())),
         }
+    }
+
+    /// Diagnostics recorded while evaluating fragments this loader opened.
+    #[must_use]
+    pub fn take_diagnostics(&self) -> Diagnostics {
+        std::mem::take(&mut self.state.borrow_mut().diagnostics)
     }
 
     /// A loader for a fragment's own directory, sharing this one's state.
@@ -201,12 +224,9 @@ impl<'a> GdlLoader<'a> {
 
         // A fragment is held to the same standard as the file loading it.
         let forbidden = scan_forbidden_tokens(&uri, &source);
-        if let Some(first) = forbidden.first() {
-            return Err(other(format!(
-                "`{}` contains a construct GDL does not permit: {}",
-                path.display(),
-                first.message
-            )));
+        if !forbidden.is_empty() {
+            self.state.borrow_mut().diagnostics.extend(forbidden);
+            return Err(other(format!("`{}` {FORBIDDEN_RECORDED}", path.display())));
         }
 
         let ast = AstModule::parse(&uri, source, &dialect())?;
@@ -219,6 +239,7 @@ impl<'a> GdlLoader<'a> {
         Module::with_temp_heap(|module| {
             {
                 let mut eval = Evaluator::new(&module);
+                apply_eval_limits(&mut eval);
                 eval.set_loader(&nested);
                 eval.eval_module(ast, self.globals)?;
             }

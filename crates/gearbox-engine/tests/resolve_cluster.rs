@@ -209,6 +209,12 @@ fn an_unsatisfiable_requirement_shows_every_provider() {
         help.contains("standalone: does not answer lock"),
         "the two providers fail for different reasons and the table must say so: {help}"
     );
+    let lock = r
+        .cluster
+        .iter()
+        .find(|b| b.primitive == ClusterPrimitive::Lock)
+        .expect("a lock binding");
+    assert_eq!(lock.resolved, ClusterResolution::Unsatisfied);
 }
 
 #[test]
@@ -229,6 +235,15 @@ fn an_unregistered_provider_is_named_against_the_registered_ones() {
         .expect("GBX0505");
     assert!(d.help.as_deref().unwrap_or_default().contains("postgres"));
     assert!(d.help.as_deref().unwrap_or_default().contains("standalone"));
+    let cache = r
+        .cluster
+        .iter()
+        .find(|b| b.primitive == ClusterPrimitive::Cache)
+        .expect("a cache binding");
+    assert_eq!(
+        cache.selected.downgraded_by,
+        Some(DiagnosticCode::ClusterUnregisteredProvider)
+    );
 }
 
 #[test]

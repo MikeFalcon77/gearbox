@@ -93,28 +93,58 @@ pub fn apply_generate(
         });
     }
 
-    let mut written = 0;
-    for file in &staged {
-        if !file.action.writes() {
-            continue;
-        }
-        let target = out_root.join(file.path.as_str());
-        write_file(&target, &file.final_bytes)?;
-        written += 1;
+    let staging = out_root.join(".apply-staging");
+    let staging_base = base_root.join(".apply-staging");
+    clear_tree(&staging);
+    clear_tree(&staging_base);
 
-        // The base is updated only for the class that reads it, and only after
-        // the real write succeeded -- a base ahead of the file it describes
-        // would make the next merge attribute our own change to the operator.
-        if matches!(file.entry.ownership, Ownership::OperatorOwned) {
-            write_file(&base_root.join(file.path.as_str()), &file.entry.bytes)?;
-        }
-    }
+    let published = publish_staged(&staged, out_root, base_root, &staging, &staging_base);
+
+    clear_tree(&staging);
+    clear_tree(&staging_base);
 
     Ok(ApplyOutcome {
         plans: staged.iter().map(to_plan).collect(),
         diagnostics,
-        written,
+        written: published?,
     })
+}
+
+fn publish_staged(
+    staged: &[Staged],
+    out_root: &Path,
+    base_root: &Path,
+    staging: &Path,
+    staging_base: &Path,
+) -> Result<usize, GenerateError> {
+    let mut written = 0;
+    for file in staged {
+        if !file.action.writes() {
+            continue;
+        }
+        write_file(&staging.join(file.path.as_str()), &file.final_bytes)?;
+        if matches!(file.entry.ownership, Ownership::OperatorOwned) {
+            write_file(&staging_base.join(file.path.as_str()), &file.entry.bytes)?;
+        }
+        written += 1;
+    }
+
+    for file in staged {
+        if !file.action.writes() {
+            continue;
+        }
+        publish(
+            &staging.join(file.path.as_str()),
+            &out_root.join(file.path.as_str()),
+        )?;
+        if matches!(file.entry.ownership, Ownership::OperatorOwned) {
+            publish(
+                &staging_base.join(file.path.as_str()),
+                &base_root.join(file.path.as_str()),
+            )?;
+        }
+    }
+    Ok(written)
 }
 
 /// Decide every file's fate and produce the bytes for it, touching nothing.
@@ -284,6 +314,29 @@ fn write_file(path: &Path, bytes: &[u8]) -> Result<(), GenerateError> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+fn publish(from: &Path, to: &Path) -> Result<(), GenerateError> {
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| GenerateError::Io {
+            what: "cannot create",
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    std::fs::rename(from, to).map_err(|source| GenerateError::Io {
+        what: "cannot publish",
+        path: to.to_path_buf(),
+        source,
+    })
+}
+
+fn clear_tree(path: &Path) {
+    if path.is_file() {
+        drop(std::fs::remove_file(path));
+    } else {
+        drop(std::fs::remove_dir_all(path));
+    }
 }
 
 /// The base cache directory for a product, given its output root.

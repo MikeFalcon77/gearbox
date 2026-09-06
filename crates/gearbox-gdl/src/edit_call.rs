@@ -194,6 +194,7 @@ pub fn add_profile(
     id: &str,
     fields: &[(String, String)],
 ) -> Result<Edit, Diagnostics> {
+    require_profile_kind(uri, kind)?;
     let list = named_list_literal(uri, source, "profiles")?;
     if list
         .entries
@@ -204,6 +205,7 @@ pub fn add_profile(
     }
     let mut parts = vec![format!("id = {}", quote_string(id))];
     for (k, v) in fields {
+        require_gdl_identifier(uri, k, "profile field")?;
         parts.push(format!("{k} = {}", quote_string(v)));
     }
     let entry = format!("{kind}({})", parts.join(", "));
@@ -242,6 +244,7 @@ pub fn set_profile_field(
     field: &str,
     value: Option<&str>,
 ) -> Result<Edit, Diagnostics> {
+    require_gdl_identifier(uri, field, "profile field")?;
     let list = named_list_literal(uri, source, "profiles")?;
     let entry = list
         .entries
@@ -298,6 +301,7 @@ pub fn render_product_template(params: &CreateProductParams) -> String {
     let name = quote_string(&params.name);
     let version = quote_string(&params.version);
     let profile_id = quote_string(&params.profile_id);
+    let profile_kind = sanitized_profile_kind(&params.profile_kind);
     let comment_name = params.name.replace(['\n', '\r'], " ");
     format!(
         r"# Generated product description for {comment_name}.
@@ -322,8 +326,7 @@ product(
     gears = [
     ],
 )
-",
-        profile_kind = params.profile_kind,
+"
     )
 }
 
@@ -363,6 +366,54 @@ pub fn clone_product_text(
         updated = set_named_arg_on_call(uri, &updated, "version", Some(&quote_string(version)))?;
     }
     Ok(replace_span(source, call_expr_span, &updated))
+}
+
+const PROFILE_KINDS: &[&str] = &["embedded", "host_workers", "kubernetes"];
+
+fn is_gdl_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {
+            chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }
+        _ => false,
+    }
+}
+
+fn is_allowed_profile_kind(kind: &str) -> bool {
+    PROFILE_KINDS.contains(&kind)
+}
+
+fn sanitized_profile_kind(kind: &str) -> &str {
+    if is_allowed_profile_kind(kind) {
+        kind
+    } else {
+        "embedded"
+    }
+}
+
+fn require_gdl_identifier(uri: &str, name: &str, what: &str) -> Result<(), Diagnostics> {
+    if is_gdl_identifier(name) {
+        Ok(())
+    } else {
+        Err(refuse(
+            uri,
+            &format!("`{name}` is not a valid {what} identifier"),
+            "use a name matching [A-Za-z_][A-Za-z0-9_]*",
+        ))
+    }
+}
+
+fn require_profile_kind(uri: &str, kind: &str) -> Result<(), Diagnostics> {
+    if is_allowed_profile_kind(kind) {
+        Ok(())
+    } else {
+        Err(refuse(
+            uri,
+            &format!("`{kind}` is not a deployment profile constructor"),
+            "use `embedded`, `host_workers`, or `kubernetes`",
+        ))
+    }
 }
 
 /// Quote `s` as a Starlark/GDL double-quoted string literal.

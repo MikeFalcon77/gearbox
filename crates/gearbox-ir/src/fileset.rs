@@ -205,6 +205,7 @@ impl FileSet {
     ///
     /// A `Some` return is always a generator bug -- two producers claiming one
     /// path -- so callers surface it rather than dropping it.
+    #[must_use]
     pub fn insert(&mut self, entry: FileEntry) -> Option<FileEntry> {
         self.entries.insert(entry.path.clone(), entry)
     }

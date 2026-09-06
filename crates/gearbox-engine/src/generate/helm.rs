@@ -17,6 +17,9 @@
 //! config become `secretKeys`, and `secret_ref = "existingSecret:<name>"`
 //! on a cluster binding becomes `existingSecret`. The chart injects those
 //! names as `secretKeyRef` env; the operator's Secret holds the values.
+//! Catalogue `ConfigField.secret` is honoured earlier, when `config/<p>.yaml`
+//! is written: a literal credential becomes `${GEAR_FIELD}` so this harvest
+//! can name it without putting the value in the chart.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -41,7 +44,9 @@ struct NamedPort {
 /// generate a chart.
 ///
 /// Reads each process's already-generated `config/<p>.yaml` out of `files`
-/// so the `ConfigMap` carries the same bytes the binary will `--config`.
+/// so the `ConfigMap`'s companion `files/` copy is the same bytes the binary
+/// will `--config`. The template itself uses `.Files.Get`, so YAML that
+/// contains `{{` is not evaluated as Helm.
 ///
 /// # Errors
 /// Returns [`GenerateError`] when a template cannot render, a path is not
@@ -216,7 +221,7 @@ fn umbrella_values(
                 init_containers: None,
                 extra_containers: None,
                 custom: BTreeMap::new(),
-                existing_secret: existing_secret(process, input),
+                existing_secret: existing_secret(process, input)?,
                 secret_keys: if keys.is_empty() { None } else { Some(keys) },
             },
         );
@@ -780,16 +785,17 @@ fn subchart_templates(
         .ok_or_else(|| GenerateError::BadPath {
             path: config_rel.as_str().to_owned(),
         })?;
-    let config_yaml = indent_block(config_raw, 4);
 
     let ports = named_ports(process);
     let http_port = process
         .service_port
         .or_else(|| ports.first().map(|p| p.port))
         .unwrap_or(80);
-    let prefix = rest_prefix(input, process);
+    let prefix = rest_prefix(input, process)?;
     let liveness_path = probe_path(&prefix, "/healthz");
+    helm_safe("liveness probe path", &liveness_path)?;
     let readiness_path = probe_path(&prefix, "/readyz");
+    helm_safe("readiness probe path", &readiness_path)?;
     let cluster_service = process.gears.iter().any(|g| g.as_str() == CLUSTER_SERVICE);
 
     let common = context! {
@@ -833,7 +839,6 @@ fn subchart_templates(
         context! {
             name => name,
             config_filename => config_filename.as_str(),
-            config_yaml => config_yaml.as_str(),
         },
     )?;
     let serviceaccount = templates::render_helm(
@@ -845,7 +850,14 @@ fn subchart_templates(
     let base = |file: &str| -> Result<_, GenerateError> {
         paths::rel(&["helm", product, "charts", name, "templates", file])
     };
+    let files_rel = paths::rel(&["helm", product, "charts", name, "files", &config_filename])?;
     Ok(vec![
+        FileEntry::text(
+            files_rel,
+            config_raw.to_owned(),
+            FileKind::Yaml,
+            Ownership::Generated,
+        ),
         FileEntry::text(
             base("_helpers.tpl")?,
             helpers,
@@ -879,17 +891,15 @@ fn subchart_templates(
     ])
 }
 
-fn indent_block(text: &str, spaces: usize) -> String {
-    let pad = " ".repeat(spaces);
-    let mut out = String::new();
-    for (i, line) in text.lines().enumerate() {
-        if i > 0 {
-            out.push('\n');
-        }
-        out.push_str(&pad);
-        out.push_str(line);
+fn helm_safe(at: &'static str, value: &str) -> Result<(), GenerateError> {
+    if value.contains("{{") || value.contains("}}") || value.contains('\n') || value.contains('\r')
+    {
+        return Err(GenerateError::UnsafeHelm {
+            at,
+            value: value.to_owned(),
+        });
     }
-    out
+    Ok(())
 }
 
 /// Env names the runtime will try to expand out of this process's config.
@@ -899,14 +909,11 @@ fn indent_block(text: &str, spaces: usize) -> String {
 /// / `${VAR:-default}` and the `ConfigMap` is what the binary actually loads.
 /// A placeholder the process will not expand is still harmless as env.
 ///
-/// **A gear is never asked, and must never be asked, where its secrets come
-/// from.** A gear knows it needs a password in its configuration struct; whether
-/// that password arrives from an environment variable, a Kubernetes Secret, a
-/// file or a vault agent is a fact about somebody's cluster, and a catalogue
-/// that recorded it would be a catalogue that stopped describing the gear. So
-/// the deployment half is derived here, from what the *product* wrote and this
-/// run generated -- not declared in `gear.gdl`, which is why no amount of
-/// searching the catalogue will find it.
+/// **Which fields are credentials is a catalogue fact.** `ConfigField.secret`
+/// is projected from `secrecy::SecretString`. **Where the value comes from**
+/// -- an environment variable, a Kubernetes Secret, a file -- is still a
+/// deployment fact derived here from the placeholders generation wrote, which
+/// is why this scan reads the YAML and not the field table.
 fn secret_vars(config: &str) -> Vec<String> {
     let mut found = BTreeSet::new();
     let mut rest = config;
@@ -938,8 +945,11 @@ fn is_env_name(name: &str) -> bool {
 /// `secret_ref = "existingSecret:<name>"` is the lock spelling of a Secret
 /// the operator already created. Any other shape stays in config only:
 /// a vault path is not a Kubernetes object name.
-fn existing_secret(process: &ResolvedProcess, input: &GenerateInput<'_>) -> Option<String> {
-    input.lock.cluster.iter().find_map(|binding| {
+fn existing_secret(
+    process: &ResolvedProcess,
+    input: &GenerateInput<'_>,
+) -> Result<Option<String>, GenerateError> {
+    let Some(name) = input.lock.cluster.iter().find_map(|binding| {
         if !binding.requesters.iter().any(|gear| process.contains(gear)) {
             return None;
         }
@@ -949,7 +959,11 @@ fn existing_secret(process: &ResolvedProcess, input: &GenerateInput<'_>) -> Opti
             .strip_prefix("existingSecret:")
             .filter(|name| !name.is_empty())
             .map(str::to_owned)
-    })
+    }) else {
+        return Ok(None);
+    };
+    helm_safe("existingSecret", &name)?;
+    Ok(Some(name))
 }
 
 /// The three parts of the image, taken from the lock rather than parsed back out.
@@ -1028,25 +1042,28 @@ fn port_name(raw: &str) -> String {
     }
 }
 
-fn rest_prefix(input: &GenerateInput<'_>, process: &ResolvedProcess) -> String {
+fn rest_prefix(
+    input: &GenerateInput<'_>,
+    process: &ResolvedProcess,
+) -> Result<String, GenerateError> {
     if !matches!(process.kind, ProcessKind::Host) {
-        return String::new();
+        return Ok(String::new());
     }
     let Some(id) = &process.rest_host else {
-        return String::new();
+        return Ok(String::new());
     };
     let Some(gear) = input.lock.gears.get(id) else {
-        return String::new();
+        return Ok(String::new());
     };
     let Some(serde_json::Value::String(raw)) = gear.config.get("prefix_path") else {
-        return String::new();
+        return Ok(String::new());
     };
     let trimmed = raw.trim().trim_matches('/');
     if trimmed.is_empty() {
-        String::new()
-    } else {
-        format!("/{trimmed}")
+        return Ok(String::new());
     }
+    helm_safe("prefix_path", trimmed)?;
+    Ok(format!("/{trimmed}"))
 }
 
 /// The restricted Pod Security Standard, as data.

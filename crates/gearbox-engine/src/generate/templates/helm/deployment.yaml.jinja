@@ -112,11 +112,11 @@ spec:
                   fieldPath: metadata.namespace
             {{- if and .Values.existingSecret .Values.secretKeys }}
             {{- range .Values.secretKeys }}
-            - name: {{ . }}
+            - name: {{ . | quote }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ $.Values.existingSecret }}
-                  key: {{ . }}
+                  name: {{ $.Values.existingSecret | quote }}
+                  key: {{ . | quote }}
             {{- end }}
             {{- end }}
             {{- with .Values.extraEnv }}

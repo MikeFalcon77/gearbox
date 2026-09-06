@@ -28,7 +28,7 @@ fn file(src: &str) -> RustFile {
 
 fn tree(rel: &str) -> Option<Vec<RustFile>> {
     let dir = crate::test_corpus::corpus(rel)?;
-    scan_crate(&dir).ok()
+    Some(scan_crate(&dir).unwrap_or_else(|e| panic!("scan {rel}: {e}")))
 }
 
 macro_rules! require {
@@ -220,6 +220,25 @@ fn an_enum_defined_outside_the_scan_degrades_instead_of_guessing() {
     assert_eq!(
         named(&project_config_fields(&files, "DemoConfig"), "enforcement").ty,
         ConfigFieldType::Complex
+    );
+}
+
+#[test]
+fn an_unknown_serde_eq_form_does_not_drop_later_keys() {
+    // `parse_nested_meta` used to abort on `serialize_with = "..."`, which
+    // dropped a following `rename` and projected the Rust name instead.
+    let files = [file(
+        r#"
+        #[derive(Deserialize)]
+        pub struct TenantConfig {
+            #[serde(serialize_with = "ser", rename = "type")]
+            pub tenant_type: String,
+        }
+        "#,
+    )];
+    assert_eq!(
+        names(&project_config_fields(&files, "TenantConfig")),
+        ["type"]
     );
 }
 

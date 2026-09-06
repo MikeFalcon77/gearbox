@@ -261,9 +261,8 @@ diagnostic_codes! {
     /// its own generated configuration -- the same failure, moved somewhere
     /// nobody is looking.
     ///
-    /// Only fields a description exposes are checked. A key outside that list is
-    /// not reported: `exposes` is a curated subset, so a key it omits may still
-    /// be one the gear reads.
+    /// Only fields in the projected schema are type-checked. A key the schema
+    /// does not name is [`GdlUnknownConfigKey`], not this code.
     GdlConfigTypeMismatch = "GBX0113", Gdl, Error, false, "config value does not match the declared field type";
 
     /// A config key a gear declares as an endpoint's `config_key` was also set
@@ -276,6 +275,20 @@ diagnostic_codes! {
     /// comes from the topology the resolver decided; a value written by hand
     /// would be describing a product that was not resolved.
     GdlConfigKeyDerived = "GBX0114", Gdl, Warning, false, "config key is derived from the topology and cannot be set here";
+
+    /// A `config = {...}` key is not a field the gear's projected schema names.
+    ///
+    /// An error because generated YAML is deserialized with `deny_unknown_fields`:
+    /// writing the key produces a file the runtime refuses at startup. A field
+    /// the gear reads must appear in the schema; a typo must not reach the file.
+    GdlUnknownConfigKey = "GBX0115", Gdl, Error, false, "config key is not declared by the gear";
+
+    /// A credential written into the description, where it would be committed.
+    ///
+    /// An error rather than a rewrite: replacing the value would leave the
+    /// original in the `.gdl` file, which is the place the requirement names.
+    /// The author has to take it out, and the help says what to write instead.
+    GdlLiteralSecret = "GBX0116", Gdl, Error, false, "a credential is written into the description";
 
     // ---------------------------------------------------------------- GBX02xx
     // GBX0201-GBX0205 are deliberately absent. They compared a `gear.gdl`
@@ -408,6 +421,12 @@ diagnostic_codes! {
     /// API gateway, so a REST host there would never receive traffic.
     TopologyRestHostInWorker = "GBX0312", Topology, Error, true, "REST host in a worker process";
 
+    /// A `host_workers` profile produced workers but no host to spawn them.
+    ///
+    /// Spawn specs are attached to the host process. Without one they are
+    /// dropped, and the workers the lock named never start.
+    TopologyNoHost = "GBX0313", Topology, Error, false, "workers have no host process to spawn them";
+
     // ---------------------------------------------------------------- GBX04xx
     /// This consumer and provider could be placed in separate processes, but the
     /// dependency between them is not declared as a contract consumption.
@@ -463,6 +482,11 @@ diagnostic_codes! {
     /// only in the segment immediately following the gears prefix, so a
     /// hyphenated dependency name nested deeper can never be matched.
     BindingEnvCannotExpressWiring = "GBX0409", Binding, Warning, true, "endpoint override cannot come from the environment";
+
+    /// A product preference was parsed and recorded, but the resolver does not
+    /// yet honour it. Silent ignore would let an operator believe the topology
+    /// changed when it did not.
+    PreferenceNotHonoured = "GBX0410", Binding, Warning, false, "preference is recorded but not honoured";
 
     // ---------------------------------------------------------------- GBX05xx
     /// A cluster provider was selected automatically.
@@ -626,6 +650,13 @@ diagnostic_codes! {
 
     /// Package metadata for a gear crate could not be read.
     GenCargoMetadataFailed = "GBX0704", Generator, Error, false, "could not read package metadata";
+
+    /// A lock resolved by an older build carries a credential.
+    ///
+    /// A warning, not an error: generation replaces it, so nothing it writes
+    /// carries the value. What the operator must still do is re-resolve, because
+    /// the lock they have keeps it until they do.
+    GenLiteralSecretInLock = "GBX0705", Generator, Warning, false, "the lock carries a credential, which generation replaced";
 }
 
 /// A diagnostic code string that this build does not know.

@@ -268,3 +268,30 @@ fn detects_changed_diagnostics() {
     assert!(d.diagnostics_changed.is_some(), "{d:?}");
     assert!(!d.is_empty());
 }
+
+#[test]
+fn same_length_diagnostics_still_say_they_changed() {
+    let before = support::fixture();
+    let mut after = support::fixture();
+    assert_eq!(before.diagnostics.len(), after.diagnostics.len());
+    after.diagnostics = before
+        .diagnostics
+        .iter()
+        .cloned()
+        .map(|mut d| {
+            d.message = format!("rewritten: {}", d.message);
+            d
+        })
+        .collect();
+
+    let d = gearbox_lock::diff(&before, &after);
+    assert_eq!(
+        d.diagnostics_changed,
+        Some((before.diagnostics.len(), after.diagnostics.len()))
+    );
+    let summary = d.summary().join("\n");
+    assert!(
+        summary.contains("diagnostics changed"),
+        "same-length content change must not look like a count-only line: {summary}"
+    );
+}

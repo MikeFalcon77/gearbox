@@ -31,7 +31,7 @@ pub enum IdError {
     },
 
     #[error(
-        "{kind} `{value}` is not kebab-case (lowercase letters, digits and single hyphens; must start with a letter and must not end with one)"
+        "{kind} `{value}` is not kebab-case (lowercase letters, digits and single hyphens; must start with a letter and must not end with a hyphen)"
     )]
     NotKebab { kind: &'static str, value: String },
 
@@ -359,6 +359,12 @@ fn validate_two_part_colon(kind: &'static str, value: &str) -> Result<(), IdErro
 #[ts(type = "string")]
 pub struct RelPath(String);
 
+/// `C:` / `C:/foo` is absolute on Windows even though it does not start with `/`.
+fn is_windows_prefix(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
 impl RelPath {
     pub const KIND: &'static str = "relative path";
 
@@ -382,7 +388,7 @@ impl RelPath {
         if raw.contains('\\') {
             return Err(malformed("forward slashes only"));
         }
-        if raw.starts_with('/') {
+        if raw.starts_with('/') || is_windows_prefix(&raw) {
             return Err(malformed("a relative path"));
         }
 
@@ -396,6 +402,9 @@ impl RelPath {
                     return Err(malformed(
                         "no `..` segments (must stay inside its source root)",
                     ));
+                }
+                other if other.contains(':') => {
+                    return Err(malformed("a relative path"));
                 }
                 other => segments.push(other),
             }
@@ -463,7 +472,7 @@ impl RelPath {
         if relative.contains('\\') {
             return Err(malformed("forward slashes only"));
         }
-        if relative.starts_with('/') {
+        if relative.starts_with('/') || is_windows_prefix(relative) {
             return Err(malformed("a relative path"));
         }
 
@@ -480,6 +489,9 @@ impl RelPath {
                     if segments.pop().is_none() {
                         return Err(malformed("a path that stays inside its source root"));
                     }
+                }
+                other if other.contains(':') => {
+                    return Err(malformed("a relative path"));
                 }
                 other => segments.push(other),
             }

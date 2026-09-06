@@ -11,20 +11,20 @@
     reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
 )]
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use gearbox_engine::{Continue, LoadEvent, SourceRoot, load_catalogue, load_catalogue_staged};
 use gearbox_ir::{LoadStage, SourceId};
 
 fn root() -> Option<SourceRoot> {
-    let candidate = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .map(|p| p.join("../gears-rust"))?;
-    let root: PathBuf = candidate
-        .canonicalize()
-        .ok()
-        .filter(|p| p.join("gears").is_dir())?;
+    let mut dir: &Path = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = loop {
+        let candidate = dir.join("gears-rust");
+        if candidate.join("gears").is_dir() {
+            break candidate.canonicalize().ok()?;
+        }
+        dir = dir.parent()?;
+    };
     SourceRoot::open(SourceId::new("gears-rust").unwrap(), root).ok()
 }
 

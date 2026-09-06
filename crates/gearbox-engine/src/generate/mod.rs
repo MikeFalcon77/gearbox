@@ -51,7 +51,7 @@ mod workspace;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use gearbox_ir::{FileSet, ProcessKind, ResolvedProduct, SourceId};
+use gearbox_ir::{Catalogue, Diagnostics, FileSet, ProcessKind, ResolvedProduct, SourceId};
 
 pub use apply::{ApplyOutcome, apply_generate, base_root_for, plan, summarize};
 pub use templates::TemplateSet;
@@ -156,6 +156,9 @@ pub enum GenerateError {
     #[error("could not render the lock")]
     Lock(#[from] gearbox_lock::LockError),
 
+    #[error("generated Helm would interpolate `{value}` as template text in {at}")]
+    UnsafeHelm { at: &'static str, value: String },
+
     #[error("{what} `{}`", .path.display())]
     Io {
         what: &'static str,
@@ -188,11 +191,26 @@ pub struct GenerateInput<'a> {
     /// and a `--dry-run` that read `templates/` itself would be answering
     /// about a different tree than the one `apply` writes from.
     pub templates: TemplateSet,
+
+    /// Catalogue used to honour `ConfigField.secret` at generate time.
+    ///
+    /// Absent in tests that do not exercise secret fields. Callers that have
+    /// already loaded a catalogue (CLI, RPC) pass it so a literal credential
+    /// cannot land in a `ConfigMap` or image.
+    pub catalogue: Option<&'a Catalogue>,
 }
 
 /// What one generation run produced.
 pub struct Generated {
     pub files: FileSet,
+
+    /// What generation had to say about the lock it was given.
+    ///
+    /// Empty in the ordinary case. **Both callers must merge this into their own
+    /// list** -- `overridden_templates` was computed and dropped on the RPC path
+    /// for a milestone, which made a house template indistinguishable from a
+    /// builtin in Studio. A credential silently replaced would be worse.
+    pub diagnostics: Diagnostics,
 
     /// Template keys the product overlaid, in sorted order.
     ///
@@ -209,6 +227,24 @@ pub struct Generated {
 /// output would be wrong rather than merely incomplete.
 pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
     let mut files = FileSet::new();
+    let mut diagnostics = Diagnostics::default();
+
+    // Before anything reads the lock, and once. A credential in it is replaced
+    // here rather than inside the configuration generator, so the `ConfigMap`,
+    // the image and the `product.lock` this run writes cannot disagree about what
+    // the value is. `GBX0116` means a lock resolved by this build never has one;
+    // a lock from an earlier build can, and `GBX0705` says so out loud.
+    let redacted = crate::secrets::redact_product(input.lock, input.catalogue, &mut diagnostics);
+    // A fresh input rather than a mutation: `templates` is owned, so the struct
+    // cannot be spread over a shared reference. The clone is of a map that is
+    // empty for every product without a template overlay.
+    let input = &GenerateInput {
+        lock: &redacted,
+        source_roots: input.source_roots,
+        out_root: input.out_root,
+        templates: input.templates.clone(),
+        catalogue: input.catalogue,
+    };
 
     // Every process is a workspace member, host or worker. A generated crate
     // sitting inside the workspace root without being a member is the failure
@@ -242,6 +278,7 @@ pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
 
     Ok(Generated {
         files,
+        diagnostics,
         overridden_templates: input.templates.overridden(),
     })
 }

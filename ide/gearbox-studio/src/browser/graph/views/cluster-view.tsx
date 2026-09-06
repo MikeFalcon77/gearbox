@@ -228,8 +228,8 @@ export function ClusterView({
  * The provider whose capabilities actually decide behaviour.
  *
  * Mirrors `ClusterResolution::effective_provider` in the IR rather than deciding
- * anything: the serde tag is `via`, and both variants carry the name of the thing
- * that ends up doing the work.
+ * anything: the serde tag is `via`. Provider and SDK-default carry the name of
+ * the thing that does the work; `unsatisfied` has no provider.
  */
 function effectiveProvider(binding: ResolvedClusterBinding): string {
   const resolved = binding.resolved as { via: string; name?: string; over_cache?: string };

@@ -199,11 +199,13 @@ fn a_complex_field_accepts_anything() {
     }
 }
 
-/// `exposes` is a curated subset, so a key it omits may still be one the gear
-/// reads. Reporting those would punish a description for being selective.
+/// A key the schema does not name becomes YAML the runtime refuses.
 #[test]
-fn a_key_outside_the_exposed_set_is_not_reported() {
-    assert_eq!(codes("not_exposed", serde_json::json!(true)), []);
+fn a_key_outside_the_schema_is_an_error() {
+    assert_eq!(
+        codes("not_exposed", serde_json::json!(true)),
+        [DiagnosticCode::GdlUnknownConfigKey]
+    );
 }
 
 /// A key the generator derives is overwritten, and the whole point of the
@@ -258,4 +260,129 @@ fn a_gear_without_a_schema_is_not_checked() {
         &mut diagnostics,
     );
     assert!(diagnostics.is_empty());
+}
+
+/// A catalogue with `demo` declaring one credential field.
+fn catalogue_with_a_secret() -> Catalogue {
+    let mut catalogue = catalogue();
+    let schema = catalogue
+        .gears
+        .get_mut(&GearId::new("demo").unwrap())
+        .unwrap()
+        .config_schema
+        .as_mut()
+        .unwrap();
+    schema.fields.push(ConfigFieldDecl {
+        name: "password".to_owned(),
+        ty: ConfigFieldType::Str,
+        required: false,
+        default: None,
+        doc: None,
+        secret: true,
+    });
+    catalogue
+}
+
+fn codes_of(catalogue: &Catalogue, intent: &ProductIntent) -> Vec<DiagnosticCode> {
+    let mut diagnostics = Diagnostics::default();
+    check(catalogue, intent, "file:///p/product.gdl", &mut diagnostics);
+    diagnostics.as_slice().iter().map(|d| d.code).collect()
+}
+
+/// A credential written into the description is refused, not rewritten.
+///
+/// Rewriting is what the generator does, and it happens too late to help: the
+/// value would still be in the `.gdl` file, which is the file that gets
+/// committed. Only the author can take it out, so only the author is asked to.
+#[test]
+fn a_literal_credential_in_a_description_is_refused() {
+    let catalogue = catalogue_with_a_secret();
+
+    let literal = intent("password", serde_json::json!("hunter2"));
+    assert_eq!(
+        codes_of(&catalogue, &literal),
+        vec![DiagnosticCode::GdlLiteralSecret]
+    );
+
+    // A default is the same secret wearing a reference's clothes: the runtime
+    // expands it whenever the variable is unset, so `hunter2` is live.
+    let defaulted = intent("password", serde_json::json!("${DEMO_PASSWORD:-hunter2}"));
+    assert_eq!(
+        codes_of(&catalogue, &defaulted),
+        vec![DiagnosticCode::GdlLiteralSecret]
+    );
+
+    // A number is not a reference either. An integer token is still a token.
+    let number = intent("password", serde_json::json!(1234));
+    assert_eq!(
+        codes_of(&catalogue, &number),
+        vec![DiagnosticCode::GdlLiteralSecret]
+    );
+
+    // And the sanctioned form passes, with the name the generator will read.
+    let named = intent("password", serde_json::json!("${DEMO_PASSWORD}"));
+    assert!(codes_of(&catalogue, &named).is_empty());
+
+    // Severity is the mechanism, not a label: `ResolvedProduct::is_writable` is
+    // `!diagnostics.has_errors()`, and both the CLI and the RPC refuse to write a
+    // lock that is not writable. That is why no second guard is needed to keep a
+    // credential out of `product.lock` -- there is no lock to put it in.
+    let mut diagnostics = Diagnostics::default();
+    check(
+        &catalogue,
+        &literal,
+        "file:///p/product.gdl",
+        &mut diagnostics,
+    );
+    assert!(
+        diagnostics.has_errors(),
+        "a warning here would let the lock be written"
+    );
+}
+
+/// The refusal names the variable, because the author's next act is to type it.
+#[test]
+fn the_refusal_spells_the_environment_variable() {
+    let catalogue = catalogue_with_a_secret();
+    let intent = intent("password", serde_json::json!("hunter2"));
+    let mut diagnostics = Diagnostics::default();
+    check(
+        &catalogue,
+        &intent,
+        "file:///p/product.gdl",
+        &mut diagnostics,
+    );
+    let help = diagnostics.as_slice()[0].help.clone().unwrap_or_default();
+    assert!(help.contains("${DEMO_PASSWORD}"), "{help}");
+}
+
+/// A plugin's configuration is checked for credentials too.
+///
+/// It is the likeliest place for one -- an OIDC plugin's `client_secret` -- and
+/// until now nothing looked at plugin configuration at all. Only the credential
+/// rule reaches here; see `check_plugin_secrets` for why the unknown-key rule
+/// cannot follow yet.
+#[test]
+fn a_credential_on_a_plugin_is_refused_as_well() {
+    let mut catalogue = catalogue_with_a_secret();
+    let plugin_id = GearId::new("demo-plugin").unwrap();
+    let mut plugin = catalogue.gears[&GearId::new("demo").unwrap()].clone();
+    plugin.id = plugin_id.clone();
+    catalogue.gears.insert(plugin_id.clone(), plugin);
+
+    let mut intent = intent("bind_addr", serde_json::json!("0.0.0.0:1"));
+    intent.selected_gears[0]
+        .plugins
+        .push(gearbox_ir::PluginSelection {
+            gear: plugin_id,
+            config: [("password".to_owned(), serde_json::json!("hunter2"))]
+                .into_iter()
+                .collect(),
+            profiles: BTreeSet::new(),
+        });
+
+    assert_eq!(
+        codes_of(&catalogue, &intent),
+        vec![DiagnosticCode::GdlLiteralSecret]
+    );
 }

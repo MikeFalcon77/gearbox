@@ -107,23 +107,32 @@ test.describe("Git, from the VS Code extension", () => {
     // out even while the builder's changes are on screen. Selecting the builder
     // root and waiting for the probe row is the same claim, and it is stable
     // across run order.
-    await withDirtyRepo(join(IDE, ".."), async (marker) => {
-      await revealLeft(studio.page, /^Source Control/);
-      await studio.page
-        .locator(".theia-scm-repository-name", { hasText: "gearbox-builder" })
-        .click();
-      await expect
-        .poll(
-          async () => {
-            const panel = await studio.page
-              .locator("#theia-left-content-panel")
-              .innerText()
-              .catch(() => "");
-            return panel.includes(marker);
-          },
-          { timeout: 60_000 },
-        )
-        .toBe(true);
+    await revealLeft(studio.page, /^Source Control/);
+    await studio.page
+      .locator(".theia-scm-repository-name", { hasText: "gearbox-builder" })
+      .click();
+
+    // The *count*, not the probe's row. The change list is virtualized, so a row
+    // fifty entries down is not in the DOM at all -- and on a working tree with
+    // fifty other edits, which is every tree in the middle of a change, that is
+    // where the probe lands. Reading the panel's text for the marker therefore
+    // failed for a reason that had nothing to do with the claim. The count is
+    // rendered whatever the scroll position, and "it went up by one when a file
+    // appeared" is the same statement: a provider that registered but read
+    // nothing would show a number that never moves.
+    const changeCount = async () => {
+      const panel = await studio.page
+        .locator("#theia-left-content-panel")
+        .innerText()
+        .catch(() => "");
+      const seen = [...panel.matchAll(/CHANGES\s+(\d+)/g)].at(-1);
+      return seen ? Number(seen[1]) : -1;
+    };
+
+    const before = await changeCount();
+    expect(before).toBeGreaterThan(0);
+    await withDirtyRepo(join(IDE, ".."), async () => {
+      await expect.poll(changeCount, { timeout: 60_000 }).toBe(before + 1);
     });
   });
 

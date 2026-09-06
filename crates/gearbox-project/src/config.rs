@@ -236,6 +236,12 @@ fn serde_attrs(attrs: &[syn::Attribute]) -> SerdeAttrs {
                 && let Ok(lit) = value.parse::<syn::LitStr>()
             {
                 out.rename_all = Some(lit.value());
+            } else if meta.input.peek(syn::Token![=]) {
+                // Consume `serialize_with = "..."`, `skip_serializing_if = "..."`
+                // and any other `key = expr` so they do not abort the rest of
+                // the list -- an unknown form used to drop `rename` / `secret`
+                // that followed it.
+                let _ = meta.value()?.parse::<syn::Expr>()?;
             }
             Ok(())
         }));

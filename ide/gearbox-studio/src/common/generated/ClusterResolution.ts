@@ -3,4 +3,4 @@
 /**
  * What a cluster primitive resolved to.
  */
-export type ClusterResolution = { "via": "provider", name: string, } | { "via": "sdk-cas-default", over_cache: string, };
+export type ClusterResolution = { "via": "provider", name: string, } | { "via": "sdk-cas-default", over_cache: string, } | { "via": "unsatisfied" };

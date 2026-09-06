@@ -17,12 +17,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use gearbox_engine::generate::{GenerateInput, Generated, TemplateSet, base_root_for, generate};
+use gearbox_engine::generate::{
+    GenerateError, GenerateInput, Generated, TemplateSet, base_root_for, generate,
+};
 use gearbox_engine::{SourceRoot, load_catalogue, load_product};
 use gearbox_ir::{
-    ClusterPrimitive, ClusterResolution, FileAction, FileEntry, FileKind, FileSet, GearId,
-    InclusionReason, Ownership, ProfileId, RelPath, ResolvedClusterBinding, ResolvedGear,
-    ResolvedProduct, Selected, SourceId,
+    ClusterPrimitive, ClusterResolution, ConfigFieldDecl, ConfigFieldType, DiagnosticCode,
+    FileAction, FileEntry, FileKind, FileSet, GearId, InclusionReason, Ownership, ProcessKind,
+    ProfileId, RelPath, ResolvedClusterBinding, ResolvedGear, ResolvedProduct, Selected, SourceId,
 };
 
 fn gears_rust() -> Option<PathBuf> {
@@ -51,7 +53,10 @@ fn product_gdl() -> PathBuf {
 
 /// Resolve the demo product for one profile against the real tree.
 fn resolve(profile: &str) -> Option<(ResolvedProduct, BTreeMap<SourceId, PathBuf>)> {
-    let root = gears_rust()?;
+    let Some(root) = gears_rust() else {
+        eprintln!("skipping: gears-rust not present");
+        return None;
+    };
     let opened = vec![SourceRoot::open(SourceId::new("gears-rust").unwrap(), &root).unwrap()];
     let scan = load_catalogue(&opened);
 
@@ -100,6 +105,7 @@ fn generate_tree(
         source_roots,
         out_root: out,
         templates: TemplateSet::new(),
+        catalogue: None,
     })
     .expect("generation succeeds for the demo product")
 }
@@ -519,6 +525,38 @@ fn a_conflict_stops_the_whole_apply() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn a_write_failure_during_staging_leaves_the_live_tree() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let out = Out::new("staging-io");
+    let base = base_root_for(&out.root());
+    out.write("keep.txt", "live\n");
+
+    let files = one("new.txt", "generated\n", Ownership::Generated);
+
+    let meta = std::fs::metadata(out.root()).unwrap();
+    let original = meta.permissions();
+    let mut locked = original.clone();
+    locked.set_mode(0o555);
+    std::fs::set_permissions(out.root(), locked).unwrap();
+
+    let result = gearbox_engine::apply_generate(&files, &out.root(), &base);
+
+    std::fs::set_permissions(out.root(), original).unwrap();
+
+    assert!(
+        result.is_err(),
+        "a read-only output root must fail the apply"
+    );
+    assert_eq!(out.read("keep.txt"), "live\n");
+    assert!(
+        !out.root().join("new.txt").exists(),
+        "staging must not publish into a tree it could not finish writing"
+    );
+}
+
 #[test]
 fn plan_writes_nothing() {
     let out = Out::new("plan");
@@ -771,6 +809,7 @@ fn a_product_template_overrides_the_builtin() {
         source_roots: &source_roots,
         out_root: &out_root(),
         templates: TemplateSet::from_overrides(overrides),
+        catalogue: None,
     })
     .expect("generation succeeds with an overlay");
     let main = text(&generated.files, "processes/api-gateway/src/main.rs");
@@ -888,6 +927,27 @@ fn a_kubernetes_profile_generates_an_umbrella_and_a_subchart_per_process() {
         let values = text(&files.files, &format!("helm/{product}/values.yaml"));
         assert!(values.contains(&format!("{sub}:")), "{values}");
         assert!(values.contains("enabled: true"), "{values}");
+
+        let configmap = text(
+            &files.files,
+            &format!("helm/{product}/charts/{sub}/templates/configmap.yaml"),
+        );
+        assert!(
+            configmap.contains(".Files.Get"),
+            "config YAML must not be inlined into a Helm template:\n{configmap}"
+        );
+        assert!(
+            !configmap.contains("home_dir:"),
+            "inlined config would be evaluated as Helm:\n{configmap}"
+        );
+        let packed = text(
+            &files.files,
+            &format!("helm/{product}/charts/{sub}/files/{}.yaml", process.name),
+        );
+        assert!(
+            packed.contains("gears:"),
+            "the chart files/ copy is what ConfigMap reads:\n{packed}"
+        );
     }
 
     let gateway_config = text(&files.files, "config/api-gateway.yaml");
@@ -1154,6 +1214,136 @@ fn generated_values_name_a_secret_and_never_contain_one() {
     assert!(!config.contains("supersecret"), "{config}");
 }
 
+/// A catalogue `secret` field must not reach the generated YAML as plaintext.
+///
+/// `secret_vars` only harvests `${VAR}` placeholders. Without rewriting the
+/// literal, a `ConfigField.secret` password would sit in the `ConfigMap`, the
+/// image, and `values.yaml`.
+#[test]
+fn a_secret_config_field_becomes_an_env_placeholder() {
+    let Some(root) = gears_rust() else {
+        eprintln!("skipping: ../gears-rust not present");
+        return;
+    };
+    let opened = vec![SourceRoot::open(SourceId::new("gears-rust").unwrap(), &root).unwrap()];
+    let scan = load_catalogue(&opened);
+    let Some((mut lock, source_roots)) = resolve("dev") else {
+        return;
+    };
+
+    let gear_id = GearId::new("api-gateway").unwrap();
+    let mut catalogue = scan.catalogue;
+    let Some(descriptor) = catalogue.gears.get_mut(&gear_id) else {
+        panic!("api-gateway is in the demo catalogue");
+    };
+    let schema = descriptor
+        .config_schema
+        .get_or_insert_with(|| gearbox_ir::ConfigSchema {
+            rust: "ApiGatewayConfig".to_owned(),
+            fields: Vec::new(),
+        });
+    schema.fields.push(ConfigFieldDecl {
+        name: "password".to_owned(),
+        ty: ConfigFieldType::Str,
+        required: false,
+        default: None,
+        doc: None,
+        secret: true,
+    });
+    schema.fields.push(ConfigFieldDecl {
+        name: "visible".to_owned(),
+        ty: ConfigFieldType::Str,
+        required: false,
+        default: None,
+        doc: None,
+        secret: false,
+    });
+
+    let gear = lock
+        .gears
+        .get_mut(&gear_id)
+        .expect("api-gateway is in the lock");
+    gear.config
+        .insert("password".to_owned(), serde_json::json!("supersecret"));
+    gear.config
+        .insert("visible".to_owned(), serde_json::json!("ok"));
+
+    let generated = generate(&GenerateInput {
+        lock: &lock,
+        source_roots: &source_roots,
+        out_root: &out_root(),
+        templates: TemplateSet::new(),
+        catalogue: Some(&catalogue),
+    })
+    .expect("generation succeeds");
+    let config = text(&generated.files, "config/api-gateway.yaml");
+    assert!(
+        config.contains("${API_GATEWAY_PASSWORD}"),
+        "the secret field must become an env placeholder:\n{config}"
+    );
+    assert!(!config.contains("supersecret"), "{config}");
+
+    // The lock beside it, which is the file people commit. Redaction used to
+    // live inside the configuration generator, so `config/<p>.yaml` came out
+    // clean while `product.lock` in the same directory kept the password --
+    // measured, not supposed. `write_canonical` recomputes the hash from what it
+    // is given, so the rewritten lock still verifies against itself.
+    let lock_text = text(&generated.files, "product.lock");
+    assert!(
+        !lock_text.contains("supersecret"),
+        "the generated lock still carries the credential:\n{lock_text}"
+    );
+    gearbox_lock::read(lock_text).expect("the redacted lock must still verify its own hash");
+
+    // And it says so. A value replaced in silence leaves the operator with a
+    // product that starts with an empty password and nothing to read about why.
+    assert!(
+        generated
+            .diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::GenLiteralSecretInLock),
+        "generation must report the replacement: {:?}",
+        generated.diagnostics.as_slice()
+    );
+
+    assert!(
+        config.contains("visible: ok") || config.contains("visible: \"ok\""),
+        "non-secret fields stay as written:\n{config}"
+    );
+}
+
+#[test]
+fn a_helm_mustache_in_prefix_path_is_refused() {
+    let Some((mut lock, source_roots)) = resolve("prod") else {
+        return;
+    };
+    let host = lock
+        .processes
+        .iter()
+        .find(|p| p.kind == ProcessKind::Host)
+        .expect("a host process");
+    let rest_host = host.rest_host.clone().expect("the host names a REST gear");
+    lock.gears
+        .get_mut(&rest_host)
+        .expect("the rest host is in the lock")
+        .config
+        .insert(
+            "prefix_path".to_owned(),
+            serde_json::json!("{{.Values.evil}}"),
+        );
+
+    let Err(err) = generate(&GenerateInput {
+        lock: &lock,
+        source_roots: &source_roots,
+        out_root: &out_root(),
+        templates: TemplateSet::new(),
+        catalogue: None,
+    }) else {
+        panic!("mustache in a probe path is Helm injection");
+    };
+    assert!(matches!(err, GenerateError::UnsafeHelm { .. }), "{err}");
+}
+
 fn generated_with_cluster_secret() -> Option<(ResolvedProduct, Generated)> {
     let (mut lock, source_roots) = resolve("prod")?;
     let root = gears_rust()?;
@@ -1262,6 +1452,7 @@ fn host_probes_follow_the_rest_prefix_and_worker_probes_do_not() {
         source_roots: &roots,
         out_root: &out_root(),
         templates: TemplateSet::new(),
+        catalogue: None,
     })
     .expect("generation succeeds")
     .files;

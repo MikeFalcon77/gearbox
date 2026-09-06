@@ -741,9 +741,17 @@ function profileFields(
  * a provider.
  */
 function describeClusterResolution(resolution: ClusterResolution): string {
-  return resolution.via === "provider"
-    ? resolution.name
-    : `sdk cas default over ${resolution.over_cache}`;
+  switch (resolution.via) {
+    case "provider":
+      return resolution.name;
+    case "sdk-cas-default":
+      return `sdk cas default over ${resolution.over_cache}`;
+    // A named provider with an empty name used to stand here, which read as a
+    // provider called nothing. A switch rather than a ternary so the next
+    // variant is a compile error in this file instead of a blank cell.
+    case "unsatisfied":
+      return "unsatisfied";
+  }
 }
 
 /** `auto` means "you decide", so it has no value to print. */

@@ -144,3 +144,30 @@ fn toml_comments_do_not_confuse_the_parser() {
     // need no special stripping, but this pins the assumption down.
     gearbox_lock::read(&text).unwrap();
 }
+
+#[test]
+fn read_returns_canonical_collections() {
+    let mut canonical = support::fixture();
+    gearbox_lock::canonicalize_order(&mut canonical);
+    canonical.product.lock_hash = gearbox_lock::compute_hash(&canonical).unwrap();
+
+    // Seed 8 moves both the process list and the diagnostics. That is not a
+    // detail: with two processes a shuffle leaves them in place half the time,
+    // and an earlier version of this test used a seed that did exactly that --
+    // it passed against the defect it was written to catch. The assertion below
+    // is total for the same reason, so no future seed can make it vacuous.
+    let mut shuffled = canonical.clone();
+    support::shuffle_orderings(&mut shuffled, 8);
+    let text = toml::to_string_pretty(&shuffled).unwrap();
+    assert_ne!(
+        text,
+        toml::to_string_pretty(&canonical).unwrap(),
+        "the shuffle must actually reorder something, or this test proves nothing"
+    );
+
+    let parsed = gearbox_lock::read(&text).unwrap();
+    assert_eq!(
+        parsed, canonical,
+        "read() must return the ordering it hashed, not the one the file happened to carry"
+    );
+}

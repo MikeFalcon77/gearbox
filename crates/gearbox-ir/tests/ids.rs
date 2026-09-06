@@ -234,9 +234,23 @@ fn rel_paths_are_relative_normalized_and_contained() {
     assert!(RelPath::here().is_here());
     assert_eq!(RelPath::new("./").unwrap().as_str(), ".");
 
-    for bad in ["/abs/path", "../escape", "gears/../../escape", "a\\b", ""] {
+    for bad in [
+        "/abs/path",
+        "../escape",
+        "gears/../../escape",
+        "a\\b",
+        "",
+        "C:",
+        "C:/windows",
+        "C:foo",
+        "gears/C:escape",
+    ] {
         assert!(RelPath::new(bad).is_err(), "RelPath accepted `{bad}`");
     }
+    assert!(
+        RelPath::here().resolve("C:/abs").is_err(),
+        "resolve must refuse a Windows drive"
+    );
 }
 
 #[test]

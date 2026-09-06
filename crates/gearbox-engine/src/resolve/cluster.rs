@@ -69,6 +69,7 @@ pub fn resolve(
             .iter()
             .filter(|b| b.scope == scope)
             .map(|b| b.resolved.effective_provider().to_owned())
+            .filter(|name| !name.is_empty())
             .collect();
 
         let declared = scoped
@@ -199,7 +200,7 @@ fn explicit(
     diagnostics: &mut Diagnostics,
 ) -> (ClusterResolution, Selected<String>) {
     let registered = ctx.providers.iter().any(|p| p.name == request.provider);
-    if !registered {
+    let selected = if !registered {
         diagnostics.push(
             Diagnostic::error(
                 DiagnosticCode::ClusterUnregisteredProvider,
@@ -211,15 +212,25 @@ fn explicit(
             )
             .at(loc(ctx.uri)),
         );
+        Selected::downgraded(
+            request.provider.clone(),
+            DiagnosticCode::ClusterUnregisteredProvider,
+        )
     } else if !candidates.iter().any(|p| p.name == request.provider) {
         diagnostics.push(unsatisfiable(ctx, Some(&request.provider)));
-    }
+        Selected::downgraded(
+            request.provider.clone(),
+            DiagnosticCode::ClusterUnsatisfiable,
+        )
+    } else {
+        Selected::honoured(request.provider.clone())
+    };
 
     (
         ClusterResolution::Provider {
             name: request.provider.clone(),
         },
-        Selected::honoured(request.provider.clone()),
+        selected,
     )
 }
 
@@ -288,12 +299,7 @@ fn automatic(
     }
 
     diagnostics.push(unsatisfiable(ctx, None));
-    (
-        ClusterResolution::Provider {
-            name: String::new(),
-        },
-        Selected::auto(),
-    )
+    (ClusterResolution::Unsatisfied, Selected::auto())
 }
 
 /// Deterministic ranking. No scoring, no search.

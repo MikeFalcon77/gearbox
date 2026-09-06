@@ -24,7 +24,7 @@ fn file(src: &str) -> RustFile {
 
 fn tree(rel: &str) -> Option<Vec<RustFile>> {
     let dir = crate::test_corpus::corpus(rel)?;
-    scan_crate(&dir).ok()
+    Some(scan_crate(&dir).unwrap_or_else(|e| panic!("scan {rel}: {e}")))
 }
 
 macro_rules! require {

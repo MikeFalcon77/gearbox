@@ -81,11 +81,16 @@ test.describe("diagnostics reach a person", () => {
     const dev = await problems(studio.page);
 
     expect(devShown).not.toBe(prodShown);
+    // This is the anti-leak assertion, and it is the whole guard: a marker left
+    // over from `prod` would make the count exceed what `dev` puts on screen.
     expect(dev.markers.length).toBe(devShown);
-    // And the specific ones are gone, not merely fewer.
-    for (const stale of prod.markers) {
-      expect(dev.markers).not.toContain(stale);
-    }
+    // And at least one of prod's really went, so two identical sets could not
+    // satisfy the line above by accident.
+    expect(prod.markers.some((marker) => !dev.markers.includes(marker))).toBe(true);
+    // Deliberately *not* "every prod marker is gone". A diagnostic both profiles
+    // report -- GBX0410 says `prefer.fewer_processes` is not honoured, and the
+    // description declares it whatever the profile -- is not stale, and demanding
+    // its removal made this claim fail the day such a diagnostic first existed.
   });
 
   test.fixme(

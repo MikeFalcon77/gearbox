@@ -23,7 +23,7 @@ use starlark::syntax::AstModule;
 
 use crate::declarative::{dialect, scan_forbidden_tokens};
 use crate::globals::gear_globals;
-use crate::loader::{GdlLoader, is_load_escape};
+use crate::loader::{FORBIDDEN_RECORDED, GdlLoader, apply_eval_limits, is_load_escape};
 use crate::sink::{GdlSink, GearDecl};
 
 /// Where a GDL file came from, as far as the catalogue is concerned.
@@ -211,6 +211,7 @@ fn evaluate<T>(
 
     let eval_err = Module::with_temp_heap(|module| {
         let mut eval = Evaluator::new(&module);
+        apply_eval_limits(&mut eval);
         eval.extra = Some(&sink);
         if let Some(loader) = loader.as_ref() {
             eval.set_loader(loader);
@@ -219,9 +220,16 @@ fn evaluate<T>(
     });
 
     let mut diagnostics = sink.take_diagnostics();
+    if let Some(loader) = loader.as_ref() {
+        diagnostics.extend(loader.take_diagnostics());
+    }
 
     if let Some(e) = eval_err {
-        diagnostics.push(starlark_error(&identity.uri, &e, classify(&e)));
+        // Fragment GBX0103 findings are already in `diagnostics`; restating
+        // them as a parent-file GBX0102 would hide the real span.
+        if !e.to_string().contains(FORBIDDEN_RECORDED) {
+            diagnostics.push(starlark_error(&identity.uri, &e, classify(&e)));
+        }
         diagnostics.finish();
         return Err(diagnostics);
     }
@@ -293,11 +301,16 @@ fn starlark_error(uri: &str, error: &starlark::Error, code: DiagnosticCode) -> D
 
     let mut diagnostic = Diagnostic::error(code, message, help);
     if let Some(span) = error.span() {
+        // The span names the file that failed, which for `load()` is the
+        // fragment, not the parent. Attributing a fragment error to the
+        // loading file is how an editor opens the wrong document.
+        let file = span.filename();
+        let at = if file.is_empty() { uri } else { file };
         // starlark's ResolvedPos is 0-based, like LSP and like our own Position,
         // so this is a field copy rather than arithmetic.
         let resolved = span.resolve_span();
         diagnostic = diagnostic.at(Location::new(
-            uri.to_owned(),
+            at.to_owned(),
             Range::new(
                 gearbox_ir::Position::new(
                     u32::try_from(resolved.begin.line).unwrap_or(u32::MAX),

@@ -26,12 +26,12 @@ fn file(src: &str) -> RustFile {
 /// The plugin crate directories, when the sibling checkout is present.
 fn plugin(name: &str) -> Option<Vec<RustFile>> {
     let dir = crate::test_corpus::corpus(&format!("gears/system/cluster/plugins/{name}"))?;
-    scan_crate(&dir).ok()
+    Some(scan_crate(&dir).unwrap_or_else(|e| panic!("scan plugin {name}: {e}")))
 }
 
 fn cluster_crate() -> Option<Vec<RustFile>> {
     let dir = crate::test_corpus::corpus("gears/system/cluster/cluster")?;
-    scan_crate(&dir).ok()
+    Some(scan_crate(&dir).unwrap_or_else(|e| panic!("scan cluster: {e}")))
 }
 
 macro_rules! require {

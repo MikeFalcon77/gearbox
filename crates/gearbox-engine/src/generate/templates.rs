@@ -53,7 +53,7 @@
 //!   `liveness_path`, `readiness_path`, `home_dir`, `container_ports`
 //! - `helm/service.yaml`: `name`, `service_name`, `ports`, `cluster_service`,
 //!   `cluster_port`
-//! - `helm/configmap.yaml`: `name`, `config_filename`, `config_yaml`
+//! - `helm/configmap.yaml`: `name`, `config_filename`
 //! - `helm/serviceaccount.yaml`: `name`
 //!
 //! This table is checked against the code by
@@ -99,10 +99,7 @@ const HELM_CONTEXT_DOC: &[(&str, &[&str])] = &[
             "cluster_port",
         ],
     ),
-    (
-        "helm/configmap.yaml",
-        &["name", "config_filename", "config_yaml"],
-    ),
+    ("helm/configmap.yaml", &["name", "config_filename"]),
     ("helm/serviceaccount.yaml", &["name"]),
 ];
 

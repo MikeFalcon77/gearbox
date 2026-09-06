@@ -23,6 +23,7 @@ pub mod plugin_select;
 pub mod product;
 pub mod resolve;
 pub mod scans;
+pub mod secrets;
 pub mod source;
 pub mod undescribed;
 pub mod validate;

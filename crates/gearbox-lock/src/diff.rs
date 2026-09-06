@@ -156,7 +156,11 @@ impl LockDiff {
             ));
         }
         if let Some((before, after)) = self.diagnostics_changed {
-            lines.push(format!("~ diagnostics: {before} -> {after}"));
+            if before == after {
+                lines.push(format!("~ diagnostics changed ({before})"));
+            } else {
+                lines.push(format!("~ diagnostics: {before} -> {after}"));
+            }
         }
 
         marked(
@@ -256,55 +260,87 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
         }
     };
 
+    // Destructure so a new lock field is a compile error here, not a silent
+    // "unchanged". Collections and diagnostics have their own lists; profile
+    // is `profile_changed`.
+    let gearbox_ir::ResolvedProduct {
+        schema_version: before_schema,
+        product: before_header,
+        kubernetes: before_k8s,
+        sources: _,
+        gears: _,
+        processes: _,
+        bindings: _,
+        cluster: _,
+        cuttable_if_declared: _,
+        provenance: _,
+        diagnostics: _,
+    } = before;
+    let gearbox_ir::ResolvedProduct {
+        schema_version: after_schema,
+        product: after_header,
+        kubernetes: after_k8s,
+        sources: _,
+        gears: _,
+        processes: _,
+        bindings: _,
+        cluster: _,
+        cuttable_if_declared: _,
+        provenance: _,
+        diagnostics: _,
+    } = after;
+
     compare(
         "schema_version",
-        before.schema_version.to_string(),
-        after.schema_version.to_string(),
-    );
-    compare(
-        "product.id",
-        before.product.id.clone(),
-        after.product.id.clone(),
-    );
-    compare(
-        "product.version",
-        before.product.version.clone(),
-        after.product.version.clone(),
-    );
-    compare(
-        "product.profile_kind",
-        before.product.profile_kind.clone(),
-        after.product.profile_kind.clone(),
-    );
-    compare(
-        "product.gearbox_version",
-        before.product.gearbox_version.clone(),
-        after.product.gearbox_version.clone(),
-    );
-    compare(
-        "product.lock_hash",
-        before.product.lock_hash.clone(),
-        after.product.lock_hash.clone(),
+        before_schema.to_string(),
+        after_schema.to_string(),
     );
 
-    let kubernetes = |p: &ResolvedProduct, f: fn(&gearbox_ir::KubernetesSettings) -> String| {
-        p.kubernetes.as_ref().map_or_else(String::new, f)
+    let header_scalars = |header: &gearbox_ir::ResolvedProductHeader| {
+        let gearbox_ir::ResolvedProductHeader {
+            id,
+            version,
+            profile: _,
+            profile_kind,
+            gearbox_version,
+            lock_hash,
+        } = header;
+        (
+            id.clone(),
+            version.clone(),
+            profile_kind.clone(),
+            gearbox_version.clone(),
+            lock_hash.clone(),
+        )
     };
-    compare(
-        "kubernetes.namespace",
-        kubernetes(before, |k| k.namespace.clone().unwrap_or_default()),
-        kubernetes(after, |k| k.namespace.clone().unwrap_or_default()),
-    );
-    compare(
-        "kubernetes.image_registry",
-        kubernetes(before, |k| k.image_registry.clone().unwrap_or_default()),
-        kubernetes(after, |k| k.image_registry.clone().unwrap_or_default()),
-    );
-    compare(
-        "kubernetes.discovery",
-        kubernetes(before, |k| k.discovery.as_str().to_owned()),
-        kubernetes(after, |k| k.discovery.as_str().to_owned()),
-    );
+    let (bid, bver, bkind, beng, bhash) = header_scalars(before_header);
+    let (aid, aver, akind, aeng, ahash) = header_scalars(after_header);
+    compare("product.id", bid, aid);
+    compare("product.version", bver, aver);
+    compare("product.profile_kind", bkind, akind);
+    compare("product.gearbox_version", beng, aeng);
+    compare("product.lock_hash", bhash, ahash);
+
+    let k8s_scalars = |settings: Option<&gearbox_ir::KubernetesSettings>| {
+        let Some(gearbox_ir::KubernetesSettings {
+            namespace,
+            image_registry,
+            discovery,
+        }) = settings
+        else {
+            return (String::new(), String::new(), String::new());
+        };
+        (
+            namespace.clone().unwrap_or_default(),
+            image_registry.clone().unwrap_or_default(),
+            discovery.as_str().to_owned(),
+        )
+    };
+    let (bns, breg, bdisc) = k8s_scalars(before_k8s.as_ref());
+    let (ans, areg, adisc) = k8s_scalars(after_k8s.as_ref());
+    compare("kubernetes.namespace", bns, ans);
+    compare("kubernetes.image_registry", breg, areg);
+    compare("kubernetes.discovery", bdisc, adisc);
 
     out.sort();
     out

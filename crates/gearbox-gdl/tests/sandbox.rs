@@ -154,8 +154,12 @@ gear(package = cargo(crate_name = "c", lib = "c"))
         "a conditional in a fragment must be rejected"
     );
     assert!(
-        codes.iter().all(|c| *c == DiagnosticCode::GdlEval),
-        "reported as an eval failure naming the fragment: {codes:?}"
+        codes.contains(&DiagnosticCode::GdlForbiddenConstruct),
+        "a fragment conditional is GBX0103 with the fragment's own span, not a parent-file GBX0102: {codes:?}"
+    );
+    assert!(
+        !codes.contains(&DiagnosticCode::GdlEval),
+        "must not also restated as GBX0102: {codes:?}"
     );
 }
 

@@ -10,4 +10,4 @@ metadata:
   {{- end }}
 data:
   << config_filename >>: |
-<< config_yaml >>
+{{ .Files.Get "files/<< config_filename >>" | indent 4 }}

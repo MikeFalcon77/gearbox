@@ -38,6 +38,9 @@ pub fn run(
 ) -> anyhow::Result<ExitCode> {
     let opened = open_roots(roots, source_id)?;
     let scan = gearbox_engine::load_catalogue(&opened);
+    if let Some(code) = crate::refuse_catalogue_errors(&scan.catalogue) {
+        return Ok(code);
+    }
 
     let product_file = product_file
         .canonicalize()
@@ -93,7 +96,13 @@ pub fn run(
         source_roots: &source_roots,
         out_root: &out_root,
         templates,
+        catalogue: Some(&scan.catalogue),
     })?;
+
+    // Generation's own diagnostics, before the plan's: a credential replaced in
+    // the lock is something the operator must act on, and computing it without
+    // reporting it is the mistake `overridden_templates` already made once.
+    diagnostics.extend(generated.diagnostics.as_slice().iter().cloned());
 
     let (plans, apply_diagnostics, written) = if dry_run {
         let (plans, diagnostics) =

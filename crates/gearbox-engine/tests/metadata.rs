@@ -17,14 +17,14 @@ use gearbox_engine::{SourceRoot, load_catalogue};
 use gearbox_ir::{Catalogue, GearId, Severity, SourceId};
 
 fn gears_rust() -> Option<PathBuf> {
-    let candidate = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .map(|p| p.join("../gears-rust"))?;
-    candidate
-        .canonicalize()
-        .ok()
-        .filter(|p| p.join("gears").is_dir())
+    let mut dir: &Path = Path::new(env!("CARGO_MANIFEST_DIR"));
+    loop {
+        let candidate = dir.join("gears-rust");
+        if candidate.join("gears").is_dir() {
+            return candidate.canonicalize().ok();
+        }
+        dir = dir.parent()?;
+    }
 }
 
 fn catalogue() -> Option<Catalogue> {

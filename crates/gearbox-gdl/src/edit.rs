@@ -36,7 +36,7 @@ pub use edit_call::{
     set_profile_field,
 };
 
-use gearbox_ir::{Diagnostic, DiagnosticCode, Diagnostics, Location, Position, Range};
+use gearbox_ir::{Diagnostic, DiagnosticCode, Diagnostics, Location};
 use starlark::syntax::AstModule;
 use starlark_syntax::codemap::{Pos, Span};
 use starlark_syntax::syntax::ast::{ArgumentP, AstExprP, AstStmtP, ExprP, StmtP};
@@ -80,7 +80,11 @@ pub fn add_gear(uri: &str, source: &str, gear: &str, source_id: &str) -> Result<
         return Ok(Edit::Unchanged);
     }
 
-    let entry = format!("use_gear(\"{gear}\", source = \"{source_id}\")");
+    let entry = format!(
+        "use_gear({}, source = {})",
+        quote_string(gear),
+        quote_string(source_id)
+    );
     Ok(Edit::Changed {
         source: insert_entry(source, &list, &entry),
     })
@@ -92,17 +96,22 @@ pub fn add_gear(uri: &str, source: &str, gear: &str, source_id: &str) -> Result<
 /// As [`add_gear`].
 pub fn remove_gear(uri: &str, source: &str, gear: &str) -> Result<Edit, Diagnostics> {
     let list = gears_list(uri, source)?;
-    let Some(target) = list
+    let mut targets: Vec<_> = list
         .entries
         .iter()
         .copied()
-        .find(|entry| names_gear(source, *entry, gear))
-    else {
+        .filter(|entry| names_gear(source, *entry, gear))
+        .collect();
+    if targets.is_empty() {
         return Ok(Edit::Unchanged);
-    };
-    Ok(Edit::Changed {
-        source: remove_entry(source, target),
-    })
+    }
+    // From the end so earlier spans stay valid after each cut.
+    targets.sort_by_key(|span| offset(span.begin(), source));
+    let mut text = source.to_owned();
+    for target in targets.into_iter().rev() {
+        text = remove_entry(&text, target);
+    }
+    Ok(Edit::Changed { source: text })
 }
 
 /// A named list argument on `product(...)`, located.
@@ -121,8 +130,9 @@ pub(crate) fn named_list_literal(
 ) -> Result<NamedList, Diagnostics> {
     let ast = AstModule::parse(uri, source.to_owned(), &dialect())
         .map_err(|e| {
-            refuse(
+            refuse_with(
                 uri,
+                DiagnosticCode::GdlParse,
                 &format!("`{uri}` does not parse: {e}"),
                 "fix the description before editing it; an edit cannot be placed in a file whose shape is unknown",
             )
@@ -311,26 +321,20 @@ fn indent_of(source: &str, span: Span) -> String {
 
 /// A refusal, pointing at the file rather than at a position inside it.
 ///
-/// No range: the reason is about the file's shape, not about one token, and a
-/// span pointing at byte zero would claim more precision than there is. `help` is
-/// not optional -- `Diagnostic::error` requires it, which is
-/// `cpt-gearbox-nfr-actionable-diagnostics` enforced by the type rather than by a
-/// review comment.
+/// Shape problems are not parse errors: the file may be valid Starlark that
+/// simply is not a product this editor can rewrite. `Location::file` carries
+/// no interesting span -- inventing byte zero would claim more precision than
+/// there is. `help` is not optional -- `Diagnostic::error` requires it, which
+/// is `cpt-gearbox-nfr-actionable-diagnostics` enforced by the type.
 pub(crate) fn refuse(uri: &str, message: &str, help: &str) -> Diagnostics {
-    let zero = Position {
-        line: 0,
-        character: 0,
-    };
-    let mut diagnostics: Diagnostics = [Diagnostic::error(DiagnosticCode::GdlParse, message, help)
-        .at(Location::new(
-            uri.to_owned(),
-            Range {
-                start: zero,
-                end: zero,
-            },
-        ))]
-    .into_iter()
-    .collect();
+    refuse_with(uri, DiagnosticCode::GdlCardinality, message, help)
+}
+
+fn refuse_with(uri: &str, code: DiagnosticCode, message: &str, help: &str) -> Diagnostics {
+    let mut diagnostics: Diagnostics =
+        [Diagnostic::error(code, message, help).at(Location::file(uri.to_owned()))]
+            .into_iter()
+            .collect();
     diagnostics.finish();
     diagnostics
 }

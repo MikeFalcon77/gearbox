@@ -57,6 +57,17 @@ pub fn project_manifest(dir: &Path) -> Result<CrateManifest, ManifestError> {
     let path = dir.join("Cargo.toml");
     let display = path.display().to_string();
 
+    if let Ok(meta) = std::fs::symlink_metadata(&path)
+        && meta.file_type().is_symlink()
+    {
+        return Err(ManifestError::Unreadable {
+            path: display,
+            message: "Cargo.toml is a symlink; a crate may only be read through a real \
+                      manifest inside its source root"
+                .to_owned(),
+        });
+    }
+
     let text = std::fs::read_to_string(&path).map_err(|e| ManifestError::Unreadable {
         path: display.clone(),
         message: e.to_string(),

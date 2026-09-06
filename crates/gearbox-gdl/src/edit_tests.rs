@@ -8,6 +8,8 @@
 
 use starlark::syntax::AstModule;
 
+use gearbox_ir::DiagnosticCode;
+
 use super::*;
 
 /// The identity the round-trip test evaluates a product under.
@@ -164,6 +166,37 @@ fn removing_takes_the_comma_and_the_line_with_it() {
     assert_eq!(edited.lines().count(), COMMENTED.lines().count() - 1);
     // And the comment above the list is not collateral damage.
     assert!(edited.contains("# Note what is NOT listed"), "{edited}");
+}
+
+#[test]
+fn removing_a_gear_takes_every_matching_entry() {
+    let source = r#"product(
+    gears = [
+        use_gear("twice", source = "a"),
+        use_gear("keep", source = "a"),
+        use_gear("twice", source = "b"),
+    ],
+)
+"#;
+    let edited = remove_gear(URI, source, "twice")
+        .expect("editable")
+        .changed()
+        .expect("changed")
+        .to_owned();
+    assert!(!edited.contains("twice"), "{edited}");
+    assert!(edited.contains("keep"), "{edited}");
+}
+
+#[test]
+fn a_shape_refusal_is_not_a_parse_error() {
+    let diagnostics = add_gear(URI, "gear(name = \"g\")\n", "a", "s").expect_err("not a product");
+    assert!(
+        diagnostics
+            .as_slice()
+            .iter()
+            .any(|d| d.code == DiagnosticCode::GdlCardinality && d.location.is_some()),
+        "{diagnostics:?}"
+    );
 }
 
 #[test]
@@ -647,6 +680,86 @@ fn computed_profiles_list_is_refused() {
 fn quote_string_escapes_control_chars() {
     assert_eq!(quote_string("a\"b\\c"), r#""a\"b\\c""#);
     assert_eq!(quote_string("a\nb"), "\"a\\nb\"");
+}
+
+#[test]
+fn add_gear_quotes_injection_payloads() {
+    let payloads = [r#"x"), use_gear("y"#, "a\"b", "a\nb"];
+    for gear in payloads {
+        let edited = add_gear(URI, COMMENTED, gear, "gears-rust")
+            .expect("editable")
+            .changed()
+            .expect("changed")
+            .to_owned();
+        assert!(
+            edited.contains(&quote_string(gear)),
+            "payload `{gear:?}` was not quoted:\n{edited}"
+        );
+        gears_list(URI, &edited).expect("quoted add_gear must still parse");
+        assert!(
+            !edited.contains(r#"use_gear("y""#),
+            "payload `{gear:?}` injected an extra call:\n{edited}"
+        );
+    }
+}
+
+#[test]
+fn add_profile_refuses_constructor_injection() {
+    let diagnostics = add_profile(
+        URI,
+        WITH_CONFIG,
+        r#"kubernetes), use_gear("x""#,
+        "prod",
+        &[],
+    )
+    .expect_err("injected constructor");
+    assert!(
+        diagnostics
+            .as_slice()
+            .iter()
+            .any(|d| d.message.contains("not a deployment profile constructor")),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn add_profile_refuses_field_injection() {
+    let diagnostics = add_profile(
+        URI,
+        WITH_CONFIG,
+        "kubernetes",
+        "prod",
+        &[(r#"ns), use_gear("x""#.into(), "pay".into())],
+    )
+    .expect_err("injected field name");
+    assert!(
+        diagnostics
+            .as_slice()
+            .iter()
+            .any(|d| d.message.contains("not a valid profile field identifier")),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn render_template_does_not_interpolate_an_injected_kind() {
+    let text = render_product_template(&CreateProductParams {
+        id: "x".into(),
+        name: "n".into(),
+        version: "0.1.0".into(),
+        sources: vec![("gears-rust".into(), "gears".into())],
+        profile_kind: r#"kubernetes), use_gear("evil""#.into(),
+        profile_id: "dev".into(),
+    });
+    assert!(
+        !text.contains("use_gear"),
+        "injected constructor reached the template:\n{text}"
+    );
+    assert!(
+        text.contains("embedded(id = \"dev\")"),
+        "unknown kinds must fall back to a real constructor:\n{text}"
+    );
+    AstModule::parse(URI, text, &crate::declarative::dialect()).expect("template must parse");
 }
 
 #[test]

@@ -27,14 +27,14 @@ static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 /// The gear corpus, when it is checked out beside this repository.
 fn gears_rust() -> Option<PathBuf> {
-    let candidate = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .map(|p| p.join("../gears-rust"))?;
-    candidate
-        .canonicalize()
-        .ok()
-        .filter(|p| p.join("gears").is_dir())
+    let mut dir: &Path = Path::new(env!("CARGO_MANIFEST_DIR"));
+    loop {
+        let candidate = dir.join("gears-rust");
+        if candidate.join("gears").is_dir() {
+            return candidate.canonicalize().ok();
+        }
+        dir = dir.parent()?;
+    }
 }
 
 /// A copy of the demo product in a scratch directory.
