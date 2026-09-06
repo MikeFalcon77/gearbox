@@ -11,4 +11,17 @@ export type SpawnSpec = {
 /**
  * The gear whose runtime kind is set to out-of-process.
  */
-gear: GearId, executable_path: string, args?: Array<string>, working_directory?: string | null, environment?: { [key in string]: string }, };
+gear: GearId, 
+/**
+ * The binary the host starts, by name.
+ *
+ * **Not a path, and that is the correction.** Where the binary sits depends
+ * on where the tree was generated and on whether a shared Cargo target
+ * directory was declared -- neither of which the resolver knows. It used to
+ * write `{target_dir}/debug/{bin}` here, copying a string the description
+ * had expressed relative to *itself*; the runtime then resolved it relative
+ * to the host's working directory, which is the generated tree. The two
+ * bases differ by one level, so the host looked for the worker in a
+ * directory that does not exist.
+ */
+bin_name: string, args?: Array<string>, working_directory?: string | null, environment?: { [key in string]: string }, };

@@ -143,6 +143,33 @@ pub fn to_slash(path: &Path) -> String {
         .join("/")
 }
 
+/// `path` with `.` and `..` collapsed, without touching the filesystem.
+///
+/// [`relative`] compares components, so a target still carrying `..` shares a
+/// shorter prefix than it really does and the tail comes out verbatim --
+/// `../../Users/mike/.../products/payments-demo/../../../gears-rust`, which is
+/// both absurd and machine-specific in a file that gets committed. Lexical
+/// rather than `canonicalize` because the directory may not exist yet: a shared
+/// Cargo target directory is created by the first build, not by us.
+#[must_use]
+pub fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                // A `..` with nothing to pop is kept: dropping it would silently
+                // rewrite a path that climbs above its own root.
+                if !out.pop() {
+                    out.push(Component::ParentDir);
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

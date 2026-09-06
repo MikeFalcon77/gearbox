@@ -2,6 +2,7 @@
 import type { CutCandidate } from "./CutCandidate";
 import type { Diagnostics } from "./Diagnostics";
 import type { GearId } from "./GearId";
+import type { HostWorkersSettings } from "./HostWorkersSettings";
 import type { KubernetesSettings } from "./KubernetesSettings";
 import type { ProvenanceEdge } from "./ProvenanceEdge";
 import type { ResolvedBinding } from "./ResolvedBinding";
@@ -18,7 +19,11 @@ import type { SourceId } from "./SourceId";
  * Every collection is in canonical order, fixed by the resolver's final pass, so
  * two runs over the same inputs serialize identically.
  */
-export type ResolvedProduct = { schema_version: number, product: ResolvedProductHeader, kubernetes?: KubernetesSettings | null, sources: { [key in SourceId]: ResolvedSource }, gears: { [key in GearId]: ResolvedGear }, 
+export type ResolvedProduct = { schema_version: number, product: ResolvedProductHeader, kubernetes?: KubernetesSettings | null, 
+/**
+ * Present only for a `host_workers` profile.
+ */
+host_workers?: HostWorkersSettings | null, sources: { [key in SourceId]: ResolvedSource }, gears: { [key in GearId]: ResolvedGear }, 
 /**
  * Ordered by name.
  */

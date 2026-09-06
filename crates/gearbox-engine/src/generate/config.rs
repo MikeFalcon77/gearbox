@@ -134,7 +134,7 @@ pub fn app_config(
     write_endpoints(process, &mut gears);
     write_consumer_wiring(input, process, &mut gears);
     write_cluster(input, process, &mut gears);
-    write_spawns(process, &mut gears);
+    write_spawns(input, process, &mut gears);
 
     let home_dir = if input.lock.kubernetes.is_some() {
         // `readOnlyRootFilesystem` makes `~` unwritable; the chart mounts an
@@ -303,7 +303,11 @@ fn write_cluster(
 /// one place they differ: the host is configured to start a gear it does not
 /// contain. Looking the section up and skipping when absent, which is what this
 /// did, silently produced a host that started nothing.
-fn write_spawns(process: &ResolvedProcess, gears: &mut BTreeMap<String, GearSection>) {
+fn write_spawns(
+    input: &GenerateInput<'_>,
+    process: &ResolvedProcess,
+    gears: &mut BTreeMap<String, GearSection>,
+) {
     if !matches!(process.kind, ProcessKind::Host) {
         return;
     }
@@ -316,14 +320,14 @@ fn write_spawns(process: &ResolvedProcess, gears: &mut BTreeMap<String, GearSect
             });
         section.runtime = Some(RuntimeSection {
             kind: "oop",
-            execution: execution(spawn),
+            execution: execution(input, spawn),
         });
     }
 }
 
-fn execution(spawn: &SpawnSpec) -> ExecutionSection {
+fn execution(input: &GenerateInput<'_>, spawn: &SpawnSpec) -> ExecutionSection {
     ExecutionSection {
-        executable_path: spawn.executable_path.clone(),
+        executable_path: format!("{}/{}", super::workspace::target_dir(input), spawn.bin_name),
         args: spawn.args.clone(),
         working_directory: spawn.working_directory.clone(),
         environment: spawn.environment.clone(),

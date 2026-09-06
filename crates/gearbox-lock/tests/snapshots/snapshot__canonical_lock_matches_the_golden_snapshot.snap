@@ -12,7 +12,11 @@ version = "0.1.0"
 profile = "local"
 profile_kind = "host-workers"
 gearbox_version = "0.1.0"
-lock_hash = "blake3:0dd99b0779c6df3df354abbc0ebf073245c6ddd592f06bf1fa665df5de1dd819"
+lock_hash = "blake3:d0164b5ad74bafeb2dd67d50396ab7d26fe9cfa21c9f5fb1834be6ba89f46d47"
+
+[host_workers]
+target_dir = "../../../gears-rust/target"
+discovery = "directory"
 
 [sources.gears-rust]
 id = "gears-rust"
@@ -141,7 +145,7 @@ allow_loopback_advertise = false
 
 [[processes.spawns]]
 gear = "payments-audit"
-executable_path = "../../../gears-rust/target/debug/gbx-payments-audit"
+bin_name = "gbx-payments-audit"
 args = [
     "--config",
     "config/payments-audit.yaml",

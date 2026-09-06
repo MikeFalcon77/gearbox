@@ -96,6 +96,7 @@ pub fn run(
         source_roots: &source_roots,
         out_root: &out_root,
         templates,
+        product_dir: product_file.parent(),
         catalogue: Some(&scan.catalogue),
     })?;
 

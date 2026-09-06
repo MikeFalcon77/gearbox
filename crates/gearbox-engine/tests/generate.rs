@@ -105,6 +105,7 @@ fn generate_tree(
         source_roots,
         out_root: out,
         templates: TemplateSet::new(),
+        product_dir: None,
         catalogue: None,
     })
     .expect("generation succeeds for the demo product")
@@ -809,6 +810,7 @@ fn a_product_template_overrides_the_builtin() {
         source_roots: &source_roots,
         out_root: &out_root(),
         templates: TemplateSet::from_overrides(overrides),
+        product_dir: None,
         catalogue: None,
     })
     .expect("generation succeeds with an overlay");
@@ -1273,6 +1275,7 @@ fn a_secret_config_field_becomes_an_env_placeholder() {
         source_roots: &source_roots,
         out_root: &out_root(),
         templates: TemplateSet::new(),
+        product_dir: None,
         catalogue: Some(&catalogue),
     })
     .expect("generation succeeds");
@@ -1337,6 +1340,7 @@ fn a_helm_mustache_in_prefix_path_is_refused() {
         source_roots: &source_roots,
         out_root: &out_root(),
         templates: TemplateSet::new(),
+        product_dir: None,
         catalogue: None,
     }) else {
         panic!("mustache in a probe path is Helm injection");
@@ -1452,6 +1456,7 @@ fn host_probes_follow_the_rest_prefix_and_worker_probes_do_not() {
         source_roots: &roots,
         out_root: &out_root(),
         templates: TemplateSet::new(),
+        product_dir: None,
         catalogue: None,
     })
     .expect("generation succeeds")

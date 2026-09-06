@@ -1541,6 +1541,7 @@ fn prepare_generate(
         source_roots: &source_roots,
         out_root: &out_root,
         templates,
+        product_dir: Path::new(path).parent(),
         catalogue: state.catalogue.as_ref(),
     }) {
         Ok(generated) => generated,

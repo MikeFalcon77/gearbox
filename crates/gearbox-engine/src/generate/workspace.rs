@@ -3,7 +3,7 @@
 use gearbox_ir::{FileEntry, FileKind, Ownership, ResolvedProcess, ResolvedProduct};
 use serde::Serialize;
 
-use super::{GenerateError, header, paths};
+use super::{GenerateError, GenerateInput, header, paths};
 
 /// The toolchain the generated crates build with.
 ///
@@ -136,4 +136,70 @@ pub const fn package_edition() -> &'static str {
 
 pub const fn package_rust_version() -> &'static str {
     RUST_VERSION
+}
+
+/// Where `cargo build` in this tree puts binaries, relative to the tree root.
+///
+/// **One answer, used twice**, and that is the whole point of putting it here:
+/// the host's configuration names the worker's executable, and `.cargo/config.toml`
+/// tells cargo where to write it. Composing those separately is what broke --
+/// the resolver wrote a path the description had expressed relative to *itself*,
+/// while the runtime resolved it relative to the host's working directory, which
+/// is this tree. The two bases differed by one level and the host looked for the
+/// worker in a directory that does not exist.
+///
+/// `target` is Cargo's own default. A profile that declares `target_dir` gets
+/// that instead, so the corpus is not rebuilt for every product -- and because
+/// both consumers read this function, the two cannot disagree again.
+pub fn target_dir(input: &GenerateInput<'_>) -> String {
+    let profile = cargo_profile_dir(input);
+    match shared_target_dir(input) {
+        Some(shared) => format!("{shared}/{profile}"),
+        None => format!("target/{profile}"),
+    }
+}
+
+/// The declared shared target directory, expressed from this tree.
+///
+/// `None` when the profile declared none, or when no relative path from the
+/// output root to it exists -- on which see [`cargo_config`], which then writes
+/// nothing rather than a path cargo would resolve elsewhere.
+fn shared_target_dir(input: &GenerateInput<'_>) -> Option<String> {
+    let declared = input.lock.host_workers.as_ref()?.target_dir.as_deref()?;
+    let absolute = paths::normalize(&input.product_dir?.join(declared));
+    let relative = paths::relative(input.out_root, &absolute)?;
+    Some(paths::to_slash(&relative))
+}
+
+/// `.cargo/config.toml`, when the profile shares a target directory.
+///
+/// Measured, not assumed: a relative `build.target-dir` resolves against the
+/// directory holding `.cargo`, so a tree-relative path here means cargo and the
+/// generated configuration agree by construction.
+///
+/// # Errors
+/// Returns [`GenerateError`] when the path is not a valid relative path.
+pub fn cargo_config(input: &GenerateInput<'_>) -> Result<Option<FileEntry>, GenerateError> {
+    let Some(shared) = shared_target_dir(input) else {
+        return Ok(None);
+    };
+    let body = format!("{}[build]\ntarget-dir = \"{shared}\"\n", header("#"));
+    Ok(Some(FileEntry::text(
+        paths::rel(&[".cargo", "config.toml"])?,
+        body,
+        FileKind::Toml,
+        Ownership::Generated,
+    )))
+}
+
+/// Which Cargo profile directory the host should exec.
+///
+/// Kubernetes images are release artefacts; one-machine profiles run what the
+/// developer just built.
+fn cargo_profile_dir(input: &GenerateInput<'_>) -> &'static str {
+    if input.lock.kubernetes.is_some() {
+        "release"
+    } else {
+        "debug"
+    }
 }

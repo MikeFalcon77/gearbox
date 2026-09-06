@@ -138,7 +138,7 @@ fn gateway_process() -> ResolvedProcess {
         cargo_features: BTreeSet::new(),
         spawns: vec![SpawnSpec {
             gear: gid("payments-audit"),
-            executable_path: "../../../gears-rust/target/debug/gbx-payments-audit".to_owned(),
+            bin_name: "gbx-payments-audit".to_owned(),
             args: vec![
                 "--config".to_owned(),
                 "config/payments-audit.yaml".to_owned(),
@@ -300,6 +300,13 @@ fn diagnostics() -> Diagnostics {
 #[must_use]
 pub fn fixture() -> ResolvedProduct {
     ResolvedProduct {
+        // The fixture models a `host_workers` product -- it has a spawn -- so it
+        // carries the settings block too. `None` here would leave the golden
+        // lock silent about a section every such product now writes.
+        host_workers: Some(gearbox_ir::HostWorkersSettings {
+            target_dir: Some("../../../gears-rust/target".to_owned()),
+            discovery: gearbox_ir::Discovery::Directory,
+        }),
         schema_version: LOCK_SCHEMA_VERSION,
         product: ResolvedProductHeader {
             id: "payments-demo".to_owned(),

@@ -267,6 +267,7 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
         schema_version: before_schema,
         product: before_header,
         kubernetes: before_k8s,
+        host_workers: before_hw,
         sources: _,
         gears: _,
         processes: _,
@@ -280,6 +281,7 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
         schema_version: after_schema,
         product: after_header,
         kubernetes: after_k8s,
+        host_workers: after_hw,
         sources: _,
         gears: _,
         processes: _,
@@ -341,6 +343,24 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
     compare("kubernetes.namespace", bns, ans);
     compare("kubernetes.image_registry", breg, areg);
     compare("kubernetes.discovery", bdisc, adisc);
+
+    let hw_scalars = |settings: Option<&gearbox_ir::HostWorkersSettings>| {
+        let Some(gearbox_ir::HostWorkersSettings {
+            target_dir,
+            discovery,
+        }) = settings
+        else {
+            return (String::new(), String::new());
+        };
+        (
+            target_dir.clone().unwrap_or_default(),
+            discovery.as_str().to_owned(),
+        )
+    };
+    let (btd, bhd) = hw_scalars(before_hw.as_ref());
+    let (atd, ahd) = hw_scalars(after_hw.as_ref());
+    compare("host_workers.target_dir", btd, atd);
+    compare("host_workers.discovery", bhd, ahd);
 
     out.sort();
     out

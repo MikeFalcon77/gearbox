@@ -192,6 +192,19 @@ pub struct GenerateInput<'a> {
     /// about a different tree than the one `apply` writes from.
     pub templates: TemplateSet,
 
+    /// The directory holding `product.gdl`, absolute.
+    ///
+    /// The one base a description-relative path can be resolved against, and the
+    /// generator is the only place that has both it and `out_root`. The lock
+    /// keeps `target_dir` as the description spelled it -- putting a
+    /// machine-specific absolute path in a committed file would be worse than
+    /// the bug this fixes.
+    ///
+    /// Absent when the caller has no description on disk, which is every test
+    /// that builds a lock by hand; a shared target directory is then simply not
+    /// expressible and the tree uses Cargo's default.
+    pub product_dir: Option<&'a Path>,
+
     /// Catalogue used to honour `ConfigField.secret` at generate time.
     ///
     /// Absent in tests that do not exercise secret fields. Callers that have
@@ -243,6 +256,7 @@ pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
         source_roots: input.source_roots,
         out_root: input.out_root,
         templates: input.templates.clone(),
+        product_dir: input.product_dir,
         catalogue: input.catalogue,
     };
 
@@ -254,6 +268,9 @@ pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
     insert(&mut files, workspace::workspace_manifest(&processes)?)?;
     insert(&mut files, workspace::toolchain()?)?;
     insert(&mut files, workspace::lock_file(input.lock)?)?;
+    if let Some(cargo_config) = workspace::cargo_config(input)? {
+        insert(&mut files, cargo_config)?;
+    }
 
     for process in processes {
         insert(&mut files, manifest::process_manifest(input, process)?)?;

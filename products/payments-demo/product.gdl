@@ -51,9 +51,16 @@ product(
         # runtime, and is what GBX0512 refuses.
         use_gear("authn-resolver", source = "gears-rust",
             plugins = [
-                plugin("static-authn-plugin", profiles = ["dev"],
+                # `local` takes the static plugin for the same reason `dev`
+                # does: it is a one-machine development profile, and validating
+                # tokens against a real issuer there is a decision nobody wants.
+                # Moving it here was not cosmetic -- the host refused to start
+                # with `missing field jwt`, because `OidcAuthNGearConfig.jwt` has
+                # no default and `oidc-authn-plugin` does not expose it, so no
+                # description can supply it. Found by running the product.
+                plugin("static-authn-plugin", profiles = ["dev", "local"],
                        config = {"mode": "accept_all"}),
-                plugin("oidc-authn-plugin", profiles = ["local", "prod"],
+                plugin("oidc-authn-plugin", profiles = ["prod"],
                        config = {"issuer": "https://id.example.com"}),
             ],
         ),

@@ -1961,11 +1961,34 @@ workspace-member entries. Nothing else in that repo changes.
 | **M3** — **done** | `gearbox validate` | `gearbox validate --root ../gears-rust` → 0 errors, and with `--product` → 0 errors on the real product; GBX0208 and GBX0301 each proved against the real tree (`bss-ledger` is undescribed, `api-gatewey` is a typo); GBX0209 proved on temporary trees because the repository has no wrong declaration to point at; GBX0207 retired with a differential test in its place | M2, M8a |
 | **M4** — **done** | Resolver + explain + lock | all three profiles diff clean against `fixtures/*/product.lock`; every GBX03xx–06xx code reachable; determinism loop | M8a |
 | **M5** — **done** | Crate + config generators; **embedded runs** | acceptance §12 step 2 in full | — |
-| **M6** — **partly done** (§9.1) | Host-workers | generated worker crate, host spawn table and `oop_http` serving config all land, and both binaries compile. The live run — host spawns worker, `wire_outcome=Remote` — is not done, and `payments-audit` is not written: the corpus supplied a severable pair already | M7 |
+| **M6** — **done** | Host-workers | `make oop-run`: the generated host starts the generated worker, the worker serves its own probes, and the `PaymentApi@v1` binding resolves **remote through the directory**. `payments-audit` was never needed -- the corpus supplied a severable pair. The evidence is `readiness: dependency resolved`, not the `wire_outcome=Remote` line §12 named: that one is DEBUG and unreachable (the runtime builds its filter from the configuration's `logging` targets and `RUST_LOG` only caps it), while the readiness line is emitted **only** for a directory-resolved remote -- a local or statically-overridden dependency is marked resolved without ever reaching that loop | M7 |
 | **M7** — **done** | Docker + Helm + `values.schema.json` | acceptance §12 step 4 minus `kubeconform`/`kind` (neither is installed); `helm lint`/`helm template`, schema `--set` rejection, GBX0603, ConfigMap `api-contracts` | M6 |
 | **M8a** — **done** | JSON-RPC + TS types | `node ide/scripts/rpc-smoke.mjs` drives initialize → catalogue over real framing, 15/15; `cargo test -p gearbox-rpc`; stdout carries nothing but JSON-RPC | from M1 |
 | **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Inspector, Graph, Product, Conflicts, Lock, Generate, Start, the product header and the two working contexts are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Electron is still open | after M4 + M8a |
 | **M9** | **DESIGN + ADRs** (§14) — written *after* the prototype runs | reviewed against `docs/checklists/{DESIGN,ADR}.md`; every claim cites either a `gearbox-builder` symbol or a `gears-rust` `file:line`; every §13 gap has a home | — |
+
+**What M6 found by running, and could not have found any other way.**
+
+- **The worker's executable path was computed from the wrong base.** The resolver copied
+  `target_dir` -- which the description expresses relative to *itself* -- into `executable_path`,
+  and the runtime resolves that relative to the host's working directory, which is the generated
+  tree. The two differ by one level, so the host looked for the worker in a directory that does not
+  exist. The path is a fact about where the tree landed, not about the resolution, so it moved:
+  `SpawnSpec` carries `bin_name`, `target_dir` travels as a profile setting, and the generator
+  composes the path with the same function that writes `build.target-dir` into a generated
+  `.cargo/config.toml`. One function, so the two cannot disagree again.
+
+- **`plugin(config = {...})` was discarded in full.** `resolve::product` read `selected_gears` and
+  never descended into `plugins`, so a plugin's configuration reached neither the lock nor the
+  generated YAML. The demo product set `issuer` on `oidc-authn-plugin` and the file carried
+  `config: {}`; the host then refused to start on a field the description had supplied. Suspected
+  during the `cargo-gears` comparison, proved by a product that would not run.
+
+- **A profile can declare a plugin that cannot start there, and nothing says so.**
+  `OidcAuthNGearConfig.jwt` has no default and `oidc-authn-plugin` does not expose it, so **no
+  description can supply it** -- `local` now takes the static plugin, as `dev` does. The general
+  form is a limit of the curation model: `exposes` is a subset, a required field may be left out of
+  it, and then `ConfigFieldDecl.required` never sees the field it would have complained about.
 
 **Three things M5 left behind, recorded here because nothing else covers them.**
 
@@ -2072,11 +2095,22 @@ set of names. Verified stable over three consecutive runs.
 Run it; assert both REST surfaces answer and `WireOutcome::Local` appears for all three bindings
 with no readiness gate.
 
-**Step 3 — host-workers.** Resolve + generate + build both bins; start Postgres in Docker; run the
-host. Assert: `pgrep -f gbx-payments-audit` (the host spawned it via `LocalProcessBackend`),
-`curl -sf localhost:8091/readyz` (self-registered via `oop_serve`),
-`wire_outcome=Remote` for `PaymentApi` in the worker log, and
-`gearbox lock processes --format json | jq -e '… .gears == ["cluster","payments-audit"]'`.
+**Step 3 — host-workers.** `make oop-run`. **Done**, and the step as first written could not have
+been: it named `gbx-payments-audit`, a gear nobody wrote, and required Postgres, which nothing in
+this product needs -- no gear demands a cluster primitive, so the declared postgres profile
+resolves to nothing and the directory is an in-memory map inside the host.
+
+Against what the corpus actually supplies: host `gateway`, worker `api-contracts` on
+`127.0.0.1:8090`. Asserts that the binary the host is configured to start is the one the build
+produced, that the worker is running, that it answers `/readyz`, that the host logs
+`readiness: dependency resolved dep=api-contracts`, and that the host's own `/readyz` opens --
+which it cannot until that remote dependency resolves.
+
+The last assertion is the one worth reading twice. `wire_outcome=Remote` is a DEBUG record and
+DEBUG is unreachable here, so the proof is the readiness line instead: `host_runtime` marks a
+dependency resolved immediately when the implementation is local, and immediately again when a
+static override stands in for discovery; **only** a binding that must be looked up in the directory
+joins the background probe list that line comes from.
 
 **Step 4 — kubernetes.** `helm lint` + `helm template` + `kubeconform`, then the hard assertions:
 ```bash

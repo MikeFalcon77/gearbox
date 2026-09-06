@@ -197,7 +197,17 @@ pub struct SpawnSpec {
     /// The gear whose runtime kind is set to out-of-process.
     pub gear: GearId,
 
-    pub executable_path: String,
+    /// The binary the host starts, by name.
+    ///
+    /// **Not a path, and that is the correction.** Where the binary sits depends
+    /// on where the tree was generated and on whether a shared Cargo target
+    /// directory was declared -- neither of which the resolver knows. It used to
+    /// write `{target_dir}/debug/{bin}` here, copying a string the description
+    /// had expressed relative to *itself*; the runtime then resolved it relative
+    /// to the host's working directory, which is the generated tree. The two
+    /// bases differ by one level, so the host looked for the worker in a
+    /// directory that does not exist.
+    pub bin_name: String,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
@@ -712,6 +722,25 @@ pub struct KubernetesSettings {
     pub discovery: Discovery,
 }
 
+/// What a `host_workers` profile decided, beyond the processes themselves.
+///
+/// Mirrors [`KubernetesSettings`]: a place for the facts the profile declared
+/// that every generator needs and no process carries.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct HostWorkersSettings {
+    /// The Cargo target directory the operator wants shared, **as the
+    /// description spelled it** -- relative to the description, not to anything
+    /// generated.
+    ///
+    /// Kept in the declared form on purpose. Resolving it here would put a
+    /// machine-specific absolute path in a file that is committed and diffed;
+    /// the generator converts it once, against the output root it alone knows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_dir: Option<String>,
+
+    pub discovery: Discovery,
+}
+
 /// The resolved product. Serialized as `product.lock`.
 ///
 /// Every collection is in canonical order, fixed by the resolver's final pass, so
@@ -724,6 +753,10 @@ pub struct ResolvedProduct {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kubernetes: Option<KubernetesSettings>,
+
+    /// Present only for a `host_workers` profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_workers: Option<HostWorkersSettings>,
 
     pub sources: BTreeMap<SourceId, ResolvedSource>,
 

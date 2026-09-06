@@ -184,15 +184,16 @@ fn assign_spawns(
             allow_loopback_advertise: loopback,
         });
 
-        // The host starts it by absolute path. `target_dir` is the only place
-        // that path can come from, and `structural::check_worker_paths` has
-        // already reported its absence -- so a missing one leaves the worker
-        // unspawned rather than pointing the host at a guess.
-        if let Some(target_dir) = declaration.target_dir() {
-            let profile = cargo_profile_dir(declaration);
+        // The binary by name, not by path. Where it sits is a fact about the
+        // generated tree -- which target directory it was built into, and where
+        // that tree is -- and the resolver knows none of that. `target_dir`
+        // travels to the lock as a profile setting instead, and the generator
+        // composes the path from both. `structural::check_worker_paths` still
+        // reports a missing one, because without it there is nowhere to build.
+        if declaration.target_dir().is_some() {
             spawns.push(SpawnSpec {
                 gear: processes[index].anchor.clone(),
-                executable_path: format!("{target_dir}/{profile}/{}", processes[index].bin_name),
+                bin_name: processes[index].bin_name.clone(),
                 // `--config` is the only channel that works: the runtime reads
                 // `TOOLKIT_CONFIG_PATH` but nothing ever sets it.
                 args: vec![
@@ -227,19 +228,6 @@ fn assign_spawns(
         )
         .at(Location::file(uri.to_owned())),
     );
-}
-
-/// Which Cargo profile directory the host should exec.
-///
-/// Kubernetes images are release artefacts; one-machine profiles run what
-/// `cargo build` (debug) just produced next to the generated tree.
-fn cargo_profile_dir(declaration: &DeploymentProfileDecl) -> &'static str {
-    match declaration {
-        DeploymentProfileDecl::Kubernetes { .. } => "release",
-        DeploymentProfileDecl::Embedded { .. } | DeploymentProfileDecl::HostWorkers { .. } => {
-            "debug"
-        }
-    }
 }
 
 /// The host a generated bind address uses.

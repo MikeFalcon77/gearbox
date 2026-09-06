@@ -129,5 +129,9 @@ check: fmt clippy lint deny test ts-check grammar-check
 
 dev: dev-fmt dev-clippy test
 
+## oop-run: start the generated host, let it spawn the worker, prove the binding is remote
+oop-run:
+	@tools/oop-run.sh
+
 clean:
 	$(CARGO) clean

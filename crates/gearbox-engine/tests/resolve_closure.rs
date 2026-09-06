@@ -180,11 +180,6 @@ fn only_plugin_selections_make_the_closure_depend_on_the_profile() {
     let local = resolve(&cat, &prod, &pid("local")).closure.ids();
     let production = resolve(&cat, &prod, &pid("prod")).closure.ids();
 
-    assert_eq!(
-        local, production,
-        "both non-dev profiles choose the same plugin"
-    );
-
     let plugins = |ids: &BTreeSet<GearId>| -> BTreeSet<GearId> {
         ids.iter()
             .filter(|g| g.as_str().ends_with("-plugin"))
@@ -198,18 +193,29 @@ fn only_plugin_selections_make_the_closure_depend_on_the_profile() {
     );
     assert_eq!(
         plugins(&local),
+        [gid("static-authn-plugin")].into_iter().collect(),
+        "local takes the static plugin too: it is a one-machine development \
+         profile, and the OIDC plugin cannot start without a `jwt` section no \
+         description can supply"
+    );
+    assert_eq!(
+        plugins(&production),
         [gid("oidc-authn-plugin")].into_iter().collect(),
-        "local selects the OIDC plugin"
+        "prod selects the OIDC plugin"
     );
 
-    // Strip the plugins and the two must be identical: nothing else about a
-    // profile may change what is in the product.
+    // Strip the plugins and all three must be identical: nothing else about a
+    // profile may change what is in the product. Three profiles now differ by
+    // their plugin alone, which makes the claim stronger than when two of them
+    // happened to agree.
     let without_plugins = |ids: BTreeSet<GearId>| -> BTreeSet<GearId> {
         ids.into_iter()
             .filter(|g| !g.as_str().ends_with("-plugin"))
             .collect()
     };
-    assert_eq!(without_plugins(dev), without_plugins(local));
+    let dev = without_plugins(dev);
+    assert_eq!(dev, without_plugins(local));
+    assert_eq!(dev, without_plugins(production));
 }
 
 #[test]

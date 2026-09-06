@@ -51,6 +51,7 @@ pub fn assemble(
             lock_hash: String::new(),
         },
         kubernetes: kubernetes(declaration),
+        host_workers: host_workers(declaration),
         sources,
         gears: gears(catalogue, intent, resolution),
         processes: resolution.partition.processes.clone(),
@@ -86,6 +87,27 @@ fn kubernetes(
     }
 }
 
+/// The `host_workers` half of the same, and for the same reason.
+///
+/// `target_dir` travels as the description spelled it. Resolving it here would
+/// bake a machine-specific path into a committed file; the generator converts it
+/// once, against the output root only it knows.
+fn host_workers(
+    declaration: Option<&gearbox_ir::DeploymentProfileDecl>,
+) -> Option<gearbox_ir::HostWorkersSettings> {
+    match declaration {
+        Some(gearbox_ir::DeploymentProfileDecl::HostWorkers {
+            discovery,
+            target_dir,
+            ..
+        }) => Some(gearbox_ir::HostWorkersSettings {
+            target_dir: target_dir.clone(),
+            discovery: *discovery,
+        }),
+        _ => None,
+    }
+}
+
 /// The gears in the product, each carrying why it is here and what it was told.
 fn gears(
     catalogue: &Catalogue,
@@ -110,19 +132,39 @@ fn gears(
                     runtime_caps: descriptor.runtime_caps.clone(),
                     colocated_deps: descriptor.colocated_deps.clone(),
                     selected_by: reasons.clone(),
-                    // Only a `use_gear` entry carries configuration. A gear the
-                    // closure pulled in has none, and inheriting one would be a
-                    // decision nobody wrote down.
-                    config: intent
-                        .selected_gears
-                        .iter()
-                        .find(|selection| &selection.gear == id)
-                        .map(|selection| selection.config.clone())
-                        .unwrap_or_default(),
+                    // A `use_gear` entry or the `plugin(...)` entry that chose
+                    // this gear. A gear the closure merely pulled in has none,
+                    // and inheriting one would be a decision nobody wrote down.
+                    //
+                    // **The plugin half was missing, and it made a product
+                    // unstartable.** `plugin("oidc-authn-plugin", config = ...)`
+                    // was evaluated, validated as far as anything validates it,
+                    // and then dropped here -- the generated file carried
+                    // `config: {}` and the plugin failed at startup on a field
+                    // the description had supplied. Found by running the thing.
+                    config: declared_config(intent, id),
                 },
             ))
         })
         .collect()
+}
+
+/// What the description told this gear, whether it was named or chosen.
+///
+/// A plugin is a gear the product selected *under* a host rather than on its own
+/// terms, so its configuration arrives on the `plugin(...)` call. Looking only at
+/// `selected_gears` misses it entirely.
+fn declared_config(intent: &ProductIntent, id: &GearId) -> BTreeMap<String, serde_json::Value> {
+    if let Some(selection) = intent.selected_gears.iter().find(|s| &s.gear == id) {
+        return selection.config.clone();
+    }
+    intent
+        .selected_gears
+        .iter()
+        .flat_map(|selection| &selection.plugins)
+        .find(|plugin| &plugin.gear == id)
+        .map(|plugin| plugin.config.clone())
+        .unwrap_or_default()
 }
 
 /// Step 9: the graph that answers "why".
