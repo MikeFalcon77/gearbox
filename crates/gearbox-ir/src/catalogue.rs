@@ -279,6 +279,8 @@ pub enum SourceKind {
     Path,
     /// A Git repository at a pinned revision.
     Git,
+    /// A package registry. The unpacked package directory is the root.
+    Registry,
 }
 
 impl SourceKind {
@@ -287,6 +289,7 @@ impl SourceKind {
         match self {
             Self::Path => "path",
             Self::Git => "git",
+            Self::Registry => "registry",
         }
     }
 }

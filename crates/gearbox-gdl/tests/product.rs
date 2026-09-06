@@ -259,23 +259,56 @@ product(
     assert!(messages.contains("other"), "{messages}");
 }
 
+/// A registry is a source now, and the prefix is how a gear id names a package.
+///
+/// It used to be spelled in the vocabulary only so the refusal could name it.
+/// The refusal is gone; what stays is that the *kind* is checked, so a typo in
+/// the constructor still reads as a typo rather than as an unknown function.
 #[test]
-fn a_registry_source_is_refused_by_name() {
+fn a_registry_source_declares_a_registry_and_a_prefix() {
     let src = r#"
 product(
     id = "demo", version = "0.1.0",
-    sources = [source(id = "s", at = registry(package = "cf-gears-thing", version = "1"))],
+    sources = [source(id = "cf", at = registry("crates.io", prefix = "cf-gears-"))],
     profiles = [embedded(id = "dev")],
     default_profile = "dev",
     gears = [],
 )
 "#;
-    let (_, codes, messages) = eval(src);
-    assert!(
-        codes.contains(&DiagnosticCode::GapRegistrySource),
-        "registry() is spelled in the vocabulary so this can be named rather than \
-         reported as a typo: {codes:?} {messages}"
+    let (intent, codes, messages) = eval(src);
+    assert!(codes.is_empty(), "{codes:?} {messages}");
+    let sources = intent.unwrap().sources;
+    let source = sources
+        .get(&SourceId::new("cf").unwrap())
+        .expect("the source");
+    assert_eq!(
+        source,
+        &gearbox_ir::SourceDecl::Registry {
+            url: "crates.io".to_owned(),
+            prefix: Some("cf-gears-".to_owned()),
+        }
     );
+}
+
+/// A version requirement on a gear drawn from a path source is refused.
+///
+/// Dropping it in silence would let a description carry a pin nobody honours:
+/// the reader would believe a version was fixed while the directory on disk is
+/// whatever happens to be checked out.
+#[test]
+fn a_version_on_a_path_source_is_refused() {
+    let src = r#"
+product(
+    id = "demo", version = "0.1.0",
+    sources = [source(id = "local", at = path("../gears"))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [use_gear("api-gateway", source = "local", version = "0.4")],
+)
+"#;
+    let (_, codes, messages) = eval(src);
+    assert!(codes.contains(&DiagnosticCode::GdlEval), "{codes:?}");
+    assert!(messages.contains("is not a registry"), "{messages}");
 }
 
 #[test]

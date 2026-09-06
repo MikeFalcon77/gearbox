@@ -94,6 +94,8 @@ fn intent(key: &str, value: serde_json::Value) -> ProductIntent {
     let mut selection = gearbox_ir::GearSelection {
         gear: GearId::new("demo").unwrap(),
         source: SourceId::new("s").unwrap(),
+        version: None,
+        package: None,
         features: Vec::new(),
         config: BTreeMap::default(),
         plugins: Vec::new(),

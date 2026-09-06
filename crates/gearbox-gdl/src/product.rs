@@ -171,6 +171,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             tag: None,
             rev: None,
             branch: None,
+            prefix: None,
         })
     }
 
@@ -197,26 +198,35 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             tag: tag.map(str::to_owned),
             rev: rev.map(str::to_owned),
             branch: branch.map(str::to_owned),
+            prefix: None,
         })
     }
 
-    /// `registry(package = ..., version = ...)` -- accepted only to be refused.
+    /// `registry("crates.io", prefix = "cf-gears-")`
     ///
-    /// Spelling it out means the diagnostic can say "registry sources are not
-    /// supported, use `path()` or `git()`" (GBX0605) instead of reporting an
-    /// unknown function, which reads as a typo.
+    /// **The source is the registry, not one package.** A product naming six
+    /// gears from it fetches six packages -- and everything they depend on --
+    /// through one declaration, because a gear's co-location dependencies are
+    /// real Cargo dependencies and cargo brings the closure with them.
+    ///
+    /// `prefix` turns a gear id into a package name: `api-gateway` becomes
+    /// `cf-gears-api-gateway`. A convention rather than magic, and one with an
+    /// exit -- `use_gear(package = "...")` overrides it for a gear that does not
+    /// follow the house naming. A wrong guess is not silent either way: the
+    /// fetched crate's own `gear.gdl` declares its `crate_name`, and GBX0209
+    /// checks that against the real `Cargo.toml`.
     fn registry(
-        #[starlark(require = named)] package: &str,
-        #[starlark(require = named)] version: Option<&str>,
+        #[starlark(require = pos)] url: &str,
+        #[starlark(require = named)] prefix: Option<&str>,
     ) -> anyhow::Result<SourceAtRecord> {
-        let _ = version;
         Ok(SourceAtRecord {
             kind: "registry".to_owned(),
-            at: Some(package.to_owned()),
-            url: None,
+            at: None,
+            url: Some(url.to_owned()),
             tag: None,
             rev: None,
             branch: None,
+            prefix: prefix.map(str::to_owned),
         })
     }
 
@@ -310,6 +320,8 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     fn use_gear<'v>(
         #[starlark(require = pos)] gear: &str,
         #[starlark(require = named)] source: &str,
+        #[starlark(require = named)] version: Option<&str>,
+        #[starlark(require = named)] package: Option<&str>,
         #[starlark(require = named)] features: Option<UnpackList<String>>,
         #[starlark(require = named)] config: Option<Value<'v>>,
         #[starlark(require = named)] plugins: Option<UnpackList<&'v PluginRecord>>,
@@ -318,6 +330,8 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         Ok(UseGearRecord {
             gear: gear.to_owned(),
             source: source.to_owned(),
+            version: version.map(str::to_owned),
+            package: package.map(str::to_owned),
             features: strings(features),
             config: config_map("config", config)?,
             plugins: plugins

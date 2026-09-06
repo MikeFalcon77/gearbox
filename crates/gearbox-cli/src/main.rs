@@ -930,6 +930,10 @@ const fn label(severity: Severity) -> &'static str {
 fn describe_source(source: &gearbox_ir::SourceDecl) -> String {
     match source {
         gearbox_ir::SourceDecl::Path { at } => format!("path {at}"),
+        gearbox_ir::SourceDecl::Registry { url, prefix } => match prefix {
+            Some(prefix) => format!("registry {url} (packages named {prefix}<gear>)"),
+            None => format!("registry {url}"),
+        },
         gearbox_ir::SourceDecl::Git {
             url,
             tag,

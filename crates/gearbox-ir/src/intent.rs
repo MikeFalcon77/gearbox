@@ -27,6 +27,25 @@ pub enum SourceDecl {
     /// A local directory, relative to the product description.
     Path { at: String },
 
+    /// A package registry, and the naming convention that turns a gear id into
+    /// a package name.
+    ///
+    /// **The source is the registry, not one package.** Everything a named gear
+    /// depends on arrives with it, because a gear's co-location dependencies are
+    /// real Cargo dependencies -- so one declaration fetches the closure.
+    ///
+    /// Immutable in the sense [`SourceDecl::is_immutable`] means: a version
+    /// requirement is a range, so what it resolves to is a decision, and the
+    /// lock is where that decision is written down.
+    Registry {
+        /// The registry, as Cargo names it: `crates.io`, or an alternate.
+        url: String,
+        /// Prepended to a gear id to name its package. `None` means the id is
+        /// the package name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prefix: Option<String>,
+    },
+
     /// A Git repository at a pinned reference.
     ///
     /// Pinning is by tag, revision, or branch; the resolved commit is what lands
@@ -50,7 +69,7 @@ impl SourceDecl {
     #[must_use]
     pub const fn is_immutable(&self) -> bool {
         match self {
-            Self::Path { .. } => false,
+            Self::Path { .. } | Self::Registry { .. } => false,
             Self::Git { rev, tag, .. } => rev.is_some() || tag.is_some(),
         }
     }
@@ -264,6 +283,21 @@ pub struct GearSelection {
 
     /// Which declared source to read it from.
     pub source: SourceId,
+
+    /// The version requirement, when the source is a registry.
+    ///
+    /// A *requirement*, not a version: what it resolves to is decided by cargo
+    /// and recorded in the lock, the same way a `Cargo.toml` range and a
+    /// `Cargo.lock` entry differ. Meaningless for a path source, and reported as
+    /// such rather than ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+
+    /// The package name, when the source's prefix does not produce it.
+    ///
+    /// The escape hatch for a gear that does not follow the house naming.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package: Option<String>,
 
     /// Extra Cargo features to enable.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

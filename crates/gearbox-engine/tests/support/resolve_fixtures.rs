@@ -95,6 +95,8 @@ pub fn intent(gears: &[&str]) -> ProductIntent {
             .map(|g| GearSelection {
                 gear: gid(g),
                 source: source(),
+                version: None,
+                package: None,
                 features: Vec::new(),
                 config: BTreeMap::new(),
                 plugins: Vec::new(),

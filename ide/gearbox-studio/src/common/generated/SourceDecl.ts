@@ -3,4 +3,13 @@
 /**
  * Where to get a gear's source.
  */
-export type SourceDecl = { "kind": "path", at: string, } | { "kind": "git", url: string, tag?: string | null, rev?: string | null, branch?: string | null, };
+export type SourceDecl = { "kind": "path", at: string, } | { "kind": "registry", 
+/**
+ * The registry, as Cargo names it: `crates.io`, or an alternate.
+ */
+url: string, 
+/**
+ * Prepended to a gear id to name its package. `None` means the id is
+ * the package name.
+ */
+prefix?: string | null, } | { "kind": "git", url: string, tag?: string | null, rev?: string | null, branch?: string | null, };

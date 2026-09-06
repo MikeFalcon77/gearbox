@@ -309,6 +309,8 @@ gdl_record! {
         pub tag: Option<String>,
         pub rev: Option<String>,
         pub branch: Option<String>,
+        /// Registry only: what a gear id is prefixed with to name its package.
+        pub prefix: Option<String>,
     }
 }
 
@@ -334,6 +336,11 @@ gdl_record! {
     UseGearRecord as "gdl_use_gear" {
         pub gear: String,
         pub source: String,
+        /// Registry only: the version requirement, in Cargo's spelling.
+        pub version: Option<String>,
+        /// Registry only: the package name, when the source's prefix is wrong
+        /// for this gear.
+        pub package: Option<String>,
         pub features: Vec<String>,
         /// Opaque per-gear configuration, carried through to the generator.
         pub config: Vec<(String, serde_json::Value)>,

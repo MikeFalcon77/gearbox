@@ -229,22 +229,28 @@ fn build_sources(
                     branch: record.at.branch.clone(),
                 }
             }
-            // `registry(...)` is spelled in the vocabulary purely so this
-            // diagnostic can name it instead of reporting an unknown function,
-            // which would read as a typo.
-            _ => {
-                diagnostics.push(
-                    Diagnostic::error(
-                        DiagnosticCode::GapRegistrySource,
-                        format!("source `{id}` uses a registry, which is not supported"),
-                        "use `path(at = \"...\")` or `git(url = \"...\", tag = \"...\")`",
-                    )
-                    .at(Location::file(uri.to_owned()))
-                    .with_evidence(
-                        "no registry client exists in gears-rust; a gear is a Cargo path or git \
-                         dependency",
-                    ),
-                );
+            "registry" => {
+                let Some(url) = non_empty(record.at.url.as_deref()) else {
+                    diagnostics.push(invalid(
+                        uri,
+                        format!("source `{id}` declares `registry()` with no registry"),
+                        "write `registry(\"crates.io\")`, optionally with \
+                         `prefix = \"cf-gears-\"`",
+                    ));
+                    continue;
+                };
+                SourceDecl::Registry {
+                    url,
+                    prefix: non_empty(record.at.prefix.as_deref()),
+                }
+            }
+            other => {
+                diagnostics.push(invalid(
+                    uri,
+                    format!("source `{id}` uses `{other}()`, which is not a source kind"),
+                    "use `path(\"...\")`, `git(url = \"...\", tag = \"...\")` or \
+                     `registry(\"crates.io\")`",
+                ));
                 continue;
             }
         };
@@ -306,9 +312,32 @@ fn build_gears(
             continue;
         }
         let plugins = build_plugins(uri, &gear, record, profiles, diagnostics);
+        // `version` and `package` only mean something for a registry. Silently
+        // dropping them on a path source would let a description carry a
+        // requirement nobody honours -- the reader would believe a version was
+        // pinned when the directory on disk is whatever it is.
+        if !matches!(sources.get(&source), Some(SourceDecl::Registry { .. })) {
+            for (field, value) in [
+                ("version", record.version.as_ref()),
+                ("package", record.package.as_ref()),
+            ] {
+                if value.is_some() {
+                    diagnostics.push(invalid(
+                        uri,
+                        format!("`{gear}` sets `{field}`, but source `{source}` is not a registry"),
+                        format!(
+                            "remove `{field}`, or declare the source as \
+                             `registry(\"crates.io\")`"
+                        ),
+                    ));
+                }
+            }
+        }
         selected.push(GearSelection {
             gear,
             source,
+            version: record.version.clone(),
+            package: record.package.clone(),
             features: record.features.clone(),
             config: record.config.iter().cloned().collect(),
             plugins,

@@ -3,4 +3,4 @@
 /**
  * Where a gear's source comes from.
  */
-export type SourceKind = "path" | "git";
+export type SourceKind = "path" | "git" | "registry";

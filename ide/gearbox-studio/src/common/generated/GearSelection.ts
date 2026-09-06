@@ -13,6 +13,21 @@ export type GearSelection = { gear: GearId,
  */
 source: SourceId, 
 /**
+ * The version requirement, when the source is a registry.
+ *
+ * A *requirement*, not a version: what it resolves to is decided by cargo
+ * and recorded in the lock, the same way a `Cargo.toml` range and a
+ * `Cargo.lock` entry differ. Meaningless for a path source, and reported as
+ * such rather than ignored.
+ */
+version?: string | null, 
+/**
+ * The package name, when the source's prefix does not produce it.
+ *
+ * The escape hatch for a gear that does not follow the house naming.
+ */
+package?: string | null, 
+/**
  * Extra Cargo features to enable.
  */
 features?: Array<string>, 
