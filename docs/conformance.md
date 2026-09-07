@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **147** — 142 built, 1 not built, 0 broken, 4 not observed.
+Claims: **148** — 143 built, 1 not built, 0 broken, 4 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -57,6 +57,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the Explorer and git are one level down, under Advanced Tools | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
 | File offers the product's verbs and nothing about a workspace | `ADR-0011 §Amendment: File is the product's` | ✅ built |  |
 | the first level of View is the domain's | `ADR-0011 §Amendment: View is the domain's` | ✅ built |  |
+| View offers a product's views only with a product | `ADR-0011 §Amendment: a screen belongs to a subject` | ✅ built |  |
 | the Plugins view is gone from the shell | `ADR-0011 §Amendment: the plugin host is not a view` | ✅ built |  |
 | the Source Control view is present | `ADR-0011 §Consequences: some Theia surface stays on purpose` | ✅ built |  |
 | the Product menu offers the product's verbs, and only with a product | `ADR-0011 §Scope: what the menu bar contains` | ✅ built |  |

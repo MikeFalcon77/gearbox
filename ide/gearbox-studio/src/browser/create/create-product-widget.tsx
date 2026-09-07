@@ -19,6 +19,7 @@ import { GearboxService } from "../../common/protocol";
 import { ProductEditService } from "../product-edit-service";
 import { EngineConnectionService } from "../shell/engine-connection-service";
 import { ProductSessionService } from "../shell/product-session-service";
+import type { ContextIdentity, OwnedWidget } from "../shell/screens";
 
 export type CreateMode = "blank" | "clone-local" | "clone-git";
 
@@ -30,9 +31,18 @@ export interface CreateProductState {
 }
 
 @injectable()
-export class CreateProductWidget extends ReactWidget {
+export class CreateProductWidget extends ReactWidget implements OwnedWidget {
   static readonly ID = "gearbox.create";
   static readonly LABEL = "New Product";
+  /**
+   * Which subject opened this wizard.
+   *
+   * Stamped by the contribution's `open*` path, read by the withdrawal sweep:
+   * a proposal composed for one product must not survive into another, because
+   * `ProductEditService` resolves the target at commit time and would otherwise
+   * write it to whatever is open then. Undefined until something opens it.
+   */
+  ownerIdentity?: ContextIdentity;
 
   @inject(GearboxService) protected readonly service!: GearboxService;
   @inject(ProductSessionService) protected readonly session!: ProductSessionService;

@@ -10,7 +10,9 @@ import {
   ConnectionStatus,
   ConnectionStatusService,
 } from "@theia/core/lib/browser/connection-status-service";
+import { CommonMenus } from "@theia/core/lib/browser/common-menus";
 import { Command, CommandRegistry, MenuModelRegistry } from "@theia/core/lib/common";
+import { Widget } from "@theia/core/shared/@lumino/widgets";
 import { inject, injectable } from "@theia/core/shared/inversify";
 
 import { CatalogueStore } from "./catalogue-store";
@@ -37,7 +39,18 @@ import {
   SHOW_PRODUCT,
 } from "./shell/session-command-ids";
 import { SelectionService } from "./shell/selection-service";
-import { STUDIO_CONTEXT_KEY, StudioContextService } from "./shell/studio-context-service";
+import {
+  availableIn,
+  identityOf,
+  whenClauseFor,
+  type ContextIdentity,
+  type OwnedWidget,
+} from "./shell/screens";
+import {
+  HAS_SELECTION_KEY,
+  STUDIO_CONTEXT_KEY,
+  StudioContextService,
+} from "./shell/studio-context-service";
 import { StartWidget } from "./start/start-widget";
 
 export const RELOAD_CATALOGUE: Command = {
@@ -54,9 +67,130 @@ export const RESOLVE_PRODUCT: Command = {
   iconClass: codicon("sync"),
 };
 
+/**
+ * A view that belongs to a context, and knows which entrance opened it.
+ *
+ * `AbstractViewContribution` registers three things per view and gates none of
+ * them: an always-enabled toggle command, a `when`-less entry in `View > Views`,
+ * and a `when`-less item in `Open View...`. That is why a UX pass found
+ * `View > Add Gear` live with no product open, and why it opened an empty panel:
+ * three surfaces, one of which nobody had thought to check.
+ *
+ * **Four surfaces, because four different pieces of code read them.** The menu
+ * re-evaluates `when` as it opens; the palette filters on `isVisible &&
+ * isEnabled` (`quick-command-service.js:191`); a keybinding reaches the handler
+ * directly; and `Open View...` reads neither menus nor commands -- it filters
+ * `QuickViewItem.when` and *nothing else*, which is why a gate that must reach
+ * it has to be a context key rather than a predicate.
+ *
+ * **This class never chains to `AbstractViewContribution`'s versions**, and a
+ * subclass must not reach past it either. `CommandRegistry.registerCommand` on
+ * an id that already exists logs `is already registered` and keeps the *first*
+ * handler, and `registerMenuAction` does not deduplicate at all -- so
+ * registering both would install the ungated pair and then quietly win with
+ * them. Two claims in `tests/regression.spec.ts` assert that pair of symptoms.
+ * A subclass calling `super.registerCommands(...)` is calling *this* class and
+ * is correct.
+ */
+@injectable()
+export abstract class ScopedViewContribution<T extends Widget> extends AbstractViewContribution<T> {
+  @inject(StudioContextService) protected readonly contexts!: StudioContextService;
+
+  /**
+   * Whether this view may be opened in the context that is current.
+   *
+   * Structural: it answers "does this screen exist here at all", and it is what
+   * hides the entry rather than greying it out.
+   */
+  protected availableHere(): boolean {
+    return availableIn(this.viewId, this.contexts.current.kind);
+  }
+
+  /**
+   * A further gate a subclass adds -- the engine being up, a selection existing.
+   *
+   * Separate from `availableHere` because the two deserve different treatment:
+   * a screen that does not belong here is *absent*, and one that belongs here
+   * but cannot act yet is *disabled*. A Generate entry that vanishes when the
+   * websocket blinks reads as a broken application.
+   */
+  protected canOpen(): boolean {
+    return true;
+  }
+
+  /**
+   * The `when` clause for the two surfaces that take one.
+   *
+   * Availability by default; a subclass whose gate is not the context overrides
+   * it -- see `InspectorViewContribution`, whose emptiness is about a selection.
+   */
+  protected whenClause(): string | undefined {
+    return whenClauseFor(this.viewId, STUDIO_CONTEXT_KEY);
+  }
+
+  /**
+   * What a **generic** entrance does: `Open View...`, the palette, a keybinding.
+   *
+   * Toggling, for an ordinary view. A stateful screen overrides this to *reveal*
+   * without re-seeding, because seeding is a reset -- see the `open*`/`reveal*`
+   * pair on the three wizards.
+   */
+  protected revealView(): Promise<unknown> {
+    return this.toggleView();
+  }
+
+  protected registerScopedToggle(commands: CommandRegistry, overrides?: Partial<Command>): void {
+    const toggle = this.toggleCommand;
+    if (toggle === undefined) return;
+    commands.registerCommand(
+      { ...toggle, ...overrides },
+      {
+        execute: () => void this.revealView(),
+        isEnabled: () => this.availableHere() && this.canOpen(),
+        // Availability only. See `canOpen`: a transient refusal stays visible.
+        isVisible: () => this.availableHere(),
+      },
+    );
+    this.quickView?.registerItem({
+      label: this.viewLabel,
+      when: this.whenClause(),
+      open: () => void this.revealView(),
+    });
+  }
+
+  override registerCommands(commands: CommandRegistry): void {
+    this.registerScopedToggle(commands);
+  }
+
+  override registerMenus(menus: MenuModelRegistry): void {
+    const toggle = this.toggleCommand;
+    if (toggle === undefined) return;
+    menus.registerMenuAction(CommonMenus.VIEW_VIEWS, {
+      commandId: toggle.id,
+      label: this.viewLabel,
+      when: this.whenClause(),
+    });
+  }
+
+  /**
+   * Record which subject opened a screen, so the sweep can withdraw it.
+   *
+   * Called from the `open*` path and never from `reveal*`: a widget that already
+   * exists keeps the owner it was opened with. One owned by another subject
+   * would have been withdrawn already, so there is nothing to re-stamp.
+   */
+  protected stampOwner(widget: OwnedWidget): void {
+    widget.ownerIdentity = this.currentIdentity();
+  }
+
+  protected currentIdentity(): ContextIdentity {
+    return identityOf(this.contexts.current);
+  }
+}
+
 @injectable()
 export class CatalogueViewContribution
-  extends AbstractViewContribution<CatalogueWidget>
+  extends ScopedViewContribution<CatalogueWidget>
   implements FrontendApplicationContribution
 {
   @inject(CatalogueStore) protected readonly store!: CatalogueStore;
@@ -209,10 +343,9 @@ export class CatalogueViewContribution
  */
 @injectable()
 export class StartViewContribution
-  extends AbstractViewContribution<StartWidget>
+  extends ScopedViewContribution<StartWidget>
   implements FrontendApplicationContribution
 {
-  @inject(StudioContextService) protected readonly contexts!: StudioContextService;
   @inject(FrontendApplicationStateService)
   protected readonly appState!: FrontendApplicationStateService;
 
@@ -269,7 +402,7 @@ export class StartViewContribution
 }
 
 @injectable()
-export class CreateProductViewContribution extends AbstractViewContribution<CreateProductWidget> {
+export class CreateProductViewContribution extends ScopedViewContribution<CreateProductWidget> {
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
 
   constructor() {
@@ -289,15 +422,26 @@ export class CreateProductViewContribution extends AbstractViewContribution<Crea
    * opened the same wizard by the same door -- the blank tab the UX report
    * described. Gating one command and leaving its twin in the palette is the
    * palette lesson from ADR-0011 in miniature: a surface is only suppressed on
-   * the surfaces somebody checked.
+   * the surfaces somebody checked. `ScopedViewContribution` now registers the
+   * toggle; this only says what else has to be true.
    */
-  override registerCommands(commands: CommandRegistry): void {
-    if (this.toggleCommand) {
-      commands.registerCommand(this.toggleCommand, {
-        execute: () => this.toggleView(),
-        isEnabled: () => this.engine.isConnected,
-      });
+  protected override canOpen(): boolean {
+    return this.engine.isConnected;
+  }
+
+  /**
+   * A generic entrance reveals; it does not re-seed.
+   *
+   * `openWith(undefined)` is a *reset* -- it clears the clone source, the git
+   * fields and the destination -- so routing `Open View...` through `openCreate`
+   * would destroy a half-filled form. The domain commands keep calling
+   * `openCreate`, which is where seeding belongs.
+   */
+  protected override async revealView(): Promise<unknown> {
+    if (this.tryGetWidget() !== undefined) {
+      return this.openView({ activate: true, reveal: true });
     }
+    return this.openCreate();
   }
 
   async openCreate(state?: CreateProductState): Promise<void> {
@@ -310,13 +454,14 @@ export class CreateProductViewContribution extends AbstractViewContribution<Crea
     const widget = await this.widgetManager.getOrCreateWidget<CreateProductWidget>(
       CreateProductWidget.ID,
     );
+    this.stampOwner(widget);
     widget.openWith(state);
     await this.openView({ activate: true, reveal: true });
   }
 }
 
 @injectable()
-export class CreateGearViewContribution extends AbstractViewContribution<CreateGearWidget> {
+export class CreateGearViewContribution extends ScopedViewContribution<CreateGearWidget> {
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
 
   constructor() {
@@ -329,25 +474,29 @@ export class CreateGearViewContribution extends AbstractViewContribution<CreateG
   }
 
   /** Gated like the product wizard's toggle, and for the same reason. */
-  override registerCommands(commands: CommandRegistry): void {
-    if (this.toggleCommand) {
-      commands.registerCommand(this.toggleCommand, {
-        execute: () => this.toggleView(),
-        isEnabled: () => this.engine.isConnected,
-      });
+  protected override canOpen(): boolean {
+    return this.engine.isConnected;
+  }
+
+  /** Reveals rather than re-seeds -- see the product wizard's `revealView`. */
+  protected override async revealView(): Promise<unknown> {
+    if (this.tryGetWidget() !== undefined) {
+      return this.openView({ activate: true, reveal: true });
     }
+    return this.openCreate();
   }
 
   async openCreate(state?: CreateGearState): Promise<void> {
     // Seeded first -- see `CreateProductViewContribution.openCreate`.
     const widget = await this.widgetManager.getOrCreateWidget<CreateGearWidget>(CreateGearWidget.ID);
+    this.stampOwner(widget);
     widget.openWith(state);
     await this.openView({ activate: true, reveal: true });
   }
 }
 
 @injectable()
-export class GearAuthorViewContribution extends AbstractViewContribution<GearAuthorWidget> {
+export class GearAuthorViewContribution extends ScopedViewContribution<GearAuthorWidget> {
   constructor() {
     super({
       widgetId: GearAuthorWidget.ID,
@@ -359,7 +508,7 @@ export class GearAuthorViewContribution extends AbstractViewContribution<GearAut
 }
 
 @injectable()
-export class AddGearViewContribution extends AbstractViewContribution<AddGearWidget> {
+export class AddGearViewContribution extends ScopedViewContribution<AddGearWidget> {
   @inject(ProductStore) protected readonly products!: ProductStore;
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
 
@@ -370,6 +519,18 @@ export class AddGearViewContribution extends AbstractViewContribution<AddGearWid
       defaultWidgetOptions: { area: "main" },
       toggleCommandId: "gearbox.product.addGear.toggle",
     });
+  }
+
+  protected override canOpen(): boolean {
+    return this.engine.isConnected;
+  }
+
+  /** Reveals rather than re-seeds -- see `CreateProductViewContribution`. */
+  protected override async revealView(): Promise<unknown> {
+    if (this.tryGetWidget() !== undefined) {
+      return this.openView({ activate: true, reveal: true });
+    }
+    return this.openAdd();
   }
 
   override registerCommands(commands: CommandRegistry): void {
@@ -395,13 +556,14 @@ export class AddGearViewContribution extends AbstractViewContribution<AddGearWid
     // most here: the panel opened on whichever gear the previous visit had
     // configured, for as long as it took the new state to arrive.
     const widget = await this.widgetManager.getOrCreateWidget<AddGearWidget>(AddGearWidget.ID);
+    this.stampOwner(widget);
     widget.openWith(state);
     await this.openView({ activate: true, reveal: true });
   }
 }
 
 @injectable()
-export class GraphViewContribution extends AbstractViewContribution<GraphWidget> {
+export class GraphViewContribution extends ScopedViewContribution<GraphWidget> {
   constructor() {
     super({
       widgetId: GraphWidget.ID,
@@ -422,11 +584,10 @@ export class GraphViewContribution extends AbstractViewContribution<GraphWidget>
  */
 @injectable()
 export class InspectorViewContribution
-  extends AbstractViewContribution<InspectorWidget>
+  extends ScopedViewContribution<InspectorWidget>
   implements FrontendApplicationContribution
 {
   @inject(SelectionService) protected readonly selection!: SelectionService;
-  @inject(StudioContextService) protected readonly contexts!: StudioContextService;
   @inject(FrontendApplicationStateService)
   protected readonly appState!: FrontendApplicationStateService;
 
@@ -450,6 +611,23 @@ export class InspectorViewContribution
       defaultWidgetOptions: { area: "right", rank: 100 },
       toggleCommandId: "gearbox.inspector.toggle",
     });
+  }
+
+  /**
+   * Gated on its *subject*, not on the context.
+   *
+   * This panel belongs to all three contexts -- a catalogue row is worth
+   * explaining on Home -- so availability is the wrong axis. What makes it empty
+   * is an absent selection, and that is what the gate says. The context key
+   * rather than `canOpen()` alone because `Open View...` reads `when` and
+   * nothing else.
+   */
+  protected override whenClause(): string | undefined {
+    return HAS_SELECTION_KEY;
+  }
+
+  protected override canOpen(): boolean {
+    return this.selection.current !== undefined;
   }
 
   onStart(): void {
@@ -504,13 +682,12 @@ export class InspectorViewContribution
  */
 @injectable()
 export class ProductViewContribution
-  extends AbstractViewContribution<ProductWidget>
+  extends ScopedViewContribution<ProductWidget>
   implements FrontendApplicationContribution
 {
   @inject(ProductStore) protected readonly store!: ProductStore;
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
   @inject(ProductSessionService) protected readonly session!: ProductSessionService;
-  @inject(StudioContextService) protected readonly contexts!: StudioContextService;
 
   constructor() {
     super({
@@ -628,7 +805,7 @@ export class ProductViewContribution
  * startup to say "no conflicts" is a panel that says nothing.
  */
 @injectable()
-export class ConflictsViewContribution extends AbstractViewContribution<ConflictsWidget> {
+export class ConflictsViewContribution extends ScopedViewContribution<ConflictsWidget> {
   constructor() {
     super({
       widgetId: ConflictsWidget.ID,
@@ -640,9 +817,12 @@ export class ConflictsViewContribution extends AbstractViewContribution<Conflict
 
   override registerCommands(commands: CommandRegistry): void {
     super.registerCommands(commands);
-    // Opens rather than toggles -- see `SHOW_CONFLICTS`.
+    // Opens rather than toggles -- see `SHOW_CONFLICTS`. Gated like the toggle
+    // beside it: leaving the *show* command ungated is the same hole the
+    // `View: Toggle New Product` twin was, one command along.
     commands.registerCommand(SHOW_CONFLICTS, {
       execute: () => this.openView({ activate: true, reveal: true }),
+      isEnabled: () => this.availableHere(),
     });
   }
 
@@ -666,7 +846,7 @@ export class ConflictsViewContribution extends AbstractViewContribution<Conflict
 }
 
 @injectable()
-export class LockViewContribution extends AbstractViewContribution<LockWidget> {
+export class LockViewContribution extends ScopedViewContribution<LockWidget> {
   constructor() {
     super({
       widgetId: LockWidget.ID,
@@ -691,7 +871,7 @@ export class LockViewContribution extends AbstractViewContribution<LockWidget> {
 }
 
 @injectable()
-export class GenerateViewContribution extends AbstractViewContribution<GenerateWidget> {
+export class GenerateViewContribution extends ScopedViewContribution<GenerateWidget> {
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
 
   constructor() {
@@ -706,30 +886,27 @@ export class GenerateViewContribution extends AbstractViewContribution<GenerateW
     });
   }
 
+  protected override canOpen(): boolean {
+    return this.engine.isConnected;
+  }
+
   override registerCommands(commands: CommandRegistry): void {
-    // Own registration so the toggle can refuse when the engine is down.
-    // `super` would register an always-enabled handler we cannot amend after.
+    // `shortTitle` as an override rather than a special case in the toolbar: the
+    // header renders `shortTitle ?? label`, so this is the one place that decides
+    // the button says `Generate` while the View menu keeps the toggle's own
+    // phrasing. A mapping from command id to caption inside `ToolbarWidget` would
+    // break the rule that file states in its first paragraph -- actions come from
+    // the registry and cannot drift from the menu.
     //
-    // `shortTitle` here rather than a special case in the toolbar: the header
-    // renders `shortTitle ?? label`, so this is the one place that decides the
-    // button says `Generate` while the View menu keeps the toggle's own phrasing.
-    // A mapping from command id to caption inside `ToolbarWidget` would break the
-    // rule that file states in its first paragraph -- actions come from the
-    // registry and cannot drift from the menu.
-    if (this.toggleCommand) {
-      commands.registerCommand({ ...this.toggleCommand, shortTitle: "Generate" }, {
-        execute: () => this.toggleView(),
-        isEnabled: () => this.engine.isConnected,
-      });
-    }
-    // Opens rather than toggles -- see `SHOW_GENERATE`.
+    // The bespoke `quickView.registerItem` that used to sit here is gone:
+    // `registerScopedToggle` registers it *with* a `when`, which is the only
+    // gate `Open View...` reads.
+    this.registerScopedToggle(commands, { shortTitle: "Generate" });
+    // Opens rather than toggles -- see `SHOW_GENERATE`. Gated on the product as
+    // well as the engine: a plan is a product's plan.
     commands.registerCommand(SHOW_GENERATE, {
       execute: () => this.openView({ activate: true, reveal: true }),
-      isEnabled: () => this.engine.isConnected,
-    });
-    this.quickView?.registerItem({
-      label: this.viewLabel,
-      open: () => this.openView({ activate: true }),
+      isEnabled: () => this.availableHere() && this.engine.isConnected,
     });
   }
 

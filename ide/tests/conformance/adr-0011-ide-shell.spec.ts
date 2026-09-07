@@ -304,10 +304,17 @@ test.describe("the narrowed shell", () => {
     // window one level down. The tools are asserted present under Advanced Tools by
     // the claim above; this one asserts they are not *also* at the top, which is the
     // half that makes the menu shorter rather than merely differently arranged.
+    //
+    // **Counting `Gearbox*` entries is not what this asserts any more.** It used to
+    // require more than four of them with no product open, which was a claim about
+    // the wrong thing: the domain's views are now scoped, so on Home the ones that
+    // act on a product are correctly absent. What survives here is the part the
+    // amendment is actually about -- the window's own views are one level down --
+    // and the scoping is the claim below.
     const items = (await menuItems(studio.page, "View")).filter((item) => item.length > 0);
     expect(items).toContain("Command Palette...");
     expect(items).toContain("Advanced Tools");
-    expect(items.filter((item) => item.startsWith("Gearbox")).length).toBeGreaterThan(4);
+    expect(items.filter((item) => item.startsWith("Gearbox")).length).toBeGreaterThan(0);
 
     const offenders = items.filter((item) =>
       /Appearance|Editor Layout|Explorer|Source Control|Output|Plugins|Timeline|Outline|Testing|Notebook/.test(
@@ -315,6 +322,45 @@ test.describe("the narrowed shell", () => {
       ),
     );
     expect(offenders, "View's first level still holds a general editor's views").toEqual([]);
+  });
+
+  test("View offers a product's views only with a product [ADR-0011 §Amendment: a screen belongs to a subject]", async ({
+    studio,
+  }) => {
+    // The other half of "the shell must not allow impossible states", read where a
+    // UX pass found it: `View > Add Gear` was live on Home and opened an empty
+    // panel. `AbstractViewContribution` registers an ungated toggle per view, so
+    // the gate has to be added rather than assumed.
+    //
+    // Asserted in both directions, because the half that is easy to get right by
+    // accident is the absence: a typo in a widget id would hide these from *both*
+    // contexts and the one-sided claim would still pass.
+    // Open first and close second, which is the order the Product-menu claim above
+    // uses and for the same reason: `studio` is worker-scoped, so whatever ran
+    // before decides what is open. Reading Home first would be reading a state
+    // this test did not establish -- it passed alone and failed in the suite,
+    // which is the shape of every claim that trusts an inherited session.
+    const PRODUCTS = ["Add Gear", "Resolution Lock", "Gearbox Conflicts", "Gearbox Generate"];
+
+    await openProduct(studio.page, "dev");
+    await expectContext(studio.page, "product");
+    const withProduct = (await menuItems(studio.page, "View")).filter((item) => item.length > 0);
+    for (const name of PRODUCTS) {
+      expect(
+        withProduct.some((item) => item.includes(name)),
+        `View does not offer ${name} with a product open`,
+      ).toBe(true);
+    }
+
+    // Through the header's own button rather than the palette: it is what a
+    // person clicks, and it is on screen already.
+    await studio.page.locator('[data-command="gearbox.product.close"]').click();
+    await expectContext(studio.page, "home");
+    const onHome = (await menuItems(studio.page, "View")).filter((item) => item.length > 0);
+    expect(
+      onHome.filter((item) => PRODUCTS.some((name) => item.includes(name))),
+      "View offers a product's views with no product open",
+    ).toEqual([]);
   });
 
   test("the Plugins view is gone from the shell [ADR-0011 §Amendment: the plugin host is not a view]", async ({

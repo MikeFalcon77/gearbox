@@ -34,6 +34,7 @@ import { inject, injectable, postConstruct } from "@theia/core/shared/inversify"
 import type { ProductRef } from "../../common/protocol";
 import { ProductStore } from "../product-store";
 import { GearSessionService } from "./gear-session-service";
+import { SelectionService } from "./selection-service";
 
 /**
  * The kinds of work Studio supports, named after the PRD's actors rather than
@@ -48,6 +49,18 @@ export type StudioContext =
 /** The context key clauses key off. Values are the `kind`s above. */
 export const STUDIO_CONTEXT_KEY = "gearbox.context";
 
+/**
+ * Whether anything is selected, as a context key rather than as a predicate.
+ *
+ * The Inspector answers about a selection, so with none it renders a panel whose
+ * whole content is "select something" -- which §9.1 calls worse than an absent
+ * one. A `canOpen()` predicate cannot express that on every surface:
+ * `QuickViewService.getPicks` filters on `QuickViewItem.when` and consults no
+ * command, so `Open View...` would have offered it regardless. A gate that must
+ * reach that list has to be a key.
+ */
+export const HAS_SELECTION_KEY = "gearbox.hasSelection";
+
 export const HOME_PERSPECTIVE = "gearbox.home";
 export const PRODUCT_PERSPECTIVE = "gearbox.product";
 export const GEAR_PERSPECTIVE = "gearbox.gear";
@@ -56,6 +69,7 @@ export const GEAR_PERSPECTIVE = "gearbox.gear";
 export class StudioContextService implements FrontendApplicationContribution {
   @inject(ProductStore) protected readonly products!: ProductStore;
   @inject(GearSessionService) protected readonly gears!: GearSessionService;
+  @inject(SelectionService) protected readonly selection!: SelectionService;
   @inject(PerspectiveService) protected readonly perspectives!: PerspectiveService;
   @inject(ContextKeyService) protected readonly contextKeys!: ContextKeyService;
   @inject(FrontendApplicationStateService)
@@ -99,6 +113,9 @@ export class StudioContextService implements FrontendApplicationContribution {
    */
   protected key!: ContextKey<string>;
 
+  /** See [`HAS_SELECTION_KEY`]. Assigned beside `key`, and for the same reason. */
+  protected selected!: ContextKey<boolean>;
+
   get current(): StudioContext {
     return this.context;
   }
@@ -106,8 +123,13 @@ export class StudioContextService implements FrontendApplicationContribution {
   @postConstruct()
   protected init(): void {
     this.key = this.contextKeys.createKey<string>(STUDIO_CONTEXT_KEY, this.context.kind);
+    this.selected = this.contextKeys.createKey<boolean>(
+      HAS_SELECTION_KEY,
+      this.selection.current !== undefined,
+    );
     this.products.onChanged(() => this.recompute());
     this.gears.onDidChange(() => this.recompute());
+    this.selection.onDidChange((current) => this.selected.set(current !== undefined));
   }
 
   onStart(): void {

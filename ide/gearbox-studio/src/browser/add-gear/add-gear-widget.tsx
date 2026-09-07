@@ -32,6 +32,7 @@ import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
 import { ConfigFields } from "./config-fields";
 import { type Impact, impactOf, isEmpty } from "./impact";
+import type { ContextIdentity, OwnedWidget } from "../shell/screens";
 
 /**
  * How long the panel waits before asking the engine what a change would do.
@@ -48,9 +49,18 @@ export interface AddGearState {
 }
 
 @injectable()
-export class AddGearWidget extends ReactWidget {
+export class AddGearWidget extends ReactWidget implements OwnedWidget {
   static readonly ID = "gearbox.add-gear";
   static readonly LABEL = "Add Gear";
+  /**
+   * Which subject opened this wizard.
+   *
+   * Stamped by the contribution's `open*` path, read by the withdrawal sweep:
+   * a proposal composed for one product must not survive into another, because
+   * `ProductEditService` resolves the target at commit time and would otherwise
+   * write it to whatever is open then. Undefined until something opens it.
+   */
+  ownerIdentity?: ContextIdentity;
 
   @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
   @inject(ProductStore) protected readonly products!: ProductStore;

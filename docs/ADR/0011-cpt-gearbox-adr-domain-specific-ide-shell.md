@@ -636,6 +636,67 @@ this and avoids what closing `terminal-` once cost.
   bottom; `ux-accessibility.spec.ts` greps this application's sources for a button without a `type`
   or an icon-only button without a name.
 
+## Amendment 2026-09-08: a screen belongs to a subject, not to a kind of subject
+
+A third UX pass put the shell at "the domain model is implemented inside the screens, and the shell
+around them is still a general editor". Three of its findings were about states the model says do
+not exist: an empty `Gearbox Product` tab after `Close`, `View > Add Gear` live with no product, and
+product screens reachable as generic Theia views.
+
+Fixing those by scoping each screen to a **context kind** would have closed the visible half and
+left the dangerous half open, which is what this amendment is mostly about.
+
+### Availability and lifetime are two axes, and conflating them hides a write bug
+
+`StudioContextService` answers *what is being worked on*. Two further questions follow from it and
+they are not the same question: **where a screen may be opened**, and **which subject an already-open
+one belongs to**.
+
+Scope by kind answers only the first. Stage an Add Gear proposal against one product and open
+another: the kind is still `product`, so nothing is withdrawn -- and `ProductEditService.commitAddGear`
+resolves its target from `this.product.current.open` at commit time, so **the proposal composed for
+the first product is written to the second**. `applyProductEdits` has the same shape from the other
+side: it takes a path from its caller and never checks it is still open, so a product-scoped New Gear
+survives `Close Product` and can still write. The empty tab is that defect with a visible symptom;
+these are the same defect without one.
+
+So `shell/screens.ts` declares both axes per screen, and the unit of scope is a `ContextIdentity` --
+`product:<canonical path>`, not `product`. The Graph is the entry that proves the axes are separate:
+it is `availableIn: all`, because its co-location view reads the *catalogue* and is a designed screen
+with no product, and `lifetime: context-instance`, because it also holds a focused gear id from one
+product's closure. The Inspector is the entry that proves a third thing -- its emptiness is about an
+absent *selection*, not an absent product -- and it is handled by a context key rather than by scope.
+
+### Four surfaces open a view, and `Open View...` reads only one of them
+
+`AbstractViewContribution` registers an always-enabled toggle command, a `when`-less entry in
+`View > Views`, and a `when`-less item in `Open View...`. Gating the first two and forgetting the
+third is the palette lesson of Amendment 2026-09-01 one surface further along:
+`QuickViewService.getPicks` filters on `QuickViewItem.when` and consults **no** command, so a
+predicate cannot reach it. A gate that must apply there has to be a context key --
+which is why `gearbox.hasSelection` exists rather than a `canOpen()` on the Inspector alone.
+
+`ScopedViewContribution` registers all four from one declaration, and deliberately never chains to
+`AbstractViewContribution`'s versions: `registerCommand` on an existing id keeps the *first* handler
+and warns, and `registerMenuAction` does not deduplicate at all, so registering both would install
+the ungated pair and quietly win with them.
+
+Availability hides an entry; a further gate (`canOpen()`) only disables it. The distinction is
+deliberate: a screen that does not belong in this context is absent, and one that belongs but cannot
+act yet -- the engine is down -- stays visible and refuses. A Generate entry that vanishes when the
+websocket blinks reads as a broken application.
+
+### Confirmation
+
+* `adr-0011-ide-shell.spec.ts` asserts in **both** directions that `View` offers Add Gear, Resolution
+  Lock, Conflicts and Generate with a product open and none of them without one. Both directions,
+  because the half that is easy to satisfy by accident is the absence: a mistyped widget id would
+  hide them from every context and a one-sided claim would still read green.
+* The same file's "the first level of View is the domain's" no longer counts `Gearbox*` entries. It
+  required more than four with no product open, which had become a claim about the wrong thing.
+* `regression.spec.ts` continues to assert that no menu holds an entry twice and that nothing logs
+  `is already registered` -- the two symptoms a mistaken `super` call produces.
+
 ## Traceability
 
 * Requirements: `cpt-gearbox-fr-studio` (the Studio itself), `cpt-gearbox-fr-editor-diagnostics`

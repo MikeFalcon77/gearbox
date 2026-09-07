@@ -170,17 +170,27 @@ async function open(browser: Browser): Promise<{ studio: Studio; close: () => Pr
       page.evaluate(
         () => (window as unknown as { __gbxSamples?: Sample[] }).__gbxSamples ?? [],
       ) as Promise<Sample[]>,
+    // **Select, then reveal, and that order is now load-bearing.** The Inspector
+    // is gated on `gearbox.hasSelection`: with nothing selected it is not in the
+    // palette, because a panel whose whole content is "select something" is worse
+    // than an absent one. Revealing first therefore fails at the command, which
+    // is the gate working -- so this picks the row first and then asks for the
+    // panel that has something to say about it.
     detailOf: async (name: string) => {
       await resetCatalogueView(page);
-      await revealDetail(page);
-      return page.evaluate(async (wanted) => {
+      const picked = await page.evaluate((wanted) => {
         const row = Array.from(
           document.querySelectorAll(".gearbox-catalogue .gbx-row"),
         ).find((r) =>
           r.querySelector(".gbx-row-name")?.textContent?.includes(wanted),
         );
-        if (!row) return null;
+        if (!row) return false;
         (row as HTMLElement).click();
+        return true;
+      }, name);
+      if (!picked) return null;
+      await revealDetail(page);
+      return page.evaluate(async (wanted) => {
         // The detail widget renders on the store's change event, so poll for the
         // gear's own name to appear rather than sleeping a guessed interval.
         for (let attempt = 0; attempt < 60; attempt += 1) {
