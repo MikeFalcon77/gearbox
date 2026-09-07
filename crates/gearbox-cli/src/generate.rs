@@ -44,7 +44,7 @@ pub fn run(
 
     let product_file = product_file
         .canonicalize()
-        .unwrap_or_else(|_| product_file.to_path_buf());
+        .map_err(|e| anyhow::anyhow!("cannot canonicalize `{}`: {e}", product_file.display()))?;
     let product_scan = gearbox_engine::load_product(&product_file, None);
     let mut diagnostics: Vec<Diagnostic> = product_scan.diagnostics.as_slice().to_vec();
     let Some(intent) = product_scan.intent else {

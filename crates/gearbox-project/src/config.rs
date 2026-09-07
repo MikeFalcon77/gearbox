@@ -217,7 +217,12 @@ fn serde_attrs(attrs: &[syn::Attribute]) -> SerdeAttrs {
                 // list; `default = "fn"` by an `=`. Testing for an empty input
                 // instead would miss `#[serde(default, deny_unknown_fields)]`,
                 // which is how most of the corpus spells it.
-                if !meta.input.peek(syn::Token![=]) {
+                if meta.input.peek(syn::Token![=]) {
+                    // Consume `default = "fn"` so a later `rename` / `skip` is
+                    // still seen. The fn name itself is collected by
+                    // `serde_default_fn`.
+                    let _ = meta.value()?.parse::<syn::Expr>()?;
+                } else {
                     out.default_bare = true;
                 }
             } else if meta.path.is_ident("flatten") {

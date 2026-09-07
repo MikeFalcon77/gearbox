@@ -576,16 +576,18 @@ pub enum ClusterResolution {
 }
 
 impl ClusterResolution {
-    /// The provider whose capabilities actually decide behaviour.
+    /// The provider whose capabilities actually decide behaviour, if any.
     ///
     /// For the compare-and-swap default that is the underlying cache, not the
     /// primitive being asked about -- which is why a process-local cache makes
-    /// leader election process-local too.
+    /// leader election process-local too. `Unsatisfied` and an empty explicit
+    /// name are `None`, not `""`.
     #[must_use]
-    pub fn effective_provider(&self) -> &str {
+    pub fn effective_provider(&self) -> Option<&str> {
         match self {
-            Self::Provider { name } | Self::SdkCasDefault { over_cache: name } => name,
-            Self::Unsatisfied => "",
+            Self::Provider { name } if !name.is_empty() => Some(name.as_str()),
+            Self::SdkCasDefault { over_cache } => Some(over_cache.as_str()),
+            Self::Provider { .. } | Self::Unsatisfied => None,
         }
     }
 }
@@ -737,6 +739,13 @@ pub struct HostWorkersSettings {
     /// the generator converts it once, against the output root it alone knows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_dir: Option<String>,
+
+    /// Which Cargo profile directory the host should exec (`dev` -> `debug`).
+    ///
+    /// Absent means `debug`. Kubernetes images stay `release` and do not
+    /// read this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cargo_profile: Option<String>,
 
     pub discovery: Discovery,
 }

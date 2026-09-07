@@ -194,12 +194,41 @@ pub fn cargo_config(input: &GenerateInput<'_>) -> Result<Option<FileEntry>, Gene
 
 /// Which Cargo profile directory the host should exec.
 ///
-/// Kubernetes images are release artefacts; one-machine profiles run what the
-/// developer just built.
-fn cargo_profile_dir(input: &GenerateInput<'_>) -> &'static str {
-    if input.lock.kubernetes.is_some() {
-        "release"
-    } else {
-        "debug"
+/// Kubernetes images are release artefacts. A `host_workers` profile names the
+/// Cargo profile in the description so two generates of the same product do not
+/// drift with the operator's environment. Cargo's `dev` profile writes under
+/// `debug/`.
+fn cargo_profile_dir(input: &GenerateInput<'_>) -> String {
+    cargo_profile_directory(
+        input.lock.kubernetes.is_some(),
+        input
+            .lock
+            .host_workers
+            .as_ref()
+            .and_then(|h| h.cargo_profile.as_deref()),
+    )
+}
+
+fn cargo_profile_directory(kubernetes: bool, declared: Option<&str>) -> String {
+    if kubernetes {
+        return "release".to_owned();
+    }
+    match declared {
+        Some("dev") | None => "debug".to_owned(),
+        Some(name) => name.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cargo_profile_directory_maps_dev_and_defaults() {
+        assert_eq!(cargo_profile_directory(true, None), "release");
+        assert_eq!(cargo_profile_directory(false, None), "debug");
+        assert_eq!(cargo_profile_directory(false, Some("dev")), "debug");
+        assert_eq!(cargo_profile_directory(false, Some("release")), "release");
+        assert_eq!(cargo_profile_directory(false, Some("ci")), "ci");
     }
 }

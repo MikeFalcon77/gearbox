@@ -99,9 +99,11 @@ fn host_workers(
         Some(gearbox_ir::DeploymentProfileDecl::HostWorkers {
             discovery,
             target_dir,
+            cargo_profile,
             ..
         }) => Some(gearbox_ir::HostWorkersSettings {
             target_dir: target_dir.clone(),
+            cargo_profile: cargo_profile.clone(),
             discovery: *discovery,
         }),
         _ => None,
@@ -333,7 +335,10 @@ pub fn explain(
                 "{}/{} -> {}",
                 binding.scope,
                 binding.primitive.slug(),
-                binding.resolved.effective_provider()
+                binding
+                    .resolved
+                    .effective_provider()
+                    .unwrap_or("unsatisfied")
             ),
         ));
         for requester in &binding.requesters {
@@ -350,14 +355,21 @@ pub fn explain(
                 ));
             }
         }
-        let (kind, because) = match binding.selected.selected {
-            Choice::Explicit { .. } => {
-                (ProvenanceKind::Declared, "named in the product description")
+        let (kind, because) = if binding.selected.was_downgraded() {
+            (
+                ProvenanceKind::DowngradedBy,
+                "named provider is unregistered or does not satisfy the primitive",
+            )
+        } else {
+            match binding.selected.selected {
+                Choice::Explicit { .. } => {
+                    (ProvenanceKind::Declared, "named in the product description")
+                }
+                Choice::Auto => (
+                    ProvenanceKind::PreferredOver,
+                    "ranked by the resolver; nothing named a provider",
+                ),
             }
-            Choice::Auto => (
-                ProvenanceKind::PreferredOver,
-                "ranked by the resolver; nothing named a provider",
-            ),
         };
         graph.add_edge(ProvenanceEdge::new(id, profile.clone(), kind, because));
     }

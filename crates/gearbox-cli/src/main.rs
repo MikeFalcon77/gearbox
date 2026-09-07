@@ -296,7 +296,7 @@ fn plugins(
     }
 
     if let Some(file) = product_file {
-        return Ok(resolve_plugins(&scan.catalogue, file));
+        return Ok(resolve_plugins(&scan.catalogue, file, gear));
     }
     if list_plugins(&scan.catalogue, gear) {
         Ok(ExitCode::SUCCESS)
@@ -366,7 +366,11 @@ fn list_plugins(catalogue: &gearbox_ir::Catalogue, only: Option<&str>) -> bool {
 }
 
 /// What each host *will* use, per profile.
-fn resolve_plugins(catalogue: &gearbox_ir::Catalogue, file: &std::path::Path) -> ExitCode {
+fn resolve_plugins(
+    catalogue: &gearbox_ir::Catalogue,
+    file: &std::path::Path,
+    only: Option<&str>,
+) -> ExitCode {
     let scan = load_product(file, None);
     // Reported whether or not the product evaluated. A warning that arrives
     // *with* a usable intent used to be dropped, so plugin resolution could exit
@@ -379,9 +383,20 @@ fn resolve_plugins(catalogue: &gearbox_ir::Catalogue, file: &std::path::Path) ->
     };
 
     let mut diagnostics = gearbox_ir::Diagnostics::new();
-    let uri = format!("file://{}", file.display());
+    let uri = gearbox_ir::file_uri(&file.canonicalize().unwrap_or_else(|_| file.to_path_buf()));
     let resolutions = check_plugins(catalogue, &intent, &uri, &mut diagnostics);
     diagnostics.finish();
+    let resolutions: Vec<_> = resolutions
+        .into_iter()
+        .filter(|r| only.is_none_or(|id| r.host.as_str() == id))
+        .collect();
+    if let Some(id) = only
+        && resolutions.is_empty()
+    {
+        eprintln!("no gear named `{id}` declares a plugin extension point");
+        report(diagnostics.as_slice());
+        return ExitCode::FAILURE;
+    }
 
     let mut last: Option<(String, String)> = None;
     for r in &resolutions {
@@ -626,7 +641,7 @@ fn resolve_product(
     // failure the Studio's dead links already taught.
     let product_file = &product_file
         .canonicalize()
-        .unwrap_or_else(|_| product_file.to_path_buf());
+        .map_err(|e| anyhow::anyhow!("cannot canonicalize `{}`: {e}", product_file.display()))?;
     let product_scan = gearbox_engine::product::load_product(product_file, None);
     let mut diagnostics: Vec<Diagnostic> = product_scan.diagnostics.as_slice().to_vec();
     let Some(intent) = product_scan.intent else {
@@ -714,7 +729,7 @@ fn print_resolution(resolved: &gearbox_ir::ResolvedProduct) {
                 "    {}/{} -> {}",
                 c.scope,
                 c.primitive.slug(),
-                c.resolved.effective_provider()
+                c.resolved.effective_provider().unwrap_or("unsatisfied")
             );
         }
     }

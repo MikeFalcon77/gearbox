@@ -129,7 +129,9 @@ fn declarations_are_sorted_and_deduplicated() {
 #[test]
 fn a_json_schema_with_a_gts_id_declares_a_type() {
     let text = r#"{"$id": "gts://cf.core.thing.v1~", "description": "A thing"}"#;
-    let got = gts_type_from_schema("schemas/thing.schema.json", text).unwrap();
+    let got = gts_type_from_schema("schemas/thing.schema.json", text)
+        .expect("valid json")
+        .expect("gts id");
     assert_eq!(
         got.type_id, "cf.core.thing.v1~",
         "the gts:// prefix is stripped"
@@ -140,12 +142,49 @@ fn a_json_schema_with_a_gts_id_declares_a_type() {
 #[test]
 fn a_json_schema_without_a_gts_id_is_not_a_declaration() {
     let text = r#"{"$id": "https://example.com/thing.json"}"#;
-    assert!(gts_type_from_schema("thing.json", text).is_none());
+    assert!(
+        gts_type_from_schema("thing.json", text)
+            .expect("valid json")
+            .is_none()
+    );
 }
 
 #[test]
-fn malformed_json_is_not_a_declaration() {
-    assert!(gts_type_from_schema("broken.json", "{ not json").is_none());
+fn malformed_json_is_an_error_not_a_missing_type() {
+    let err = gts_type_from_schema("broken.json", "{ not json").unwrap_err();
+    assert!(matches!(err, GtsError::InvalidJson { .. }), "got {err}");
+}
+
+#[test]
+fn a_comment_or_string_mention_is_not_a_declaration() {
+    let src = r#"
+        // struct_to_gts_schema!(Thing, "cf.thing.v1~");
+        const S: &str = "struct_to_gts_schema!";
+        pub fn f() {}
+    "#;
+    assert!(
+        project_gts_types(&[file(src)]).unwrap().is_empty(),
+        "a mention outside a macro invocation is not a declaration"
+    );
+}
+
+#[test]
+fn nested_struct_to_gts_schema_is_refused() {
+    let dir = std::env::temp_dir().join(format!("gearbox-gts-nested-{}", std::process::id()));
+    drop(std::fs::remove_dir_all(&dir));
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("src/lib.rs"),
+        r#"other_macro! { struct_to_gts_schema!(Thing, "cf.thing.v1~"); }"#,
+    )
+    .unwrap();
+    let files = scan_crate(&dir).expect("scan");
+    let err = project_gts_types(&files).unwrap_err();
+    drop(std::fs::remove_dir_all(&dir));
+    assert!(
+        matches!(err, GtsError::UnsupportedMacro { .. }),
+        "got {err}"
+    );
 }
 
 // ---------------------------------------------------------------- real tree

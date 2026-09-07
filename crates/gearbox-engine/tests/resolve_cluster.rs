@@ -93,7 +93,7 @@ fn one_process_gets_the_process_local_cache() {
 
     let binding = r.cluster.first().expect("one binding");
     assert_eq!(binding.primitive, ClusterPrimitive::Cache);
-    assert_eq!(binding.resolved.effective_provider(), "postgres");
+    assert_eq!(binding.resolved.effective_provider(), Some("postgres"));
     assert!(codes(&r).contains(&DiagnosticCode::ClusterAutoSelected));
 
     let help = r
@@ -244,6 +244,8 @@ fn an_unregistered_provider_is_named_against_the_registered_ones() {
         cache.selected.downgraded_by,
         Some(DiagnosticCode::ClusterUnregisteredProvider)
     );
+    assert_eq!(cache.resolved, ClusterResolution::Unsatisfied);
+    assert_eq!(cache.resolved.effective_provider(), None);
 }
 
 #[test]
@@ -300,7 +302,7 @@ fn existing_infrastructure_is_preferred_within_a_scope() {
         .iter()
         .find(|b| b.primitive == ClusterPrimitive::Lock)
         .expect("a lock binding");
-    assert_eq!(lock.resolved.effective_provider(), "postgres");
+    assert_eq!(lock.resolved.effective_provider(), Some("postgres"));
 }
 
 #[test]

@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use lsp_server::RequestId;
 
 use super::*;
-use crate::protocol::CreateProductParams;
+use crate::protocol::{CreateProductParams, ScaffoldGearParams};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
@@ -146,5 +146,36 @@ fn clone_from_a_gdl_outside_the_workspace_is_refused() {
         message.contains("outside the declared workspace")
             || message.contains("outside the declared workspace and every source root"),
         "{message}"
+    );
+}
+
+#[test]
+fn scaffold_refuses_a_dotdot_id() {
+    let tmp = scratch("scaffold-dotdot");
+    let workspace = tmp.join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let dest = workspace.join("gears");
+    std::fs::create_dir_all(&dest).unwrap();
+
+    let mut state = write_state(workspace);
+    let response = scaffold_gear(
+        &mut state,
+        RequestId::from(1),
+        &ScaffoldGearParams {
+            id: "..".to_owned(),
+            name: "Escape".to_owned(),
+            version: "0.1.0".to_owned(),
+            destination_dir: dest.display().to_string(),
+            dry_run: false,
+        },
+    );
+    let message = match response.response_result {
+        Err(e) => e.message,
+        Ok(_) => panic!("must refuse `..`"),
+    };
+    assert!(message.contains("kebab-case"), "{message}");
+    assert!(
+        !dest.join("Cargo.toml").exists(),
+        "parent dest must stay unchanged"
     );
 }

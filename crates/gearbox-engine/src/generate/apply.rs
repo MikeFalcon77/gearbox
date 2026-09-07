@@ -129,22 +129,78 @@ fn publish_staged(
         written += 1;
     }
 
-    for file in staged {
-        if !file.action.writes() {
-            continue;
-        }
-        publish(
-            &staging.join(file.path.as_str()),
-            &out_root.join(file.path.as_str()),
-        )?;
-        if matches!(file.entry.ownership, Ownership::OperatorOwned) {
-            publish(
-                &staging_base.join(file.path.as_str()),
-                &base_root.join(file.path.as_str()),
+    let backup = out_root.join(".apply-backup");
+    let backup_base = base_root.join(".apply-backup");
+    clear_tree(&backup);
+    clear_tree(&backup_base);
+
+    let mut moved: Vec<(std::path::PathBuf, Option<std::path::PathBuf>)> = Vec::new();
+    let published = (|| {
+        for file in staged {
+            if !file.action.writes() {
+                continue;
+            }
+            publish_or_remember(
+                &staging.join(file.path.as_str()),
+                &out_root.join(file.path.as_str()),
+                &backup.join(file.path.as_str()),
+                &mut moved,
             )?;
+            if matches!(file.entry.ownership, Ownership::OperatorOwned) {
+                publish_or_remember(
+                    &staging_base.join(file.path.as_str()),
+                    &base_root.join(file.path.as_str()),
+                    &backup_base.join(file.path.as_str()),
+                    &mut moved,
+                )?;
+            }
+        }
+        Ok(written)
+    })();
+
+    if published.is_err() {
+        for (dest, bak) in moved.into_iter().rev() {
+            if let Some(bak) = bak {
+                drop(std::fs::copy(bak, dest));
+            } else {
+                drop(std::fs::remove_file(dest));
+            }
         }
     }
-    Ok(written)
+    clear_tree(&backup);
+    clear_tree(&backup_base);
+    published
+}
+
+fn publish_or_remember(
+    from: &Path,
+    to: &Path,
+    backup: &Path,
+    moved: &mut Vec<(std::path::PathBuf, Option<std::path::PathBuf>)>,
+) -> Result<(), GenerateError> {
+    // Copy, not rename: dest stays in place until `publish` atomically replaces
+    // it. A crash between the two leaves the operator's file where it was; a
+    // leftover `.apply-backup` is then harmless to `clear_tree`.
+    let saved = if to.exists() {
+        if let Some(parent) = backup.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| GenerateError::Io {
+                what: "cannot create",
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        std::fs::copy(to, backup).map_err(|source| GenerateError::Io {
+            what: "cannot backup",
+            path: to.to_path_buf(),
+            source,
+        })?;
+        Some(backup.to_path_buf())
+    } else {
+        None
+    };
+    publish(from, to)?;
+    moved.push((to.to_path_buf(), saved));
+    Ok(())
 }
 
 /// Decide every file's fate and produce the bytes for it, touching nothing.

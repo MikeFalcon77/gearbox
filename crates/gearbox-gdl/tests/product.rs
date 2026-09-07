@@ -12,7 +12,9 @@
 )]
 
 use gearbox_gdl::{FileIdentity, GdlEngine};
-use gearbox_ir::{DiagnosticCode, ProductIntent, ProfileId, RelPath, SourceId};
+use gearbox_ir::{
+    DeploymentProfileDecl, DiagnosticCode, ProductIntent, ProfileId, RelPath, SourceId,
+};
 
 fn identity() -> FileIdentity {
     FileIdentity {
@@ -518,5 +520,57 @@ fn a_fetched_template_set_is_refused_with_its_reason() {
     // No intent: `eval_product` withholds the value whenever a diagnostic is an
     // error, so a description naming a template set nobody can read resolves to
     // nothing rather than to a product quietly using the builtins.
+    assert!(intent.is_none());
+}
+
+#[test]
+fn cargo_profile_is_recorded_on_host_workers() {
+    let src = r#"
+product(
+    id = "demo",
+    name = "Demo",
+    version = "0.1.0",
+    sources = [source(id = "s", at = path("."))],
+    profiles = [host_workers(
+        id = "local",
+        host = "gateway",
+        worker_discovery = "static",
+        cargo_profile = "release",
+    )],
+    default_profile = "local",
+    gears = [],
+)
+"#;
+    let (intent, codes, messages) = eval(src);
+    assert!(codes.is_empty(), "{codes:?} {messages}");
+    let intent = intent.expect("evaluates");
+    match intent.profiles.get(&ProfileId::new("local").unwrap()) {
+        Some(DeploymentProfileDecl::HostWorkers { cargo_profile, .. }) => {
+            assert_eq!(cargo_profile.as_deref(), Some("release"));
+        }
+        other => panic!("expected host_workers, got {other:?}"),
+    }
+}
+
+#[test]
+fn cargo_profile_dotdot_is_refused() {
+    let src = r#"
+product(
+    id = "demo",
+    name = "Demo",
+    version = "0.1.0",
+    sources = [source(id = "s", at = path("."))],
+    profiles = [host_workers(
+        id = "local",
+        host = "gateway",
+        worker_discovery = "static",
+        cargo_profile = "..",
+    )],
+    default_profile = "local",
+    gears = [],
+)
+"#;
+    let (intent, _codes, messages) = eval(src);
+    assert!(messages.contains("cargo profile"), "{messages}");
     assert!(intent.is_none());
 }

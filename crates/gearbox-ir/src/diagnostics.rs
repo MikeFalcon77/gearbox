@@ -786,7 +786,10 @@ impl Location {
 #[must_use]
 pub fn file_uri(path: &std::path::Path) -> String {
     let text = path.to_string_lossy().replace('\\', "/");
-    if text.starts_with('/') {
+    if let Some(unc) = text.strip_prefix("//") {
+        // `\\server\share\file` → `file://server/share/file`, not four slashes.
+        format!("file://{unc}")
+    } else if text.starts_with('/') {
         format!("file://{text}")
     } else {
         format!("file:///{text}")

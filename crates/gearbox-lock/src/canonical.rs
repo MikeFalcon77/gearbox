@@ -55,6 +55,13 @@ pub fn canonicalize_order(product: &mut ResolvedProduct) {
     });
     product.provenance.dedup();
 
+    for gear in product.gears.values_mut() {
+        gear.selected_by.sort();
+    }
+    for binding in &mut product.cluster {
+        binding.requesters.sort();
+    }
+
     product.diagnostics.finish();
 }
 

@@ -131,7 +131,7 @@ pub fn app_config(
         })
         .collect();
 
-    write_endpoints(process, &mut gears);
+    write_endpoints(process, &mut gears)?;
     write_consumer_wiring(input, process, &mut gears);
     write_cluster(input, process, &mut gears);
     write_spawns(input, process, &mut gears);
@@ -187,7 +187,10 @@ fn drop_unknown_keys(catalogue: &Catalogue, id: &GearId, config: &mut Map<String
 /// The key comes from the gear's `serves` declaration, not from a table here:
 /// the REST host calls it `bind_addr` and the gRPC hub calls it `listen_addr`,
 /// and the generator has to write whichever one the gear actually reads.
-fn write_endpoints(process: &ResolvedProcess, gears: &mut BTreeMap<String, GearSection>) {
+fn write_endpoints(
+    process: &ResolvedProcess,
+    gears: &mut BTreeMap<String, GearSection>,
+) -> Result<(), GenerateError> {
     for endpoint in &process.listens {
         let Some(section) = gears.get_mut(endpoint.gear.as_str()) else {
             // A `listens` entry for a gear not in the process is a resolver
@@ -199,8 +202,9 @@ fn write_endpoints(process: &ResolvedProcess, gears: &mut BTreeMap<String, GearS
             &mut section.config,
             &endpoint.config_key,
             Value::String(endpoint.address.clone()),
-        );
+        )?;
     }
+    Ok(())
 }
 
 /// Endpoint overrides for edges that cross a process boundary.
@@ -340,26 +344,34 @@ fn execution(input: &GenerateInput<'_>, spawn: &SpawnSpec) -> ExecutionSection {
 /// naming a nested field. Splitting on `.` here means a gear that declares
 /// `health.bind_addr` gets a nested map rather than a literal key with a dot in
 /// it, which the gear's `deny_unknown_fields` would reject.
-fn insert_path(target: &mut Map<String, Value>, key: &str, value: Value) {
+fn insert_path(
+    target: &mut Map<String, Value>,
+    key: &str,
+    value: Value,
+) -> Result<(), GenerateError> {
     let mut segments = key.split('.').peekable();
     let mut cursor = target;
     while let Some(segment) = segments.next() {
         if segments.peek().is_none() {
             cursor.insert(segment.to_owned(), value);
-            return;
+            return Ok(());
         }
         let next = cursor
             .entry(segment.to_owned())
             .or_insert_with(|| Value::Object(Map::new()));
         // A non-map already sitting at an intermediate segment means two
         // endpoints disagree about the shape of one key. Replacing it would
-        // hide that; leaving it alone drops this endpoint, which the missing
-        // bind address makes loud at startup.
+        // hide that; leaving it alone would drop this endpoint silently.
         match next.as_object_mut() {
             Some(map) => cursor = map,
-            None => return,
+            None => {
+                return Err(GenerateError::ConfigShape {
+                    key: key.to_owned(),
+                });
+            }
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -369,7 +381,8 @@ mod tests {
     #[test]
     fn a_dotted_key_becomes_a_nested_map() {
         let mut target = Map::new();
-        insert_path(&mut target, "health.bind_addr", Value::String("x".into()));
+        insert_path(&mut target, "health.bind_addr", Value::String("x".into()))
+            .expect("nested key");
         let health = target.get("health").and_then(Value::as_object);
         assert_eq!(
             health
@@ -382,7 +395,19 @@ mod tests {
     #[test]
     fn a_flat_key_stays_flat() {
         let mut target = Map::new();
-        insert_path(&mut target, "bind_addr", Value::String("x".into()));
+        insert_path(&mut target, "bind_addr", Value::String("x".into())).expect("flat key");
         assert_eq!(target.get("bind_addr").and_then(Value::as_str), Some("x"));
+    }
+
+    #[test]
+    fn a_non_object_intermediate_is_a_shape_error() {
+        let mut target = Map::new();
+        target.insert(
+            "health".to_owned(),
+            Value::String("already a scalar".into()),
+        );
+        let err = insert_path(&mut target, "health.bind_addr", Value::String("x".into()))
+            .expect_err("shape conflict");
+        assert!(matches!(err, GenerateError::ConfigShape { .. }));
     }
 }

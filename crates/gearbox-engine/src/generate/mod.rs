@@ -159,6 +159,9 @@ pub enum GenerateError {
     #[error("generated Helm would interpolate `{value}` as template text in {at}")]
     UnsafeHelm { at: &'static str, value: String },
 
+    #[error("config key `{key}` cannot nest under an existing non-object value")]
+    ConfigShape { key: String },
+
     #[error("{what} `{}`", .path.display())]
     Io {
         what: &'static str,

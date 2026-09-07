@@ -347,3 +347,21 @@ gear(package = LEFT, name = "Demo")
     );
     assert!(codes.is_empty(), "a diamond should load cleanly: {codes:?}");
 }
+
+#[test]
+fn a_broken_fragment_is_a_parse_error_on_the_fragment() {
+    let fx = Fixture::new("parse");
+    fs::write(fx.root().join("broken.gdl"), "this is not (\n").expect("write broken");
+    let outcome = GdlEngine::new().eval_gear(
+        &fx.identity(),
+        "load(\"//broken.gdl\", \"X\")\ngear(package = cargo(crate_name = \"c\", lib = \"c\"))\n",
+    );
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::GdlParse && d.message.contains("broken.gdl")),
+        "{:?}",
+        outcome.diagnostics
+    );
+}

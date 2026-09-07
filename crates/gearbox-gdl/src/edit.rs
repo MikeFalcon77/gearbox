@@ -36,6 +36,8 @@ pub use edit_call::{
     set_profile_field,
 };
 
+use std::collections::BTreeSet;
+
 use gearbox_ir::{Diagnostic, DiagnosticCode, Diagnostics, Location};
 use starlark::syntax::AstModule;
 use starlark_syntax::codemap::{Pos, Span};
@@ -210,8 +212,46 @@ where
 /// comparing the rendered text keeps this indifferent to how the rest of the
 /// entry is written.
 fn names_gear(source: &str, entry: Span, gear: &str) -> bool {
-    edit_call::names_entry(source, entry, gear)
-        && slice(source, entry).trim_start().starts_with("use_gear")
+    edit_call::names_entry(source, entry, gear) && is_use_gear_entry(source, entry)
+}
+
+/// Honour `use_gear("x")` and `UG = use_gear` / `UG("x")`. A prefix check on
+/// the source text misses the alias, so `remove_gear` would leave it behind.
+pub(crate) fn is_use_gear_entry(source: &str, entry: Span) -> bool {
+    let Some(callee) = edit_call::entry_callee(source, entry) else {
+        return false;
+    };
+    callee == "use_gear" || use_gear_aliases(source).contains(&callee)
+}
+
+fn use_gear_aliases(source: &str) -> BTreeSet<String> {
+    // One-step `NAME = use_gear` on a line. `A = B = use_gear` and an alias of
+    // an alias are invisible: GDL assignments are rare, and walking a full
+    // binding chain would be a second parser for a shape nobody writes.
+    let mut names = BTreeSet::new();
+    for line in source.lines() {
+        let code = line.split('#').next().unwrap_or("").trim();
+        let Some((lhs, rhs)) = code.split_once('=') else {
+            continue;
+        };
+        if rhs.trim() == "use_gear" {
+            let lhs = lhs.trim();
+            if is_gdl_ident(lhs) {
+                names.insert(lhs.to_owned());
+            }
+        }
+    }
+    names
+}
+
+fn is_gdl_ident(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {
+            chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }
+        _ => false,
+    }
 }
 
 /// Insert `entry` as the last element of `list`.
@@ -330,7 +370,12 @@ pub(crate) fn refuse(uri: &str, message: &str, help: &str) -> Diagnostics {
     refuse_with(uri, DiagnosticCode::GdlCardinality, message, help)
 }
 
-fn refuse_with(uri: &str, code: DiagnosticCode, message: &str, help: &str) -> Diagnostics {
+pub(crate) fn refuse_with(
+    uri: &str,
+    code: DiagnosticCode,
+    message: &str,
+    help: &str,
+) -> Diagnostics {
     let mut diagnostics: Diagnostics =
         [Diagnostic::error(code, message, help).at(Location::file(uri.to_owned()))]
             .into_iter()

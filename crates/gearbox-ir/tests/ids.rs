@@ -244,12 +244,27 @@ fn rel_paths_are_relative_normalized_and_contained() {
         "C:/windows",
         "C:foo",
         "gears/C:escape",
+        "NUL",
+        "CON",
+        "COM1",
+        "aux.txt",
+        "out/NUL",
+        "gears/\0hidden",
+        "..\0",
     ] {
         assert!(RelPath::new(bad).is_err(), "RelPath accepted `{bad}`");
     }
     assert!(
         RelPath::here().resolve("C:/abs").is_err(),
         "resolve must refuse a Windows drive"
+    );
+    assert!(
+        RelPath::here().resolve("..\0").is_err(),
+        "resolve must refuse a control character even inside `..`"
+    );
+    assert!(
+        RelPath::new("gears").unwrap().resolve("NUL").is_err(),
+        "resolve must refuse a Windows device name"
     );
 }
 

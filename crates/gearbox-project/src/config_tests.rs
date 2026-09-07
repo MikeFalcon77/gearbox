@@ -391,6 +391,22 @@ fn defaults_are_read_from_a_default_impl_and_from_a_serde_fn() {
     );
 }
 
+#[test]
+fn default_fn_does_not_drop_a_following_rename() {
+    let files = [file(
+        r#"
+        #[derive(Deserialize)]
+        pub struct DemoConfig {
+            #[serde(default = "d", rename = "type")]
+            pub kind: String,
+        }
+        fn d() -> String { "x".to_owned() }
+        "#,
+    )];
+    let fields = project_config_fields(&files, "DemoConfig");
+    assert_eq!(named(&fields, "type").name, "type");
+}
+
 /// Three defaults that were wrong before they were read off the real corpus, and
 /// each was wrong in the same way: a path is a *name*, not a value.
 #[test]

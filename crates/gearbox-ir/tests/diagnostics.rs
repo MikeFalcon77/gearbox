@@ -311,3 +311,9 @@ fn optional_fields_are_omitted_when_absent() {
     let round: Diagnostic = serde_json::from_str(&serde_json::to_string(&full).unwrap()).unwrap();
     assert_eq!(round, full);
 }
+
+#[test]
+fn file_uri_does_not_quadruple_slash_a_unc_path() {
+    let uri = gearbox_ir::file_uri(std::path::Path::new(r"\\server\share\file.gdl"));
+    assert_eq!(uri, "file://server/share/file.gdl");
+}

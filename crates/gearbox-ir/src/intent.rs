@@ -138,6 +138,12 @@ pub enum DeploymentProfileDecl {
         /// executable path.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target_dir: Option<String>,
+        /// Which Cargo profile directory the host should exec (`dev` -> `debug`).
+        ///
+        /// Recorded as the description spelled it so two generates of the same
+        /// product cannot drift with the operator's environment.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cargo_profile: Option<String>,
         /// Where `host_workers(...)` was written in the product description.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         declared_at: Option<Location>,
@@ -345,19 +351,29 @@ pub struct PluginSelection {
 
 impl PluginSelection {
     /// The vendor this selection asks for, if the product set one.
-    #[must_use]
-    pub fn configured_vendor(&self) -> Option<&str> {
-        self.config
-            .get("vendor")
-            .and_then(serde_json::Value::as_str)
+    ///
+    /// # Errors
+    /// Returns an error when the key is present but not a string.
+    pub fn configured_vendor(&self) -> Result<Option<&str>, &'static str> {
+        match self.config.get("vendor") {
+            None => Ok(None),
+            Some(serde_json::Value::String(s)) => Ok(Some(s.as_str())),
+            Some(_) => Err("`vendor` must be a string"),
+        }
     }
 
     /// The priority this selection asks for, if the product set one.
-    #[must_use]
-    pub fn configured_priority(&self) -> Option<i64> {
-        self.config
-            .get("priority")
-            .and_then(serde_json::Value::as_i64)
+    ///
+    /// # Errors
+    /// Returns an error when the key is present but not an integer.
+    pub fn configured_priority(&self) -> Result<Option<i64>, &'static str> {
+        match self.config.get("priority") {
+            None => Ok(None),
+            Some(serde_json::Value::Number(n)) => {
+                n.as_i64().map(Some).ok_or("`priority` must be an integer")
+            }
+            Some(_) => Err("`priority` must be an integer"),
+        }
     }
 }
 

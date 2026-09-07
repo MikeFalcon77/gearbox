@@ -25,6 +25,13 @@ host: ProcessId, discovery: Discovery,
  */
 target_dir?: string | null, 
 /**
+ * Which Cargo profile directory the host should exec (`dev` -> `debug`).
+ *
+ * Recorded as the description spelled it so two generates of the same
+ * product cannot drift with the operator's environment.
+ */
+cargo_profile?: string | null, 
+/**
  * Where `host_workers(...)` was written in the product description.
  */
 declared_at?: Location | null, } | { "profile": "kubernetes", id: ProfileId, discovery: Discovery, namespace?: string | null, image_registry?: string | null, 

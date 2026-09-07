@@ -75,9 +75,10 @@ impl NodeKind {
     /// aborting a resolution.
     #[must_use]
     pub fn id_for(self, key: &str) -> Option<NodeId> {
-        // A colon separates the two parts, so one inside the key would make a
-        // third and `NodeId` would reject it.
-        NodeId::new(format!("{}:{}", self.prefix(), key.replace(':', "_"))).ok()
+        // Extra colons stay in the payload. `NodeId` is `{kind}:{opaque}`, and
+        // decision keys already embed arrows and slashes
+        // (`cut:payments-audit->api-contracts/PaymentApi@v1`).
+        NodeId::new(format!("{}:{}", self.prefix(), key)).ok()
     }
 }
 
@@ -253,32 +254,28 @@ impl ExplanationGraph {
         let mut out = Self::new();
         let mut frontier = vec![root.clone()];
         let mut seen = std::collections::BTreeSet::new();
+        if let Some(node) = self.nodes.get(root) {
+            out.add_node(node.clone());
+            seen.insert(root.clone());
+        }
 
-        for _ in 0..=depth {
+        // `depth` is hops, not inclusive loop count: 0 is the root alone.
+        for _ in 0..depth {
             let mut next = Vec::new();
             for id in std::mem::take(&mut frontier) {
-                if !seen.insert(id.clone()) {
-                    continue;
-                }
-                if let Some(node) = self.nodes.get(&id) {
-                    out.add_node(node.clone());
-                }
                 for edge in self.outgoing(&id) {
                     out.add_edge(edge.clone());
-                    next.push(edge.to.clone());
+                    if seen.insert(edge.to.clone()) {
+                        if let Some(node) = self.nodes.get(&edge.to) {
+                            out.add_node(node.clone());
+                        }
+                        next.push(edge.to.clone());
+                    }
                 }
             }
             frontier = next;
             if frontier.is_empty() {
                 break;
-            }
-        }
-
-        // Include the far end of every retained edge, so no edge dangles.
-        let targets: Vec<NodeId> = out.edges.iter().map(|e| e.to.clone()).collect();
-        for target in targets {
-            if let Some(node) = self.nodes.get(&target) {
-                out.add_node(node.clone());
             }
         }
 
@@ -317,5 +314,54 @@ impl ExplanationGraph {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty() && self.edges.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn id_for_keeps_colons_in_the_payload() {
+        let id = NodeKind::Decision
+            .id_for("cut:payments-audit->api-contracts/PaymentApi@v1")
+            .expect("NodeId accepts extra colons in the payload");
+        assert_eq!(
+            id.as_str(),
+            "decision:cut:payments-audit->api-contracts/PaymentApi@v1"
+        );
+    }
+
+    #[test]
+    fn because_of_depth_zero_is_the_root_alone() {
+        let root = NodeKind::Decision.id_for("root").unwrap();
+        let child = NodeKind::Constraint.id_for("rule").unwrap();
+        let mut graph = ExplanationGraph::new();
+        graph.add_node(ExplanationNode::new(
+            root.clone(),
+            NodeKind::Decision,
+            "root",
+        ));
+        graph.add_node(ExplanationNode::new(
+            child.clone(),
+            NodeKind::Constraint,
+            "rule",
+        ));
+        graph.add_edge(ProvenanceEdge::new(
+            root.clone(),
+            child,
+            ProvenanceKind::ConstrainedBy,
+            "because",
+        ));
+        graph.finish();
+
+        let zero = graph.because_of(&root, 0);
+        assert_eq!(zero.nodes.len(), 1);
+        assert!(zero.nodes.contains_key(&root));
+        assert!(zero.edges.is_empty());
+
+        let one = graph.because_of(&root, 1);
+        assert_eq!(one.nodes.len(), 2);
+        assert_eq!(one.edges.len(), 1);
     }
 }

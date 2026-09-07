@@ -300,6 +300,11 @@ pub(crate) fn serde_default_fn(attrs: &[syn::Attribute]) -> Option<String> {
                 && let Ok(lit) = value.parse::<syn::LitStr>()
             {
                 found = Some(lit.value());
+            } else if meta.input.peek(syn::Token![=]) {
+                // Consume `rename = "..."`, `skip_serializing_if = "..."` and
+                // any other `key = expr` so they do not abort the rest of the
+                // list before `default = "fn"` is seen.
+                let _ = meta.value()?.parse::<syn::Expr>()?;
             }
             Ok(())
         }));

@@ -68,8 +68,7 @@ pub fn resolve(
         let already: BTreeSet<String> = out
             .iter()
             .filter(|b| b.scope == scope)
-            .map(|b| b.resolved.effective_provider().to_owned())
-            .filter(|name| !name.is_empty())
+            .filter_map(|b| b.resolved.effective_provider().map(str::to_owned))
             .collect();
 
         let declared = scoped
@@ -226,12 +225,15 @@ fn explicit(
         Selected::honoured(request.provider.clone())
     };
 
-    (
+    let resolved = if selected.was_downgraded() {
+        ClusterResolution::Unsatisfied
+    } else {
         ClusterResolution::Provider {
             name: request.provider.clone(),
-        },
-        selected,
-    )
+        }
+    };
+
+    (resolved, selected)
 }
 
 /// Nothing was named, so the resolver ranks.
@@ -410,7 +412,9 @@ fn guard_process_local(
     if !ctx.spread {
         return;
     }
-    let effective = resolved.effective_provider();
+    let Some(effective) = resolved.effective_provider() else {
+        return;
+    };
     let Some(provider) = ctx.providers.iter().find(|p| p.name == effective) else {
         return;
     };
@@ -442,7 +446,9 @@ fn check_credentials(
     declared: Option<&ProviderBinding>,
     diagnostics: &mut Diagnostics,
 ) {
-    let effective = resolved.effective_provider();
+    let Some(effective) = resolved.effective_provider() else {
+        return;
+    };
     let Some(provider) = ctx.providers.iter().find(|p| p.name == effective) else {
         return;
     };

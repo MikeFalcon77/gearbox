@@ -717,11 +717,25 @@ fn deployment_profile(
                     return None;
                 }
             };
+            let cargo_profile = match record.cargo_profile.as_deref() {
+                None => None,
+                Some(raw) if is_cargo_profile_name(raw) => Some(raw.to_owned()),
+                Some(raw) => {
+                    diagnostics.push(invalid(
+                        uri,
+                        format!("profile `{id}` names cargo profile `{raw}`"),
+                        "use a single path segment (`dev`, `release`, or a custom Cargo profile \
+                         name); `dev` writes under `target/debug`",
+                    ));
+                    return None;
+                }
+            };
             Some(DeploymentProfileDecl::HostWorkers {
                 id: id.clone(),
                 host,
                 discovery: discovery(uri, id, record.discovery.as_deref(), diagnostics)?,
                 target_dir: record.target_dir.clone(),
+                cargo_profile,
                 declared_at: record.declared_at.clone(),
             })
         }
@@ -741,6 +755,18 @@ fn deployment_profile(
             None
         }
     }
+}
+
+fn is_cargo_profile_name(value: &str) -> bool {
+    !value.is_empty()
+        && value != "."
+        && value != ".."
+        && !value.contains('/')
+        && !value.contains('\\')
+        && !value.contains('\0')
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 fn discovery(

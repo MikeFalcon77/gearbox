@@ -33,7 +33,7 @@ use starlark::eval::{Evaluator, FileLoader};
 use starlark::syntax::AstModule;
 use starlark::values::FrozenHeapName;
 
-use gearbox_ir::Diagnostics;
+use gearbox_ir::{Diagnostic, DiagnosticCode, Diagnostics, Location};
 
 use crate::declarative::{dialect, scan_forbidden_tokens};
 
@@ -41,11 +41,30 @@ use crate::declarative::{dialect, scan_forbidden_tokens};
 /// for a fragment whose GBX0103 diagnostics are already recorded.
 pub const FORBIDDEN_RECORDED: &str = "contains a construct GDL does not permit";
 
-/// GDL is declarative: no loops, no recursion. A deep stack or a large heap
-/// is a runaway fragment, not a legitimate description.
+/// Sentinel the parent evaluation matches so a fragment parse failure is not
+/// restated as a parent-file `GdlEval`.
+pub const PARSE_RECORDED: &str = "fragment does not parse";
+
+/// Bound on a loaded fragment. A description is not a program; a megabyte of
+/// it is a runaway `load()`, not a legitimate include.
+const MAX_FRAGMENT_BYTES: u64 = 1024 * 1024;
+
+/// GDL is declarative: no loops, no recursion. A deep stack, a large heap,
+/// or a long tick count is a runaway fragment, not a legitimate description.
+///
+/// # Panics
+/// When called twice on the same evaluator: starlark refuses a second cap,
+/// and a missing cap would leave the sandbox unbounded.
 pub fn apply_eval_limits(eval: &mut Evaluator) {
-    let _callstack = eval.set_max_callstack_size(64);
-    let _heap = eval.set_max_heap_size(4 * 1024 * 1024);
+    if let Err(e) = eval.set_max_callstack_size(64) {
+        panic!("cannot cap GDL callstack on a fresh Evaluator: {e}");
+    }
+    if let Err(e) = eval.set_max_heap_size(4 * 1024 * 1024) {
+        panic!("cannot cap GDL heap on a fresh Evaluator: {e}");
+    }
+    if let Err(e) = eval.set_max_tick_count(100_000) {
+        panic!("cannot cap GDL ticks on a fresh Evaluator: {e}");
+    }
 }
 
 /// What every loader in one evaluation shares.
@@ -219,6 +238,15 @@ impl<'a> GdlLoader<'a> {
     /// exactly as unhelpful as a top-level one would be.
     fn evaluate(&self, path: &Path) -> starlark::Result<FrozenModule> {
         let uri = gearbox_ir::file_uri(path);
+        let meta = std::fs::metadata(path)
+            .map_err(|e| other(format!("cannot read `{}`: {e}", path.display())))?;
+        if meta.len() > MAX_FRAGMENT_BYTES {
+            return Err(other(format!(
+                "`{}` is {} bytes; a GDL fragment may be at most {MAX_FRAGMENT_BYTES}",
+                path.display(),
+                meta.len()
+            )));
+        }
         let source = std::fs::read_to_string(path)
             .map_err(|e| other(format!("cannot read `{}`: {e}", path.display())))?;
 
@@ -229,7 +257,21 @@ impl<'a> GdlLoader<'a> {
             return Err(other(format!("`{}` {FORBIDDEN_RECORDED}", path.display())));
         }
 
-        let ast = AstModule::parse(&uri, source, &dialect())?;
+        let ast = match AstModule::parse(&uri, source, &dialect()) {
+            Ok(ast) => ast,
+            Err(e) => {
+                self.state.borrow_mut().diagnostics.push(
+                    Diagnostic::error(
+                        DiagnosticCode::GdlParse,
+                        format!("`{uri}` does not parse: {e}"),
+                        "fix the fragment; a load()ed file is held to the same syntax as the \
+                         description that loads it",
+                    )
+                    .at(Location::file(uri)),
+                );
+                return Err(other(format!("`{}` {PARSE_RECORDED}", path.display())));
+            }
+        };
 
         // Nested loads resolve from the fragment's own directory, against the
         // same root and the same cache. Declared before the evaluator because

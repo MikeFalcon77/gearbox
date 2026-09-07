@@ -27,7 +27,9 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
 use gearbox_engine::{Continue, LoadEvent, SourceRoot, default_source_ids, load_catalogue_staged};
-use gearbox_ir::{Diagnostic, ExplanationGraph, ProfileId, RelPath, ResolvedProduct, SourceId};
+use gearbox_ir::{
+    Diagnostic, ExplanationGraph, GearId, ProfileId, RelPath, ResolvedProduct, SourceId,
+};
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
 
 use crate::protocol::{
@@ -388,11 +390,20 @@ fn require_ready(state: &State, id: &RequestId) -> Option<Response> {
         ));
     }
     if state.roots.is_empty() {
-        return Some(error(
-            id.clone(),
-            error_code::WORKSPACE_NOT_OPEN,
-            "no source root is open; pass `roots` to `initialize` or `--root` to the CLI",
-        ));
+        let why = if state.failed_roots.is_empty() {
+            "no source root is open; pass `roots` to `initialize` or `--root` to the CLI".to_owned()
+        } else {
+            format!(
+                "no source root is open; every root given failed to open: {}",
+                state
+                    .failed_roots
+                    .iter()
+                    .map(|r| format!("{}: {}", r.path, r.error))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )
+        };
+        return Some(error(id.clone(), error_code::WORKSPACE_NOT_OPEN, &why));
     }
     None
 }
@@ -674,10 +685,11 @@ fn edit_gear(state: &mut State, id: RequestId, params: &EditGearParams, add: boo
         );
     }
 
-    let path = PathBuf::from(&params.path);
-    if let Err(refusal) = writable_path(state, &path) {
-        return error(id, error_code::EDIT_REFUSED, &refusal);
-    }
+    let requested = PathBuf::from(&params.path);
+    let path = match writable_path(state, &requested) {
+        Ok(path) => path,
+        Err(refusal) => return error(id, error_code::EDIT_REFUSED, &refusal),
+    };
 
     let before = match std::fs::read_to_string(&path) {
         Ok(text) => text,
@@ -690,7 +702,7 @@ fn edit_gear(state: &mut State, id: RequestId, params: &EditGearParams, add: boo
         }
     };
 
-    let uri = format!("file://{}", path.display());
+    let uri = gearbox_ir::file_uri(&path);
     let outcome = if add {
         let Some(source_id) = params.source.as_deref() else {
             return error(
@@ -858,10 +870,11 @@ fn edit_with(
              pass `allow_writes: true` to `initialize` if the client is meant to edit files",
         );
     }
-    let path = PathBuf::from(path_str);
-    if let Err(refusal) = writable_path(state, &path) {
-        return error(id, error_code::EDIT_REFUSED, &refusal);
-    }
+    let requested = PathBuf::from(path_str);
+    let path = match writable_path(state, &requested) {
+        Ok(path) => path,
+        Err(refusal) => return error(id, error_code::EDIT_REFUSED, &refusal),
+    };
     let before = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(e) => {
@@ -872,7 +885,7 @@ fn edit_with(
             );
         }
     };
-    let uri = format!("file://{}", path.display());
+    let uri = gearbox_ir::file_uri(&path);
     let edit = match apply(&uri, &before) {
         Ok(edit) => edit,
         Err(diagnostics) => {
@@ -958,10 +971,11 @@ fn create_product(state: &mut State, id: RequestId, params: &CreateProductParams
     }
 
     let after = if let Some(clone_from) = params.clone_from.as_deref() {
-        let source_path = PathBuf::from(clone_from);
-        if let Err(refusal) = writable_path(state, &source_path) {
-            return error(id, error_code::EDIT_REFUSED, &refusal);
-        }
+        let requested = PathBuf::from(clone_from);
+        let source_path = match writable_path(state, &requested) {
+            Ok(path) => path,
+            Err(refusal) => return error(id, error_code::EDIT_REFUSED, &refusal),
+        };
         let source = match std::fs::read_to_string(&source_path) {
             Ok(text) => text,
             Err(e) => {
@@ -1071,23 +1085,20 @@ fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) 
         );
     }
 
-    if params.id.trim().is_empty() {
-        return error(id, error_code::EDIT_REFUSED, "gear id must not be empty");
-    }
-    if params.id.contains('/') || params.id.contains('\\') {
+    let Ok(gear_id) = GearId::new(params.id.trim()) else {
         return error(
             id,
             error_code::EDIT_REFUSED,
-            "gear id must be a single path segment, not a nested path",
+            "gear id must be kebab-case (a single path segment, not `.` or `..`)",
         );
-    }
+    };
 
     let dest_dir = PathBuf::from(&params.destination_dir);
     let parent = match writable_out_root(state, &dest_dir) {
         Ok(path) => path,
         Err(refusal) => return error(id, error_code::EDIT_REFUSED, &refusal),
     };
-    let out_root = parent.join(&params.id);
+    let out_root = parent.join(gear_id.as_str());
     if out_root.exists() {
         return error(
             id,
@@ -1189,10 +1200,12 @@ type ScaffoldFile = (String, String, gearbox_ir::FileKind);
 
 /// Minimal gear scaffold contents: description, stub crate, empty lib.
 fn scaffold_gear_files(params: &ScaffoldGearParams) -> Result<Vec<ScaffoldFile>, String> {
-    let crate_name = params.id.replace('_', "-");
-    let lib_name = params.id.replace('-', "_");
-    if crate_name.is_empty() || lib_name.is_empty() {
-        return Err("gear id must yield a non-empty crate and lib name".to_owned());
+    let crate_name = GearId::new(params.id.trim())
+        .map_err(|_| "gear id must be kebab-case".to_owned())?
+        .to_string();
+    let lib_name = crate_name.replace('-', "_");
+    if !is_semver(&params.version) {
+        return Err("version must be a semver triple like `0.1.0`".to_owned());
     }
 
     let name = gearbox_gdl::edit::quote_string(&params.name);
@@ -1226,20 +1239,22 @@ gear(
 
     let cargo = format!(
         r#"[package]
-name = "{crate_name}"
-version = "{version}"
+name = {crate_toml}
+version = {version_toml}
 edition = "2021"
 
 [lib]
-name = "{lib_name}"
+name = {lib_toml}
 path = "src/lib.rs"
 "#,
-        version = params.version.replace('"', ""),
+        crate_toml = toml_basic_string(&crate_name),
+        version_toml = toml_basic_string(&params.version),
+        lib_toml = toml_basic_string(&lib_name),
     );
 
-    let lib = format!(
-        "// Scaffolded lib for `{crate_name}`.\n\
-         // Gear macros (#[toolkit::gear], provides/consumes) come next.\n"
+    let lib = String::from(
+        "// Scaffolded lib.\n\
+         // Gear macros (#[toolkit::gear], provides/consumes) come next.\n",
     );
 
     Ok(vec![
@@ -1258,7 +1273,7 @@ path = "src/lib.rs"
 ///
 /// If nothing was declared, nothing is writable. Failing closed is the only
 /// defensible default for a method that changes files.
-fn writable_path(state: &State, path: &Path) -> Result<(), String> {
+fn writable_path(state: &State, path: &Path) -> Result<PathBuf, String> {
     let Ok(canonical) = path.canonicalize() else {
         return Err(format!("`{}` does not exist", path.display()));
     };
@@ -1269,12 +1284,29 @@ fn writable_path(state: &State, path: &Path) -> Result<(), String> {
         ));
     }
 
-    let mut allowed: Vec<PathBuf> = state
-        .roots
-        .iter()
-        .filter_map(|root| root.root.canonicalize().ok())
-        .collect();
-    allowed.extend(state.workspace.as_ref().and_then(|w| w.canonicalize().ok()));
+    let mut allowed = Vec::new();
+    for root in &state.roots {
+        match root.root.canonicalize() {
+            Ok(path) => allowed.push(path),
+            Err(e) => {
+                return Err(format!(
+                    "cannot canonicalize source root `{}`: {e}",
+                    root.root.display()
+                ));
+            }
+        }
+    }
+    if let Some(workspace) = state.workspace.as_ref() {
+        match workspace.canonicalize() {
+            Ok(path) => allowed.push(path),
+            Err(e) => {
+                return Err(format!(
+                    "cannot canonicalize workspace `{}`: {e}",
+                    workspace.display()
+                ));
+            }
+        }
+    }
 
     if allowed.is_empty() {
         return Err(
@@ -1282,7 +1314,7 @@ fn writable_path(state: &State, path: &Path) -> Result<(), String> {
         );
     }
     if allowed.iter().any(|root| canonical.starts_with(root)) {
-        Ok(())
+        Ok(canonical)
     } else {
         Err(format!(
             "`{}` is outside the declared workspace and every source root",
@@ -1319,9 +1351,15 @@ fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
         .canonicalize()
         .map_err(|e| format!("cannot canonicalize `{}`: {e}", existing.display()))?;
 
-    let Some(workspace) = state.workspace.as_ref().and_then(|w| w.canonicalize().ok()) else {
+    let Some(raw_workspace) = state.workspace.as_ref() else {
         return Err("no workspace was declared, so no output root is writable".to_owned());
     };
+    let workspace = raw_workspace.canonicalize().map_err(|e| {
+        format!(
+            "cannot canonicalize workspace `{}`: {e}",
+            raw_workspace.display()
+        )
+    })?;
     if !canonical_existing.starts_with(&workspace) {
         return Err(format!(
             "`{}` is outside the declared workspace",
@@ -1755,6 +1793,39 @@ fn generate_file(state: &mut State, id: RequestId, params: &GenerateFileParams) 
 /// is atomic, so a crash leaves either the old description or the new one and
 /// never a truncated one. The same directory matters -- across filesystems a
 /// rename is a copy, and the guarantee is gone.
+fn is_semver(value: &str) -> bool {
+    let mut parts = value.split('.');
+    let Some(major) = parts.next() else {
+        return false;
+    };
+    let Some(minor) = parts.next() else {
+        return false;
+    };
+    let Some(patch) = parts.next() else {
+        return false;
+    };
+    parts.next().is_none()
+        && [major, minor, patch]
+            .into_iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+}
+
+fn toml_basic_string(value: &str) -> String {
+    let mut out = String::from("\"");
+    for c in value.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
     let directory = path.parent().unwrap_or(Path::new("."));
     let temporary = directory.join(format!(

@@ -202,7 +202,11 @@ fn check_discovery(
         return;
     }
 
-    let Some(host) = partition.processes.first() else {
+    let Some(host) = partition
+        .processes
+        .iter()
+        .find(|process| process.kind == ProcessKind::Host)
+    else {
         return;
     };
     let has = |gear: &str| GearId::new(gear).is_ok_and(|id| host.contains(&id));

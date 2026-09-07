@@ -40,6 +40,47 @@ pub struct PointResolution {
     pub tied: bool,
 }
 
+/// Report a present-but-wrong-type `vendor` / `priority` rather than treating
+/// it as unset (which would silently change who wins).
+fn report_plugin_config_types(intent: &ProductIntent, uri: &str, diagnostics: &mut Diagnostics) {
+    for selection in &intent.selected_gears {
+        if let Some(value) = selection.config.get("vendor")
+            && !value.is_string()
+        {
+            diagnostics.push(
+                Diagnostic::error(
+                    DiagnosticCode::GdlConfigTypeMismatch,
+                    format!("gear `{}`: `vendor` must be a string", selection.gear),
+                    "set `vendor` to a string, or drop the key to use the crate default",
+                )
+                .at(Location::file(uri.to_owned())),
+            );
+        }
+        for plugin in &selection.plugins {
+            if let Err(msg) = plugin.configured_vendor() {
+                diagnostics.push(
+                    Diagnostic::error(
+                        DiagnosticCode::GdlConfigTypeMismatch,
+                        format!("plugin `{}`: {msg}", plugin.gear),
+                        "set `vendor` to a string, or drop the key to use the crate default",
+                    )
+                    .at(Location::file(uri.to_owned())),
+                );
+            }
+            if let Err(msg) = plugin.configured_priority() {
+                diagnostics.push(
+                    Diagnostic::error(
+                        DiagnosticCode::GdlConfigTypeMismatch,
+                        format!("plugin `{}`: {msg}", plugin.gear),
+                        "set `priority` to an integer, or drop the key to use the crate default",
+                    )
+                    .at(Location::file(uri.to_owned())),
+                );
+            }
+        }
+    }
+}
+
 /// The vendor a host will search for.
 fn host_vendor<'a>(gear: &'a GearDescriptor, intent: &'a ProductIntent) -> Option<&'a str> {
     intent
@@ -53,7 +94,7 @@ fn host_vendor<'a>(gear: &'a GearDescriptor, intent: &'a ProductIntent) -> Optio
 
 /// The vendor a plugin will register itself under.
 fn plugin_vendor<'a>(selection: &'a PluginSelection, catalogue: &'a Catalogue) -> Option<&'a str> {
-    selection.configured_vendor().or_else(|| {
+    selection.configured_vendor().ok().flatten().or_else(|| {
         catalogue
             .gear(&selection.gear)
             .and_then(|g| g.fills.as_ref())
@@ -66,6 +107,8 @@ fn plugin_vendor<'a>(selection: &'a PluginSelection, catalogue: &'a Catalogue) -
 fn plugin_priority(selection: &PluginSelection, catalogue: &Catalogue) -> i64 {
     selection
         .configured_priority()
+        .ok()
+        .flatten()
         .or_else(|| {
             catalogue
                 .gear(&selection.gear)
@@ -87,6 +130,7 @@ pub fn check(
     diagnostics: &mut Diagnostics,
 ) -> Vec<PointResolution> {
     let mut out = Vec::new();
+    report_plugin_config_types(intent, uri, diagnostics);
 
     for profile in intent.profiles.keys() {
         for selection in &intent.selected_gears {

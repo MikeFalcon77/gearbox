@@ -4,7 +4,7 @@
 //! re-serialisation. Named arguments and dict keys are located on the AST of the
 //! call being edited; string values are escaped before they are written.
 
-use gearbox_ir::{ConfigValue, Diagnostics};
+use gearbox_ir::{ConfigValue, DiagnosticCode, Diagnostics};
 use starlark::syntax::AstModule;
 use starlark_syntax::codemap::Span;
 use starlark_syntax::syntax::ast::{
@@ -13,7 +13,8 @@ use starlark_syntax::syntax::ast::{
 
 use crate::declarative::dialect;
 use crate::edit::{
-    Edit, NamedList, insert_entry, named_list_literal, offset, refuse, remove_entry, slice,
+    Edit, NamedList, insert_entry, is_use_gear_entry, named_list_literal, offset, refuse,
+    refuse_with, remove_entry, slice,
 };
 
 /// Whether a config key name looks like a credential slot.
@@ -195,6 +196,9 @@ pub fn add_profile(
     fields: &[(String, String)],
 ) -> Result<Edit, Diagnostics> {
     require_profile_kind(uri, kind)?;
+    for (k, _) in fields {
+        require_gdl_identifier(uri, k, "profile field")?;
+    }
     let list = named_list_literal(uri, source, "profiles")?;
     if list
         .entries
@@ -203,9 +207,9 @@ pub fn add_profile(
     {
         return Ok(Edit::Unchanged);
     }
+    require_profile_fields(uri, kind, fields)?;
     let mut parts = vec![format!("id = {}", quote_string(id))];
     for (k, v) in fields {
-        require_gdl_identifier(uri, k, "profile field")?;
         parts.push(format!("{k} = {}", quote_string(v)));
     }
     let entry = format!("{kind}({})", parts.join(", "));
@@ -302,6 +306,7 @@ pub fn render_product_template(params: &CreateProductParams) -> String {
     let version = quote_string(&params.version);
     let profile_id = quote_string(&params.profile_id);
     let profile_kind = sanitized_profile_kind(&params.profile_kind);
+    let profile = render_profile_entry(profile_kind, &profile_id);
     let comment_name = params.name.replace(['\n', '\r'], " ");
     format!(
         r"# Generated product description for {comment_name}.
@@ -319,7 +324,7 @@ product(
     ],
 
     profiles = [
-        {profile_kind}(id = {profile_id}),
+        {profile},
     ],
     default_profile = {profile_id},
 
@@ -328,6 +333,16 @@ product(
 )
 "
     )
+}
+
+fn render_profile_entry(kind: &str, id: &str) -> String {
+    match kind {
+        "kubernetes" => format!("{kind}(id = {id}, discovery = \"dns\")"),
+        "host_workers" => {
+            format!("{kind}(id = {id}, host = \"localhost\", worker_discovery = \"dns\")")
+        }
+        _ => format!("{kind}(id = {id})"),
+    }
 }
 
 /// Clone a product file, changing `id` and `name` on the top-level call.
@@ -346,8 +361,9 @@ pub fn clone_product_text(
     version: Option<&str>,
 ) -> Result<String, Diagnostics> {
     let ast = AstModule::parse(uri, source.to_owned(), &dialect()).map_err(|e| {
-        refuse(
+        refuse_with(
             uri,
+            DiagnosticCode::GdlParse,
             &format!("`{uri}` does not parse: {e}"),
             "fix the source description before cloning it",
         )
@@ -402,6 +418,28 @@ fn require_gdl_identifier(uri: &str, name: &str, what: &str) -> Result<(), Diagn
             "use a name matching [A-Za-z_][A-Za-z0-9_]*",
         ))
     }
+}
+
+fn require_profile_fields(
+    uri: &str,
+    kind: &str,
+    fields: &[(String, String)],
+) -> Result<(), Diagnostics> {
+    let required: &[&str] = match kind {
+        "kubernetes" => &["discovery"],
+        "host_workers" => &["host", "worker_discovery"],
+        _ => &[],
+    };
+    for name in required {
+        if !fields.iter().any(|(key, _)| key == name) {
+            return Err(refuse(
+                uri,
+                &format!("`{kind}` profile needs `{name}`"),
+                &format!("pass `{name}` when adding a `{kind}` profile"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn require_profile_kind(uri: &str, kind: &str) -> Result<(), Diagnostics> {
@@ -459,10 +497,33 @@ pub fn entry_id(source: &str, entry: Span) -> Option<String> {
 }
 
 fn find_gear_entry(source: &str, list: &NamedList, gear: &str) -> Option<Span> {
-    list.entries.iter().copied().find(|entry| {
-        let text = slice(source, *entry).trim_start();
-        text.starts_with("use_gear") && names_entry(source, *entry, gear)
-    })
+    list.entries
+        .iter()
+        .copied()
+        .find(|entry| is_use_gear_entry(source, *entry) && names_entry(source, *entry, gear))
+}
+
+pub fn entry_callee(source: &str, entry: Span) -> Option<String> {
+    let text = slice(source, entry);
+    let ast = AstModule::parse("file:///entry.gdl", text.to_owned(), &dialect()).ok()?;
+    call_callee(ast.statement())
+}
+
+fn call_callee<P>(stmt: &AstStmtP<P>) -> Option<String>
+where
+    P: starlark_syntax::syntax::ast::AstPayload,
+{
+    match &stmt.node {
+        StmtP::Statements(statements) => statements.iter().find_map(call_callee),
+        StmtP::Expression(expr) => match &expr.node {
+            ExprP::Call(callee, _) => match &callee.node {
+                ExprP::Identifier(id) => Some(id.node.ident.clone()),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn product_call_span<P>(stmt: &AstStmtP<P>) -> Option<Span>

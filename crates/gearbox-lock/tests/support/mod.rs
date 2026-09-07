@@ -305,6 +305,7 @@ pub fn fixture() -> ResolvedProduct {
         // lock silent about a section every such product now writes.
         host_workers: Some(gearbox_ir::HostWorkersSettings {
             target_dir: Some("../../../gears-rust/target".to_owned()),
+            cargo_profile: None,
             discovery: gearbox_ir::Discovery::Directory,
         }),
         schema_version: LOCK_SCHEMA_VERSION,

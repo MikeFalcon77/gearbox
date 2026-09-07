@@ -84,6 +84,8 @@ fn umbrella_chart(
     product: &str,
     version: &str,
 ) -> Result<FileEntry, GenerateError> {
+    helm_safe("Chart.yaml name", product)?;
+    helm_safe("Chart.yaml version", version)?;
     let mut body = String::new();
     body.push_str(&header("#"));
     body.push_str("apiVersion: v2\n");
@@ -101,6 +103,7 @@ fn umbrella_chart(
     body.push_str("dependencies:\n");
     for process in &input.lock.processes {
         let sub = subchart_name(process);
+        helm_safe("Chart.yaml dependency name", sub)?;
         body.push_str("  - name: ");
         body.push_str(sub);
         body.push('\n');
@@ -123,6 +126,8 @@ fn umbrella_chart(
 }
 
 fn subchart_chart(product: &str, sub: &str, version: &str) -> Result<FileEntry, GenerateError> {
+    helm_safe("subchart Chart.yaml name", sub)?;
+    helm_safe("subchart Chart.yaml version", version)?;
     let mut body = String::new();
     body.push_str(&header("#"));
     body.push_str("apiVersion: v2\n");

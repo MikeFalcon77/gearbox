@@ -37,6 +37,9 @@ pub enum GtsError {
 
     #[error("`#[gts_type_schema]` in {relative} has no readable `type_id`")]
     UnreadableTypeId { relative: String },
+
+    #[error("schema `{relative}` is not valid JSON: {message}")]
+    InvalidJson { relative: String, message: String },
 }
 
 /// Whether an attribute is `gts_type_schema`, however it is qualified.
@@ -140,8 +143,11 @@ pub fn project_gts_types(files: &[RustFile]) -> Result<Vec<GtsType>, GtsError> {
 
 /// Whether the file invokes `struct_to_gts_schema!` anywhere.
 ///
-/// A token scan rather than an AST walk: the macro can appear at item, statement
-/// or expression position, and all that matters is that it is there.
+/// `syn::Visit` does not descend into `mac.tokens`, so a nested
+/// `struct_to_gts_schema!(...)` inside another macro would be invisible on
+/// path alone. Scanning those tokens (not the whole file text) still sees the
+/// nested call without treating a mention in a comment or string as a
+/// declaration.
 fn file_uses_unsupported_macro(file: &RustFile) -> bool {
     struct Finder(bool);
     impl<'ast> syn::visit::Visit<'ast> for Finder {
@@ -151,6 +157,7 @@ fn file_uses_unsupported_macro(file: &RustFile) -> bool {
                 .segments
                 .last()
                 .is_some_and(|s| s.ident == "struct_to_gts_schema")
+                || mac.tokens.to_string().contains("struct_to_gts_schema")
             {
                 self.0 = true;
             }
@@ -167,23 +174,31 @@ fn file_uses_unsupported_macro(file: &RustFile) -> bool {
 /// Separate from the Rust pass because `scan_crate` reads only `.rs`. Takes the
 /// already-read text so the caller owns the I/O and this stays testable from a
 /// literal.
-#[must_use]
-pub fn gts_type_from_schema(relative: &str, text: &str) -> Option<GtsType> {
-    let value: serde_json::Value = serde_json::from_str(text).ok()?;
-    let id = value.get("$id")?.as_str()?;
+/// # Errors
+/// Returns [`GtsError::InvalidJson`] when `text` is not JSON. A schema that
+/// parses but is not a GTS id is `Ok(None)`, not an error.
+pub fn gts_type_from_schema(relative: &str, text: &str) -> Result<Option<GtsType>, GtsError> {
+    let value: serde_json::Value =
+        serde_json::from_str(text).map_err(|e| GtsError::InvalidJson {
+            relative: relative.to_owned(),
+            message: e.to_string(),
+        })?;
+    let Some(id) = value.get("$id").and_then(serde_json::Value::as_str) else {
+        return Ok(None);
+    };
     // `gts-analyze` accepts both spellings.
     let type_id = id.strip_prefix("gts://").unwrap_or(id);
     if !type_id.starts_with("gts.") && !type_id.starts_with("cf.") {
-        return None;
+        return Ok(None);
     }
-    Some(GtsType {
+    Ok(Some(GtsType {
         type_id: type_id.to_owned(),
         description: value
             .get("description")
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned),
         relative: relative.to_owned(),
-    })
+    }))
 }
 
 #[cfg(test)]

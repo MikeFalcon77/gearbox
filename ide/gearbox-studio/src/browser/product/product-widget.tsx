@@ -724,6 +724,7 @@ function profileFields(
         { wire: "host", label: "host", value: profile.host },
         { wire: "worker_discovery", label: "worker_discovery", value: profile.discovery },
         { wire: "target_dir", label: "target_dir", value: profile.target_dir },
+        { wire: "cargo_profile", label: "cargo_profile", value: profile.cargo_profile },
       ];
     case "kubernetes":
       return [

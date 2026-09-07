@@ -323,6 +323,7 @@ gdl_record! {
         pub host: Option<String>,
         pub discovery: Option<String>,
         pub target_dir: Option<String>,
+        pub cargo_profile: Option<String>,
         pub namespace: Option<String>,
         pub image_registry: Option<String>,
         /// Where this profile constructor was written.

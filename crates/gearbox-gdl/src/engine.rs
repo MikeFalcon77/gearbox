@@ -23,7 +23,9 @@ use starlark::syntax::AstModule;
 
 use crate::declarative::{dialect, scan_forbidden_tokens};
 use crate::globals::gear_globals;
-use crate::loader::{FORBIDDEN_RECORDED, GdlLoader, apply_eval_limits, is_load_escape};
+use crate::loader::{
+    FORBIDDEN_RECORDED, GdlLoader, PARSE_RECORDED, apply_eval_limits, is_load_escape,
+};
 use crate::sink::{GdlSink, GearDecl};
 
 /// Where a GDL file came from, as far as the catalogue is concerned.
@@ -227,7 +229,7 @@ fn evaluate<T>(
     if let Some(e) = eval_err {
         // Fragment GBX0103 findings are already in `diagnostics`; restating
         // them as a parent-file GBX0102 would hide the real span.
-        if !e.to_string().contains(FORBIDDEN_RECORDED) {
+        if !e.to_string().contains(FORBIDDEN_RECORDED) && !e.to_string().contains(PARSE_RECORDED) {
             diagnostics.push(starlark_error(&identity.uri, &e, classify(&e)));
         }
         diagnostics.finish();

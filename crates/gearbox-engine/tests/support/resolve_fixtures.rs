@@ -280,6 +280,7 @@ pub fn host_workers_intent(gears: &[&str]) -> ProductIntent {
             host: gearbox_ir::ProcessId::new("gateway").unwrap(),
             discovery: gearbox_ir::Discovery::Static,
             target_dir: None,
+            cargo_profile: None,
             declared_at: None,
         },
     );
@@ -322,6 +323,7 @@ pub fn host_workers(
             host: gearbox_ir::ProcessId::new("host").unwrap(),
             discovery,
             target_dir: target_dir.map(ToOwned::to_owned),
+            cargo_profile: None,
             declared_at: None,
         },
     );

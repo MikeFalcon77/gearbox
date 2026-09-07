@@ -249,6 +249,26 @@ fn a_file_that_is_not_a_product_is_refused_by_name() {
 }
 
 #[test]
+fn remove_gear_honours_an_aliased_use_gear() {
+    let source = r#"
+UG = use_gear
+product(
+    gears = [
+        UG("g", source = "s"),
+        use_gear("keep", source = "s"),
+    ],
+)
+"#;
+    let edited = remove_gear(URI, source, "g")
+        .expect("editable")
+        .changed()
+        .expect("changed")
+        .to_owned();
+    assert!(!edited.contains("UG(\"g\""), "{edited}");
+    assert!(edited.contains(r#"use_gear("keep""#), "{edited}");
+}
+
+#[test]
 fn the_result_still_parses_and_still_says_what_it_said() {
     // The edit is text surgery, so the only real proof it produced a description
     // is to parse the result -- and the round trip has to agree about the gears.
@@ -640,14 +660,17 @@ fn profile_add_remove_is_byte_exact_inverse() {
         WITH_CONFIG,
         "kubernetes",
         "prod",
-        &[("namespace".into(), "pay".into())],
+        &[
+            ("discovery".into(), "dns".into()),
+            ("namespace".into(), "pay".into()),
+        ],
     )
     .expect("editable")
     .changed()
     .expect("changed")
     .to_owned();
     assert!(
-        added.contains("kubernetes(id = \"prod\", namespace = \"pay\")"),
+        added.contains("kubernetes(id = \"prod\", discovery = \"dns\", namespace = \"pay\")"),
         "{added}"
     );
     assert_eq!(
@@ -701,6 +724,19 @@ fn add_gear_quotes_injection_payloads() {
             "payload `{gear:?}` injected an extra call:\n{edited}"
         );
     }
+}
+
+#[test]
+fn add_profile_refuses_incomplete_kubernetes() {
+    let diagnostics = add_profile(URI, WITH_CONFIG, "kubernetes", "prod", &[])
+        .expect_err("incomplete kubernetes");
+    assert!(
+        diagnostics
+            .as_slice()
+            .iter()
+            .any(|d| d.message.contains("needs `discovery`")),
+        "{diagnostics:?}"
+    );
 }
 
 #[test]

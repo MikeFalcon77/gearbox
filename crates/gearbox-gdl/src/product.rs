@@ -254,18 +254,20 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             host: None,
             discovery: None,
             target_dir: None,
+            cargo_profile: None,
             namespace: None,
             image_registry: None,
             declared_at: call_location(eval),
         })
     }
 
-    /// `host_workers(id = ..., host = ..., worker_discovery = ..., target_dir = ...)`
+    /// `host_workers(id = ..., host = ..., worker_discovery = ..., target_dir = ..., cargo_profile = ...)`
     fn host_workers<'v>(
         #[starlark(require = named)] id: &str,
         #[starlark(require = named)] host: &str,
         #[starlark(require = named)] worker_discovery: &str,
         #[starlark(require = named)] target_dir: Option<&str>,
+        #[starlark(require = named)] cargo_profile: Option<&str>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ProfileRecord> {
         Ok(ProfileRecord {
@@ -274,6 +276,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             host: Some(host.to_owned()),
             discovery: Some(worker_discovery.to_owned()),
             target_dir: target_dir.map(str::to_owned),
+            cargo_profile: cargo_profile.map(str::to_owned),
             namespace: None,
             image_registry: None,
             declared_at: call_location(eval),
@@ -294,6 +297,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             host: None,
             discovery: Some(discovery.to_owned()),
             target_dir: None,
+            cargo_profile: None,
             namespace: namespace.map(str::to_owned),
             image_registry: image_registry.map(str::to_owned),
             declared_at: call_location(eval),

@@ -82,6 +82,21 @@ pub fn scan_crate(crate_dir: &Path) -> Result<Vec<RustFile>, ScanError> {
             let at = e.path().unwrap_or(&src).to_path_buf();
             ScanError::Walk(at, e.to_string())
         })?;
+        // `follow_links(false)` already refuses to descend a symlink directory
+        // or read a symlink-to-non-rs. The hole is a `.rs` symlink: walkdir
+        // reports it as neither file nor directory, so it would otherwise skip
+        // the entry and the post-walk check would never see it.
+        if entry.file_type().is_symlink() {
+            if entry.path().extension().is_some_and(|x| x == "rs") {
+                return Err(ScanError::Walk(
+                    entry.into_path(),
+                    "source file is a symlink; a crate may only be read through real files \
+                     inside its source root"
+                        .to_owned(),
+                ));
+            }
+            continue;
+        }
         if entry.file_type().is_file() && entry.path().extension().is_some_and(|x| x == "rs") {
             paths.push(entry.into_path());
         }
@@ -132,4 +147,52 @@ pub fn narrowing_path(spec: &str) -> Result<PathBuf, String> {
         return Err(spec.to_owned());
     }
     Ok(as_path.strip_prefix("src").unwrap_or(as_path).to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_symlink_rs_file_is_a_walk_error() {
+        let dir = std::env::temp_dir().join(format!("gearbox-scan-symlink-{}", std::process::id()));
+        drop(std::fs::remove_dir_all(&dir));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("real.rs"), "pub fn f() {}\n").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(dir.join("real.rs"), dir.join("src/lib.rs")).unwrap();
+            let Err(err) = scan_crate(&dir) else {
+                panic!("symlink must be refused");
+            };
+            drop(std::fs::remove_dir_all(&dir));
+            assert!(matches!(err, ScanError::Walk(_, _)), "got {err}");
+        }
+        #[cfg(not(unix))]
+        {
+            drop(std::fs::remove_dir_all(&dir));
+        }
+    }
+
+    #[test]
+    fn a_symlink_non_rs_file_is_ignored() {
+        let dir =
+            std::env::temp_dir().join(format!("gearbox-scan-json-symlink-{}", std::process::id()));
+        drop(std::fs::remove_dir_all(&dir));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/lib.rs"), "pub fn f() {}\n").unwrap();
+        std::fs::write(dir.join("thing.json"), "{}\n").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(dir.join("thing.json"), dir.join("src/thing.json")).unwrap();
+            let files =
+                scan_crate(&dir).unwrap_or_else(|e| panic!("json symlink must be ignored: {e}"));
+            drop(std::fs::remove_dir_all(&dir));
+            assert_eq!(files.len(), 1);
+        }
+        #[cfg(not(unix))]
+        {
+            drop(std::fs::remove_dir_all(&dir));
+        }
+    }
 }

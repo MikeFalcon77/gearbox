@@ -17,4 +17,11 @@ export type HostWorkersSettings = {
  * machine-specific absolute path in a file that is committed and diffed;
  * the generator converts it once, against the output root it alone knows.
  */
-target_dir?: string | null, discovery: Discovery, };
+target_dir?: string | null, 
+/**
+ * Which Cargo profile directory the host should exec (`dev` -> `debug`).
+ *
+ * Absent means `debug`. Kubernetes images stay `release` and do not
+ * read this field.
+ */
+cargo_profile?: string | null, discovery: Discovery, };

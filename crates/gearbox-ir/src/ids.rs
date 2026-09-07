@@ -365,15 +365,69 @@ fn is_windows_prefix(value: &str) -> bool {
     bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
+fn has_controls(value: &str) -> bool {
+    value.chars().any(char::is_control)
+}
+
+/// `NUL`, `CON`, `COM1`, … — a stored `RelPath` must not become a device on Windows.
+fn is_windows_device(segment: &str) -> bool {
+    let stem = segment.split_once('.').map_or(segment, |(head, _)| head);
+    matches!(
+        stem.to_ascii_uppercase().as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
+}
+
+fn refuse_segment(segment: &str) -> Option<&'static str> {
+    if has_controls(segment) {
+        return Some("no control characters");
+    }
+    if is_windows_device(segment) {
+        return Some("no Windows device names");
+    }
+    if segment.contains(':') {
+        return Some("a relative path");
+    }
+    None
+}
+
 impl RelPath {
     pub const KIND: &'static str = "relative path";
 
-    /// Validate and construct. Rejects absolute paths, `..` segments and
-    /// backslashes; normalizes away redundant separators and `.` segments.
+    /// Validate and construct. Rejects absolute paths, `..` segments,
+    /// backslashes, control characters and Windows device names (`NUL`, `CON`,
+    /// `COM1`, …); normalizes away redundant separators and `.` segments.
+    ///
+    /// Device names are refused in every segment, including on Unix: a
+    /// legitimate `src/aux.rs` or `nul.json` is then a hard error. That is the
+    /// compromise that keeps a stored `RelPath` from becoming a device when the
+    /// same bytes are opened on Windows.
     ///
     /// # Errors
     /// Returns [`IdError`] when `value` is empty, absolute, contains a backslash,
-    /// or contains a `..` segment (which would escape its source root).
+    /// a control character, a Windows device name, or a `..` segment (which
+    /// would escape its source root).
     pub fn new(value: impl Into<String>) -> Result<Self, IdError> {
         let raw = value.into();
         let malformed = |expected: &'static str| IdError::Malformed {
@@ -387,6 +441,9 @@ impl RelPath {
         }
         if raw.contains('\\') {
             return Err(malformed("forward slashes only"));
+        }
+        if has_controls(&raw) {
+            return Err(malformed("no control characters"));
         }
         if raw.starts_with('/') || is_windows_prefix(&raw) {
             return Err(malformed("a relative path"));
@@ -403,10 +460,12 @@ impl RelPath {
                         "no `..` segments (must stay inside its source root)",
                     ));
                 }
-                other if other.contains(':') => {
-                    return Err(malformed("a relative path"));
+                other => {
+                    if let Some(expected) = refuse_segment(other) {
+                        return Err(malformed(expected));
+                    }
+                    segments.push(other);
                 }
-                other => segments.push(other),
             }
         }
 
@@ -472,6 +531,9 @@ impl RelPath {
         if relative.contains('\\') {
             return Err(malformed("forward slashes only"));
         }
+        if has_controls(relative) {
+            return Err(malformed("no control characters"));
+        }
         if relative.starts_with('/') || is_windows_prefix(relative) {
             return Err(malformed("a relative path"));
         }
@@ -490,10 +552,12 @@ impl RelPath {
                         return Err(malformed("a path that stays inside its source root"));
                     }
                 }
-                other if other.contains(':') => {
-                    return Err(malformed("a relative path"));
+                other => {
+                    if let Some(expected) = refuse_segment(other) {
+                        return Err(malformed(expected));
+                    }
+                    segments.push(other);
                 }
-                other => segments.push(other),
             }
         }
 

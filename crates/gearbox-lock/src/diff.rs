@@ -114,30 +114,56 @@ pub struct LockDiff {
 impl LockDiff {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.profile_changed.is_none()
-            && self.fields_changed.is_empty()
-            && self.diagnostics_changed.is_none()
-            && self.sources_added.is_empty()
-            && self.sources_removed.is_empty()
-            && self.sources_changed.is_empty()
-            && self.cuts_added.is_empty()
-            && self.cuts_removed.is_empty()
-            && self.cuts_changed.is_empty()
-            && self.provenance_added.is_empty()
-            && self.provenance_removed.is_empty()
-            && self.provenance_changed.is_empty()
-            && self.gears_added.is_empty()
-            && self.gears_removed.is_empty()
-            && self.gears_changed.is_empty()
-            && self.processes_added.is_empty()
-            && self.processes_removed.is_empty()
-            && self.processes_changed.is_empty()
-            && self.bindings_added.is_empty()
-            && self.bindings_removed.is_empty()
-            && self.bindings_changed.is_empty()
-            && self.cluster_added.is_empty()
-            && self.cluster_removed.is_empty()
-            && self.cluster_changed.is_empty()
+        let Self {
+            profile_changed,
+            fields_changed,
+            sources_added,
+            sources_removed,
+            sources_changed,
+            gears_added,
+            gears_removed,
+            gears_changed,
+            processes_added,
+            processes_removed,
+            processes_changed,
+            bindings_added,
+            bindings_removed,
+            bindings_changed,
+            cluster_added,
+            cluster_removed,
+            cluster_changed,
+            cuts_added,
+            cuts_removed,
+            cuts_changed,
+            provenance_added,
+            provenance_removed,
+            provenance_changed,
+            diagnostics_changed,
+        } = self;
+        profile_changed.is_none()
+            && fields_changed.is_empty()
+            && diagnostics_changed.is_none()
+            && sources_added.is_empty()
+            && sources_removed.is_empty()
+            && sources_changed.is_empty()
+            && cuts_added.is_empty()
+            && cuts_removed.is_empty()
+            && cuts_changed.is_empty()
+            && provenance_added.is_empty()
+            && provenance_removed.is_empty()
+            && provenance_changed.is_empty()
+            && gears_added.is_empty()
+            && gears_removed.is_empty()
+            && gears_changed.is_empty()
+            && processes_added.is_empty()
+            && processes_removed.is_empty()
+            && processes_changed.is_empty()
+            && bindings_added.is_empty()
+            && bindings_removed.is_empty()
+            && bindings_changed.is_empty()
+            && cluster_added.is_empty()
+            && cluster_removed.is_empty()
+            && cluster_changed.is_empty()
     }
 
     /// Render as ordered, human-readable lines: `+` added, `-` removed,
@@ -347,19 +373,22 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
     let hw_scalars = |settings: Option<&gearbox_ir::HostWorkersSettings>| {
         let Some(gearbox_ir::HostWorkersSettings {
             target_dir,
+            cargo_profile,
             discovery,
         }) = settings
         else {
-            return (String::new(), String::new());
+            return (String::new(), String::new(), String::new());
         };
         (
             target_dir.clone().unwrap_or_default(),
+            cargo_profile.clone().unwrap_or_default(),
             discovery.as_str().to_owned(),
         )
     };
-    let (btd, bhd) = hw_scalars(before_hw.as_ref());
-    let (atd, ahd) = hw_scalars(after_hw.as_ref());
+    let (btd, bcp, bhd) = hw_scalars(before_hw.as_ref());
+    let (atd, acp, ahd) = hw_scalars(after_hw.as_ref());
     compare("host_workers.target_dir", btd, atd);
+    compare("host_workers.cargo_profile", bcp, acp);
     compare("host_workers.discovery", bhd, ahd);
 
     out.sort();
@@ -517,8 +546,12 @@ pub fn diff(before: &ResolvedProduct, after: &ResolvedProduct) -> LockDiff {
     let (provenance_added, provenance_removed, provenance_changed) =
         diff_keyed(&by_provenance_key(before), &by_provenance_key(after));
 
-    let diagnostics_changed = (before.diagnostics != after.diagnostics)
-        .then(|| (before.diagnostics.len(), after.diagnostics.len()));
+    let mut before_diagnostics = before.diagnostics.clone();
+    before_diagnostics.finish();
+    let mut after_diagnostics = after.diagnostics.clone();
+    after_diagnostics.finish();
+    let diagnostics_changed = (before_diagnostics != after_diagnostics)
+        .then(|| (before_diagnostics.len(), after_diagnostics.len()));
 
     LockDiff {
         profile_changed,
