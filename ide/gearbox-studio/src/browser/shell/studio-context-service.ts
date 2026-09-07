@@ -148,7 +148,18 @@ export class StudioContextService implements FrontendApplicationContribution {
    * this service used to drop on the floor.
    */
   async settled(): Promise<void> {
-    await this.switching;
+    // **Loops, because awaiting the field once awaits a *snapshot* of it.** A
+    // caller that asks during a product-to-product move, and is still waiting
+    // when the next move replaces `switching`, would otherwise return while the
+    // switch that matters is still applying its layout -- and a sweep that runs
+    // then is the failure `view-contributions.ts` records about closing during
+    // `setLayoutData`. Settling means "the latest known switch has finished",
+    // not "the one that was pending when I asked".
+    for (;;) {
+      const pending = this.switching;
+      await pending;
+      if (pending === this.switching) return;
+    }
   }
 
   /**

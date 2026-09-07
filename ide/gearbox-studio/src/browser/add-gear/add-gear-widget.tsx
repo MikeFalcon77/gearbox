@@ -207,7 +207,10 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
     const gearId = gear.id;
     this.previewing = true;
     this.update();
-    const result = await this.edits.previewStagedAdd(this.stagedEdits(gear.id, gear.source));
+    const result = await this.edits.previewStagedAdd(
+      this.stagedEdits(gear.id, gear.source),
+      this.ownerIdentity,
+    );
     if (token !== this.previewToken || this.gearId !== gearId) return;
     this.previewing = false;
     if (result === undefined) {
@@ -353,7 +356,11 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
     if (gear === undefined || this.applying) return;
     this.applying = true;
     this.update();
-    const ok = await this.edits.commitAddGear(gear.id, this.stagedEdits(gear.id, gear.source));
+    const ok = await this.edits.commitAddGear(
+      gear.id,
+      this.stagedEdits(gear.id, gear.source),
+      this.ownerIdentity,
+    );
     this.applying = false;
     if (ok) {
       this.close();

@@ -203,5 +203,9 @@ export namespace OwnedWidget {
 }
 
 function canonical(path: string): string {
-  return URI.fromFilePath(path).toString();
+  // `normalizePath` as well as `fromFilePath`, and the second half is the half
+  // that does the work here: `fromFilePath` settles the scheme and the
+  // separators, and leaves `/a/./b` alone. Two spellings of one product would
+  // withdraw its screens from themselves on every reconcile.
+  return URI.fromFilePath(path).normalizePath().toString();
 }

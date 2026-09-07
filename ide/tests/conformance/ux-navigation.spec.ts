@@ -16,7 +16,16 @@
 // These two tests therefore drive the shell the way a person does and assert
 // visibility with no reveal anywhere.
 
-import { expect, openProduct, productSection, settled, test } from "../fixtures/studio";
+import {
+  expect,
+  expectContext,
+  openProduct,
+  productSection,
+  resetCatalogueView,
+  revealCatalogue,
+  settled,
+  test,
+} from "../fixtures/studio";
 
 test.describe("Home is the start screen and nothing else", () => {
   test("nothing opens itself into the bottom panel on Home [plan §9.1: an empty domain panel is worse than an absent one]", async ({
@@ -43,6 +52,44 @@ test.describe("Home is the start screen and nothing else", () => {
       ).map((e) => (e.textContent ?? "").trim()),
     );
     expect(bottom).toEqual([]);
+  });
+});
+
+test.describe("a screen belongs to a subject", () => {
+  test("closing a product takes its screens with it [ADR-0011 §Amendment: a screen belongs to a subject]", async ({
+    studio,
+  }) => {
+    // The finding this is built from, verbatim: "after Close the product closes,
+    // but the active tab stays an empty `Gearbox Product`". The cause is not a
+    // stray widget -- it is that nothing ever decided a screen may *stop* being
+    // allowed. A menu is re-read each time it opens; a widget already on screen
+    // is never asked again.
+    //
+    // Add Gear is opened first because it is the harder half: the Product view
+    // at least renders a picker with no product, whereas the configurator holds a
+    // proposal composed against one, and `ProductEditService` resolves its target
+    // when it commits rather than when it was staged.
+    const { page } = studio;
+    await openProduct(page, "dev");
+    await revealCatalogue(page);
+    await resetCatalogueView(page);
+    await page.locator('[data-toggle-gear="cluster"]').click();
+    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+
+    await page.locator('[data-command="gearbox.product.close"]').click();
+    await expectContext(page, "home");
+
+    const main = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("#theia-main-content-panel .lm-TabBar-tabLabel")).map(
+        (e) => (e.textContent ?? "").trim(),
+      ),
+    );
+    expect(main, "a product's screens outlived the product").not.toContain("Gearbox Product");
+    expect(main, "a product's screens outlived the product").not.toContain("Add Gear");
+    // And the context's own screen is in front, rather than whichever sibling
+    // Lumino picked when the active tab closed -- the rule that took ten Add Gear
+    // claims down the last time anything here was closed.
+    await expect(page.locator(".gbx-start")).toBeVisible();
   });
 });
 

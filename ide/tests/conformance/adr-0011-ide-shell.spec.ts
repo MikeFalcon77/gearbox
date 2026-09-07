@@ -627,6 +627,46 @@ test.describe("the editor Studio came for", () => {
 // Two claims about the shape of the code rather than about what it renders. They
 // are here, in the ADR's own file, because that is where the claim lives.
 test.describe("structural claims", () => {
+  test("a screen composed for one product does not survive another [ADR-0011 §Amendment: a screen belongs to a subject]", async () => {
+    // **The dangerous half of the finding, and the half with no visible symptom.**
+    // Scoping by context *kind* would have closed the empty-tab complaint and left
+    // this: open a second product and the kind is still `product`, so nothing is
+    // withdrawn -- while `ProductEditService.commitAddGear` resolves its target
+    // from whatever is open at commit time. A proposal staged against the first
+    // product is then written to the second.
+    //
+    // **Asserted against the module rather than through the shell, and that is a
+    // limitation worth stating.** The corpus has one product
+    // (`products/payments-demo`), so a browser claim cannot reach the transition
+    // at all; the rule lives in `outOfScope`, which is a pure function precisely
+    // so that it can be read here. A second product in the corpus would let this
+    // become a behavioural claim, and it should when there is one.
+    //
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const screens = require(join(IDE, "gearbox-studio/lib/browser/shell/screens"));
+    const a = "product:file:///a/product.gdl";
+    const b = "product:file:///b/product.gdl";
+
+    const moved: string[] = screens.outOfScope(a, b);
+    for (const id of ["gearbox.add-gear", "gearbox.product", "gearbox.generate", "gearbox.graph"]) {
+      expect(moved, `${id} survives a change of product`).toContain(id);
+    }
+
+    // The other direction, which is what stops the rule being "close everything
+    // always": re-resolving the same product is not a change of subject, and a
+    // configurator must not be swept out from under someone mid-edit.
+    expect(screens.outOfScope(a, a), "a screen is withdrawn from its own subject").not.toContain(
+      "gearbox.add-gear",
+    );
+
+    // And the identity is canonical, so two spellings of one path are one
+    // subject -- otherwise every reconcile would withdraw a product's screens
+    // from the product they belong to.
+    const idOf = (path: string): string =>
+      screens.identityOf({ kind: "product", product: { path, label: "x" } });
+    expect(idOf("/a/./b/product.gdl")).toBe(idOf("/a/b/product.gdl"));
+  });
+
   test("exactly one @theia/core is installed [ADR-0011 §Confirmation]", () => {
     // A transitive `^` pulls a second copy, which breaks inversify identity --
     // the most common Theia build failure, and one that produces a runtime

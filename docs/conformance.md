@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **148** — 143 built, 1 not built, 0 broken, 4 not observed.
+Claims: **150** — 145 built, 1 not built, 0 broken, 4 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -68,6 +68,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the Product view opens its own description | `ADR-0011 §Confirmation: a clicked link must open a tab` | ✅ built |  |
 | the .gdl editor is tokenized, not plaintext | `ADR-0011 §Confirmation` | ✅ built |  |
 | no grammar failed to load | `ADR-0011 §the .gdl grammar is native` | ✅ built |  |
+| a screen composed for one product does not survive another | `ADR-0011 §Amendment: a screen belongs to a subject` | ✅ built |  |
 | exactly one @theia/core is installed | `ADR-0011 §Confirmation` | ✅ built |  |
 | a contribution base class binds five contribution interfaces at once | `ADR-0011 §Consequences` | ✅ built |  |
 
@@ -237,6 +238,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Claim | Source | Status | Note |
 |---|---|---|---|
 | nothing opens itself into the bottom panel on Home | `plan §9.1: an empty domain panel is worse than an absent one` | ✅ built |  |
+| closing a product takes its screens with it | `ADR-0011 §Amendment: a screen belongs to a subject` | ✅ built |  |
 | the Product view is four stages and a way out to Generate | `plan §9.1: Product navigation` | ✅ built |  |
 | a reload with a product open comes back to Home | `plan §9.1: Home is a screen, not an empty area` | ✅ built |  |
 | opening a product leaves the Product workspace on screen | `plan §9.1: Open Product is atomic` | ✅ built |  |

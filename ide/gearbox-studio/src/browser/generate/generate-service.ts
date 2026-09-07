@@ -168,6 +168,42 @@ export class GenerateService {
   // `.gearbox/<product>/<profile>/` stands: one tree, and it is the tree §12
   // step 2 builds and runs.
 
+  /**
+   * What a cached plan is a plan *of*.
+   *
+   * **The revision is the part that was missing.** The key used to be path and
+   * profile alone, so editing the product and re-resolving produced an identical
+   * key -- `forgetIfStale` compared it, found no change, and kept a plan that
+   * described the resolution before the edit. `ProductStore.revision` is the
+   * epoch that changes on every resolve, which is exactly the question being
+   * asked here.
+   */
+  protected planKey(): string | undefined {
+    const open = this.product.current.open;
+    const profile = this.product.current.profile;
+    if (open === undefined || profile === undefined) return undefined;
+    return `${open.path}::${profile}::${this.product.revision}`;
+  }
+
+  /**
+   * Refuse to write a plan that is not a plan of what is on screen.
+   *
+   * `apply()` and `file()` both re-read `this.product.current.open` when they
+   * are called, so without this they act on whatever is open *now* using a plan
+   * that described something else -- and `canApply` is computed from the cached
+   * plan too, so the gates could be evaluated against one product while the
+   * write went to another.
+   */
+  protected planIsCurrent(): boolean {
+    const key = this.planKey();
+    if (key !== undefined && key === this.forKey) return true;
+    this.messages.warn(
+      "Nothing was written: this plan describes a resolution that has since changed. " +
+        "Plan again.",
+    );
+    return false;
+  }
+
   /** Fetch the plan for whatever is on screen, once per resolution. */
   async ensurePlan(): Promise<void> {
     if (!this.engine.isConnected) {
@@ -178,7 +214,8 @@ export class GenerateService {
     if (open === undefined || profile === undefined) {
       return;
     }
-    const key = `${open.path}::${profile}`;
+    const key = this.planKey();
+    if (key === undefined) return;
     if (
       this.inFlight ||
       this.product.current.status !== "ready" ||
@@ -212,6 +249,7 @@ export class GenerateService {
       this.messages.warn(this.blocks.map((b) => b.reason).join("; "));
       return undefined;
     }
+    if (!this.planIsCurrent()) return undefined;
     const open = this.product.current.open;
     const profile = this.product.current.profile;
     if (open === undefined || profile === undefined) return undefined;
@@ -248,6 +286,12 @@ export class GenerateService {
     if (open === undefined || profile === undefined) {
       throw new Error("open a product before asking for a generated file");
     }
+    // The same check as `apply`, because the same mistake is available: a
+    // `FilePlan` comes from `this.state.plan`, and resolving one against a
+    // different product would show two sides of a file neither of them plans.
+    if (this.planKey() !== this.forKey) {
+      throw new Error("this plan describes a resolution that has since changed");
+    }
     return this.service.generateFile(open.path, plan.path, profile, undefined);
   }
 
@@ -258,9 +302,7 @@ export class GenerateService {
    * against a `prod` resolution would be a lie.
    */
   forgetIfStale(): void {
-    const open = this.product.current.open;
-    const profile = this.product.current.profile;
-    const key = open === undefined || profile === undefined ? undefined : `${open.path}::${profile}`;
+    const key = this.planKey();
     if (key !== this.forKey) {
       this.epoch += 1;
       this.forKey = undefined;

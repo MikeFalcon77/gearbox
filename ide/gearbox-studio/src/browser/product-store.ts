@@ -235,6 +235,21 @@ export class ProductStore {
   /** Evaluate a product and resolve it for its own default profile. */
   async open(ref: ProductRef): Promise<void> {
     const epoch = ++this.epoch;
+    // **The selection goes at the *start* of the change, not at the end of it.**
+    // `clear()` drops it when a product closes, and opening a second product is
+    // the same transition with no close in between -- the selection would
+    // otherwise still name a gear or a process from the previous product, and an
+    // open takes about three seconds, all of which the Inspector would spend
+    // answering about something that is no longer on screen. Doing it in the
+    // shell's reconciliation instead would be too late for the same reason.
+    //
+    // Guarded, because `reload()` calls this with the product that is already
+    // open: re-resolving a product is not a change of subject, and dropping the
+    // selection on every resolve would take the Inspector down on each profile
+    // switch.
+    if (this.state.open?.path !== ref.path) {
+      this.selection.select(undefined);
+    }
     this.update({ status: "loading", open: ref, intent: undefined, resolution: undefined });
     try {
       const loaded = await this.service.loadProduct(ref.path);

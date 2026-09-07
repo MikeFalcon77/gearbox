@@ -77,6 +77,7 @@ import { ProductSessionService } from "./shell/product-session-service";
 import { EngineConnectionService } from "./shell/engine-connection-service";
 import { SelectionService } from "./shell/selection-service";
 import { SessionCommands } from "./shell/session-commands";
+import { ScreenScopeService } from "./shell/screen-scope-service";
 import { StudioContextService } from "./shell/studio-context-service";
 import { ToolbarContribution } from "./shell/toolbar-contribution";
 import { ToolbarWidget } from "./shell/toolbar-widget";
@@ -224,6 +225,17 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bind(GearboxPerspectives).toSelf().inSingletonScope();
   bind(PerspectiveContribution).toService(GearboxPerspectives);
 
+  // Why: the context says what is being worked on; this says which screens may
+  // therefore exist, and closes the ones that may not. Bound after
+  // `StudioContextService` because it waits on that service's `settled()` --
+  // closing a widget while a perspective switch is applying its layout is the
+  // race that poisoned the Home snapshot three times. It is also the **only**
+  // imperative activation in the application: `StartViewContribution` and the
+  // perspectives' `onActivate` both used to open their own view, before the
+  // layout had settled, which is what this replaces.
+  bind(ScreenScopeService).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(ScreenScopeService);
+
   // Why: the switch and the two domain actions belong on the shell, not on a
   // view. `@theia/toolbar` is a user-configurable bar with its own JSON, which
   // is the opposite of the narrowing ADR-0011 is for. A widget in `top` is
@@ -313,8 +325,11 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // shell already believes that perspective is active -- see the view's header.
   bindViewContribution(bind, ProductViewContribution);
   bind(FrontendApplicationContribution).toService(ProductViewContribution);
+  // No `FrontendApplicationContribution`: Start no longer opens itself. It was
+  // subscribing to the context and opening on every change to Home, which fired
+  // before the perspective switch had applied its layout -- `ScreenScopeService`
+  // owns that now, and one owner is the point.
   bindViewContribution(bind, StartViewContribution);
-  bind(FrontendApplicationContribution).toService(StartViewContribution);
   bindViewContribution(bind, CreateProductViewContribution);
   bindViewContribution(bind, CreateGearViewContribution);
   bindViewContribution(bind, GearAuthorViewContribution);

@@ -686,6 +686,71 @@ deliberate: a screen that does not belong in this context is absent, and one tha
 act yet -- the engine is down -- stays visible and refuses. A Generate entry that vanishes when the
 websocket blinks reads as a broken application.
 
+### Withdrawing a screen *is* closing its widget
+
+Amendment 2026-09-07 says hiding a screen is not closing its widget, and gives two failures to
+explain why Start was never closed. Both are still true and both are now addressed rather than
+avoided, so the rule gains its converse: a screen whose subject has ended is **closed**, for widgets
+this application builds, after the switch has settled.
+
+Closing during a perspective switch loses a race with `setLayoutData` and poisons the snapshot. The
+withdrawal waits on `StudioContextService.settled()` -- which had to be fixed first, because it
+awaited a *snapshot* of `switching` and would return early when a second switch replaced it mid-wait.
+It now loops until the field it awaited is still the field it finds, so settling means "the latest
+known switch has finished".
+
+Closing after the layout settles lets Lumino's "activate a sibling" rule take the front. The
+withdrawal therefore ends by re-asserting the context's own screen, through the contribution that
+owns each view's "may I take the front" rule -- never a bare `activateWidget`.
+
+Closing is safe here in a way it was not for `terminal-`: every Gearbox widget is bound transiently
+behind a `WidgetFactory`, and `WidgetManager` drops its cache entry on dispose, so the next open
+builds a fresh instance. Foreign widgets are still *detached* by `LayoutMigration.sweepForbidden`.
+The split is now policy: **close ours, detach theirs.**
+
+So **Start is closed when the context leaves Home**, which settles the contradiction this document
+carried between "Start closes when the context leaves it" and "Start is not closed". It is Home's
+screen, and Home's screen does not belong to a product.
+
+### One owner for what is in front
+
+Three components used to decide that: `StartViewContribution` from a context event, both
+perspectives from `onActivate`, and `ProductViewContribution` from the session's signal. Each was
+guarded, and the guards were not the problem -- being several was. `onActivate` is fire-and-forget
+and its chain is slow in a way the callback cannot see, so an activation could land 2.5 s after the
+interaction that started it.
+
+`ScreenScopeService.reassertPrimary` is now the only imperative activation. The perspectives arrange
+panels and activate nothing; Start no longer subscribes to the context at all.
+
+Reconciliation re-reads the context after **every** await, not only the first. A pass that captured
+one subject and woke after two further moves would otherwise open the wrong screen and then record
+itself as applied, leaving the next pass to skip as already done -- so the "applied" identity is
+written only by a pass that ran to completion under one identity.
+
+### The shell is not the write boundary
+
+A widget the shell failed to close must still be unable to write, so the guarantee is enforced twice.
+
+`commitAddGear` is the path that needed it: it resolves its target from `ProductStore.current.open`
+at commit time and had no re-check, so a proposal staged against one product and applied after
+another was opened went to the second. `applyDescriptionEdit` was already covered from the other
+side -- its post-dialog check refuses when the open path is not the previewed one -- and what it
+gains is a refusal *before* the confirmation dialog with an accurate reason.
+
+The owner is checked at entry and again immediately before each write, because the sequence between
+them contains a person. `CreateGearWidget.create` checks before `scaffoldGear`, not only before the
+description edit: the scaffold writes a crate, and refusing only at the second step would leave it
+on disk with nothing naming it. When the two halves do disagree the wizard says so -- the crate was
+created, the product was not updated -- rather than returning silently on a promise it made.
+
+`GenerateService` had the same shape and a stale cache besides: its plan key was path and profile
+with no revision, so editing a product and re-resolving produced an identical key and `forgetIfStale`
+kept a plan describing the resolution before the edit. The key now includes `ProductStore.revision`,
+and `apply()` and `file()` refuse a plan that is not a plan of what is on screen -- `canApply` is
+computed from the cached plan, so without that the gates could be evaluated against one product
+while the write went to another.
+
 ### Confirmation
 
 * `adr-0011-ide-shell.spec.ts` asserts in **both** directions that `View` offers Add Gear, Resolution
@@ -696,6 +761,12 @@ websocket blinks reads as a broken application.
   required more than four with no product open, which had become a claim about the wrong thing.
 * `regression.spec.ts` continues to assert that no menu holds an entry twice and that nothing logs
   `is already registered` -- the two symptoms a mistaken `super` call produces.
+* `ux-navigation.spec.ts` opens a product, opens the Add Gear configurator, closes the product, and
+  asserts that neither screen is left in the main area and that Start is in front -- the reported
+  defect and the sibling-activation trap in one claim.
+* `adr-0011-ide-shell.spec.ts` asserts the product-to-product rule against `shell/screens.ts`
+  directly, and says why: the corpus holds one product, so no browser claim can reach that
+  transition. It should become a behavioural claim when there is a second product.
 
 ## Traceability
 

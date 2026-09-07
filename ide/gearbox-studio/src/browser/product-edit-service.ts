@@ -46,6 +46,8 @@ import type { ResolveResult } from "../common/generated/ResolveResult";
 import { GearboxService } from "../common/protocol";
 import { ProductStore } from "./product-store";
 import { ProductSessionService } from "./shell/product-session-service";
+import { identityOf, type ContextIdentity } from "./shell/screens";
+import { StudioContextService } from "./shell/studio-context-service";
 
 @injectable()
 export class ProductEditService {
@@ -54,6 +56,8 @@ export class ProductEditService {
   @inject(ProductSessionService) protected readonly session!: ProductSessionService;
   @inject(MonacoTextModelService) protected readonly models!: MonacoTextModelService;
   @inject(MessageService) protected readonly messages!: MessageService;
+  // Read only, and only to know which subject a caller composed for.
+  @inject(StudioContextService) protected readonly contexts!: StudioContextService;
 
   /** Queued edits for the open product path, awaiting Apply or Discard. */
   protected drafts = new Map<string, ProductEdit[]>();
@@ -305,6 +309,47 @@ export class ProductEditService {
   }
 
   /**
+   * Refuse when the caller composed its proposal for a subject that is no longer
+   * the one open.
+   *
+   * **`commitAddGear` is the path this exists for.** It resolves its target from
+   * `this.product.current.open` at the moment it commits and has no re-check of
+   * its own, so a proposal staged against one product and applied after another
+   * was opened is written to the second -- silently, and with the first
+   * product's gear in it.
+   *
+   * `applyDescriptionEdit` is a different case and was never open in the same
+   * way: its post-dialog check already refuses when `open?.path` is not the path
+   * it previewed, which covers both a different product and no product at all.
+   * What this adds there is a refusal *before* the confirmation dialog, and a
+   * reason that says what actually happened rather than "the product changed
+   * while the preview was open".
+   *
+   * Checked at entry *and* again immediately before the write, because the
+   * sequence between them contains a person: dry run, confirmation, commit. One
+   * check at the top cannot see a context that moved while the dialog was up.
+   *
+   * A message rather than a thrown error, like every other refusal here: the
+   * cause is always something the person can act on. `undefined` means a caller
+   * with no subject of its own, which is not a licence -- the paths that need
+   * one pass it.
+   *
+   * Public, for the one caller that must ask *before* calling anything else
+   * here: `CreateGearWidget.create` scaffolds a crate to disk and only then
+   * edits the description, so the refusal has to be reachable ahead of the first
+   * write rather than only inside the second.
+   */
+  ownsSubject(owner: ContextIdentity | undefined): boolean {
+    if (owner === undefined) return true;
+    if (identityOf(this.contexts.current) === owner) return true;
+    this.messages.error(
+      `That was composed for a product which is no longer open, so nothing was written. ` +
+        `Open it again to finish the change.`,
+    );
+    return false;
+  }
+
+  /**
    * Dry-run the configurator's whole proposal, and return the text it would write.
    *
    * **One batch, because the proposal is one edit.** This used to dry-run
@@ -319,7 +364,11 @@ export class ProductEditService {
    * Returns `undefined` when the edit is refused or impossible; the caller shows
    * the engine's reason via the message service already fired here.
    */
-  async previewStagedAdd(edits: readonly ProductEdit[]): Promise<EditGearResult | undefined> {
+  async previewStagedAdd(
+    edits: readonly ProductEdit[],
+    owner?: ContextIdentity,
+  ): Promise<EditGearResult | undefined> {
+    if (!this.ownsSubject(owner)) return undefined;
     const open = this.product.current.open;
     if (open === undefined) {
       this.messages.warn("Open a product before adding gears to it.");
@@ -390,7 +439,12 @@ export class ProductEditService {
    * was always available; what was missing was a way to put the addition *in* the
    * batch.
    */
-  async commitAddGear(gear: string, edits: readonly ProductEdit[]): Promise<boolean> {
+  async commitAddGear(
+    gear: string,
+    edits: readonly ProductEdit[],
+    owner?: ContextIdentity,
+  ): Promise<boolean> {
+    if (!this.ownsSubject(owner)) return false;
     const open = this.product.current.open;
     if (open === undefined) {
       this.messages.warn("Open a product before adding gears to it.");
@@ -416,6 +470,10 @@ export class ProductEditService {
       return false;
     }
 
+    // Again, immediately before the write. The dry run above is a round trip to
+    // the engine, and a product can be closed or switched while it is in flight
+    // -- which is the whole reason one check at the top is not enough.
+    if (!this.ownsSubject(owner)) return false;
     // eslint-disable-next-line no-console
     console.info(`Gearbox: writing add ${gear} to ${open.path}`, new Error("write path").stack);
     try {
@@ -445,8 +503,10 @@ export class ProductEditService {
   async applyProductEdits(
     target: { path: string; label: string },
     edits: readonly ProductEdit[],
+    owner?: ContextIdentity,
   ): Promise<boolean> {
     if (edits.length === 0) return false;
+    if (!this.ownsSubject(owner)) return false;
     return this.applyDescriptionEdit({
       title: "Add to product",
       ok: "Add",

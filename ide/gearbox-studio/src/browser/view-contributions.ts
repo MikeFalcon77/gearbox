@@ -331,24 +331,20 @@ export class CatalogueViewContribution
 /**
  * The Home screen.
  *
- * Opens itself when the context is Home -- after the shell is `ready`, and again
- * whenever the context returns to Home. It deliberately does **not** open from
- * `initializeLayout`: that runs before a saved product layout is restored and
- * would park Start behind a product the restorer still intends to show.
+ * **It no longer opens itself, and that is the point of the change.** It used to
+ * subscribe to the context and open on every change to Home, which fired
+ * *before* the perspective switch had applied its layout -- so it raced the very
+ * reconciliation that now owns this. `ScreenScopeService.reassertPrimary` calls
+ * `openView` here once the layout has settled, and it is the only thing that
+ * does; a second owner of "what is in front", however well guarded, is what
+ * produced the front-stealing ADR-0011 records.
  *
- * The Home perspective's `onActivate` also opens this view, but that path is
- * skipped when Studio boots already in the Home context (`recompute` sees no
- * change and never switches perspective). Waiting for `ready` covers the
- * restorer race the perspective alone cannot: a restored empty main area.
+ * It deliberately does **not** open from `initializeLayout` either: that runs
+ * before a saved product layout is restored and would park Start behind a
+ * product the restorer still intends to show.
  */
 @injectable()
-export class StartViewContribution
-  extends ScopedViewContribution<StartWidget>
-  implements FrontendApplicationContribution
-{
-  @inject(FrontendApplicationStateService)
-  protected readonly appState!: FrontendApplicationStateService;
-
+export class StartViewContribution extends ScopedViewContribution<StartWidget> {
   constructor() {
     super({
       widgetId: StartWidget.ID,
@@ -363,42 +359,21 @@ export class StartViewContribution
     });
   }
 
-  onStart(): void {
-    const openIfHome = (): void => {
-      if (this.isHome()) {
-        void this.openView({ activate: true, reveal: true });
-      }
-    };
-    this.contexts.onDidChange(openIfHome);
-    void this.appState.reachedState("ready").then(openIfHome);
-  }
-
-  /**
-   * On screen in Home, behind the subject everywhere else.
-   *
-   * **It is not closed, and that was tried three times.** A Start screen *in
-   * front of* an open product is the hybrid state the UX pass objected to; a
-   * Start screen behind the Product tab is not, and the difference matters
-   * because closing it fights the shell in two ways that took a suite run each
-   * to find. Closing while a perspective switch is applying a layout loses the
-   * race and poisons the snapshot -- the product perspective then holds a Start
-   * tab and `setLayoutData` restores it as *current*, so it comes back on top.
-   * And closing after the layout settles is late enough that Lumino's
-   * "activate a sibling when the active widget goes" rule steals the front from
-   * whatever the person has since opened: it took down all ten Add Gear claims
-   * at once, each reporting the panel attached but hidden with `Gearbox Product`
-   * in front of it.
-   *
-   * So the invariant is about what is *visible*, which is what the complaint was
-   * about, and it is held by opening the subject rather than by closing this:
-   * `ProductViewContribution` and the perspective's own `onActivate` both
-   * activate the Product view, so Start ends up behind it. The claim in
-   * `conformance/ux-navigation.spec.ts` asserts exactly that -- Start not
-   * visible, not Start absent.
-   */
-  protected isHome(): boolean {
-    return this.contexts.current.kind === "home";
-  }
+  // **Closed when the context leaves Home, and this is the fourth attempt.** The
+  // three before it failed for two recorded reasons, and both are gone. Closing
+  // while a perspective switch is applying a layout lost a race with
+  // `setLayoutData` and poisoned the snapshot -- the withdrawal now runs after
+  // `StudioContextService.settled()`, which waits for the *latest* switch rather
+  // than the one that happened to be pending. And closing after the layout
+  // settled let Lumino's "activate a sibling when the active widget goes" rule
+  // take the front from whatever the person had since opened -- the withdrawal
+  // now ends by re-asserting the context's own screen, through the contribution
+  // that owns the rule.
+  //
+  // What made the previous attempts necessary is unchanged: a Start screen in
+  // front of an open product is a hybrid state. What changed is that "behind the
+  // product" is no longer the only way to express that, because there is now one
+  // component deciding what may be on screen at all.
 }
 
 @injectable()

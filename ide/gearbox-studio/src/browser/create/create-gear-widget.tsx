@@ -394,11 +394,25 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
       return;
     }
     const sourceId = sourceIdFor(at);
-    const added = await this.edits.applyProductEdits(product, [
-      { kind: "add_source", id: sourceId, at },
-      { kind: "add_gear", gear: gearId, source: sourceId },
-    ]);
-    if (!added) return;
+    const added = await this.edits.applyProductEdits(
+      product,
+      [
+        { kind: "add_source", id: sourceId, at },
+        { kind: "add_gear", gear: gearId, source: sourceId },
+      ],
+      this.ownerIdentity,
+    );
+    if (!added) {
+      // **Said, not swallowed.** The scaffold succeeded and the description edit
+      // did not, and the two are not a transaction -- so the crate exists and
+      // nothing names it. The wizard promised "it will be added", and a silent
+      // return would leave that promise looking kept.
+      this.messages.warn(
+        `${gearId} was created at ${this.destinationDir()}/${gearId}, but ${product.label} ` +
+          `was not updated. Open the product and add it, or delete the folder.`,
+      );
+      return;
+    }
     // Back where the flow started. The audit's phrasing: "after creating --
     // `Add this gear to Payments Demo` -- and a return to the Product
     // workspace". This is the return.
@@ -412,6 +426,12 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
 
   protected async create(): Promise<void> {
     if (!this.engine.isConnected || this.applying) return;
+    // **Before the scaffold, not after it.** `scaffoldGear` writes a crate to
+    // disk; `applyProductEdits` refuses when the product this was started for is
+    // no longer open. Checking only at the second one would leave the crate
+    // behind with nothing naming it -- so the wizard asks first whether it is
+    // still working on what it was opened for.
+    if (!this.edits.ownsSubject(this.ownerIdentity)) return;
     this.applying = true;
     this.update();
     try {
