@@ -335,3 +335,91 @@ fn a_gear_with_no_extension_points_is_left_alone() {
     );
     assert!(codes.is_empty(), "{codes:?} {messages}");
 }
+
+/// The gap `PluginHostNotSelected` leaves, and the whole reason GBX0518 exists.
+///
+/// A plugin listed under a host that does not declare its point passed every
+/// check while meaning nothing: `report_orphan_plugins` asks whether *some*
+/// selected gear expects the point, and here one does -- `authn-resolver` is in
+/// the product. So the misplacement was invisible, and the Add Gear panel
+/// offered it because nothing refused it.
+#[test]
+fn a_plugin_under_the_wrong_host_is_an_error_naming_both() {
+    let cat = require!();
+    let (codes, messages) = check(
+        &cat,
+        &product(
+            r#"embedded(id = "dev")"#,
+            "dev",
+            &format!(
+                "{AUTHN}, plugins = [plugin(\"static-authn-plugin\")]), \
+                 use_gear(\"types-registry\", source = \"gears-rust\", \
+                 plugins = [plugin(\"oidc-authn-plugin\")])"
+            ),
+        ),
+    );
+    assert!(
+        codes.contains(&DiagnosticCode::PluginPointNotDeclared),
+        "{codes:?} {messages}"
+    );
+    assert!(
+        messages.contains("types-registry") && messages.contains("oidc-authn-plugin"),
+        "the message must name the host and the plugin: {messages}"
+    );
+    assert!(
+        messages.contains("declares no extension point"),
+        "and say what the host does declare: {messages}"
+    );
+}
+
+/// Host declares *some* points, just not the one this plugin fills.
+///
+/// The empty-host branch (`declares no extension point`) is covered above;
+/// this is the other formatting arm -- naming what the host *does* declare.
+#[test]
+fn a_plugin_under_a_host_with_other_points_names_them() {
+    let cat = require!();
+    let (codes, messages) = check(
+        &cat,
+        &product(
+            r#"embedded(id = "dev")"#,
+            "dev",
+            &format!(
+                "{AUTHN}, plugins = [plugin(\"static-authn-plugin\")]), \
+                 use_gear(\"tenant-resolver\", source = \"gears-rust\", \
+                 plugins = [plugin(\"oidc-authn-plugin\")])"
+            ),
+        ),
+    );
+    assert!(
+        codes.contains(&DiagnosticCode::PluginPointNotDeclared),
+        "{codes:?} {messages}"
+    );
+    assert!(
+        messages.contains("tenant-resolver") && messages.contains("oidc-authn-plugin"),
+        "the message must name the host and the plugin: {messages}"
+    );
+    assert!(
+        messages.contains("declares ") && !messages.contains("declares no extension point"),
+        "name the points the host has, not the empty-host sentence: {messages}"
+    );
+}
+
+/// The negative case, which is the one that makes the check worth having: a
+/// plugin under the host that *does* declare its point is silent.
+#[test]
+fn a_plugin_under_its_own_host_is_clean() {
+    let cat = require!();
+    let (codes, messages) = check(
+        &cat,
+        &product(
+            r#"embedded(id = "dev")"#,
+            "dev",
+            &format!(r#"{AUTHN}, plugins = [plugin("oidc-authn-plugin")])"#),
+        ),
+    );
+    assert!(
+        !codes.contains(&DiagnosticCode::PluginPointNotDeclared),
+        "{codes:?} {messages}"
+    );
+}

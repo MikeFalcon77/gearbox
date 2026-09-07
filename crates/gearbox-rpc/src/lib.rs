@@ -822,6 +822,15 @@ fn apply_product_edits(
     let mut changed = false;
     for edit in edits {
         let step = match edit {
+            ProductEdit::AddGear { gear, source } => {
+                gearbox_gdl::edit::add_gear(uri, &current, gear, source)?
+            }
+            ProductEdit::RemoveGear { gear } => {
+                gearbox_gdl::edit::remove_gear(uri, &current, gear)?
+            }
+            ProductEdit::AddSource { id, at } => {
+                gearbox_gdl::edit::add_source(uri, &current, id, at)?
+            }
             ProductEdit::SetConfig { gear, key, value } => {
                 gearbox_gdl::edit::set_gear_config(uri, &current, gear, key, value.as_ref())?
             }
@@ -1224,17 +1233,10 @@ gear(
         lib = {lib_quoted},
         path = ".",
     ),
-
-    # Uncomment once this gear reads configuration. `exposes` is the only half
-    # written here: which settings are worth putting in front of an integrator.
-    # Their names, types, defaults and doc comments are read from the struct the
-    # gear deserializes into, which is found from the `ctx.config*()` call in
-    # `impl Gear::init` -- so nothing about the struct is repeated here.
-    #
-    # config_schema = config(exposes = ["bind_addr"]),
-)
+{shape})
 "#,
         comment = params.name.replace(['\n', '\r'], " "),
+        shape = gdl_shape(params.kind),
     );
 
     let cargo = format!(
@@ -1252,16 +1254,156 @@ path = "src/lib.rs"
         lib_toml = toml_basic_string(&lib_name),
     );
 
-    let lib = String::from(
-        "// Scaffolded lib.\n\
-         // Gear macros (#[toolkit::gear], provides/consumes) come next.\n",
-    );
-
     Ok(vec![
         ("gear.gdl".to_owned(), gdl, gearbox_ir::FileKind::Text),
         ("Cargo.toml".to_owned(), cargo, gearbox_ir::FileKind::Toml),
-        ("src/lib.rs".to_owned(), lib, gearbox_ir::FileKind::Rust),
+        (
+            "src/lib.rs".to_owned(),
+            lib_stub(params.kind),
+            gearbox_ir::FileKind::Rust,
+        ),
     ])
+}
+
+/// The declarations one shape of gear needs, after `package`.
+///
+/// **Comments, not values, and that is the whole design.** Every one of these
+/// fields is either projected from Rust or checked against it: a `category` this
+/// method invented would draw GBX's unknown-category warning on the first load, a
+/// `plugin_interface` naming no `pub trait` is refused outright (GBX0516), and an
+/// `sdk` locator pointing at a directory that does not exist makes the gear fail
+/// to load. So the shape's job is to put the next declaration **where it goes**,
+/// with the sentence that says what decides it -- and to leave it commented until
+/// there is something true to write. A scaffold that emitted placeholders would
+/// hand its author a description to repair rather than one to fill in.
+fn gdl_shape(kind: crate::protocol::GearKind) -> &'static str {
+    match kind {
+        // What this method has always written: a crate and a name, with the one
+        // hint that applies to every gear.
+        crate::protocol::GearKind::Minimal => {
+            r#"
+    # Uncomment once this gear reads configuration. `exposes` is the only half
+    # written here: which settings are worth putting in front of an integrator.
+    # Their names, types, defaults and doc comments are read from the struct the
+    # gear deserializes into, which is found from the `ctx.config*()` call in
+    # `impl Gear::init` -- so nothing about the struct is repeated here.
+    #
+    # config_schema = config(exposes = ["bind_addr"]),
+"#
+        }
+        // A gear that does something on its own. The three declared fields every
+        // service in the corpus carries, then the contract and configuration
+        // hints -- `provides` and `consumes` are declared, unlike `runtime_caps`
+        // and `colocated_deps`, which #[toolkit::gear] owns and GBX0210 refuses
+        // to see restated here.
+        crate::protocol::GearKind::Service => {
+            r#"
+    # The three fields a described service carries beyond its crate. `category`
+    # is checked against the known set and warns when it is not one of them;
+    # `visibility = "public"` is what makes a gear selectable by a product.
+    #
+    # description = "What this gear does, in one sentence.",
+    # category = "core-platform-integration",
+    # visibility = "internal",
+
+    # Contracts are declared -- unlike `runtime_caps` and `colocated_deps`, which
+    # #[toolkit::gear] owns and GBX0210 refuses to see restated here. `provides`
+    # names the trait this gear implements for others; `consumes` names one it
+    # needs, and the transports come from the provider's side.
+    #
+    # provides = [provide(contract = "PaymentApi", version = "v1")],
+    # consumes = [consume(contract = "TenantApi", version = "v1")],
+
+    # Uncomment once this gear reads configuration. `exposes` is the only half
+    # written here: which settings are worth putting in front of an integrator.
+    # Their names, types, defaults and doc comments are read from the struct the
+    # gear deserializes into, which is found from the `ctx.config*()` call in
+    # `impl Gear::init` -- so nothing about the struct is repeated here.
+    #
+    # config_schema = config(exposes = ["bind_addr"]),
+"#
+        }
+        // A gear that fills another gear's extension point. `sdk` is the locator
+        // that decides *which* point: the SDK crate declares the plugin-API
+        // trait, and which one this crate implements is read from the `impl`
+        // rather than declared. Both stay commented until the SDK path is real --
+        // an `sdk` pointing nowhere fails the load, and `plugin_interface` naming
+        // a trait the SDK does not declare is GBX0516.
+        crate::protocol::GearKind::Plugin => {
+            r#"
+    # description = "What this plugin does, in one sentence.",
+    # category = "core-platform-integration",
+    # visibility = "internal",
+
+    # **The locator that makes this a plugin.** The SDK crate declares the
+    # plugin-API trait; which of its traits this crate implements is read from the
+    # `impl`, not declared here. Point `path` at the SDK crate before uncommenting
+    # -- a locator to a directory that does not exist makes this gear fail to
+    # load.
+    #
+    # sdk = cargo(
+    #     crate_name = "cf-gears-authn-resolver-sdk",
+    #     lib = "authn_resolver_sdk",
+    #     path = "../../authn-resolver-sdk",
+    # ),
+
+    # Only when reading the `impl` cannot decide -- a crate implementing two
+    # plugin interfaces. A name no `pub trait` in the sdk backs is refused
+    # (GBX0516), so this is an escape hatch and never a declaration of intent.
+    #
+    # plugin_interface = "AuthNResolverPluginClient",
+
+    # A plugin's own `vendor` and `priority` are the join key its host's selector
+    # matches against, and both are read from this crate's config struct. What is
+    # declared is only that they are worth showing an integrator.
+    #
+    # config_schema = config(exposes = ["vendor", "priority"]),
+"#
+        }
+    }
+}
+
+/// The `src/lib.rs` stub for one shape.
+///
+/// A comment rather than code, for the reason the shapes are comments: the
+/// toolkit's location and version are not known here, so `#[toolkit::gear]` would
+/// be written against a dependency this method cannot add -- a crate that does
+/// not compile is worse than one that is empty. What the stub carries is the
+/// order of the next steps, which is the part a person actually looks up.
+fn lib_stub(kind: crate::protocol::GearKind) -> String {
+    match kind {
+        crate::protocol::GearKind::Minimal => String::from(
+            "// Scaffolded lib.\n\
+             // Gear macros (#[toolkit::gear], provides/consumes) come next.\n",
+        ),
+        crate::protocol::GearKind::Service => String::from(
+            "// Scaffolded service gear.\n\
+             //\n\
+             // Next, in this order:\n\
+             //   1. add the toolkit dependency to Cargo.toml;\n\
+             //   2. #[toolkit::gear(name = \"...\")] on the gear struct -- the id,\n\
+             //      runtime capabilities and co-located deps are projected from it,\n\
+             //      and restating them in gear.gdl is refused (GBX0210);\n\
+             //   3. impl Gear, whose `init` is where a single ctx.config*() call\n\
+             //      links this gear to its configuration struct;\n\
+             //   4. uncomment `config_schema` in gear.gdl once that struct exists.\n",
+        ),
+        crate::protocol::GearKind::Plugin => String::from(
+            "// Scaffolded plugin gear.\n\
+             //\n\
+             // Next, in this order:\n\
+             //   1. add the host's SDK crate to Cargo.toml, and point `sdk` in\n\
+             //      gear.gdl at it -- that locator is what decides which extension\n\
+             //      point this gear fills;\n\
+             //   2. impl the SDK's plugin-API trait. Which one you implement is\n\
+             //      *read* from this file, so there is nothing to declare;\n\
+             //   3. register the vendor and priority this plugin answers under --\n\
+             //      they are the join key the host's `vendor` selector matches;\n\
+             //   4. list this gear under its host's `plugins = [...]` in the\n\
+             //      product. A plugin under a host that does not declare its point\n\
+             //      is refused (GBX0518).\n",
+        ),
+    }
 }
 
 /// Whether a path may be written, and why not when it may not.
@@ -1351,6 +1493,23 @@ fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
         .canonicalize()
         .map_err(|e| format!("cannot canonicalize `{}`: {e}", existing.display()))?;
 
+    // **Source roots before the workspace, and this order is the whole point.**
+    // A source root may sit *beside* the workspace -- the corpus is a sibling of
+    // this repository, and `products/payments-demo` names `../../../gears-rust`
+    // -- so generating into one is both "outside the declared workspace" and
+    // "inside a source root". Both are refusals; only the second names the rule
+    // (ADR-0010 tier 5, do not write next to human-authored crates) instead of
+    // describing a boundary nobody meant to cross.
+    //
+    // The loop below the lexical join used to be the only one, under a comment
+    // claiming exactly this precedence -- which the workspace check above it made
+    // unreachable for the one layout the comment named. Checked here against the
+    // nearest *existing* ancestor, because the joined path does not exist yet at
+    // this point and cannot: the join needs the workspace this check precedes.
+    if let Some(refusal) = inside_a_source_root(state, &canonical_existing, path) {
+        return Err(refusal);
+    }
+
     let Some(raw_workspace) = state.workspace.as_ref() else {
         return Err("no workspace was declared, so no output root is writable".to_owned());
     };
@@ -1377,19 +1536,12 @@ fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
     let resolved = join_lexically(&workspace, canonical_existing, suffix)
         .ok_or_else(|| format!("`{}` is outside the declared workspace", path.display()))?;
 
-    // Source roots first: they may sit *beside* the workspace (the gears-rust
-    // slice is a sibling of this repository), and "do not write next to human
-    // Rust" is the more specific refusal when both apply.
-    for root in &state.roots {
-        if let Ok(src) = root.root.canonicalize()
-            && resolved.starts_with(&src)
-        {
-            return Err(format!(
-                "`{}` is inside a source root; generation must not write next to \
-                 human-authored crates",
-                path.display()
-            ));
-        }
+    // Again, on the joined path. The check above sees the nearest existing
+    // ancestor; this one sees where the `..` components actually land, which is a
+    // different question -- `workspace/keep/missing/../../../gears-rust` starts
+    // inside the workspace and ends inside a source root.
+    if let Some(refusal) = inside_a_source_root(state, &resolved, path) {
+        return Err(refusal);
     }
 
     if !resolved.starts_with(&workspace) {
@@ -1400,6 +1552,32 @@ fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
     }
 
     Ok(resolved)
+}
+
+/// The tier-5 refusal for `candidate`, or `None` when it is not in a source root.
+///
+/// One function because `writable_out_root` asks twice, about two different
+/// paths: the nearest existing ancestor (before the workspace is known, so that a
+/// source root beside the workspace gets the specific refusal) and the joined
+/// path (after, so that a `..` chain landing in a root is caught too). Two copies
+/// of the sentence would be two chances for them to drift, and the sentence is
+/// what a person reads.
+///
+/// A root that cannot be canonicalized is skipped rather than refused: it is
+/// already reported as a `FailedRoot` at `initialize`, and refusing every write
+/// because an unrelated root went missing would be a second, worse answer to
+/// that.
+fn inside_a_source_root(state: &State, candidate: &Path, requested: &Path) -> Option<String> {
+    state.roots.iter().find_map(|root| {
+        let src = root.root.canonicalize().ok()?;
+        candidate.starts_with(&src).then(|| {
+            format!(
+                "`{}` is inside a source root; generation must not write next to \
+                 human-authored crates",
+                requested.display()
+            )
+        })
+    })
 }
 
 /// Join `suffix` onto `ancestor` without letting `..` leave `workspace`.

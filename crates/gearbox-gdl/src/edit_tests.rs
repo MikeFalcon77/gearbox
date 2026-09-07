@@ -799,6 +799,63 @@ fn render_template_does_not_interpolate_an_injected_kind() {
 }
 
 #[test]
+fn add_source_refuses_an_id_that_is_not_kebab() {
+    let source = r#"product(
+    sources = [
+        source(id = "gears-rust", at = path("gears")),
+    ],
+)
+"#;
+    let err = add_source(URI, source, "Not_Kebab", "local-gears").expect_err("must refuse");
+    assert!(
+        err.iter()
+            .any(|d| d.message.contains("not a valid source id")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn add_source_refuses_an_empty_path() {
+    let source = r#"product(
+    sources = [
+        source(id = "gears-rust", at = path("gears")),
+    ],
+)
+"#;
+    for at in ["", "   "] {
+        let err = add_source(URI, source, "local-gears", at).expect_err("must refuse");
+        assert!(
+            err.iter()
+                .any(|d| d.message.contains("a source needs a path")),
+            "at={at:?}: {err:?}"
+        );
+    }
+}
+
+#[test]
+fn add_source_inserts_a_path_entry() {
+    let source = r#"product(
+    sources = [
+        source(id = "gears-rust", at = path("gears")),
+    ],
+)
+"#;
+    let edited = add_source(URI, source, "local-gears", "gears/local")
+        .expect("editable")
+        .changed()
+        .expect("changed")
+        .to_owned();
+    assert!(
+        edited.contains(r#"source(id = "local-gears", at = path("gears/local"))"#),
+        "{edited}"
+    );
+    assert_eq!(
+        add_source(URI, &edited, "local-gears", "gears/local").expect("editable"),
+        Edit::Unchanged
+    );
+}
+
+#[test]
 fn set_gear_plugins_writes_plugin_list() {
     let source = r#"product(
     gears = [

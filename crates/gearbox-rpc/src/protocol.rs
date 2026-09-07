@@ -444,17 +444,39 @@ pub struct SetProfileFieldParams {
 ///
 /// Applied in order against the same file text, so a draft of several fields
 /// becomes one dry-run, one confirmation, and one write.
+///
+/// **`AddGear` is here so that adding a gear *and* configuring it is one batch.**
+/// `gearbox/product/addGear` still exists and still does one thing; what could
+/// not be expressed before was the Add Gear panel's actual proposal, which is a
+/// gear plus the features, config and plugins staged beside it. Those had to be
+/// a second call, because `applyEdits` reads the file and the gear is not in it
+/// yet -- so the panel's "What will be written" could only ever show the
+/// `use_gear` line, and the commit wrote twice with a window in between where
+/// the description named a gear nobody had configured.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-#[allow(
-    clippy::enum_variant_names,
-    reason = "the shared prefix is the verb, not noise: every variant is an \
-              instruction to set something, and the `kind` tag on the wire is \
-              `set_config`/`set_features`/… . Dropping it would turn instructions \
-              into nouns (`Config` reads as a config, not as setting one) and \
-              would change the protocol the generated TypeScript already speaks."
-)]
 pub enum ProductEdit {
+    /// Insert one `use_gear(...)` entry. Idempotent: naming a gear the
+    /// description already has is `Unchanged`, as `add_gear` has always been.
+    AddGear {
+        gear: String,
+        source: String,
+    },
+    /// Remove every `use_gear` naming this gear.
+    RemoveGear {
+        gear: String,
+    },
+    /// Declare a directory as a source the product reads gears from.
+    ///
+    /// Here for one flow: a gear scaffolded from inside a product lands outside
+    /// every declared source, because `writable_out_root` refuses to write into
+    /// one -- so "create a gear and add it to this product" is two edits that
+    /// have to be one batch, or the description spends a moment naming a gear
+    /// from a source it does not have.
+    AddSource {
+        id: String,
+        at: String,
+    },
     SetConfig {
         gear: String,
         key: String,
@@ -515,6 +537,34 @@ pub struct CreateProductParams {
     pub dry_run: bool,
 }
 
+/// What kind of gear is being scaffolded.
+///
+/// **Three shapes, and the corpus is what decided there are three.** Of the
+/// fourteen described gears, seven are plugins -- they fill an extension point
+/// declared by an SDK crate -- and the rest are gears that do something on their
+/// own. A scaffold that ignored that difference wrote the same file for both and
+/// left a plugin author to find out what else a plugin needs.
+///
+/// What differs is **which declarations the file offers**, not generated code. A
+/// scaffold has no compiler and does not know where the toolkit or an SDK lives,
+/// so the difference is the next declaration each shape needs, written where it
+/// goes -- and for a plugin, written as a *comment*, because `plugin_interface`
+/// naming a trait no `pub trait` backs is refused (GBX0516) and an `sdk` locator
+/// pointing at a directory that does not exist makes the gear fail to load. A
+/// scaffold must not produce a description that is already wrong.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum GearKind {
+    /// A crate and a name. What this method has always written.
+    #[default]
+    Minimal,
+    /// A gear that does something on its own: the declared fields a service
+    /// carries, and the configuration hint.
+    Service,
+    /// A gear that fills another gear's extension point.
+    Plugin,
+}
+
 /// `gearbox/gear/scaffold` -- tier-0 gear crate under a writable destination.
 ///
 /// Writes `{destination_dir}/{id}/gear.gdl`, `Cargo.toml`, and `src/lib.rs`.
@@ -525,6 +575,12 @@ pub struct ScaffoldGearParams {
     pub name: String,
     #[serde(default = "default_product_version")]
     pub version: String,
+    /// Which shape to write.
+    ///
+    /// Absent means [`GearKind::Minimal`], which is what this method wrote
+    /// before the field existed -- so an older client keeps its behaviour.
+    #[serde(default)]
+    pub kind: GearKind,
     /// Parent directory; the gear lands in `{destination_dir}/{id}/`.
     pub destination_dir: String,
     /// Preview only, like every other write method on this protocol.

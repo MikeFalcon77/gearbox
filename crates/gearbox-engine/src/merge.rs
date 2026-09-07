@@ -57,6 +57,8 @@ pub struct Projections<'a> {
     pub config: Option<gearbox_ir::ConfigSchema>,
     pub docs: Option<gearbox_ir::GearDocs>,
     pub gts_types: Vec<gearbox_ir::GtsTypeDecl>,
+    /// The names in the gear crate's `[features]` table.
+    pub available_features: std::collections::BTreeSet<String>,
 }
 
 #[allow(
@@ -77,6 +79,7 @@ pub fn merge(
         config,
         docs,
         gts_types,
+        available_features,
     } = projections;
     let uri = identity.uri.as_str();
 
@@ -299,6 +302,9 @@ pub fn merge(
         fills: plugin.fills.clone(),
         vendor_selector: plugin.vendor_selector.clone(),
         declared_roles,
+        // Projected from the crate's own `Cargo.toml`, uncurated; see the field's
+        // doc comment for why there is no declared half yet.
+        available_features,
         // Declared curation over projected fields; see `config.rs`.
         config_schema: config,
         // Found by convention beside the gear and one level up; see `docs.rs`.

@@ -218,6 +218,66 @@ pub fn add_profile(
     })
 }
 
+/// Insert a `source(id = ..., at = path(...))` entry.
+///
+/// **Why a product ever needs one added.** A scaffolded gear cannot land inside
+/// an existing source root: `writable_out_root` refuses that path, and ADR
+/// `cpt-gearbox-adr-authoring-ownership-tiers` tier 5 is why -- the tool does not
+/// write into a corpus somebody else owns. So a gear created from inside a
+/// product is, by construction, in a directory the product does not read yet, and
+/// `use_gear` cannot reach it until the directory is declared. Without this edit
+/// the flow ended at a notification telling the person to go and edit the
+/// description by hand.
+///
+/// Only `path(...)` sources. A `git(...)` source is refused by
+/// `ProductSessionService` when a product declares one, and writing an entry the
+/// session will then refuse to open is worse than not offering it.
+///
+/// # Errors
+/// When `sources` is missing or not a list literal, when `id` is not a valid
+/// [`SourceId`](gearbox_ir::SourceId) (kebab-case), or when `at` is empty.
+pub fn add_source(uri: &str, source: &str, id: &str, at: &str) -> Result<Edit, Diagnostics> {
+    // **`SourceId`'s rule, not the GDL identifier rule.** A source id is
+    // kebab-case -- the demo's own is `gears-rust` -- so validating it as an
+    // identifier refused the id every product in the corpus already uses. Found
+    // by the idempotence test, which is exactly what that test is for: it passes
+    // an id the description already declares, so it can only fail on validation.
+    // `SourceId::new` is the authority, and calling it keeps one rule in one
+    // place rather than a second spelling of kebab-case here.
+    if let Err(e) = gearbox_ir::SourceId::new(id) {
+        return Err(refuse(
+            uri,
+            &format!("`{id}` is not a valid source id: {e}"),
+            "use a kebab-case name, like `local-gears`",
+        ));
+    }
+    if at.trim().is_empty() {
+        return Err(refuse(
+            uri,
+            "a source needs a path",
+            "pass the directory the gears live in, relative to the description",
+        ));
+    }
+    let list = named_list_literal(uri, source, "sources")?;
+    if list
+        .entries
+        .iter()
+        .any(|entry| names_entry(source, *entry, id))
+    {
+        // Idempotent, as `add_gear` is: a product that already declares this id
+        // is already what the caller wanted.
+        return Ok(Edit::Unchanged);
+    }
+    let entry = format!(
+        "source(id = {}, at = path({}))",
+        quote_string(id),
+        quote_string(at)
+    );
+    Ok(Edit::Changed {
+        source: insert_entry(source, &list, &entry),
+    })
+}
+
 /// Remove a profile by `id`.
 ///
 /// # Errors

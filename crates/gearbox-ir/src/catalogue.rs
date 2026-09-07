@@ -403,6 +403,25 @@ pub struct GearDescriptor {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declared_roles: Vec<DeclaredRole>,
 
+    /// The Cargo features the gear's own crate declares.
+    ///
+    /// Projected from its `Cargo.toml`, because `use_gear(..., features = [...])`
+    /// writes Cargo feature names and a client with no list of them can only
+    /// offer a text box -- where a typo becomes a feature that does not exist and
+    /// a build failure two steps later. Empty means the crate declares none,
+    /// which 7 of the 14 gears in the corpus correctly do.
+    ///
+    /// **Uncurated on purpose, and a client must say so.** Some of these gate a
+    /// crate's own test matrix (`integration` needs a Docker daemon), and which
+    /// features an integrator should be offered is a declaration nobody has
+    /// written yet -- the same projected-facts / declared-selection split
+    /// `config_schema` makes, whose declared half is `exposes`.
+    ///
+    /// Not carried into the lock, for the same reason as `config_schema`: what a
+    /// gear *can* be built with is not a decision the resolution made.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub available_features: BTreeSet<String>,
+
     /// The gear's configuration surface, when its description locates one.
     ///
     /// Was an opaque `RelPath` pointing at a schema file that nothing ever

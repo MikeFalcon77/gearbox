@@ -84,6 +84,36 @@ fn a_virtual_workspace_manifest_is_reported_not_defaulted() {
 }
 
 #[test]
+fn features_table_keys_are_projected() {
+    let dir = crate_with(
+        "[package]\nname = \"cf-gears-example\"\nversion = \"0.1.0\"\n\n\
+         [features]\ndefault = []\notel = []\nintegration = [\"dep:docker\"]\n",
+    );
+    let manifest = project_manifest(&dir).unwrap();
+    assert_eq!(
+        manifest.features.iter().cloned().collect::<Vec<_>>(),
+        vec![
+            "default".to_owned(),
+            "integration".to_owned(),
+            "otel".to_owned()
+        ],
+        "keys only, sorted; dependency lists stay cargo's business"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_manifest_without_features_yields_an_empty_set() {
+    let dir = crate_with("[package]\nname = \"cf-gears-example\"\nversion = \"0.1.0\"\n");
+    let manifest = project_manifest(&dir).unwrap();
+    assert!(
+        manifest.features.is_empty(),
+        "no table is an answer, not unknown: {manifest:?}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn a_missing_manifest_is_an_error() {
     let dir = std::env::temp_dir().join("gearbox-manifest-definitely-absent");
     let err = project_manifest(&dir).unwrap_err();

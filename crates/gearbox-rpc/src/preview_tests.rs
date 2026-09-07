@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use gearbox_ir::GearId;
 
 use super::*;
-use crate::protocol::{PreviewAddGear, ResolvePreviewParams};
+use crate::protocol::{PreviewAddGear, ProductEdit, ResolvePreviewParams};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
@@ -188,4 +188,163 @@ fn a_refused_edit_still_writes_nothing() {
         before,
         "a no-op preview must leave the description byte-identical"
     );
+}
+
+/// One batch writes what two calls used to, and the dry run's `after` is it.
+///
+/// The Add Gear panel's proposal is a gear **plus** the features, config and
+/// plugins staged beside it, and it could not be expressed as one edit:
+/// `applyEdits` reads the file, and every follow-up names a gear the file does
+/// not have yet. So the panel dry-ran `addGear` alone -- which is why its "What
+/// will be written" showed one line while three more edits were pending -- and
+/// the commit wrote twice, leaving a window where the description named a gear
+/// nobody had configured.
+///
+/// Asserted as text equality against the old sequence rather than against a
+/// literal: the point is that `ProductEdit::AddGear` changed *when* the edits are
+/// folded, not *what* they produce.
+#[test]
+fn one_batch_folds_an_add_and_its_follow_ups_like_two_calls_did() {
+    let (_state, path) = require_corpus!();
+    let uri = path.display().to_string();
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    let follow_ups = vec![
+        ProductEdit::SetFeatures {
+            gear: "tenant-resolver".to_owned(),
+            features: vec!["otel".to_owned()],
+        },
+        ProductEdit::SetConfig {
+            gear: "tenant-resolver".to_owned(),
+            key: "namespace".to_owned(),
+            value: Some(gearbox_ir::ConfigValue::Str("demo".to_owned())),
+        },
+        ProductEdit::SetPlugins {
+            gear: "tenant-resolver".to_owned(),
+            plugins: vec!["single-tenant-tr-plugin".to_owned()],
+        },
+    ];
+
+    // The old shape: `add_gear` first, then a second fold over the result.
+    let added = gearbox_gdl::edit::add_gear(&uri, &before, "tenant-resolver", "gears-rust")
+        .expect("add_gear");
+    let after_add = added
+        .changed()
+        .expect("the demo does not name tenant-resolver");
+    let two_calls = apply_product_edits(&uri, after_add, &follow_ups)
+        .expect("follow-ups apply to a text that names the gear")
+        .changed()
+        .expect("the follow-ups change the text")
+        .to_owned();
+
+    // The new shape: one ordered batch, addition first.
+    let mut batch = vec![ProductEdit::AddGear {
+        gear: "tenant-resolver".to_owned(),
+        source: "gears-rust".to_owned(),
+    }];
+    batch.extend(follow_ups);
+    let one_batch = apply_product_edits(&uri, &before, &batch)
+        .expect("one batch applies")
+        .changed()
+        .expect("the batch changes the text")
+        .to_owned();
+
+    assert_eq!(one_batch, two_calls);
+    assert!(one_batch.contains("tenant-resolver"));
+    assert!(one_batch.contains("single-tenant-tr-plugin"));
+    assert!(one_batch.contains("otel"));
+    assert!(one_batch.contains("namespace"));
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        before,
+        "folding writes nothing; only `edit_with` does"
+    );
+}
+
+/// The follow-ups alone are refused, which is *why* the addition has to be in
+/// the batch rather than sent before it.
+#[test]
+fn a_follow_up_without_the_addition_is_refused() {
+    let (_state, path) = require_corpus!();
+    let uri = path.display().to_string();
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    let refused = apply_product_edits(
+        &uri,
+        &before,
+        &[ProductEdit::SetFeatures {
+            gear: "tenant-resolver".to_owned(),
+            features: vec!["otel".to_owned()],
+        }],
+    );
+    assert!(
+        refused.is_err(),
+        "a gear the description does not name has no span to edit"
+    );
+}
+
+/// Creating a gear from inside a product is two edits, and they have to be one.
+///
+/// A scaffold cannot land inside an existing source root -- `writable_out_root`
+/// refuses it, because tier 5 of ADR `cpt-gearbox-adr-authoring-ownership-tiers`
+/// keeps the tool out of a corpus somebody else owns -- so the new gear is always
+/// in a directory the product does not read yet. `use_gear` alone would name a
+/// gear from a source the description does not declare; `add_source` alone would
+/// leave the gear unreferenced. One batch is the whole point.
+#[test]
+fn declaring_a_source_and_adding_a_gear_is_one_batch() {
+    let (_state, path) = require_corpus!();
+    let uri = path.display().to_string();
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    let batch = vec![
+        ProductEdit::AddSource {
+            id: "local-gears".to_owned(),
+            at: "gears".to_owned(),
+        },
+        ProductEdit::AddGear {
+            gear: "payments-audit".to_owned(),
+            source: "local-gears".to_owned(),
+        },
+    ];
+    let after = apply_product_edits(&uri, &before, &batch)
+        .expect("both edits apply")
+        .changed()
+        .expect("the batch changes the text")
+        .to_owned();
+
+    assert!(after.contains(r#"source(id = "local-gears", at = path("gears"))"#));
+    assert!(after.contains(r#"use_gear("payments-audit", source = "local-gears")"#));
+    // The description's own comments are what span surgery is for: 29 of them in
+    // the demo, and a re-serialising editor would take them all.
+    let comments = |text: &str| {
+        text.lines()
+            .filter(|l| l.trim_start().starts_with('#'))
+            .count()
+    };
+    assert_eq!(comments(&after), comments(&before));
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        before,
+        "folding writes nothing"
+    );
+}
+
+/// The same source twice is not an edit, for the reason `add_gear` is not.
+#[test]
+fn declaring_a_source_the_product_already_has_is_unchanged() {
+    let (_state, path) = require_corpus!();
+    let uri = path.display().to_string();
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    let edit = apply_product_edits(
+        &uri,
+        &before,
+        &[ProductEdit::AddSource {
+            id: "gears-rust".to_owned(),
+            at: "../../../gears-rust".to_owned(),
+        }],
+    )
+    .expect("an idempotent edit is not an error");
+    assert!(edit.changed().is_none(), "the demo already declares it");
 }

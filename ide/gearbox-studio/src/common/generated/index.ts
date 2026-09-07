@@ -51,6 +51,7 @@ export * from "./FilePlan";
 export * from "./GearDescriptor";
 export * from "./GearDocs";
 export * from "./GearId";
+export * from "./GearKind";
 export * from "./GearSelection";
 export * from "./GenerateApplyResult";
 export * from "./GenerateFileParams";

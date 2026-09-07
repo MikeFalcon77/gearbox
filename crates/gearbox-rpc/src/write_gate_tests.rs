@@ -39,10 +39,21 @@ fn scratch(label: &str) -> PathBuf {
 }
 
 fn write_state(workspace: PathBuf) -> State {
+    state_with_roots(workspace, &[])
+}
+
+/// A write-enabled session with source roots, for the gate that is about them.
+///
+/// `write_state` declares none, which is why the source-root branch of
+/// `writable_out_root` went uncovered by `make check` for as long as it did: only
+/// `ide/scripts/rpc-smoke.mjs` ever passed a real corpus, and that script is not
+/// part of it.
+fn state_with_roots(workspace: PathBuf, roots: &[PathBuf]) -> State {
+    let (roots, failed_roots) = open_roots(roots);
     State {
-        roots: vec![],
+        roots,
         catalogue: None,
-        failed_roots: vec![],
+        failed_roots,
         initialized: true,
         allow_writes: true,
         workspace: Some(workspace),
@@ -84,6 +95,60 @@ fn missing_dir_plus_dotdot_is_outside_the_workspace() {
         !escaped.exists(),
         "the gate must not create the escaped location"
     );
+}
+
+/// A source root beside the workspace gets the source-root refusal, not the
+/// workspace one.
+///
+/// **Both rules apply and the specific one has to win.** The corpus is a
+/// *sibling* of this repository -- `products/payments-demo` names
+/// `../../../gears-rust` -- so generating into it is simultaneously "outside the
+/// declared workspace" and "inside a source root". The second sentence is the one
+/// a person can act on: it names the rule (ADR-0010 tier 5, do not write next to
+/// human-authored crates) instead of describing a boundary they did not cross on
+/// purpose.
+///
+/// `writable_out_root` said so in a comment and did the opposite: the workspace
+/// check returned first, which made its own source-root loop unreachable for
+/// exactly the layout the comment names. `ide/scripts/rpc-smoke.mjs` asserted the
+/// intent and had been failing on it; this is the same claim where `make check`
+/// can see it.
+#[test]
+fn a_source_root_beside_the_workspace_gets_the_specific_refusal() {
+    let tmp = scratch("out-in-sibling-source-root");
+    let workspace = tmp.join("ws");
+    let corpus = tmp.join("gears-rust");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(corpus.join("gears")).unwrap();
+
+    let state = state_with_roots(workspace, std::slice::from_ref(&corpus));
+    let err = writable_out_root(&state, &corpus.join("generated"))
+        .expect_err("generation must not write into a source root");
+    assert!(
+        err.contains("inside a source root"),
+        "the refusal must name the rule, not the boundary: {err}"
+    );
+}
+
+/// The other order still holds: outside everything is a workspace refusal.
+///
+/// The pair matters. Making the source-root sentence win must not turn every
+/// out-of-workspace path into one, and this is the case that would catch it --
+/// a directory that is outside the workspace and inside no source root.
+#[test]
+fn a_root_outside_everything_is_still_a_workspace_refusal() {
+    let tmp = scratch("out-outside-everything");
+    let workspace = tmp.join("ws");
+    let corpus = tmp.join("gears-rust");
+    let elsewhere = tmp.join("elsewhere");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(corpus.join("gears")).unwrap();
+    std::fs::create_dir_all(&elsewhere).unwrap();
+
+    let state = state_with_roots(workspace, &[corpus]);
+    let err = writable_out_root(&state, &elsewhere.join("generated"))
+        .expect_err("generation must stay inside the workspace");
+    assert!(err.contains("outside the declared workspace"), "{err}");
 }
 
 #[test]
@@ -165,6 +230,7 @@ fn scaffold_refuses_a_dotdot_id() {
             id: "..".to_owned(),
             name: "Escape".to_owned(),
             version: "0.1.0".to_owned(),
+            kind: crate::protocol::GearKind::Minimal,
             destination_dir: dest.display().to_string(),
             dry_run: false,
         },
@@ -178,4 +244,108 @@ fn scaffold_refuses_a_dotdot_id() {
         !dest.join("Cargo.toml").exists(),
         "parent dest must stay unchanged"
     );
+}
+
+/// Every shape evaluates, and each one offers what its kind needs.
+///
+/// The gate this guards is the scaffold's own: `scaffold_gear` evaluates the
+/// `gear.gdl` it just rendered and refuses if it does not parse as a gear
+/// description. Three shapes mean three chances to write a file that does not --
+/// and the shapes are mostly *comments*, so a stray `#` or an unbalanced paren
+/// would be caught here and nowhere else until somebody used it.
+#[test]
+fn every_scaffold_shape_evaluates_and_carries_its_own_hints() {
+    use crate::protocol::GearKind;
+
+    for kind in [GearKind::Minimal, GearKind::Service, GearKind::Plugin] {
+        let files = super::scaffold_gear_files(&ScaffoldGearParams {
+            id: "payments-audit".to_owned(),
+            name: "Payments Audit".to_owned(),
+            version: "0.1.0".to_owned(),
+            kind,
+            destination_dir: "/tmp".to_owned(),
+            dry_run: true,
+        })
+        .expect("the shape renders");
+
+        let gdl = &files
+            .iter()
+            .find(|(rel, _, _)| rel == "gear.gdl")
+            .expect("a gear.gdl")
+            .1;
+        let lib = &files
+            .iter()
+            .find(|(rel, _, _)| rel == "src/lib.rs")
+            .expect("a lib.rs")
+            .1;
+
+        let identity = gearbox_gdl::FileIdentity {
+            uri: "file:///scaffold/gear.gdl".to_owned(),
+            source: SourceId::new("scaffold").expect("kebab"),
+            gdl_path: RelPath::new("gear.gdl").expect("valid"),
+            load_paths: None,
+        };
+        let outcome = gearbox_gdl::GdlEngine::new().eval_gear(&identity, gdl);
+        assert!(
+            outcome.value.is_some(),
+            "{kind:?} does not evaluate: {:?}",
+            outcome.diagnostics
+        );
+
+        // Every shape names the crate and carries the configuration hint.
+        assert!(gdl.contains(r#"crate_name = "payments-audit""#), "{kind:?}");
+        assert!(gdl.contains("config_schema = config(exposes"), "{kind:?}");
+
+        // Shapes are comments until there is something true to write. Live
+        // placeholders fail load (sdk) or diagnostics (plugin_interface /
+        // invented category), so every hint must stay behind `#`.
+        for line in gdl.lines() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with('#') || trimmed.is_empty() {
+                continue;
+            }
+            assert!(
+                !trimmed.starts_with("config_schema =")
+                    && !trimmed.starts_with("sdk = ")
+                    && !trimmed.starts_with("plugin_interface")
+                    && !trimmed.starts_with("provides =")
+                    && !trimmed.starts_with("consumes =")
+                    && !trimmed.starts_with("description =")
+                    && !trimmed.starts_with("category =")
+                    && !trimmed.starts_with("visibility ="),
+                "{kind:?} writes `{trimmed}` as a value, and it has nothing true to put there"
+            );
+        }
+
+        match kind {
+            GearKind::Minimal => {
+                // Nothing beyond the crate, the name and that one hint: this is
+                // the shape the method wrote before kinds existed.
+                assert!(!gdl.contains("sdk = cargo"), "{kind:?}");
+                assert!(!gdl.contains("provides = ["), "{kind:?}");
+                assert!(!lib.contains("impl Gear"), "{kind:?}");
+            }
+            GearKind::Service => {
+                assert!(gdl.contains("provides = [provide("), "{kind:?}");
+                assert!(gdl.contains("consumes = [consume("), "{kind:?}");
+                assert!(!gdl.contains("plugin_interface"), "{kind:?}");
+                // Doc in the stub, not code -- the toolkit path is unknown here.
+                assert!(lib.contains("impl Gear"), "{kind:?}");
+                assert!(
+                    lib.lines().all(|line| {
+                        let t = line.trim_start();
+                        t.is_empty() || t.starts_with("//")
+                    }),
+                    "{kind:?} lib stub must stay comments only"
+                );
+            }
+            GearKind::Plugin => {
+                // The locator that decides which point it fills, and the escape
+                // hatch for the case reading the `impl` cannot decide.
+                assert!(gdl.contains("sdk = cargo("), "{kind:?}");
+                assert!(gdl.contains("plugin_interface"), "{kind:?}");
+                assert!(lib.contains("GBX0518"), "{kind:?}");
+            }
+        }
+    }
 }

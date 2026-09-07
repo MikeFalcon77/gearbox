@@ -13,7 +13,7 @@
     reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not helpers"
 )]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use gearbox_ir::{
     CargoRef, GearDescriptor, GearId, GearSelection, ProductIntent, ProfileId, RelPath, SourceId,
@@ -63,6 +63,7 @@ pub fn descriptor(id: &str) -> GearDescriptor {
         fills: None,
         vendor_selector: None,
         declared_roles: Vec::new(),
+        available_features: BTreeSet::new(),
         config_schema: None,
         docs: None,
         gts_types: Vec::new(),
@@ -115,8 +116,6 @@ pub fn intent(gears: &[&str]) -> ProductIntent {
 // Six catalogues for step 3. Each is the smallest shape that exercises one
 // branch, because the real slice can demonstrate only two of them: it holds
 // exactly one provider and exactly one declared edge.
-
-use std::collections::BTreeSet;
 
 use gearbox_ir::{
     Catalogue, ContractDescriptor, ContractId, ContractKind, ContractVersion, ProviderDescriptor,

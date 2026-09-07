@@ -81,6 +81,7 @@ fn demo_descriptor() -> GearDescriptor {
         fills: None,
         vendor_selector: None,
         declared_roles: Vec::new(),
+        available_features: BTreeSet::new(),
         config_schema: None,
         docs: None,
         gts_types: Vec::new(),

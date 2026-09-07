@@ -158,7 +158,74 @@ pub fn check(
     }
 
     report_orphan_plugins(catalogue, intent, uri, diagnostics);
+    report_misplaced_plugins(catalogue, intent, uri, diagnostics);
     out
+}
+
+/// A plugin listed under a host that does not declare its point.
+///
+/// The gap `report_orphan_plugins` leaves. That one asks whether *some* selected
+/// gear expects the plugin's point, which is the right question for a plugin
+/// selected as an ordinary gear and the wrong one for a plugin written into a
+/// specific host's `plugins = [...]`: with `authn-resolver` also in the product,
+/// listing `oidc-authn-plugin` under `types-registry` passed both checks while
+/// meaning nothing at all -- the host looks for no implementation and the plugin
+/// registers a trait nobody queries.
+///
+/// Reported per host entry rather than per profile: the list is profile-scoped
+/// but the mismatch is not, and one sentence per wrong pair is the useful count.
+fn report_misplaced_plugins(
+    catalogue: &Catalogue,
+    intent: &ProductIntent,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    for selection in &intent.selected_gears {
+        let Some(host) = catalogue.gear(&selection.gear) else {
+            continue;
+        };
+        for plugin in &selection.plugins {
+            let Some(fills) = catalogue.gear(&plugin.gear).and_then(|g| g.fills.as_ref()) else {
+                // Not a plugin at all, or absent from the catalogue. Both are
+                // other codes' business (GBX0301, GBX0516), and naming them here
+                // would report one fault twice.
+                continue;
+            };
+            if host.extension_points.contains(&fills.point) {
+                continue;
+            }
+            let declares = if host.extension_points.is_empty() {
+                "declares no extension point".to_owned()
+            } else {
+                format!(
+                    "declares {}",
+                    host.extension_points
+                        .iter()
+                        .map(ExtensionPointDecl::qualified)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            diagnostics.push(
+                Diagnostic::error(
+                    DiagnosticCode::PluginPointNotDeclared,
+                    format!(
+                        "gear `{}` lists plugin `{}`, which fills `{}`, but `{}` {declares}",
+                        selection.gear,
+                        plugin.gear,
+                        fills.point.qualified(),
+                        selection.gear
+                    ),
+                    format!(
+                        "list `{}` under the gear that declares `{}`, or drop it",
+                        plugin.gear,
+                        fills.point.qualified()
+                    ),
+                )
+                .at(Location::file(uri.to_owned())),
+            );
+        }
+    }
 }
 
 #[expect(

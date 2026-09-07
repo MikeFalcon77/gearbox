@@ -6,8 +6,17 @@ import type { ConfigValue } from "./ConfigValue";
  *
  * Applied in order against the same file text, so a draft of several fields
  * becomes one dry-run, one confirmation, and one write.
+ *
+ * **`AddGear` is here so that adding a gear *and* configuring it is one batch.**
+ * `gearbox/product/addGear` still exists and still does one thing; what could
+ * not be expressed before was the Add Gear panel's actual proposal, which is a
+ * gear plus the features, config and plugins staged beside it. Those had to be
+ * a second call, because `applyEdits` reads the file and the gear is not in it
+ * yet -- so the panel's "What will be written" could only ever show the
+ * `use_gear` line, and the commit wrote twice with a window in between where
+ * the description named a gear nobody had configured.
  */
-export type ProductEdit = { "kind": "set_config", gear: string, key: string, 
+export type ProductEdit = { "kind": "add_gear", gear: string, source: string, } | { "kind": "remove_gear", gear: string, } | { "kind": "add_source", id: string, at: string, } | { "kind": "set_config", gear: string, key: string, 
 /**
  * `None` removes the key. A scalar, because a control writes scalars
  * and a nested literal has no control to render it.

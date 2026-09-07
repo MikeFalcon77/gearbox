@@ -593,6 +593,22 @@ diagnostic_codes! {
     /// implementations is legitimate -- selection may be per-tenant at runtime.
     PluginVendorAmbiguous = "GBX0517", Cluster, Info, false, "several plugins share a vendor for one extension point";
 
+    /// A gear lists a plugin under a host that does not declare that point.
+    ///
+    /// The gap [`PluginHostNotSelected`] leaves. That code asks whether *some*
+    /// selected gear expects the plugin's point, which is the right question for
+    /// a plugin selected as an ordinary gear -- and it says nothing about the
+    /// `plugins = [...]` list a plugin was actually written into. So a product
+    /// could list an authentication plugin under `types-registry`, whose
+    /// projected `extension_points` is empty, and be told nothing: the host
+    /// looks for no implementation, the plugin registers for a trait nobody
+    /// queries, and the link is inert.
+    ///
+    /// Found by a UX pass rather than by a resolution, which is the useful part:
+    /// the Add Gear panel offered the choice because nothing refused it, and a
+    /// client is not a boundary (`cpt-gearbox-fr-rpc-writes-opt-in`).
+    PluginPointNotDeclared = "GBX0518", Cluster, Error, false, "plugin fills a point its host does not declare";
+
     // ---------------------------------------------------------------- GBX06xx
     /// Roles were declared. The runtime has no role concept.
     ///

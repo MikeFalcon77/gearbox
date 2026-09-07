@@ -15,7 +15,17 @@
 //! what a reader guesses from the directory. Getting it wrong emits a link line
 //! that does not compile, which is why the description declares it and this
 //! module checks the declaration.
+//!
+//! A third fact is read and is not checked against anything: the **names in
+//! `[features]`**. `use_gear(..., features = [...])` writes Cargo features, and
+//! until this was projected the Studio had no way to know which names were
+//! real -- so it offered a free-text box, and a typo became a `Cargo.toml`
+//! feature that does not exist and a build failure two steps later. Measured
+//! before building it: 7 of the 14 gear crates in the corpus declare a
+//! `[features]` table, of 2 to 4 entries; the other 7 declare none, which is an
+//! answer rather than a gap.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 /// A crate's identity as its own manifest states it.
@@ -32,6 +42,21 @@ pub struct CrateManifest {
     /// mismatch on one that does not means someone derived the identifier from
     /// the directory instead of from the package name.
     pub lib_is_explicit: bool,
+
+    /// The names in `[features]`, in sorted order.
+    ///
+    /// Every name, uncurated, including the ones a crate declares for its own
+    /// test matrix: `types-registry`'s only feature is `integration`, which
+    /// gates tests that need a Docker daemon. Deciding which of these an
+    /// integrator should be offered is a *declaration* -- the same split ADR
+    /// `cpt-gearbox-adr-macro-projected-catalogue` makes for config fields,
+    /// where the types are projected and only the selection is declared -- and
+    /// there is no such declaration yet. So a client that shows these must say
+    /// what they are rather than implying they are all appropriate.
+    ///
+    /// Empty means the crate declares no features. It is not "unknown": a
+    /// manifest that could not be read is an error, not an empty set.
+    pub features: BTreeSet<String>,
 }
 
 /// Why a manifest could not be read.
@@ -100,10 +125,19 @@ pub fn project_manifest(dir: &Path) -> Result<CrateManifest, ManifestError> {
     let lib_is_explicit = explicit.is_some();
     let lib_ident = explicit.unwrap_or_else(|| package_name.replace('-', "_"));
 
+    // Keys only. A feature's value is the list of dependencies it turns on,
+    // which is cargo's business and not a fact about the product.
+    let features = table
+        .get("features")
+        .and_then(toml::Value::as_table)
+        .map(|features| features.keys().cloned().collect())
+        .unwrap_or_default();
+
     Ok(CrateManifest {
         package_name,
         lib_ident,
         lib_is_explicit,
+        features,
     })
 }
 
