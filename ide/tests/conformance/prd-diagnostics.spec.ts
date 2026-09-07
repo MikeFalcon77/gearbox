@@ -14,6 +14,13 @@ test.describe("diagnostics reach a person", () => {
   test("the Problems view is present to receive markers [PRD cpt-gearbox-fr-editor-diagnostics]", async ({
     studio,
   }) => {
+    // **Present, not pre-opened.** It used to open itself on a first run and this
+    // claim read the boot tab list, which made it a claim about the default
+    // layout rather than about the destination existing. Conflicts is the domain
+    // screen for the resolution's diagnostics; Problems stays for the
+    // file-anchored ones Monaco publishes, and is one command away
+    // (`HiddenProblemsView` records why). Reached the way a person reaches it.
+    await problems(studio.page);
     const tabs = await studio.page.evaluate(() =>
       Array.from(
         document.querySelectorAll("#theia-bottom-content-panel .lm-TabBar-tabLabel"),

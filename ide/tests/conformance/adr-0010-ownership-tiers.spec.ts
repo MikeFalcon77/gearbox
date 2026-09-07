@@ -100,6 +100,74 @@ test.describe("what the tool may write", () => {
     },
   );
 
+  test(
+    "a scaffold has three shapes, and each offers what its kind needs [ADR-0010 tier 0]",
+    async ({ freshStudio }) => {
+      // Of the fourteen described gears in the corpus, seven are plugins -- they
+      // fill an extension point an SDK crate declares -- and none is a bare
+      // crate with a name. One shape for all of them left a plugin author to
+      // find out what else a plugin needs.
+      //
+      // What differs is which declarations the file *offers*, not generated
+      // code: a scaffold has no compiler and does not know where the toolkit or
+      // an SDK lives. And for a plugin the two fields that matter are offered
+      // **commented**, because `plugin_interface` naming no `pub trait` is
+      // refused (GBX0516) and an `sdk` locator pointing nowhere makes the gear
+      // fail to load -- so a placeholder would hand its author a description to
+      // repair rather than one to fill in.
+      const { page } = freshStudio;
+      await settled(page);
+      await expect(page.locator('[data-start-action="new-gear"]:not([disabled])')).toBeVisible({
+        timeout: 60_000,
+      });
+      await page.locator('[data-start-action="new-gear"]').click();
+
+      const kind = page.locator("[data-create-gear-kind]");
+      await expect(kind).toBeVisible({ timeout: 30_000 });
+      const shapes = await kind
+        .locator("option")
+        .evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value));
+      expect(shapes).toEqual(["service", "plugin", "minimal"]);
+
+      // Every shape writes the same three files: the shape is what the
+      // description says, not how many files there are. `data-plan-blake3` is
+      // how the test sees that `kind` reached the scaffold -- FilePlan carries
+      // no content, and the preview lists paths only.
+      const blake3Of = async (rel: string): Promise<string> => {
+        const row = page.locator(`.gbx-create-preview [data-plan-path="${rel}"]`);
+        await expect(row).toBeVisible({ timeout: 30_000 });
+        return (await row.getAttribute("data-plan-blake3")) ?? "";
+      };
+      const paths = async (): Promise<string[]> =>
+        page
+          .locator(".gbx-create-preview [data-plan-path]")
+          .evaluateAll((rows) => rows.map((r) => r.getAttribute("data-plan-path") ?? ""));
+      await expect(page.locator(".gbx-create-preview [data-plan-path]").first()).toBeVisible({
+        timeout: 30_000,
+      });
+      expect((await paths()).sort()).toEqual(["Cargo.toml", "gear.gdl", "src/lib.rs"]);
+      const serviceGdl = await blake3Of("gear.gdl");
+      expect(serviceGdl).not.toEqual("");
+
+      await kind.selectOption("plugin");
+      await expect
+        .poll(async () => blake3Of("gear.gdl"), { timeout: 30_000 })
+        .not.toEqual(serviceGdl);
+      expect((await paths()).sort()).toEqual(["Cargo.toml", "gear.gdl", "src/lib.rs"]);
+      const pluginGdl = await blake3Of("gear.gdl");
+      expect(pluginGdl).not.toEqual("");
+
+      await kind.selectOption("minimal");
+      await expect
+        .poll(async () => blake3Of("gear.gdl"), { timeout: 30_000 })
+        .not.toEqual(pluginGdl);
+      const minimalGdl = await blake3Of("gear.gdl");
+      expect(minimalGdl).not.toEqual("");
+      expect(minimalGdl).not.toEqual(serviceGdl);
+      await page.locator("[data-create-gear-cancel]").click();
+    },
+  );
+
   test("a generated composition crate carries a header naming its generator [ADR-0010 tier 2]", async ({
     studio,
   }) => {
@@ -247,6 +315,50 @@ test.describe("typed config from schema (Phase 7)", () => {
    * string field gets a text input rather than the untyped key/value row that
    * stood here before.
    */
+  test("a field says where its value came from, and an explicit one can be reset [Phase 7]", async ({
+    studio,
+  }) => {
+    // Three states a person acts on differently, and a form that renders them
+    // identically invites someone to override the resolver by accident: what the
+    // *description* sets can be reset, what the *resolver* derived should
+    // usually be left alone (GBX0114 is the engine saying so), and what nothing
+    // sets is the gear's own default -- already the control's placeholder.
+    //
+    // All three are read from what is on screen: the intent, the resolution, and
+    // the difference between them. No new wire field.
+    await openProduct(studio.page, "dev");
+    await revealCatalogue(studio.page);
+    await resetCatalogueView(studio.page);
+    await studio.page.locator(".gearbox-catalogue .gbx-row", { hasText: "api-gateway" }).click();
+    await revealInspector(studio.page);
+    const config = studio.page.locator('[data-gear-config="api-gateway"]');
+    await config.waitFor({ state: "visible", timeout: 60_000 });
+
+    // `bind_addr` is the derived case in this corpus: the resolver assigns the
+    // port from the process topology, and the demo description sets nothing.
+    const bindAddr = config.locator('[data-config-field="bind_addr"]');
+    await expect(bindAddr).toBeVisible();
+    const provenance = await bindAddr.getAttribute("data-config-provenance");
+    expect(["derived", "default", "explicit"]).toContain(provenance);
+    // Whatever it is, it is *said*: the label is the claim, not the attribute.
+    await expect(bindAddr.locator("[data-config-provenance-label]")).toBeVisible();
+
+    // Reset is offered for an explicit value and only for one, so the flow is:
+    // type, watch it become explicit, reset, watch the offer go.
+    const field = config.locator('[data-config-field="prefix_path"]');
+    await expect(field).toBeVisible();
+    await field.locator("input").fill("/demo");
+    await expect(field).toHaveAttribute("data-config-provenance", "explicit");
+    await expect(field.locator("[data-config-reset]")).toBeVisible();
+    await field.locator("[data-config-reset]").click();
+    await expect(field.locator("[data-config-reset]")).toHaveCount(0);
+    // Reset means "the gear's default", not "derived": the last resolution still
+    // holds the old key, and without a `removed` branch provenance fell through
+    // to derived and lied about who set it.
+    await expect(field).toHaveAttribute("data-config-provenance", "default");
+    await studio.page.locator(".gbx-toolbar [data-draft-discard]").click();
+  });
+
   test("a projected string field renders as a typed control [Phase 7]", async ({ studio }) => {
     const page = studio.page;
     await openProduct(page, "dev");

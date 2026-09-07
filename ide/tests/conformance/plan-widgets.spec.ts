@@ -18,9 +18,11 @@ import {
   openGraph,
   openGraphView,
   openProduct,
+  productSection,
   resetCatalogueView,
   revealCatalogue,
   revealDetail,
+  revealInspector,
   revealLeft,
   revealLock,
   runCommand,
@@ -90,24 +92,38 @@ test.describe("where the views live", () => {
     expect(tabs).toContain("Gearbox Catalogue");
   });
 
-  test("the Inspector is in the bottom area, not the side panel [plan §9: Inspector, bottom]", async ({
+  test("the Inspector is beside the tree, not under it [plan §9: Inspector, right panel]", async ({
     studio,
   }) => {
-    // "In the side panel this content was clipped, which hid exactly the
-    // projected facts it exists to show."
-    const tabs = await studio.page.evaluate(() =>
-      Array.from(
-        document.querySelectorAll("#theia-bottom-content-panel .lm-TabBar-tabLabel"),
-      ).map((e) => (e.textContent ?? "").trim()),
+    // It was the bottom area, and the reason recorded for that was that a side
+    // panel clipped the projected facts. A UX pass measured the other side of the
+    // trade: at an ordinary window height the bottom strip shows **one**
+    // configuration field and hides the rest behind an inner scroll -- in the
+    // panel that is the gear configurator. So it moves, and the two-column layout
+    // that did the clipping becomes one column (`index.css`, `.theia-side-panel
+    // .gbx-inspector`).
+    //
+    // Asserted by which shell area holds it, not by pixel geometry: the panel is
+    // resizable and a person's own width is not this claim's business.
+    await revealInspector(studio.page);
+    const area = await studio.page.evaluate(() => {
+      const node = document.querySelector(".gbx-inspector");
+      if (node === null) return "absent";
+      if (node.closest("#theia-right-content-panel") !== null) return "right";
+      if (node.closest("#theia-bottom-content-panel") !== null) return "bottom";
+      if (node.closest("#theia-left-content-panel") !== null) return "left";
+      if (node.closest("#theia-main-content-panel") !== null) return "main";
+      return "elsewhere";
+    });
+    expect(area).toBe("right");
+
+    // And Conflicts stays below, because it is read *while* looking at the tree
+    // that caused the complaint.
+    await openConflicts(studio.page);
+    const conflicts = await studio.page.evaluate(
+      () => document.querySelector("#theia-bottom-content-panel .gbx-conflicts") !== null,
     );
-    expect(tabs).toContain("Gearbox Inspector");
-    // `.gbx-inspector`, not `.gbx-detail`: the detail is one *section* of the
-    // panel and it renders only once something is selected, so asserting it here
-    // would be asserting a selection this claim is not about.
-    const inBottom = await studio.page.evaluate(
-      () => document.querySelector("#theia-bottom-content-panel .gbx-inspector") !== null,
-    );
-    expect(inBottom).toBe(true);
+    expect(conflicts).toBe(true);
   });
 
   test("one selection answers both questions at once [plan §9: Inspector, one selection]", async ({
@@ -120,6 +136,7 @@ test.describe("where the views live", () => {
     // a gear in the catalogue". One `SelectionService` later, both are about the
     // same gear.
     await openProduct(studio.page, "dev");
+    await productSection(studio.page, "gears");
     await studio.page.locator('[data-asked-for="api-gateway"] a').click();
     await revealDetail(studio.page);
 
@@ -163,13 +180,26 @@ test.describe("where the views live", () => {
     // co-location legible; Security and Artifacts are absent because neither
     // exists to show; Deployment stays in the header because the profile switch
     // must work while a resolution is in flight.
+    // **The branches are behind the stages now**, and that is the one change to
+    // this claim: the panel is `Overview · Gears · Topology · Validation`, so
+    // `Gears` holds the gears branch and `Topology` holds the three that describe
+    // how it deploys. The set is the same and the order is the same; what the
+    // claim adds is that each is reachable.
     await openProduct(studio.page, "dev");
-    const branches = await studio.page
+    await productSection(studio.page, "gears");
+    const gearBranches = await studio.page
       .locator("[data-branch]")
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-branch")));
-    expect(branches).toEqual(["gears", "processes", "contracts", "cluster"]);
+    expect(gearBranches).toEqual(["gears"]);
+
+    await productSection(studio.page, "topology");
+    const topologyBranches = await studio.page
+      .locator("[data-branch]")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-branch")));
+    expect(topologyBranches).toEqual(["processes", "contracts", "cluster"]);
 
     // A branch folds, and says so rather than only looking folded.
+    await productSection(studio.page, "gears");
     const gears = studio.page.locator('[data-branch="gears"] .gbx-group-label').first();
     await expect(gears).toHaveAttribute("data-collapsed", "false");
     await expect(studio.page.locator('[data-asked-for="api-gateway"]')).toBeVisible();
@@ -196,12 +226,29 @@ test.describe("where the views live", () => {
     // table is absent from this assertion on purpose -- no gear in this product
     // requests a cluster scope, so there is no row to render, and demanding one
     // would be demanding a different product.
+    //
+    // Read across the stages, since the panel has them: the profile switch and
+    // the diagnostics summary are above the strip and therefore on every one --
+    // the switch because it must work while a resolution is in flight, the
+    // summary because a person on Topology is exactly who needs to know the
+    // resolution complained.
     await openProduct(studio.page, "dev");
     await expect(studio.page.locator("[data-profile]").first()).toBeVisible();
+    await expect(studio.page.locator(".gbx-diagnostics")).toBeVisible();
+
+    await productSection(studio.page, "gears");
     await expect(studio.page.locator("[data-asked-for]").first()).toBeVisible();
     await expect(studio.page.locator("[data-pulled-in]").first()).toBeVisible();
-    await expect(studio.page.locator(".gbx-binding [data-mechanism]").first()).toBeVisible();
+    // Still on screen from here: one line, on every stage.
     await expect(studio.page.locator(".gbx-diagnostics")).toBeVisible();
+
+    await productSection(studio.page, "topology");
+    await expect(studio.page.locator(".gbx-binding [data-mechanism]").first()).toBeVisible();
+
+    // And the stage that is only about what went wrong, which is the fourth.
+    await productSection(studio.page, "validation");
+    await expect(studio.page.locator("[data-product-validation]")).toBeVisible();
+    await expect(studio.page.locator("[data-validation-errors]")).toBeVisible();
   });
 
   test("the Conflicts screen lists what the resolution reported [plan §9: Conflicts]", async ({
@@ -267,16 +314,26 @@ test.describe("where the views live", () => {
     );
   });
 
-  test("the explanation is in the bottom area [plan §9: Explain]", async ({ studio }) => {
+  test("the explanation travels with the Inspector [plan §9: Explain]", async ({ studio }) => {
+    // A section of the Inspector rather than a panel of its own, so it is
+    // wherever that panel is -- the right side since 2026-09-07. The property
+    // that matters has not changed and is the one asserted: it answers about a
+    // selection made elsewhere, so it must be readable *while* the Product view
+    // is on screen rather than instead of it. A side panel satisfies that; the
+    // main area would not.
+    await openProduct(studio.page, "dev");
+    await productSection(studio.page, "gears");
+    await studio.page.locator('[data-asked-for="api-gateway"] a').click();
     await openExplain(studio.page);
-    const inBottom = await studio.page.evaluate(
-      () => document.querySelector("#theia-bottom-content-panel .gbx-explain") !== null,
-    );
-    // A section of the Inspector rather than a panel of its own now, and in the
-    // bottom area for the reason it always was: it answers about a selection made
-    // elsewhere, so it has to be readable *while* the Product view is on screen
-    // rather than instead of it.
-    expect(inBottom).toBe(true);
+    const area = await studio.page.evaluate(() => {
+      const node = document.querySelector(".gbx-explain");
+      if (node === null) return "absent";
+      if (node.closest("#theia-right-content-panel") !== null) return "right";
+      if (node.closest("#theia-bottom-content-panel") !== null) return "bottom";
+      if (node.closest("#theia-main-content-panel") !== null) return "main";
+      return "elsewhere";
+    });
+    expect(["right", "bottom"]).toContain(area);
   });
 
   test("the Lock view is in the main area [plan §9: Lock]", async ({ studio }) => {
@@ -293,6 +350,38 @@ test.describe("where the views live", () => {
   test("a Generate view exists [plan §9: Generate]", async ({ studio }) => {
     await openGenerate(studio.page);
     await expect(studio.page.locator(".gbx-generate")).toBeVisible();
+  });
+
+  test("Apply is refused when the plan writes nothing [plan §9: Generate, Apply disabled]", async ({
+    studio,
+  }) => {
+    // Every gate on Apply was about permission or correctness -- capability,
+    // write rights, resolution errors, conflicts -- and an all-`unchanged` plan
+    // passes all four. So the button stayed live over a plan with no work in it,
+    // the round trip ran, and the engine answered `written: 0`. A control that is
+    // enabled for an operation with no effect teaches the reader that the counts
+    // above it are decoration.
+    await openProduct(studio.page, "dev");
+    await openGenerate(studio.page);
+    const counts = studio.page.locator(".gbx-generate-counts");
+    await expect(counts).toBeVisible({ timeout: 60_000 });
+
+    // Observed rather than arranged: whether this corpus has a generated tree on
+    // disk depends on what ran before, and generating one here would leave the
+    // repository dirty. Both states are asserted -- the point is that the button
+    // agrees with the plan either way.
+    const writes = await studio.page
+      .locator('.gbx-generate [data-action="create"], .gbx-generate [data-action="update"]')
+      .count();
+    const apply = studio.page.locator("[data-apply]");
+    if (writes === 0) {
+      await expect(studio.page.locator('[data-apply-block="nothing"]')).toContainText(
+        "up to date",
+      );
+      await expect(apply).toBeDisabled();
+    } else {
+      await expect(studio.page.locator('[data-apply-block="nothing"]')).toHaveCount(0);
+    }
   });
 });
 

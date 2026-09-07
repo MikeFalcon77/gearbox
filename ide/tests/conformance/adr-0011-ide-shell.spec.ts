@@ -16,6 +16,7 @@ import {
   expectContext,
   openProduct,
   paletteOffers,
+  productSection,
   runCommand,
   test,
 } from "../fixtures/studio";
@@ -376,6 +377,37 @@ test.describe("the narrowed shell", () => {
     // The verbs, not the panels: what a person does to a product.
     expect(items).toContain("Resolve Product");
     expect(items.length, "the Product menu rendered nothing").toBeGreaterThan(1);
+
+    // **And the second half of the title, which nothing used to assert.** A UX
+    // pass found the Product menu in the bar with no product open, offering
+    // Conflicts, Lock and Generate as though they had a subject -- so the claim
+    // read as green while describing something untrue. Closing the product is the
+    // only way to observe it, which is why it happens here rather than in a test
+    // of its own: the shared session would have to open one again anyway.
+    //
+    // Through the header's own button rather than the palette: it is what a
+    // person clicks, and it is on screen already.
+    await studio.page.locator('[data-command="gearbox.product.close"]').click();
+    await expectContext(studio.page, "home");
+
+    // **Disabled, not absent, and that is Theia's answer rather than ours.**
+    // Every entry under this submenu is `when`-gated on the product context, and
+    // a submenu whose items are all invisible renders as an unopenable label
+    // (`aria-disabled="true"`) rather than disappearing. What the claim is about
+    // is that the bar never offers verbs for a subject that is not there, and a
+    // label that cannot be opened does not.
+    //
+    // Worth knowing why this needed work at all: the menu bar is rebuilt on a
+    // preference, keybinding or *menu model* change and **not** on a context-key
+    // change (`browser-menu-plugin.js:45-54`), so the label's state was decided
+    // once and then went stale in whichever direction the session started from.
+    // `ShellPolicy` now touches the registry when the context changes.
+    const item = studio.page
+      .locator(".lm-MenuBar-item", {
+        has: studio.page.locator(".lm-MenuBar-itemLabel", { hasText: /^Product$/ }),
+      })
+      .first();
+    await expect(item).toHaveAttribute("aria-disabled", "true");
   });
 
   test("the header names what is being worked on [ADR-0011 §The two contexts]", async ({
@@ -458,6 +490,8 @@ test.describe("the editor Studio came for", () => {
     // catalogue's link test is written that way, and the reason those links once
     // shipped dead.
     await openProduct(studio.page, "dev");
+    // The Gears stage: the panel is `Overview · Gears · Topology · Validation`.
+    await productSection(studio.page, "gears");
     const link = studio.page.locator('[data-asked-for="api-gateway"] a').first();
     await expect(link).toBeVisible();
     await link.click();

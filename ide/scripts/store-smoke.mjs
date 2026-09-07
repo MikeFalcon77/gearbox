@@ -22,11 +22,60 @@ function check(ok, what) {
   if (!ok) failures += 1;
 }
 
-/** A store wired to `service`, bypassing inversify's property injection. */
+/**
+ * A recording stand-in for `EngineConnectionService`.
+ *
+ * Recorded rather than stubbed silent, because "the engine is gone" is a thing
+ * the shell has to *say* -- it gates New Product, Resolve and Generate -- and the
+ * store is what says it. This script exists for the states the panel used to lie
+ * about, and that is one of them.
+ */
+function engineStub() {
+  const calls = [];
+  return {
+    calls,
+    isConnected: true,
+    markConnected() {
+      calls.push("connected");
+      this.isConnected = true;
+    },
+    markDisconnected(reason) {
+      calls.push(`disconnected: ${reason}`);
+      this.isConnected = false;
+    },
+    onDidChange: () => ({ dispose() {} }),
+  };
+}
+
+/** A selection service that holds nothing, which is the boot state. */
+function selectionStub() {
+  return {
+    current: undefined,
+    select() {},
+    onDidChange: () => ({ dispose() {} }),
+  };
+}
+
+/**
+ * A store wired to `service`, bypassing inversify's property injection.
+ *
+ * **Every injected field, not just the one the first assertion needs.** The store
+ * gained `EngineConnectionService` and `SelectionService` after this script was
+ * written, and hand-rolled DI does not fail when a dependency is missing -- it
+ * fails later, inside the method under test, as
+ * `Cannot read properties of undefined (reading 'markDisconnected')`. That is
+ * what this script did for its whole first assertion, so it reported nothing at
+ * all while looking like a test suite.
+ *
+ * Returns the stubs too, so a caller can assert what the store told them.
+ */
 function storeWith(service) {
   const store = new CatalogueStore();
+  const engine = engineStub();
   store.service = service;
-  return store;
+  store.engine = engine;
+  store.selection = selectionStub();
+  return Object.assign(store, { __engine: engine });
 }
 
 function pending(gdlPath) {
@@ -74,6 +123,14 @@ const deferred = () => {
     `the cause is kept for the panel to show (got ${JSON.stringify(state.error)})`,
   );
   check(state.rows.length === 0, "no rows are left behind from a failed load");
+  // And the shell is told, not left to infer it from a panel that renders an
+  // error: `EngineConnectionService` is what disables New Product, Resolve and
+  // Generate, and a spawn failure is exactly when they must go.
+  check(
+    store.__engine.calls.some((call) => call.startsWith("disconnected")),
+    `a failed load marks the engine disconnected (got ${JSON.stringify(store.__engine.calls)})`,
+  );
+  check(store.__engine.isConnected === false, "and leaves it disconnected");
 }
 
 // ------------------------------------------- a failed catalogue load, likewise
@@ -106,38 +163,76 @@ const deferred = () => {
   check(store.current.failedRoots.length === 1, "a root that would not open is reported");
 }
 
-// ------------------------------------------------------- overlapping loads
+// --------------------------------------------------------- queued loads
 
 {
-  // Load A is suspended at the S1/S2 boundary. Load B runs to completion and
-  // projects a gear. A then resumes: its pending set must not land on top.
-  const first = deferred();
+  // **Two loads asked for at once, and the second waits.** `initialize` disposes
+  // the engine and spawns a new one, so two loads in the air mean two respawns
+  // and the second spawn lands while the first is mid-request -- which the first
+  // sees as an engine that died under it. The boot sequence walks into this: the
+  // application starts one load at `onStart`, and a product session opening in
+  // the same tick starts another with its own roots.
+  //
+  // This block used to drive them *overlapping* and assert that a superseded
+  // load's pending set could not land on top of a newer load's projections. That
+  // shape is now unreachable through `load()` -- and it deadlocked this script,
+  // invisibly, because the script had already died on its first assertion for
+  // want of an engine stub. What replaces it is the queue itself, plus the guard
+  // that still has work to do: a notification arriving while no load is
+  // streaming.
+  const order = [];
+  const gate = deferred();
   let loads = 0;
   const store = storeWith({
-    initialize: () => Promise.resolve({ capabilities: {}, roots: [], failed_roots: [] }),
+    initialize: () => {
+      order.push("initialize");
+      return Promise.resolve({ capabilities: {}, roots: [], failed_roots: [] });
+    },
     loadCatalogue: () => {
       loads += 1;
+      order.push(`loadCatalogue-${loads}`);
       return loads === 1
-        ? first.promise
+        ? gate.promise.then(() => ({
+            total: 1,
+            pending: [pending("a/gear.gdl")],
+            diagnostics: [],
+          }))
         : Promise.resolve({ total: 1, pending: [pending("b/gear.gdl")], diagnostics: [] });
     },
   });
 
   const a = store.load();
-  // Let A get past `initialize` and into `loadCatalogue`.
+  // Let A get past `initialize` and into `loadCatalogue`, where it is gated.
+  await new Promise((r) => setImmediate(r));
+  const b = store.load();
   await new Promise((r) => setImmediate(r));
 
-  await store.load();
-  store.onCatalogueChanged({ gear: projected("b/gear.gdl", "b"), replaces: "b/gear.gdl" });
-  store.onProgress({ token: "catalogue", completed: 1, total: 1, done: true });
+  check(loads === 1, `the second load waits rather than racing the first (got ${loads})`);
 
-  first.resolve({ total: 1, pending: [pending("a/gear.gdl")], diagnostics: [] });
+  // A notification cannot be attributed to a load -- `catalogueChanged` carries
+  // no epoch -- so the store ignores every one that arrives while nothing is
+  // streaming, which is exactly the window a queued load sits in.
+  store.onCatalogueChanged({ gear: projected("ghost/gear.gdl", "ghost"), replaces: "ghost/gear.gdl" });
+  check(
+    store.current.rows.length === 0,
+    `a notification with no load streaming is dropped (got ${store.current.rows.length} row(s))`,
+  );
+
+  gate.resolve();
   await a;
+  await b;
+
+  check(loads === 2, `and then runs (got ${loads})`);
+  check(
+    order.join(" > ") === "initialize > loadCatalogue-1 > initialize > loadCatalogue-2",
+    `each load initializes for itself, in order (got ${order.join(" > ")})`,
+  );
 
   const rows = store.current.rows;
-  check(rows.length === 1 && rows[0].gear.gdl_path === "b/gear.gdl", "only the newest load's rows survive");
-  check(rows[0]?.kind === "projected", "a superseded load cannot revert a projected row to pending");
-  check(store.current.status === "ready", "the newest load's terminal progress still stands");
+  check(
+    rows.length === 1 && rows[0].gear.gdl_path === "b/gear.gdl",
+    `only the newest load's rows survive (got ${JSON.stringify(rows.map((r) => r.gear.gdl_path))})`,
+  );
 }
 
 // --------------------------------------- pending after `done` is not "parsing"
@@ -302,6 +397,7 @@ const deferred = () => {
 function productWith(service) {
   const store = new ProductStore();
   store.service = service;
+  store.selection = selectionStub();
   return store;
 }
 

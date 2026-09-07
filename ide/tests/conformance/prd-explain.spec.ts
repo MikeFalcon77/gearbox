@@ -10,13 +10,27 @@
 // their own -- which also means the explanation cannot be about a different
 // resolution than the one being shown.
 
-import { expect, openExplain, openProduct, test } from "../fixtures/studio";
+import { expect, openExplain, openProduct, productSection, test } from "../fixtures/studio";
 
+/**
+ * Select something in the product and read the explanation for it.
+ *
+ * **The stage is found rather than passed.** The Product view is
+ * `Overview · Gears · Topology · Validation` since 2026-09-07, so a gear leaf
+ * lives on one stage and a binding on another -- and which is which is the
+ * panel's business, not this file's. Trying Gears and falling back to Topology
+ * keeps every call site below about *what is explained* rather than about where
+ * the panel currently is.
+ */
 async function explain(
   page: import("@playwright/test").Page,
   click: string,
 ): Promise<{ explaining: string; steps: { kind: string; because: string; origin: string | null }[] }> {
   await openExplain(page);
+  for (const section of ["gears", "topology"] as const) {
+    await productSection(page, section);
+    if ((await page.locator(click).count()) > 0) break;
+  }
   await page.click(click);
   await page.locator("[data-explaining]").waitFor({ state: "visible" });
   return page.evaluate(() => ({
@@ -118,6 +132,11 @@ test.describe("why the resolution is the way it is", () => {
     // Re-open Product: selecting a gear can leave the pulled-in row scrolled out of
     // the panel's visible area, and Playwright then waits forever on a hidden link.
     await openProduct(studio.page, "prod");
+    // The stage first, then the scroll: `openProduct` leaves the panel on
+    // Overview, so scrolling to a gear leaf before switching to Gears waits on
+    // an element that is not in the DOM -- and with no `actionTimeout` in the
+    // config, "waits" means until the test times out.
+    await productSection(studio.page, "gears");
     const pulled = studio.page.locator('[data-pulled-in="types-registry"] a');
     await pulled.scrollIntoViewIfNeeded();
     const colocated = await explain(studio.page, '[data-pulled-in="types-registry"] a');

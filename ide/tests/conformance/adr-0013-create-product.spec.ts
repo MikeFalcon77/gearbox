@@ -189,6 +189,70 @@ test.describe("create and clone a product", () => {
   });
 });
 
+test.describe("a gear created for a product ends up in it", () => {
+  // The whole flow, and the reason it needed engine work. A scaffold cannot land
+  // inside a source root -- `writable_out_root` refuses it, tier 5 of ADR-0010 is
+  // why -- so a gear created for a product is in a directory that product does
+  // not read. `use_gear` alone would name a gear from a source the description
+  // does not declare. So the finish is one `applyEdits` batch: `add_source` then
+  // `add_gear`.
+  //
+  // **Against `payments-demo`, not a product made here.** A product created by
+  // the wizard declares a source that *contains* `<product>/gears`, so the
+  // scaffold is refused before this flow starts -- which is correct behaviour and
+  // the wrong subject for this claim. The demo's own source is a sibling
+  // checkout, which is the ordinary shape. The description and the scaffolded
+  // directory both go back in `finally`.
+  const GEAR = "conformance-audit";
+  const SCAFFOLD = join(REPO, "products/payments-demo/gears");
+
+  test("Create Gear declares its folder as a source and adds the gear [ADR-0013 §Amendment: create for a product]", async ({
+    studio,
+  }) => {
+    expect(diffOf(DEMO_REL)).toBe("");
+    try {
+      await openProduct(studio.page, "dev");
+
+      // From inside the product, so the panel is told which product it is for.
+      await studio.page.locator("[data-create-gear]").click();
+      await expect(studio.page.locator("[data-create-gear-for]")).toContainText("Payments Demo", {
+        timeout: 30_000,
+      });
+      await studio.page.locator("[data-create-gear-id]").fill(GEAR);
+      await expect(
+        studio.page.locator(".gbx-create-preview [data-plan-path]").first(),
+      ).toBeVisible({ timeout: 30_000 });
+      await studio.page.locator("[data-create-gear-submit]").click();
+
+      // One preview for the description edit, and it names both halves.
+      const preview = studio.page.locator(".dialogBlock", {
+        has: studio.page.locator(".gbx-edit-preview"),
+      });
+      await expect(preview).toBeVisible({ timeout: 60_000 });
+      await expect(preview).toContainText("source(");
+      await expect(preview).toContainText(`use_gear("${GEAR}"`);
+      await studio.page.locator(".dialogBlock .theia-button.main").click();
+
+      // And the description says both, which is what makes the gear reachable.
+      await expect
+        .poll(() => readFileSync(join(REPO, DEMO_REL), "utf8"), { timeout: 60_000 })
+        .toContain(`use_gear("${GEAR}"`);
+      const text = readFileSync(join(REPO, DEMO_REL), "utf8");
+      expect(text).toMatch(/source\(id = "gears", at = path\("gears"\)\)/);
+      // Span surgery, so the description's 29 comments are still there.
+      expect(commentLines(text)).toBe(commentLines(execFileSync("git", ["show", `HEAD:${DEMO_REL}`], { cwd: REPO, encoding: "utf8" })));
+
+      // Back in the Product workspace, which is where the flow started.
+      await expect(studio.page.locator(".gbx-product")).toBeVisible({ timeout: 60_000 });
+    } finally {
+      rmSync(SCAFFOLD, { recursive: true, force: true });
+      if (diffOf(DEMO_REL) !== "") {
+        execFileSync("git", ["checkout", "--", DEMO_REL], { cwd: REPO });
+      }
+    }
+  });
+});
+
 test.describe("edit config and profiles in the open product", () => {
   test("a config edit changes one line [ADR-0013 §Confirmation]", async ({ studio }) => {
     expect(diffOf(DEMO_REL)).toBe("");
@@ -206,7 +270,7 @@ test.describe("edit config and profiles in the open product", () => {
       await studio.page.locator("[data-config-new-key]").fill("demo_mode");
       await studio.page.locator("[data-config-new-value]").fill("demo_value");
       await studio.page.locator('[data-add-config="api-gateway"]').click();
-      await studio.page.locator('[data-gear-config="api-gateway"] [data-draft-apply]').click();
+      await studio.page.locator(".gbx-toolbar [data-draft-apply]").click();
       await acceptPreview(studio.page);
       await expect(studio.page.locator('[data-config-key="demo_mode"]')).toBeVisible({
         timeout: 30_000,
@@ -218,7 +282,7 @@ test.describe("edit config and profiles in the open product", () => {
       // (§9.1), and a reload of the shared worker page races the next test against
       // an empty catalogue `rootPaths()`.
       await studio.page.locator('[data-config-remove="demo_mode"]').click();
-      await studio.page.locator('[data-gear-config="api-gateway"] [data-draft-apply]').click();
+      await studio.page.locator(".gbx-toolbar [data-draft-apply]").click();
       await acceptPreview(studio.page);
       await expect(studio.page.locator('[data-config-key="demo_mode"]')).toHaveCount(0, {
         timeout: 30_000,
@@ -254,11 +318,17 @@ test.describe("edit config and profiles in the open product", () => {
       await expect(studio.page.locator('[data-config-key="draft_b"]')).toBeVisible();
       expect(diffOf(DEMO_REL)).toBe("");
 
-      const gearConfig = studio.page.locator('[data-gear-config="api-gateway"]');
-      await gearConfig.locator("[data-draft-discard]").click();
+      // **The pair is in the header, and there is exactly one.** It used to be
+      // rendered by this panel *and* by the Product view, both gated on the
+      // product-wide `hasDraft()`, so a locator scoped to the gear-config block
+      // was picking one of two buttons that did the same thing to the same draft
+      // and remounted different inputs.
+      const draft = studio.page.locator(".gbx-toolbar");
+      await expect(draft.locator("[data-draft-apply]")).toHaveCount(1);
+      await draft.locator("[data-draft-discard]").click();
       await expect(studio.page.locator('[data-config-key="draft_a"]')).toHaveCount(0);
       await expect(studio.page.locator('[data-config-key="draft_b"]')).toHaveCount(0);
-      await expect(gearConfig.locator("[data-draft-apply]")).toHaveCount(0);
+      await expect(draft.locator("[data-draft-apply]")).toHaveCount(0);
       expect(diffOf(DEMO_REL)).toBe("");
 
       await studio.page.locator("[data-config-new-key]").fill("draft_a");
@@ -267,7 +337,7 @@ test.describe("edit config and profiles in the open product", () => {
       await studio.page.locator("[data-config-new-key]").fill("draft_b");
       await studio.page.locator("[data-config-new-value]").fill("two");
       await studio.page.locator('[data-add-config="api-gateway"]').click();
-      await gearConfig.locator("[data-draft-apply]").click();
+      await draft.locator("[data-draft-apply]").click();
       const previews = studio.page.locator(".dialogBlock", {
         has: studio.page.locator(".gbx-edit-preview"),
       });
@@ -281,7 +351,7 @@ test.describe("edit config and profiles in the open product", () => {
 
       await studio.page.locator('[data-config-remove="draft_a"]').click();
       await studio.page.locator('[data-config-remove="draft_b"]').click();
-      await gearConfig.locator("[data-draft-apply]").click();
+      await draft.locator("[data-draft-apply]").click();
       await acceptPreview(studio.page);
       // Polled, not sampled: accepting the preview starts the write, and reading
       // `git diff` on the next line races it -- one key already removed and the
@@ -309,10 +379,17 @@ test.describe("edit config and profiles in the open product", () => {
     await studio.page.locator("[data-config-new-key]").fill("password");
     await studio.page.locator("[data-config-new-value]").fill("literal");
     await studio.page.locator('[data-add-config="api-gateway"]').click();
-    await expect(studio.page.locator(".theia-notification-message").first()).toContainText(
-      /refusing|password|secret|could not be edited/i,
-      { timeout: 10_000 },
-    );
+    // Matched among the notifications rather than at the top of the stack. The
+    // claim is that the refusal is *said*, and notifications accumulate in the
+    // shared session -- reading `.first()` made this assert which message was
+    // most recent, so an unrelated success further up the file failed it.
+    await expect(
+      studio.page
+        .locator(".theia-notification-message", {
+          hasText: /refusing|password|secret|could not be edited/i,
+        })
+        .first(),
+    ).toBeVisible({ timeout: 10_000 });
     expect(diffOf(DEMO_REL)).toBe("");
   });
 

@@ -237,14 +237,15 @@ export async function settled(page: Page): Promise<void> {
     undefined,
     { timeout: 90_000, polling: SAMPLE_MS },
   );
-  // Theia's bottom area attaches later than the side panel -- measured at about
-  // 3.3s against 1.1s for the tree -- so the Inspector has to be waited for
-  // rather than assumed present the moment a row is clickable.
+  // A second signal, because the catalogue settling says nothing about the rest
+  // of the shell: Theia attaches the side and bottom areas after the tree.
   //
-  // `.gbx-inspector` and not `.gbx-detail`: the detail is a *section*, and it only
-  // renders once something is selected. Waiting on it here waited for a selection
-  // nobody had made yet.
-  await page.waitForSelector(".gbx-inspector", { timeout: 60_000 });
+  // This waited for `.gbx-inspector` until the Inspector moved to the right
+  // panel and stopped opening itself on Home -- it now arrives with the first
+  // selection, which is what fills it, so waiting for it here would wait for a
+  // selection nobody has made. The Start screen is the honest boot-complete
+  // signal for the Home context every session begins in.
+  await page.waitForSelector(".gbx-start", { state: "attached", timeout: 60_000 });
 }
 
 /**
@@ -556,14 +557,19 @@ export async function openExplain(page: Page): Promise<void> {
 export async function problems(
   page: Page,
 ): Promise<{ files: string[]; markers: string[] }> {
+  // Opened rather than assumed, since Problems stopped opening itself: on Home
+  // there is no resolution to report on, and Conflicts is the domain screen for
+  // the array this view also receives (`HiddenProblemsView`). The tab exists once
+  // something has asked for it.
   const tab = page.locator("#theia-bottom-content-panel .lm-TabBar-tab", {
     hasText: "Problems",
   });
-  const current = await tab.evaluate((e) => e.classList.contains("lm-mod-current"));
-  if (!current) {
+  if ((await tab.count()) === 0) {
+    await runCommand(page, "Problems");
+  } else if (!(await tab.evaluate((e) => e.classList.contains("lm-mod-current")))) {
     await tab.click();
   }
-  await page.locator(".theia-marker-container").waitFor({ state: "visible" });
+  await page.locator(".theia-marker-container").waitFor({ state: "visible", timeout: 30_000 });
 
   const read = () =>
     page.evaluate(() =>
@@ -729,14 +735,18 @@ function escapeForRegExp(text: string): string {
  */
 export async function revealInspector(page: Page): Promise<void> {
   await refuseIfDialogOpen(page, "revealing the Inspector");
-  const tab = page.locator("#theia-bottom-content-panel .lm-TabBar-tab", {
-    hasText: "Gearbox Inspector",
-  });
-  if ((await tab.count()) === 0) return;
-  if (!(await tab.evaluate((e) => e.classList.contains("lm-mod-current")))) {
+  // The right panel since 2026-09-07, and not pinned to it here: a returning
+  // person's saved layout may still hold the Inspector at the bottom, and this
+  // helper's job is to bring the panel forward wherever the shell has it.
+  const tab = page.locator(".lm-TabBar-tab", { hasText: "Gearbox Inspector" }).first();
+  if ((await tab.count()) === 0) {
+    // Not in any tab bar: a collapsed side panel keeps its tab, but a view that
+    // was never opened has none, so the command is the only way in.
+    await runCommand(page, "Gearbox Inspector");
+  } else if (!(await tab.evaluate((e) => e.classList.contains("lm-mod-current")))) {
     await tab.click();
   }
-  await page.locator(".gbx-inspector").waitFor({ state: "visible" });
+  await page.locator(".gbx-inspector").waitFor({ state: "visible", timeout: 30_000 });
 }
 
 /**
@@ -760,8 +770,27 @@ export async function openConflicts(page: Page): Promise<void> {
   await revealView(page, "Gearbox Conflicts", ".gbx-conflicts");
 }
 
+/**
+ * The Lock view, left on whichever half it is showing.
+ *
+ * `revealLock` asks for the canonical text, because every caller it has wants
+ * the text. This one is for the claim about the *summary* being what opens.
+ */
+export async function revealLockView(page: Page): Promise<void> {
+  await revealView(page, "Resolution Lock", ".gbx-lock");
+  await page.locator(".gbx-lock").waitFor({ state: "visible", timeout: 60_000 });
+}
+
 export async function revealLock(page: Page): Promise<void> {
-  await revealView(page, "Gearbox Lock", ".gbx-lock");
+  await revealView(page, "Resolution Lock", ".gbx-lock");
+  // The view opens on its Summary half now -- the canonical text is several
+  // hundred lines and answers the second question a person asks. Every caller of
+  // this helper wants the text, so it asks for it; the summary has a claim of its
+  // own in `prd-lock.spec.ts`.
+  const raw = page.locator('[data-lock-tab="raw"]');
+  if (await raw.isVisible().catch(() => false)) {
+    await raw.click();
+  }
   // The text is fetched lazily on first render, so the view being visible is not
   // the same as the lock being there.
   await page.locator("[data-lock-canonical]").waitFor({ state: "visible", timeout: 60_000 });
@@ -798,8 +827,59 @@ export async function expectContext(
   });
 }
 
+/**
+ * Move the Product view to one of its stages.
+ *
+ * The panel is `Overview · Gears · Topology · Validation` since 2026-09-07: it
+ * had grown to the whole product on one strip, which a UX pass reported as a
+ * very long screen with no sense of where one is. A claim about a fact the
+ * product renders therefore has to say which stage renders it -- which is worth
+ * the extra line, because it is also the claim that the fact is *reachable*.
+ */
+export async function productSection(
+  page: Page,
+  section: "overview" | "gears" | "topology" | "validation",
+): Promise<void> {
+  const tab = page.locator(`[data-product-section="${section}"]`);
+  await tab.waitFor({ state: "visible", timeout: 30_000 });
+  await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+}
+
 export async function openProduct(page: Page, profile: string): Promise<void> {
+  // **A product is opened here, not inherited from boot.** Studio used to open
+  // the only product it could find whenever the Product widget was constructed,
+  // so every test started with one open and this helper only had to reveal the
+  // view. Home is a deliberate starting point now, so the helper does what a
+  // person does: the Continue card when it is offered, the picker otherwise.
+  //
+  // The `revealView` call stays. It is not the claim about automatic placement --
+  // `conformance/ux-navigation.spec.ts` asserts that with no reveal at all -- it
+  // is protection against the tab a *previous* test left on top in the shared
+  // worker session, and the measurement in `revealView` (19.6 minutes against
+  // 3.3) is why it is a tab click rather than a command.
+  if ((await page.locator(".gbx-toolbar").getAttribute("data-context")) !== "product") {
+    const card = page.locator('[data-start-action="continue"]');
+    if (await card.isVisible().catch(() => false)) {
+      await card.click();
+    } else {
+      await runCommand(page, "Open Product…");
+      const options = page.locator(`.quick-input-list [role="option"]`);
+      await options.first().waitFor({ state: "visible", timeout: 30_000 });
+      await options.filter({ hasText: "payments-demo" }).first().click();
+    }
+    await expect(page.locator(".gbx-toolbar")).toHaveAttribute("data-context", "product", {
+      timeout: 90_000,
+    });
+  }
   await revealView(page, "Gearbox Product", ".gbx-product");
+  // **Overview, because the resolved header lives there.** The panel keeps
+  // whichever stage was last chosen -- correct behaviour, and it means a helper
+  // that waits for `[data-resolved-profile]` would be waiting for a section a
+  // previous test navigated away from. This is the helper that establishes a
+  // known state, so it establishes this part of it too; the profile switch
+  // itself sits above the strip and works from any stage.
+  await productSection(page, "overview");
   await page.locator("[data-resolved-profile]").waitFor({ state: "visible", timeout: 60_000 });
   await page.locator(`[data-profile="${profile}"]`).click();
   await page

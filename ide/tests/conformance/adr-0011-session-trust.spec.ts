@@ -8,6 +8,8 @@ import {
   expectContext,
   openProduct,
   paletteOffers,
+  productSection,
+  revealCatalogue,
   revealInspector,
   runCommand,
   settled,
@@ -100,6 +102,12 @@ test.describe("session trust [ADR-0011 amendment 2026-09-02]", () => {
       // The shared session has its own engine and its own frontend; nothing tells
       // it to reconnect, so this does.
       await runCommand(studio.page, "Gearbox: Reload Catalogue");
+      // Revealed, because the panel may be behind a collapsed left side: the
+      // product context collapses that area on its first activation, and the
+      // catalogue is a source of components there rather than the subject. What
+      // this line is about is the *rows*, so it makes sure they are on screen
+      // before asking whether they are.
+      await revealCatalogue(studio.page);
       await expect(studio.page.locator(".gearbox-catalogue .gbx-row").first()).toBeVisible({
         timeout: 90_000,
       });
@@ -118,16 +126,36 @@ test.describe("session trust [ADR-0011 amendment 2026-09-02]", () => {
   test("Discard on a profile field restores the saved value [ADR-0013 §Amendment: Discard restores]", async ({
     studio,
   }) => {
+    // **This claim passed while the behaviour was broken, and the difference was
+    // which Discard.** The pair used to be rendered twice -- by the Inspector and
+    // by the Product view, both gated on the product-wide `hasDraft()` -- and each
+    // bumped a remount counter private to its own widget. `.first()` happened to
+    // be the Product view's, so the input the test read was the one that had been
+    // remounted; discarding from the Inspector cleared the `modified` badge and
+    // left the typed text on screen, which is what the UX pass of 2026-09-07 saw.
+    // There is one pair now, in the header, so the test asserts that too: a claim
+    // about "the" Discard is only meaningful if there is one.
     await openProduct(studio.page, "local");
     const host = studio.page.locator('[data-profile-field="host"]').first();
     await expect(host).toBeVisible({ timeout: 30_000 });
     const saved = await host.inputValue();
     await host.fill("ux-test-host-should-not-stick");
-    await expect(studio.page.locator("[data-draft-discard]").first()).toBeVisible();
-    await studio.page.locator("[data-draft-discard]").first().click();
+
+    const discard = studio.page.locator("[data-draft-discard]");
+    await expect(discard).toHaveCount(1);
+    await expect(studio.page.locator('[data-status="modified"]')).toBeVisible();
+    // The control says the edit is in it, because the buttons no longer do.
+    await expect(host).toHaveAttribute("data-field-modified", "true");
+
+    await discard.click();
     await expect(studio.page.locator('[data-profile-field="host"]').first()).toHaveValue(saved, {
       timeout: 10_000,
     });
+    await expect(studio.page.locator('[data-status="modified"]')).toHaveCount(0);
+    await expect(studio.page.locator('[data-profile-field="host"]').first()).not.toHaveAttribute(
+      "data-field-modified",
+      "true",
+    );
   });
 
   test("Add profile uses an in-panel form, not window.prompt [ADR-0013 §Amendment: no window.prompt]", async ({
@@ -157,6 +185,10 @@ test.describe("session trust [ADR-0011 amendment 2026-09-02]", () => {
     studio,
   }) => {
     await openProduct(studio.page, "prod");
+    // Processes live on the Topology stage -- the panel is
+    // `Overview · Gears · Topology · Validation` since 2026-09-07 -- and a
+    // selection made there is the one this claim is about.
+    await productSection(studio.page, "topology");
     await studio.page.locator("[data-process]").first().click();
     await expect(studio.page.locator(".gbx-inspector, .gbx-explain, .gbx-detail").first()).toBeVisible({
       timeout: 30_000,

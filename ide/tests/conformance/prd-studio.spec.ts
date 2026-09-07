@@ -19,6 +19,7 @@ import {
   openGraph,
   openGraphView,
   openProduct,
+  productSection,
   test,
 } from "../fixtures/studio";
 
@@ -218,6 +219,8 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
     // `prd-explain.spec.ts`; this clause is only that the view exists and answers.
     await openProduct(studio.page, "prod");
     await openExplain(studio.page);
+    // Bindings are on the Topology stage; the panel has four since 2026-09-07.
+    await productSection(studio.page, "topology");
     await studio.page.click("[data-binding]");
     await expect(studio.page.locator("[data-explaining]")).toBeVisible();
     await expect(studio.page.locator(".gbx-step").first()).toBeVisible();

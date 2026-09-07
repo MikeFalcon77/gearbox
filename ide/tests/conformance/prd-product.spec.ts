@@ -11,10 +11,42 @@
 // picks up `single-document` and `multiple-document` from whatever editor is
 // open. That was a real reading, not a hypothetical.
 
-import { expect, openProduct, test } from "../fixtures/studio";
+import { expect, openProduct, productSection, test } from "../fixtures/studio";
 
-/** Everything the panel renders about the resolution now on screen. */
+/**
+ * Everything the panel renders about the resolution now on screen.
+ *
+ * **Read across the stages.** The Product view is
+ * `Overview · Gears · Topology · Validation` since 2026-09-07 -- one strip had
+ * become the whole product -- so a single DOM snapshot can no longer see the
+ * gears and the processes at once. Each stage is visited and the parts are
+ * merged, which keeps every claim below about the product rather than about the
+ * panel's shape.
+ */
 async function shown(page: import("@playwright/test").Page) {
+  await productSection(page, "overview");
+  const header = await snapshot(page);
+  await productSection(page, "gears");
+  const gears = await snapshot(page);
+  await productSection(page, "topology");
+  const topology = await snapshot(page);
+  // Left where the helpers expect to find it, so a caller that goes on to click
+  // a leaf does not have to know this happened.
+  await productSection(page, "overview");
+  return {
+    profile: header.profile,
+    lock: header.lock,
+    processes: topology.processes,
+    processGears: topology.processGears,
+    modes: topology.modes,
+    mechanisms: topology.mechanisms,
+    askedFor: gears.askedFor,
+    pulledIn: gears.pulledIn,
+  };
+}
+
+/** One stage's worth of the panel, whichever stage is showing. */
+async function snapshot(page: import("@playwright/test").Page) {
   return page.evaluate(() => {
     // Scoped to the Product panel. These selectors used to run over the whole
     // document, which held only as long as no other widget rendered a
