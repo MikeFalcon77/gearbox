@@ -787,10 +787,16 @@ export async function revealLock(page: Page): Promise<void> {
   // hundred lines and answers the second question a person asks. Every caller of
   // this helper wants the text, so it asks for it; the summary has a claim of its
   // own in `prd-lock.spec.ts`.
+  //
+  // **Waited for, not clicked if it happens to be there.** The halves exist only
+  // once the lock has arrived, because the text is fetched lazily on first
+  // render -- so a conditional click skipped itself on a freshly opened view and
+  // left the wait below with nothing to wait for. It passed for as long as some
+  // earlier test in the shared session had already opened this view, which is an
+  // ordering the suite does not promise.
   const raw = page.locator('[data-lock-tab="raw"]');
-  if (await raw.isVisible().catch(() => false)) {
-    await raw.click();
-  }
+  await raw.waitFor({ state: "visible", timeout: 60_000 });
+  await raw.click();
   // The text is fetched lazily on first render, so the view being visible is not
   // the same as the lock being there.
   await page.locator("[data-lock-canonical]").waitFor({ state: "visible", timeout: 60_000 });
