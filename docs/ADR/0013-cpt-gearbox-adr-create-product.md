@@ -290,3 +290,149 @@ Implemented in `crates/gearbox-project/src/config.rs`, `crates/gearbox-engine/sr
 `config_check.rs`, `crates/gearbox-gdl/src/edit_call.rs`, and
 `ide/gearbox-studio/src/browser/add-gear/config-fields.tsx`; asserted in
 `ide/tests/conformance/adr-0010-ownership-tiers.spec.ts`.
+
+
+## Amendment 2026-09-07: the panel offers only what is applicable, and one batch writes it
+
+**Status: accepted. This extends the Add Gear configurator; it reverses nothing about write gates,
+span-surgical edits, the four UI gates, or "errors warn, they do not block".**
+
+The second UX pass found the configurator offering a configuration that cannot exist and previewing
+one that is not what would be written. Both are gaps in *what the panel knows about*, not in the
+edit machinery.
+
+### A choice that cannot be right is not offered
+
+Selecting `types-registry` printed "Extension points: none declared." three lines above a list of
+every plugin in the catalogue; choosing `oidc-authn-plugin` reported it joining the closure as a
+"plugin of types-registry". Both halves of the join key were already on the wire -- the host's
+`extension_points` and the plugin's `fills.point`, keyed on the pair `(sdk_lib, trait_ident)` and
+never on a derived short name -- so the offer itself was the defect. The picker is filtered on that
+pair, grouped by point when a host declares several (`mini-chat` declares two), and absent entirely
+when the host declares none.
+
+**The engine gets the same rule, because a client is not a boundary**
+(`cpt-gearbox-fr-rpc-writes-opt-in`). `report_orphan_plugins` asks whether *some* selected gear
+expects a plugin's point, which is right for a plugin selected as an ordinary gear and wrong for one
+written into a specific host's `plugins = [...]`: with `authn-resolver` also in the product, the
+misplacement passed every check while being inert -- the host looks for no implementation, the
+plugin registers a trait nobody queries. That is **GBX0518**, `PluginPointNotDeclared`.
+
+### Features are projected, and the list says what it is
+
+`use_gear(..., features = [...])` writes **Cargo** feature names, and nothing projected the set of
+real ones, so both panels offered a text box where a typo becomes a feature that does not exist and
+a build failure two steps later. `CrateManifest` now carries the `[features]` keys and
+`GearDescriptor.available_features` reaches the client.
+
+Measured before building it, as the config projection was: **7 of the 14 gear crates declare a
+`[features]` table** (2-4 entries: `grpc`, `otel`, `k8s-auth`, `embed_elements`, `grpc-client`,
+`integration`, …), and 7 declare none -- which is an answer, not a gap, and is what the panel says.
+
+**The list is uncurated and must be labelled as such.** `types-registry`'s only feature is
+`integration`, which gates tests needing a Docker daemon. Which features an integrator should be
+offered is a *declaration* nobody has written -- the same projected-facts / declared-selection split
+this ADR's previous amendment makes for config fields, whose declared half is `exposes`. A curated
+`exposes_features` is the follow-up; presenting the projected list as if it were curated would be
+the drift ADR `cpt-gearbox-adr-macro-projected-catalogue` exists to prevent.
+
+`available_features` is catalogue-only and never enters the lock, for the same reason
+`config_schema` does not: what a gear *can* be built with is not a decision the resolution made. So
+`lock_hash` is unchanged, and the golden snapshot is the assertion.
+
+### A config key is checked where the caret is
+
+`bad key = "secret-looking"` was accepted and written cleanly, because a config key is a **quoted
+dict key** in the description and the span surgeon has no opinion about its shape; the refusal came
+three steps later, at resolve, as GBX0115. Keys that no serde field could ever be -- spaces, quotes,
+line breaks -- are refused at the row now, and a key the schema does not declare is *reported*
+there, naming GBX0115, rather than enforced: a curated `exposes` is deliberately narrower than the
+struct, so a key outside it may still be one the gear reads.
+
+### One batch writes the whole proposal
+
+`ProductEdit` gains **`AddGear`** and **`RemoveGear`**. The panel's proposal is a gear *plus* the
+features, config and plugins staged beside it, and that could not be expressed: `applyEdits` reads
+the file, and the gear is not in it yet. So section 7 could only ever show the `use_gear` line, and
+`commitAddGear` wrote twice -- `addGear`, then `applyEdits` -- with a window in between where the
+description named a gear nobody had configured. One batch closes both: the dry run's `after` text
+**is** the exact serialization, and the write is atomic because `apply_product_edits` already fails
+the whole fold on any refusal.
+
+`gearbox/product/addGear` keeps its own method and its own meaning; nothing about the four gates
+changes.
+
+### Confirmation
+
+* Selecting a gear with no extension point offers no plugin picker and says why; a host is offered
+  only the plugins that fill its own points -- `adr-0013-add-gear.spec.ts`.
+* GBX0518 fires for a plugin listed under a host that does not declare its point, and not for one
+  listed under a host that does.
+* One `applyEdits` batch of `add_gear` + `set_features` + `set_config` + `set_plugins` produces text
+  byte-identical to the previous two-call sequence, and "What will be written" names all of them.
+* `lock_hash` for `dev`, `local` and `prod` is unchanged across the `available_features`
+  projection.
+
+## Amendment 2026-09-07: a gear created for a product ends up in it
+
+**Status: accepted. This extends the Create/Clone decision; it reverses nothing about write gates,
+span-surgical edits, `writable_out_root`, or the four UI gates.**
+
+`Create Gear` from inside a product ended in a notification asking the person to add the gear
+themselves, and the reason was structural rather than unfinished work: **a scaffold cannot land
+inside a source root.** `writable_out_root` refuses that path, and ADR
+`cpt-gearbox-adr-authoring-ownership-tiers` tier 5 is why -- the tool does not write next to
+human-authored crates it does not own. So a gear created for a product is *always* in a directory
+that product does not read, and `use_gear` cannot reach it.
+
+**`ProductEdit::AddSource`, and one batch.** `edit_call::add_source` inserts
+`source(id = ..., at = path(...))` into the `sources` list, span-surgically like every other edit
+here, and the finish of the flow is one `applyEdits`: declare the folder, then add the gear. One
+preview, one confirmation, one write -- and no window in which the description names a gear from a
+source it does not declare.
+
+Three details worth recording:
+
+* **The source id is derived, not asked for.** It is a key inside one description, the folder is what
+  it names, and one more question in a form is one more thing to get wrong.
+* **`SourceId`'s own rule validates it.** The first version used the GDL identifier rule and refused
+  `gears-rust` -- the id every product in the corpus uses -- because a source id is kebab-case. The
+  idempotence test caught it, which is what an idempotence test is for.
+* **Only `path(...)` sources.** `ProductSessionService` refuses to open a product with a `git(...)`
+  source, and writing an entry the session will then refuse is worse than not offering it.
+
+The panel also says whose product it is for, and returns there when it is done: the product travels
+into the wizard now (a path and a label), where a boolean `offerAddToProduct` used to be all the
+context there was.
+
+### Three shapes, and why they are comments
+
+`ScaffoldGearParams.kind` is `service | plugin | minimal`, and the corpus decided there are three: of
+the fourteen described gears **seven are plugins** -- they fill an extension point an SDK crate
+declares -- and none is a bare crate with a name. One shape for all of them wrote the same file for a
+service and a plugin and left a plugin author to discover what else a plugin needs.
+
+**What differs is which declarations the file offers, not generated code.** A scaffold has no
+compiler and does not know where the toolkit or an SDK lives, so `#[toolkit::gear]` code would be
+written against a dependency this method cannot add -- a crate that does not compile is worse than one
+that is empty. So each shape puts the next declaration *where it goes*, with the sentence that says
+what decides it, and `src/lib.rs` carries the order of the steps rather than a stub of them.
+
+**And for a plugin, both of the fields that matter stay commented.** `plugin_interface` naming a trait
+no `pub trait` in the SDK backs is refused (GBX0516), and an `sdk` locator pointing at a directory
+that does not exist makes the gear fail to load. A scaffold must not hand its author a description to
+repair, so it hands them one to fill in. `minimal` is what this method wrote before kinds existed and
+is also the serde default, so an older client keeps its behaviour.
+
+### Confirmation
+
+* `adr-0013-create-product.spec.ts`: creating a gear from inside `payments-demo` writes one
+  `source(...)` and one `use_gear(...)`, both named in a single preview; the description's comment
+  count is unchanged; the panel returns to the Product workspace. The description and the scaffolded
+  directory are both restored by the test.
+* Declaring a source a product already has is `Unchanged`, as adding a gear it already names is.
+* `crates/gearbox-rpc/src/preview_tests.rs` proves the batch and the idempotent case fold without
+  writing.
+* All three shapes evaluate through the scaffold's own gate, each carries its kind's hints, and the
+  plugin shape writes `sdk` and `plugin_interface` only as comments -- asserted line by line in
+  `write_gate_tests.rs`, and in the browser by `adr-0010-ownership-tiers.spec.ts`.

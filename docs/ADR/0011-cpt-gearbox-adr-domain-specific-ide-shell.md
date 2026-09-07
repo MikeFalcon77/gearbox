@@ -525,6 +525,117 @@ product context, and that gate is a requirement, not an incidental implementatio
 The whitelist, the withdrawn terminal, the editor stack, and the derivation of context from what is
 actually open stand as written in the amendments above.
 
+## Amendment 2026-09-07: the context reconciles a restored perspective, and Home is a starting point
+
+**Status: accepted. This extends the two-contexts amendment; it reverses nothing about the
+whitelist, the withdrawn terminal, the editor stack, or the derivation of context from what is
+actually open.**
+
+A second UX pass found that opening a product updated the header, the catalogue and the status and
+left the Start screen in the centre. The mechanism is worth stating precisely, because the shape of
+it will recur with every Theia upgrade:
+
+* `PerspectiveService.switchPerspective` **returns early when its target is already the active
+  perspective** (`perspective-service.js:114`);
+* `ShellLayoutRestorer` sets `activePerspectiveId` from persisted state **before any of our code
+  runs** (`shell-layout-restorer.js:189`).
+
+So after a reload the shell can hold `gearbox.product` with no product open, while
+`StudioContextService` derives `home`, compares it against its *own previous* `home`, and returns
+early. The two answers disagree, nothing corrects them, and the next open asks for a perspective the
+shell already believes is active -- receiving no `onActivate`, which was the only thing that put the
+Product widget in the centre.
+
+**The context is reconciled against the shell's answer, not against its own previous one.** The
+direction stays one-way: a perspective still cannot promote itself into a context, but a perspective
+that disagrees with the context is corrected rather than believed.
+
+**And it is reconciled after `ready`, not in `onStart`.** `FrontendApplication.start` runs every
+`onStart` before `attachShell` and before `initializeLayout` (`frontend-application.js:59-66`), so a
+perspective switched from `onStart` is applied to a shell nobody has attached and is then
+overwritten by the restorer. This is the same trap this ADR already records for *opening a view*
+from `onStart`; the first version of this fix walked into it, and the failures were the scaffold
+preview and both git claims, because the workspace roots had not landed yet. The context key is
+still set in `onStart` -- menus read it from the first frame.
+
+**A view that must be on screen opens itself from a session signal, not from a layout event.**
+`ProductViewContribution` is a `FrontendApplicationContribution` now and opens on
+`ProductSessionService.onDidChangeOpening`, which is the symmetric twin of what
+`StartViewContribution` already did for Home. The earlier note in this file -- that the Product view
+"opens on request, so it has nothing of that interface to implement" -- was right about
+`initializeLayout` and wrong about the request. Opening is also **immediate**: the session's two
+engine spawns take about three seconds, and the panel that will hold the answer says
+`Loading <product>...` for that window rather than the previous screen saying nothing.
+
+**Home is a starting point, and Start closes when the context leaves it.** The Product widget's
+constructor used to call `ensureOpen()` -- "one product is a question with one answer, so it opens"
+-- which made it a rule about widget construction: a restored layout naming the Product view put a
+product back on screen with nobody having asked, and Home was unreachable while one existed.
+Discovery still happens; acting on it is a **Continue card** on Start, named and timed. And Start is
+closed rather than left behind a tab, which is safe precisely because returning to Home *opens* it
+rather than activating it.
+
+**One draft, one Apply/Discard pair, in the header.** The pair was rendered by both the Inspector
+and the Product view, each gated on the product-wide `hasDraft()` and each bumping a remount counter
+private to itself -- so a Discard through one panel left the other displaying text the file did not
+contain. The counter belongs to `ProductEditService`, the pair sits beside the `modified` badge the
+header already rendered, and the controls holding unapplied edits are marked individually, because
+one badge cannot say where they are.
+
+### Two more mechanisms, both about *when* Theia does something
+
+**`ApplicationShell.activateWidget` can take 2.25 s and cannot be hurried.** It waits on
+`waitForRevealed` (polls, no timeout) and `waitForActivation` (gives up after 2.25 s), and
+`applyViewPlacements` activates every `viewPlacements` entry and then every `primaryViews` entry --
+inside the switch's own promise chain. Measured: a boot switch to Home landed its last activation
+2.5 s after a product had been opened and Add Gear opened over it, and put Home in front of both.
+
+So the perspective descriptors carry **empty** `viewPlacements` and no `primaryViews`. Every widget
+already declares its area in `defaultWidgetOptions`, so no placement changes; what moves is the
+decision about *when* a view comes forward, from a descriptor field Theia applies late to an
+`onActivate` that can decline. Two rules make declining possible: a perspective callback checks the
+context before acting -- "a perspective cannot promote itself into a context" extended to its
+callbacks -- and `ProductViewContribution.mayTakeTheFront` will not take the main area from another
+Gearbox surface, since Add Gear, Generate, Lock and the Graph are places a person navigated to. Start
+and an editor lose to it, which is the case the context switch exists for. A flow that *wants* the
+product in front says so (`SHOW_PRODUCT`), and both wizards do when they finish.
+
+**The menu bar is rebuilt on a menu-model change, not on a context-key change**
+(`browser-menu-plugin.js:45-54`). An open menu re-evaluates `when` and `isEnabled` as it opens, so the
+*entries* were always right; the top-level label's state is fixed when the bar is built. That is why
+the `Product` submenu's own `when` never hid it: correct at boot, stale from the first product
+onwards. `ShellPolicy` touches the registry on a context change, which rebuilds the bar; with no
+product the label is `aria-disabled` and cannot be opened. `Find Gear…` and `Reload Catalogue` moved
+to `View > Catalogue`, because neither is a verb on a product.
+
+### Hiding a screen is not closing its widget
+
+Start is **not** closed when the context leaves Home, and the two failures that established it are
+worth keeping. Closing during a perspective switch loses a race with `setLayoutData` and poisons the
+snapshot -- the product perspective then holds a Start tab that the restore brings back as *current*.
+Closing after the layout settles is late enough that Lumino's "activate a sibling when the active
+widget goes" rule takes the front from whatever the person has since opened; that took down ten Add
+Gear claims at once. The invariant is about what is **visible**, and it is held by opening the
+subject. Problems and Outline, by contrast, are handled where they are *opened* --
+`initializeLayout(): NOOP`, as for Debug, Test and the terminal -- and the widgets a saved *snapshot*
+resurrects are **detached** (`widget.parent = null`), never closed, which is Theia's own technique for
+this and avoids what closing `terminal-` once cost.
+
+### Confirmation
+
+* `conformance/ux-navigation.spec.ts`: a reload with a product open lands on Home with a Continue
+  card naming it; opening a product then leaves the Product workspace on screen **with no reveal,
+  no `View` menu, and no tab click**, and the Start screen is behind it rather than in front. Both
+  were verified to fail against the previous build, one with "Expected: home, Received: product".
+  Nothing opens itself into the bottom panel on Home.
+* `adr-0011-session-trust.spec.ts` asserts that exactly one Discard exists, that the control carries
+  `data-field-modified` while the edit is unapplied, and that the rendered value comes back.
+* `adr-0011-ide-shell.spec.ts` asserts the `Product` label is `aria-disabled` with no product open --
+  the half of that claim's own title which nothing used to check.
+* `plan-widgets.spec.ts` asserts the Inspector is in the right area and Conflicts still in the
+  bottom; `ux-accessibility.spec.ts` greps this application's sources for a button without a `type`
+  or an icon-only button without a name.
+
 ## Traceability
 
 * Requirements: `cpt-gearbox-fr-studio` (the Studio itself), `cpt-gearbox-fr-editor-diagnostics`

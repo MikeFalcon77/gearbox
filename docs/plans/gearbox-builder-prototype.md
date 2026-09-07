@@ -1865,6 +1865,188 @@ carrying these measurements rather than deleted, because the choice is not the i
 creating a terminal is fixed, or the ADR stops promising a terminal. What is *not* acceptable is the
 state this replaced, where a green claim implied a capability that had never been exercised.
 
+#### The second UX pass, and the three mechanisms under it
+
+A second pass went through Home -> New/Open Product -> New/Open Gear -> Product -> Add Gear ->
+Inspector -> profiles -> Conflicts -> Generate -> Lock -> Graph and came back at 6.5/10, *request
+changes*. The verdict was not that the shell is wrong; it was that a few remaining inconsistencies
+**undermine trust in the configuration**. Three findings carried the weight, and each turned out to
+be one mechanism rather than one symptom.
+
+**Opening a product left Home in the centre.** The header switched, the catalogue marked the
+selected gears, and the middle of the screen still offered to open a product -- reachable only by
+`View -> Gearbox Product`. `PerspectiveService.switchPerspective` returns early when its target is
+already the active perspective (`perspective-service.js:114`), and `ShellLayoutRestorer` sets
+`activePerspectiveId` from persisted state before any Gearbox code runs
+(`shell-layout-restorer.js:189`). So a session that had a product open came back with
+`gearbox.product` active and *no product open*; `StudioContextService.recompute` derived `home`,
+compared it with its own previous `home`, and returned early -- leaving the shell's answer and the
+context's answer disagreeing. The next open then asked for the perspective the shell already
+believed was active and got nothing: no `onActivate`, and `gearbox-perspectives.ts` was **the only
+code in the application that put the Product widget in the centre**.
+
+Three things follow from that, and only the first is the fix. The context now reconciles against
+*the shell's* answer rather than against its own previous one -- but only after `ready`, because
+`FrontendApplication.start` runs every `onStart` before `attachShell` and before `initializeLayout`
+(`frontend-application.js:59-66`), and a perspective switched from `onStart` is applied to a shell
+nobody has attached and then overwritten. That was measured the hard way: the first version
+reconciled in `onStart` and broke the scaffold preview and both git claims, because the workspace
+roots had not landed yet. Second, `ProductViewContribution` opens its own view from
+`ProductSessionService.onDidChangeOpening` -- the symmetric twin of what `StartViewContribution`
+already did for Home -- so the centre no longer depends on a layout event at all, and the ~3 s of
+two engine spawns is a `Loading <product>...` state in the panel that is going to hold the answer.
+Third, Start **closes** when the context leaves Home, because a Start screen behind a product is the
+hybrid state the pass objected to.
+
+**`ensureOpen` had to go with it.** The Product widget's constructor opened the only product it
+could find, which made it a rule about widget construction rather than about intent: a restored
+layout naming the Product view put a product back on screen with nobody having asked, and Home was
+unreachable while one existed. It is a Continue card on Start now -- named, timed, one click -- and
+`openProduct` in the fixture opens a product the way a person does instead of inheriting one from
+boot. Every test that assumed an open product at startup was relying on that accident.
+
+**`Discard` cleared the badge and left the typed value on screen.** One draft, product-wide, and
+*two* private remount counters: the Inspector and the Product view each rendered
+`Apply changes`/`Discard` gated on `hasDraft()` and each bumped its own `editEpoch` on Discard. So
+discarding through one panel remounted that panel's inputs and left the other showing text the file
+did not contain -- the interface asserting an edit was dropped while displaying it. A React input
+whose `value` prop is unchanged between two renders is not rewritten, which is why the remount is
+needed at all and why it cannot be per-panel.
+
+The claim that covers this **was already green**: `adr-0011-session-trust.spec.ts` asserts the DOM
+value, and it clicked `[data-draft-discard]`**.first()** -- which happened to be the panel whose
+counter its own click bumped. That is the third time in this file a claim has passed for the wrong
+reason. The epoch belongs to `ProductEditService` now, there is exactly one Apply/Discard pair and
+it lives in the header beside the `modified` badge it already rendered, and the claim asserts the
+count as well as the value. Which controls hold the unapplied edits is marked on the controls
+(`data-field-modified`), because one badge in the header cannot say *where*.
+
+**Add Gear offered a plugin to a gear that declares no extension point.** Selecting
+`types-registry` printed "Extension points: none declared." three lines above a list of every
+plugin in the catalogue; choosing `oidc-authn-plugin` reported it joining the closure as a "plugin
+of types-registry". Both halves of the join key were already on the wire -- the host's
+`extension_points`, the plugin's `fills.point` -- so the offer was the defect, and the list is
+filtered on the pair now, grouped by point when a host declares several. A choice that cannot be
+right is not offered rather than offered and then refused; that is the eCos lesson the Conflicts
+screen already follows.
+
+The engine was no better, and a client is not a boundary. `report_orphan_plugins` asks whether
+*some* selected gear expects the plugin's point, which is the right question for a plugin selected
+as an ordinary gear and the wrong one for a plugin written into a specific host's
+`plugins = [...]`: with `authn-resolver` also in the product, the misplacement passed every check
+while meaning nothing at all. That gap is **GBX0518**.
+
+Two smaller things in the same pass, both the same shape -- a control offered for an operation that
+cannot work. `Apply` in Generate stayed enabled over an all-`unchanged` plan, because every gate on
+it was about permission or correctness and none about whether the plan writes anything; it now says
+"generation is up to date -- 12 files unchanged" through the block list it already had, and
+`FileAction::writes()` finally has a caller on this side. And a config key with a space in it was
+written cleanly -- a key is a *quoted dict key* in the description, so the span surgeon has no
+opinion -- and refused three steps later at resolve as GBX0115. The shape is checked where the caret
+is now, and the schema is *reported* rather than enforced, because a curated `exposes` is
+deliberately narrower than the struct.
+
+#### The same pass, the rest of the way: focus, and the shell that kept moving
+
+The pass's second and third tiers were about *focus* rather than trust, and two of them turned out to
+sit on the same Theia behaviour, which is worth stating once because it will recur with every upgrade.
+
+**`ApplicationShell.activateWidget` is slow in a way nothing here can see.** It waits on
+`waitForRevealed`, which polls with **no timeout**, and on `waitForActivation`, which gives up after
+2.25 s -- so a widget that never becomes visible costs that much, and
+`PerspectiveService.applyViewPlacements` activates every entry in `viewPlacements` and then every
+entry in `primaryViews`. Measured: a boot switch to Home landed its last activation 2.5 s after a
+product had been opened and Add Gear opened on top of it, and brought Home to the front of both. Ten
+Add Gear claims failed at once, each reporting the panel as attached but hidden.
+
+Three things came out of that, and only the first is a fix to *our* code:
+
+* the perspective descriptors carry **empty** `viewPlacements` and no `primaryViews`; every widget
+  already declares its area in `defaultWidgetOptions`, so nothing moves, and *when* a view comes
+  forward is `onActivate`'s decision -- which can be declined;
+* a perspective's `onActivate` checks the context before acting, because it is fire-and-forget and can
+  land after the context has moved on. "A perspective cannot promote itself into a context" now also
+  means its callbacks may not act against one;
+* `ProductViewContribution.mayTakeTheFront` refuses to steal the main area from another Gearbox
+  surface -- Add Gear, Generate, Lock and the Graph are things a person navigated to -- while Start
+  and an editor lose to it. The two wizards therefore *ask* for the product when they finish
+  (`SHOW_PRODUCT`), which is also the "return to the Product workspace" the pass asked for.
+
+**Closing a widget is not the way to hide a screen, twice over.** Start was closed when the context
+left Home, and it cost two suite runs: closing during a perspective switch loses a race and poisons
+the snapshot, so the product perspective then held a Start tab that `setLayoutData` restored as
+*current*; and closing after the layout settles is late enough that Lumino's "activate a sibling"
+rule steals the front from whatever the person has since opened. The invariant is about what is
+*visible*, so it is held by opening the subject: Start stays a tab and is never in front of a product.
+`conformance/ux-navigation.spec.ts` asserts `toBeHidden`, not `toHaveCount(0)`, and says why.
+
+**The menu bar is rebuilt on a menu-model change and not on a context-key change**
+(`browser-menu-plugin.js:45-54`). An *open* menu re-evaluates `when` and `isEnabled` as it opens,
+which is why the entries inside `Product` were always right; the top-level label's enabled state is
+decided when the bar is built, so it was correct at boot and stale forever after. That is the
+mechanism behind the pass's "the Product menu is there with no product open", and the claim that named
+it asserted only the half that was true. `ShellPolicy` touches the registry when the context changes;
+the label is `aria-disabled` with no product, and the claim asserts that. `Find Gear…` and
+`Reload Catalogue` moved to `View > Catalogue` in the same pass: neither is a verb on a product, and
+their presence is half of why that menu looked like it had work to offer.
+
+**Where things live now.** The Inspector is the right panel: the bottom strip showed one configuration
+field at an ordinary window height, in the panel that *is* the gear configurator, and the two-column
+layout that once justified the bottom becomes one column in a side panel. Problems and Outline join
+Debug, Test and the terminal in `initializeLayout(): NOOP` -- markers are load-bearing, the panels are
+not, and Conflicts is the domain screen for the array Problems also receives. A repeated sweep
+detaches the widgets a *snapshot* brings back, which is the terminal the pass saw activate itself
+after a close; detached rather than closed, for the reason `CLOSED_ON_MIGRATION` already records about
+`terminal-`. And the Product view is four stages -- `Overview · Gears · Topology · Validation` -- with
+Generate a link out rather than a fifth tab, because a tab holding a file plan and an Apply button
+would be a second answer to a question the Generate view already answers.
+
+**A gear created for a product now ends up in it.** The flow used to end in a notification asking the
+person to add the gear themselves, and the reason was structural rather than lazy:
+`writable_out_root` refuses to scaffold inside a source root (ADR-0010 tier 5), so a gear created for
+a product is *always* in a directory that product does not read, and `use_gear` cannot reach it. So
+`ProductEdit::AddSource` exists, `edit_call::add_source` writes the entry, and the finish is one batch
+-- declare the folder, add the gear -- with one preview and one confirmation. The source id is derived
+from the folder rather than asked for, and `SourceId`'s own rule validates it: the first version used
+the GDL identifier rule and refused `gears-rust`, the id every product in the corpus uses. The
+idempotence test is what caught that, which is what an idempotence test is for.
+
+**And the scaffold has three shapes.** `service | plugin | minimal`, because seven of the fourteen
+described gears are plugins and none is a bare crate with a name. What differs is which declarations
+the file offers -- there is no compiler here and no way to know where the toolkit or an SDK lives, so
+generated code would be written against a dependency this method cannot add. The plugin shape's two
+load-bearing fields, `sdk` and `plugin_interface`, are written as **comments** with the sentence that
+says what decides them: a `plugin_interface` naming no `pub trait` is refused (GBX0516) and an `sdk`
+locator pointing nowhere fails the load, so a placeholder would hand its author a description to
+repair rather than one to fill in.
+
+Smaller things, each a control that said less than it knew: features are checkboxes from the crate's
+projected `[features]` (7 of the 14 crates declare one); a config key with a space is refused at the
+row rather than at the next resolve; `discovery` is a select over the two values `Discovery` has; a
+field says whether its value is the product's, the resolver's or the gear's default, and an explicit
+one can be reset; the catalogue's `+` announces which gear and which product; the lock opens on a
+summary with the canonical text behind a tab; and every button in the Studio now has a `type` and, if
+it is icon-only, a name -- with a source-grep claim so the next one does too.
+
+One finding was declined, and it is worth recording as a disagreement rather than an omission. The
+pass asked that `Add to Product` be blocked on blocking semantic errors. ADR-0013's amendment of
+2026-09-03 decided the opposite for resolution errors and the reason still holds -- building a
+product is add-a-gear-then-bind-it, and refusing the first step until the second is done makes the
+intermediate state unreachable. What the pass actually hit was not a warning it wanted blocked but a
+configuration the UI should never have offered, which is what the filter above removes. The button's
+disabled state still means only what that ADR says it means, plus one honest addition: input that
+could not be written at all.
+
+A second finding is declined on a measurement. The pass reported `prefix_path = bad` as accepted
+"though the description requires a leading slash", and the description does say that --
+`api-gateway`'s own doc comment reads *"Must start with a leading slash"*. The runtime disagrees with
+its own prose: `normalize_prefix_path` (`gears-rust`, `api-gateway/src/gear.rs:321`) trims, collapses
+duplicate slashes and **prepends one when it is missing**, and the Helm generator does the same
+(`generate/helm.rs:1063-1072`). So `bad` is a legal value that becomes `/bad`, and there is nothing
+here to refuse: a client-side regex would be a rule this repository does not have, enforced against a
+gear that accepts the value. What is wrong is one sentence in another repository's doc comment, which
+is where a fix belongs.
+
 ### 9.2 Writing to a description, and the four refusals
 
 The catalogue toggle is the only thing in Studio that writes a file a person owns, so the checks in

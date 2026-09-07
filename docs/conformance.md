@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **130** — 125 built, 1 not built, 0 broken, 4 not observed.
+Claims: **147** — 142 built, 1 not built, 0 broken, 4 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -32,10 +32,12 @@ Rust, and the ADRs' own Confirmation sections say which.
 |---|---|---|---|
 | Studio offers a command to scaffold a new gear | `ADR-0010 tier 0` | ✅ built |  |
 | a scaffold shows its file plan before writing anything | `ADR-0010 §Consequences: a preview is not optional` | ✅ built |  |
+| a scaffold has three shapes, and each offers what its kind needs | `ADR-0010 tier 0` | ✅ built |  |
 | a generated composition crate carries a header naming its generator | `ADR-0010 tier 2` | ✅ built |  |
 | a description edit shows the line before writing it | `ADR-0010 §Consequences: a preview is not optional` | ✅ built |  |
 | adding a gear inserts one line, and removing it restores the file exactly | `ADR-0010 tier 3` | ✅ built |  |
 | Inspector projects config struct fields as typed controls | `Phase 7` | ✅ built |  |
+| a field says where its value came from, and an explicit one can be reset | `Phase 7` | ✅ built |  |
 | a projected string field renders as a typed control | `Phase 7` | ✅ built |  |
 
 ## `conformance/adr-0011-ide-shell.spec.ts`
@@ -99,6 +101,11 @@ Rust, and the ADRs' own Confirmation sections say which.
 | catalogue + opens the Add Gear configurator, not an immediate write dialog | `—` | ✅ built |  |
 | the closure a gear joins is visible before anything is written | `—` | ✅ built |  |
 | choosing a plugin changes what the closure would pull in | `—` | ✅ built |  |
+| a gear that declares no extension point is offered no plugin | `plan §9.1: the surface offers only what is applicable` | ✅ built |  |
+| a host is offered only the plugins that fill its own points | `plan §9.1: the surface offers only what is applicable` | ✅ built |  |
+| What will be written names every staged edit, not just the gear | `plan §9.1: the review is the exact serialization` | ✅ built |  |
+| a config key that no field could be is refused at the row | `plan §9.1: checked where the caret is` | ✅ built |  |
+| features are the crate's own, and absence says so | `plan §9.1: features are projected` | ✅ built |  |
 | errors warn beside the button and never disable it | `—` | ⚪ not observed | no gear in this corpus makes the resolution fail when added, so the warning cannot be observed here |
 
 ## `conformance/adr-0013-create-product.spec.ts`
@@ -110,6 +117,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the destination is choosable, and sources are relative to it | `ADR-0013 §Amendment: destination picker` | ✅ built |  |
 | Clone Local stamps version into the preview | `ADR-0013 amendment` | ✅ built |  |
 | Clone keeps the source comment line count | `ADR-0013 §Confirmation` | ✅ built |  |
+| Create Gear declares its folder as a source and adds the gear | `ADR-0013 §Amendment: create for a product` | ✅ built |  |
 | a config edit changes one line | `ADR-0013 §Confirmation` | ✅ built |  |
 | draft edits two config keys with one Apply preview; Discard restores | `ADR-0013 §Confirmation` | ✅ built |  |
 | a config key named password is refused with an explanation | `ADR-0013 §Confirmation` | ✅ built |  |
@@ -121,16 +129,17 @@ Rust, and the ADRs' own Confirmation sections say which.
 |---|---|---|---|
 | the Catalogue folds by category and filters | `plan §9: Catalogue, foldable and filtered` | ✅ built |  |
 | the Catalogue is in the left area | `plan §9: Catalogue, left` | ✅ built |  |
-| the Inspector is in the bottom area, not the side panel | `plan §9: Inspector, bottom` | ✅ built |  |
+| the Inspector is beside the tree, not under it | `plan §9: Inspector, right panel` | ✅ built |  |
 | one selection answers both questions at once | `plan §9: Inspector, one selection` | ✅ built |  |
 | the co-location Graph opens in the main area | `plan §9: Graph, main` | ✅ built |  |
 | the Product view is a tree of branches | `vision §60; plan §9: Product` | ✅ built |  |
 | the Product view shows what §9 asks it to | `plan §9: Product` | ✅ built |  |
 | the Conflicts screen lists what the resolution reported | `plan §9: Conflicts` | ✅ built |  |
 | a conflict points the Inspector at its subject | `PRD cpt-gearbox-fr-explain: subject` | ✅ built |  |
-| the explanation is in the bottom area | `plan §9: Explain` | ✅ built |  |
+| the explanation travels with the Inspector | `plan §9: Explain` | ✅ built |  |
 | the Lock view is in the main area | `plan §9: Lock` | ✅ built |  |
 | a Generate view exists | `plan §9: Generate` | ✅ built |  |
+| Apply is refused when the plan writes nothing | `plan §9: Generate, Apply disabled` | ✅ built |  |
 | the layout is the same after a reload | `plan §9: deterministic layout` | ✅ built |  |
 | the closure reaches past the direct dependencies | `plan §9: co-location closure` | ✅ built |  |
 | clicking a gear paints its transitive closure | `plan §9: co-location closure` | ✅ built |  |
@@ -173,6 +182,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the Lock view diffs against the lock on disk | `plan §9: diff toggle vs disk` | ✅ built |  |
 | a tampered lock is neither current nor stale | `plan §9: diff toggle vs disk` | ✅ built |  |
 | a lock that matches the disk says so, without a toggle | `plan §9: lock_hash badge` | ✅ built |  |
+| the lock opens on a summary, with the canonical text one click away | `plan §9: Lock` | ✅ built |  |
 
 ## `conformance/prd-product.spec.ts`
 
@@ -212,3 +222,20 @@ Rust, and the ADRs' own Confirmation sections say which.
 | it previews and applies generation | `PRD cpt-gearbox-fr-generate-preview` | ✅ built |  |
 | the resolver notice is gone, and gone because the engine says so | `PRD cpt-gearbox-fr-rpc-api` | ✅ built |  |
 | it contains no resolution logic of its own | `PRD cpt-gearbox-fr-studio: no resolution logic` | ✅ built |  |
+
+## `conformance/ux-accessibility.spec.ts`
+
+| Claim | Source | Status | Note |
+|---|---|---|---|
+| no button in the Studio is written without a type | `ADR-0011 §Confirmation` | ✅ built |  |
+| an icon-only button carries an accessible name | `ADR-0011 §Confirmation` | ✅ built |  |
+| the catalogue's add control says which gear and which product | `ADR-0011 §Confirmation` | ✅ built |  |
+
+## `conformance/ux-navigation.spec.ts`
+
+| Claim | Source | Status | Note |
+|---|---|---|---|
+| nothing opens itself into the bottom panel on Home | `plan §9.1: an empty domain panel is worse than an absent one` | ✅ built |  |
+| the Product view is four stages and a way out to Generate | `plan §9.1: Product navigation` | ✅ built |  |
+| a reload with a product open comes back to Home | `plan §9.1: Home is a screen, not an empty area` | ✅ built |  |
+| opening a product leaves the Product workspace on screen | `plan §9.1: Open Product is atomic` | ✅ built |  |
