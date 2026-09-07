@@ -23,12 +23,19 @@ import { GraphWidget } from "./graph/graph-widget";
 import { InspectorWidget } from "./inspector/inspector-widget";
 import { GenerateWidget } from "./generate/generate-widget";
 import { LockWidget } from "./lock/lock-widget";
-import { GearboxMenus } from "./menus";
+import { GearboxMenus, VIEW_CATALOGUE } from "./menus";
 import { ProductStore } from "./product-store";
 import { ProductWidget } from "./product/product-widget";
 import { GearAuthorWidget } from "./gear/gear-author-widget";
 import { EngineConnectionService } from "./shell/engine-connection-service";
-import { ADD_GEAR, BROWSE_CATALOGUE } from "./shell/session-command-ids";
+import { ProductSessionService } from "./shell/product-session-service";
+import {
+  ADD_GEAR,
+  BROWSE_CATALOGUE,
+  SHOW_CONFLICTS,
+  SHOW_GENERATE,
+  SHOW_PRODUCT,
+} from "./shell/session-command-ids";
 import { SelectionService } from "./shell/selection-service";
 import { STUDIO_CONTEXT_KEY, StudioContextService } from "./shell/studio-context-service";
 import { StartWidget } from "./start/start-widget";
@@ -151,18 +158,22 @@ export class CatalogueViewContribution
   }
 
   /**
-   * `Reload Catalogue` under Product, and **not** the panel toggle.
+   * `Reload Catalogue` under **View**, beside the panel it acts on.
    *
-   * The toggle used to be here as well, labelled `Catalogue`, and it was one half
-   * of the duplication in this menu: `AbstractViewContribution.registerMenus`
-   * already puts every toggle under `View > Views`, so the same command appeared
-   * twice under two different words. The rule now is that **View lists panels and
-   * Product lists things to do** -- so a panel toggle belongs in View, and
-   * reloading the catalogue, which is an act with an effect, belongs here.
+   * It was under Product, on the rule that "View lists panels and Product lists
+   * things to do". The rule survives; the placement does not. Re-reading the
+   * source roots is not a verb on a product -- it works with none open, and it is
+   * about the catalogue -- and having it in the Product menu is part of what made
+   * that menu look like it had work to offer with no product. `View > Catalogue`
+   * is where the panel already lives.
+   *
+   * The panel *toggle* is still not registered here: `AbstractViewContribution`
+   * puts every toggle under `View > Views`, and registering it twice under two
+   * different words was the original duplication.
    */
   override registerMenus(menus: MenuModelRegistry): void {
     super.registerMenus(menus);
-    menus.registerMenuAction(GearboxMenus.GEARBOX_INSPECT, {
+    menus.registerMenuAction(VIEW_CATALOGUE, {
       commandId: RELOAD_CATALOGUE.id,
       label: "Reload Catalogue",
       order: "2",
@@ -221,12 +232,39 @@ export class StartViewContribution
 
   onStart(): void {
     const openIfHome = (): void => {
-      if (this.contexts.current.kind === "home") {
+      if (this.isHome()) {
         void this.openView({ activate: true, reveal: true });
       }
     };
     this.contexts.onDidChange(openIfHome);
     void this.appState.reachedState("ready").then(openIfHome);
+  }
+
+  /**
+   * On screen in Home, behind the subject everywhere else.
+   *
+   * **It is not closed, and that was tried three times.** A Start screen *in
+   * front of* an open product is the hybrid state the UX pass objected to; a
+   * Start screen behind the Product tab is not, and the difference matters
+   * because closing it fights the shell in two ways that took a suite run each
+   * to find. Closing while a perspective switch is applying a layout loses the
+   * race and poisons the snapshot -- the product perspective then holds a Start
+   * tab and `setLayoutData` restores it as *current*, so it comes back on top.
+   * And closing after the layout settles is late enough that Lumino's
+   * "activate a sibling when the active widget goes" rule steals the front from
+   * whatever the person has since opened: it took down all ten Add Gear claims
+   * at once, each reporting the panel attached but hidden with `Gearbox Product`
+   * in front of it.
+   *
+   * So the invariant is about what is *visible*, which is what the complaint was
+   * about, and it is held by opening the subject rather than by closing this:
+   * `ProductViewContribution` and the perspective's own `onActivate` both
+   * activate the Product view, so Start ends up behind it. The claim in
+   * `conformance/ux-navigation.spec.ts` asserts exactly that -- Start not
+   * visible, not Start absent.
+   */
+  protected isHome(): boolean {
+    return this.contexts.current.kind === "home";
   }
 }
 
@@ -263,8 +301,17 @@ export class CreateProductViewContribution extends AbstractViewContribution<Crea
   }
 
   async openCreate(state?: CreateProductState): Promise<void> {
-    const widget = await this.openView({ activate: true, reveal: true });
+    // **Seeded before the view is activated.** `openView` then `openWith`
+    // painted the panel once with whatever the last visit left in it -- or empty
+    // on a first open -- and then again with the state that was asked for, which
+    // a UX pass saw as a blank tab that filled in a moment later. `getOrCreateWidget`
+    // is what `openView` uses internally, so this costs one lookup and no
+    // second construction.
+    const widget = await this.widgetManager.getOrCreateWidget<CreateProductWidget>(
+      CreateProductWidget.ID,
+    );
     widget.openWith(state);
+    await this.openView({ activate: true, reveal: true });
   }
 }
 
@@ -292,8 +339,10 @@ export class CreateGearViewContribution extends AbstractViewContribution<CreateG
   }
 
   async openCreate(state?: CreateGearState): Promise<void> {
-    const widget = await this.openView({ activate: true, reveal: true });
+    // Seeded first -- see `CreateProductViewContribution.openCreate`.
+    const widget = await this.widgetManager.getOrCreateWidget<CreateGearWidget>(CreateGearWidget.ID);
     widget.openWith(state);
+    await this.openView({ activate: true, reveal: true });
   }
 }
 
@@ -342,8 +391,12 @@ export class AddGearViewContribution extends AbstractViewContribution<AddGearWid
   }
 
   async openAdd(state?: AddGearState): Promise<void> {
-    const widget = await this.openView({ activate: true, reveal: true });
+    // Seeded first -- see `CreateProductViewContribution.openCreate`. It matters
+    // most here: the panel opened on whichever gear the previous visit had
+    // configured, for as long as it took the new state to arrive.
+    const widget = await this.widgetManager.getOrCreateWidget<AddGearWidget>(AddGearWidget.ID);
     widget.openWith(state);
+    await this.openView({ activate: true, reveal: true });
   }
 }
 
@@ -373,6 +426,7 @@ export class InspectorViewContribution
   implements FrontendApplicationContribution
 {
   @inject(SelectionService) protected readonly selection!: SelectionService;
+  @inject(StudioContextService) protected readonly contexts!: StudioContextService;
   @inject(FrontendApplicationStateService)
   protected readonly appState!: FrontendApplicationStateService;
 
@@ -380,10 +434,20 @@ export class InspectorViewContribution
     super({
       widgetId: InspectorWidget.ID,
       widgetName: InspectorWidget.LABEL,
-      // The bottom area, so the tree, the graph and the answer are all readable at
-      // once. In the side panel this content was clipped, which hid exactly the
-      // projected facts it exists to show.
-      defaultWidgetOptions: { area: "bottom" },
+      // **The right panel, since 2026-09-07.** It was the bottom area, so that
+      // the tree, the graph and the answer were readable at once, and the reason
+      // given for not using a side panel was that this content was clipped there
+      // -- which was true of a two-column layout in a narrow panel, and is what
+      // the single-column rules in `index.css` answer. What the bottom strip cost
+      // was worse and was measured by a UX pass: at an ordinary window height one
+      // configuration field is visible and the rest needs an inner scroll, in the
+      // panel that *is* the gear configurator. A configurator's properties area
+      // belongs beside the tree it is about, which is where every tool in this
+      // class puts it.
+      //
+      // Conflicts stays in the bottom area: it is read *while* looking at the
+      // tree that caused the complaint, and it is a list rather than a form.
+      defaultWidgetOptions: { area: "right", rank: 100 },
       toggleCommandId: "gearbox.inspector.toggle",
     });
   }
@@ -396,11 +460,19 @@ export class InspectorViewContribution
       if (current === undefined || current.kind === "catalogue-row") return;
       void this.openView({ activate: true, reveal: true });
     });
-    // After reload the layout restorer may leave the bottom strip empty while
+    // After a reload the layout restorer may leave the panel empty while
     // `initializeLayout` is skipped (a saved layout exists). Re-open without
-    // stealing focus so `settled()` and the Inspector itself stay reachable.
+    // stealing focus so the Inspector stays reachable.
+    //
+    // **Not on Home, and not revealed.** On Home nothing is selected, so this
+    // used to open a panel whose whole content is "select something" -- which
+    // §9.1 already calls worse than an absent one -- and now that the panel is
+    // the right side, revealing it would expand a side panel over the Start
+    // screen. `reveal: false` still creates and attaches the widget, which is
+    // what the boot-completeness check in the fixture waits for.
     void this.appState.reachedState("ready").then(() => {
-      void this.openView({ activate: false, reveal: true });
+      if (this.contexts.current.kind === "home") return;
+      void this.openView({ activate: false, reveal: false });
     });
   }
 
@@ -412,17 +484,33 @@ export class InspectorViewContribution
 }
 
 /**
- * Deliberately *not* a `FrontendApplicationContribution`.
+ * The Product workspace, opened by the act of opening a product.
  *
- * The other two views implement it to open themselves in `initializeLayout`.
- * This one opens on request, so it has no member of that interface to implement
- * -- and since every member is optional, claiming it would be a declaration
- * TypeScript rejects for having nothing in common with the type.
+ * This was deliberately *not* a `FrontendApplicationContribution`, on the
+ * argument that it "opens on request" and so had no member of that interface to
+ * implement. That reasoning was sound about `initializeLayout` and wrong about
+ * the request: the only thing that ever opened this view was the Product
+ * perspective's `onActivate`, and a perspective switch is silently skipped when
+ * the shell already believes that perspective is active -- which it does after
+ * any reload with a product open (`StudioContextService.recompute` records the
+ * mechanism). So opening a product updated the header, the catalogue and the
+ * status, and left Home in the centre.
+ *
+ * It now opens itself for the same reason `StartViewContribution` does, and by
+ * the same means: from a session signal rather than from a layout event. Two
+ * signals, because they answer different questions -- `onDidChangeOpening` puts
+ * the view up *while* the engine restarts twice (~3 s), and `onDidChange` covers
+ * a product that arrives without going through this client's open path.
  */
 @injectable()
-export class ProductViewContribution extends AbstractViewContribution<ProductWidget> {
+export class ProductViewContribution
+  extends AbstractViewContribution<ProductWidget>
+  implements FrontendApplicationContribution
+{
   @inject(ProductStore) protected readonly store!: ProductStore;
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
+  @inject(ProductSessionService) protected readonly session!: ProductSessionService;
+  @inject(StudioContextService) protected readonly contexts!: StudioContextService;
 
   constructor() {
     super({
@@ -437,8 +525,68 @@ export class ProductViewContribution extends AbstractViewContribution<ProductWid
     });
   }
 
+  onStart(): void {
+    this.session.onDidChangeOpening(() => void this.openIfProduct());
+    this.contexts.onDidChange(() => void this.openIfProduct());
+  }
+
+  /**
+   * Put the Product workspace on screen, unless the person is looking at
+   * something they chose.
+   *
+   * Opened, never merely activated: `activateWidget` on a widget nobody has
+   * built is a silent no-op, which is the trap §9.1 records three times.
+   * `openView` is idempotent, so the ordinary case costs one lookup.
+   *
+   * **Public, and called by the Product perspective too**, so that the rule below
+   * has one definition. Two callers wanting the same view in front for two
+   * reasons is how a late activation ends up stealing the front from a panel a
+   * person opened a moment ago.
+   */
+  async openIfProduct(): Promise<void> {
+    if (this.session.opening === undefined && this.store.current.open === undefined) return;
+    if (!this.mayTakeTheFront()) {
+      // Still opened -- the context is a product and this view must exist -- but
+      // not brought forward.
+      await this.openView({ activate: false, reveal: false });
+      return;
+    }
+    await this.openView({ activate: true, reveal: true });
+  }
+
+  /**
+   * Whether the Product view may become the current tab in the main area.
+   *
+   * The Start screen loses to it -- that is the whole point of opening a
+   * product. An editor loses to it too: a restored layout parks one over the
+   * Product view, and the subject of the context should win that. **Another
+   * Gearbox surface wins**, because Add Gear, Generate, Lock and the Graph are
+   * things a person navigated to on purpose, and this method can run seconds
+   * after they did: `ApplicationShell.activateWidget` waits on `waitForRevealed`
+   * (polls with no timeout) and `waitForActivation` (2.25 s), so a perspective
+   * switch that activates several widgets lands its last one long after the
+   * interaction that started it. Measured at 2.5 s, which was long enough to
+   * take every Add Gear claim down at once.
+   */
+  protected mayTakeTheFront(): boolean {
+    const current = this.shell.getCurrentWidget("main");
+    if (current === undefined) return true;
+    if (current.id === ProductWidget.ID || current.id === StartWidget.ID) return true;
+    return !current.id.startsWith("gearbox.");
+  }
+
   override registerCommands(commands: CommandRegistry): void {
     super.registerCommands(commands);
+    // **Shows, never toggles**, and exists for the wizards. Both of them end by
+    // opening or editing a product and then closing themselves, and the panel
+    // that should be in front afterwards is the product's. Asking for it by
+    // command rather than by injection keeps the wizards free of a dependency on
+    // this contribution -- and `mayTakeTheFront` deliberately refuses to steal
+    // the front from a Gearbox surface, so a wizard has to *ask*.
+    commands.registerCommand(SHOW_PRODUCT, {
+      execute: () => this.openView({ activate: true, reveal: true }),
+      isEnabled: () => this.store.current.open !== undefined,
+    });
     commands.registerCommand(RESOLVE_PRODUCT, {
       // Re-resolves whatever is open for whatever profile is selected, which is
       // what "resolve" means once a product is on screen. Opening one is the
@@ -459,6 +607,14 @@ export class ProductViewContribution extends AbstractViewContribution<ProductWid
       commandId: RESOLVE_PRODUCT.id,
       label: "Resolve Product",
       order: "2",
+      // **Every entry in this menu carries the gate, not just some.** The
+      // submenu's own `when` did not hide it: a UX pass found `Product` in the
+      // bar with no product open, offering Conflicts, Lock and Generate as
+      // though they had a subject. Theia's menu bar omits a submenu whose items
+      // are all invisible, so gating the items is what actually removes it -- and
+      // the claim in `adr-0011-ide-shell.spec.ts` now asserts the absence rather
+      // than only naming it.
+      when: `${STUDIO_CONTEXT_KEY} == 'product'`,
     });
   }
 }
@@ -482,6 +638,14 @@ export class ConflictsViewContribution extends AbstractViewContribution<Conflict
     });
   }
 
+  override registerCommands(commands: CommandRegistry): void {
+    super.registerCommands(commands);
+    // Opens rather than toggles -- see `SHOW_CONFLICTS`.
+    commands.registerCommand(SHOW_CONFLICTS, {
+      execute: () => this.openView({ activate: true, reveal: true }),
+    });
+  }
+
   /**
    * In the Product menu, because looking at what the resolution could not decide
    * is one of the few things there is to *do* to a product -- the exception to
@@ -490,9 +654,13 @@ export class ConflictsViewContribution extends AbstractViewContribution<Conflict
   override registerMenus(menus: MenuModelRegistry): void {
     super.registerMenus(menus);
     menus.registerMenuAction(GearboxMenus.GEARBOX_RESOLVE, {
-      commandId: this.toggleCommand?.id ?? "",
+      // `SHOW_CONFLICTS`, not the toggle: a menu entry that hides the screen when
+      // the screen is open is the `BROWSE_CATALOGUE` defect again. The toggle
+      // stays in `View > Views`, where toggling a panel is the point.
+      commandId: SHOW_CONFLICTS.id,
       label: "Conflicts",
       order: "3",
+      when: `${STUDIO_CONTEXT_KEY} == 'product'`,
     });
   }
 }
@@ -515,8 +683,9 @@ export class LockViewContribution extends AbstractViewContribution<LockWidget> {
     super.registerMenus(menus);
     menus.registerMenuAction(GearboxMenus.GEARBOX_RESOLVE, {
       commandId: this.toggleCommand?.id ?? "",
-      label: "Lock",
+      label: "Resolution Lock",
       order: "4",
+      when: `${STUDIO_CONTEXT_KEY} == 'product'`,
     });
   }
 }
@@ -553,6 +722,11 @@ export class GenerateViewContribution extends AbstractViewContribution<GenerateW
         isEnabled: () => this.engine.isConnected,
       });
     }
+    // Opens rather than toggles -- see `SHOW_GENERATE`.
+    commands.registerCommand(SHOW_GENERATE, {
+      execute: () => this.openView({ activate: true, reveal: true }),
+      isEnabled: () => this.engine.isConnected,
+    });
     this.quickView?.registerItem({
       label: this.viewLabel,
       open: () => this.openView({ activate: true }),
@@ -562,9 +736,13 @@ export class GenerateViewContribution extends AbstractViewContribution<GenerateW
   override registerMenus(menus: MenuModelRegistry): void {
     super.registerMenus(menus);
     menus.registerMenuAction(GearboxMenus.GEARBOX_GENERATE, {
-      commandId: this.toggleCommand?.id ?? "",
+      // `SHOW_GENERATE`, not the toggle: a menu entry that hides the plan when
+      // the plan is open is the Product-strip defect again. The toggle stays in
+      // `View > Views`, where toggling a panel is the point.
+      commandId: SHOW_GENERATE.id,
       label: "Generate",
       order: "1",
+      when: `${STUDIO_CONTEXT_KEY} == 'product'`,
     });
   }
 }

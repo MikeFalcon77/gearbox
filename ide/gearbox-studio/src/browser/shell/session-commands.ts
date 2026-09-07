@@ -95,7 +95,7 @@ export class SessionCommands implements CommandContribution, MenuContribution {
     });
     menus.registerMenuAction(FILE_PRODUCT, {
       commandId: NEW_GEAR.id,
-      label: "New Gear",
+      label: "New Gear…",
       order: "2",
     });
     menus.registerMenuAction(FILE_PRODUCT, {

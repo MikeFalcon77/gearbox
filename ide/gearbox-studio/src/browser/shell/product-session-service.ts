@@ -31,6 +31,7 @@
 
 import { StorageService } from "@theia/core/lib/browser/storage-service";
 import { URI } from "@theia/core/lib/common/uri";
+import { Emitter, Event } from "@theia/core/lib/common/event";
 import { MessageService } from "@theia/core/lib/common/message-service";
 import { MonacoTextModelService } from "@theia/monaco/lib/browser/monaco-text-model-service";
 import { inject, injectable } from "@theia/core/shared/inversify";
@@ -45,6 +46,17 @@ import { GearSessionService } from "./gear-session-service";
 
 /** Where the Recent list lives. Per browser profile, like any other Theia state. */
 const RECENT_KEY = "gearbox.recentProducts";
+
+/**
+ * A remembered product, and when it was last opened.
+ *
+ * `openedAt` is optional because entries written before it existed have none,
+ * and a Continue card that said "last opened just now" for a week-old entry
+ * would be worse than one that says nothing.
+ */
+export interface RecentEntry extends ProductRef {
+  readonly openedAt?: number;
+}
 
 /**
  * How many to keep.
@@ -71,12 +83,34 @@ export class ProductSessionService {
    * **An open is not reentrant.** It respawns the engine twice, and two of them
    * interleaved leave the catalogue loading against one set of roots while the
    * product resolves against another -- which presents as a panel that never
-   * finishes resolving. The Product widget is closable, so its `postConstruct`
-   * runs again on every reopen and `ensureOpen` is called more than once by
-   * design; concurrent callers wait for the same answer rather than starting a
-   * second sequence.
+   * finishes resolving. Several callers ask independently -- the Continue card,
+   * the picker, `File > Open Product...`, a Recent entry -- so concurrent callers
+   * wait for the same answer rather than starting a second sequence.
    */
   protected inFlight: Promise<boolean> | undefined;
+
+  /**
+   * Which product is being opened, while it is being opened.
+   *
+   * An open takes two engine spawns and a catalogue load -- measured at roughly
+   * three seconds on this corpus -- and until this existed nothing on screen said
+   * so. The shell's answer arrived only at the end, when `ProductStore` finally
+   * had a product, so the person watched Home sit there and concluded the click
+   * had missed. This is what lets the Product view open *first*, with the name of
+   * the thing it is waiting for.
+   */
+  protected openingRef: ProductRef | undefined;
+
+  protected readonly onDidChangeOpeningEmitter = new Emitter<ProductRef | undefined>();
+
+  /** Fires when an open starts and when it finishes, successfully or not. */
+  readonly onDidChangeOpening: Event<ProductRef | undefined> =
+    this.onDidChangeOpeningEmitter.event;
+
+  /** The product being opened right now, if any. */
+  get opening(): ProductRef | undefined {
+    return this.openingRef;
+  }
 
   /**
    * The products opened before, most recent first.
@@ -85,7 +119,12 @@ export class ProductSessionService {
    * failure mode of a Recent menu.
    */
   async recent(): Promise<ProductRef[]> {
-    return (await this.storage.getData<ProductRef[]>(RECENT_KEY)) ?? [];
+    return (await this.recentEntries()).map(({ path, label }) => ({ path, label }));
+  }
+
+  /** The same list, with the times the Continue card reads. */
+  async recentEntries(): Promise<RecentEntry[]> {
+    return (await this.storage.getData<RecentEntry[]>(RECENT_KEY)) ?? [];
   }
 
   /**
@@ -111,13 +150,13 @@ export class ProductSessionService {
    * engine reported, so the same product reached two ways is one entry.
    */
   protected async remember(ref: ProductRef): Promise<void> {
-    const kept = (await this.recent()).filter((entry) => entry.path !== ref.path);
-    kept.unshift(ref);
+    const kept = (await this.recentEntries()).filter((entry) => entry.path !== ref.path);
+    kept.unshift({ ...ref, openedAt: Date.now() });
     await this.storage.setData(RECENT_KEY, kept.slice(0, RECENT_LIMIT));
   }
 
   protected async forget(ref: ProductRef): Promise<void> {
-    const kept = (await this.recent()).filter((entry) => entry.path !== ref.path);
+    const kept = (await this.recentEntries()).filter((entry) => entry.path !== ref.path);
     await this.storage.setData(RECENT_KEY, kept);
   }
 
@@ -164,23 +203,13 @@ export class ProductSessionService {
     return this.models.models.some((model) => model.uri === wanted && model.dirty);
   }
 
-  /**
-   * Make sure something is open, if there is an obvious something.
-   *
-   * One product is a question with one answer, so it opens. Several is a choice,
-   * and the picker asks it. This used to live in `ProductStore.discover()`, where
-   * it opened a product *without* re-initializing the engine -- so the catalogue
-   * kept whatever roots the previous session had left.
-   */
-  async ensureOpen(): Promise<void> {
-    if (this.products.current.open !== undefined) return;
-    await this.products.ensureDiscovered();
-    const products = this.products.current.products;
-    const [only] = products;
-    if (products.length === 1 && only !== undefined) {
-      await this.open(only);
-    }
-  }
+  // `ensureOpen()` used to live here: "one product is a question with one answer,
+  // so it opens". It was called from `ProductWidget`'s constructor, which made it
+  // a rule about *widget construction* rather than about intent -- a reload, or a
+  // restored layout naming the Product view, opened a product nobody had asked
+  // for, and the Home screen could not be reached with a product in the
+  // workspace. Discovery still happens (`ProductStore.ensureDiscovered`); acting
+  // on it is the Start screen's Continue card and the picker.
 
   /**
    * The write boundary for a product: the workspace folder that contains it.
@@ -224,11 +253,15 @@ export class ProductSessionService {
     if (pending !== undefined) return pending;
     const started = this.doOpen(ref);
     this.inFlight = started;
+    this.openingRef = ref;
+    this.onDidChangeOpeningEmitter.fire(ref);
     try {
       return await started;
     } finally {
       if (this.inFlight === started) {
         this.inFlight = undefined;
+        this.openingRef = undefined;
+        this.onDidChangeOpeningEmitter.fire(undefined);
       }
     }
   }

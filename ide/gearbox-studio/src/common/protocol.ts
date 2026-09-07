@@ -12,6 +12,7 @@ import type { EditGearResult } from "./generated/EditGearResult";
 import type { GenerateApplyResult } from "./generated/GenerateApplyResult";
 import type { GenerateFileResult } from "./generated/GenerateFileResult";
 import type { GeneratePlanResult } from "./generated/GeneratePlanResult";
+import type { GearKind } from "./generated/GearKind";
 import type { LockResult } from "./generated/LockResult";
 import type { ProductEdit } from "./generated/ProductEdit";
 import type { ProductLoadResult } from "./generated/ProductLoadResult";
@@ -254,6 +255,8 @@ export interface GearboxService {
     id: string;
     name: string;
     version: string;
+    /** Which shape to write; the engine defaults to `minimal` when absent. */
+    kind?: GearKind;
     destinationDir: string;
     dryRun: boolean;
   }): Promise<GeneratePlanResult>;

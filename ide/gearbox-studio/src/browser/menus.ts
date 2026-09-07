@@ -46,4 +46,13 @@ export namespace GearboxMenus {
  */
 export const FILE_PRODUCT: MenuPath = [...MAIN_MENU_BAR, "1_file", "0_product"];
 
+/**
+ * `View > 1_catalogue`: the two acts on the gear catalogue.
+ *
+ * Under View because the catalogue is a panel and these are things done to it;
+ * under *Product* they made a menu about a product offer work that has nothing to
+ * do with one, and they stayed enabled with no product open.
+ */
+export const VIEW_CATALOGUE: MenuPath = [...MAIN_MENU_BAR, "4_view", "1_catalogue"];
+
 export const VIEW_ADVANCED: MenuPath = [...MAIN_MENU_BAR, "4_view", "9_advanced"];

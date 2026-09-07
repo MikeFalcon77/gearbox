@@ -7,6 +7,8 @@ import { CommandContribution } from "@theia/core/lib/common/command";
 import { MenuContribution } from "@theia/core/lib/common/menu";
 import { ContainerModule } from "@theia/core/shared/inversify";
 import { DebugFrontendApplicationContribution } from "@theia/debug/lib/browser/debug-frontend-application-contribution";
+import { ProblemContribution } from "@theia/markers/lib/browser/problem/problem-contribution";
+import { OutlineViewContribution } from "@theia/outline-view/lib/browser/outline-view-contribution";
 import { MonacoEditorProvider } from "@theia/monaco/lib/browser/monaco-editor-provider";
 import { TerminalFrontendContribution } from "@theia/terminal/lib/browser/terminal-frontend-contribution";
 import { TestViewContribution } from "@theia/test/lib/browser/view/test-view-contribution";
@@ -21,6 +23,8 @@ import { ProductStore } from "./product-store";
 import { ResolutionMarkers } from "./resolution-markers";
 import { bindWidget } from "./contribution";
 import { HiddenDebugView } from "./theia/debug/hidden-debug-view";
+import { HiddenProblemsView } from "./theia/markers/hidden-problems-view";
+import { HiddenOutlineView } from "./theia/outline-view/hidden-outline-view";
 import { ShellPolicy } from "./theia/core/shell-policy";
 import { ReadOnlyLockEditorProvider } from "./theia/monaco/read-only-lock-editor-provider";
 import { DomainWorkspace } from "./theia/workspace/domain-workspace";
@@ -113,6 +117,15 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // saved layout is still respected and the view is one command away.
   rebind(DebugFrontendApplicationContribution).to(HiddenDebugView).inSingletonScope();
   rebind(TestViewContribution).to(HiddenTestView).inSingletonScope();
+
+  // Why: the same mechanism for two panels this application does choose the
+  // package of and does not choose the panel of. Markers are load-bearing --
+  // `ResolutionMarkers` writes every resolve diagnostic into `ProblemManager` --
+  // but Conflicts is the domain screen for that array, and an outline of a
+  // `product.gdl` is a shorter version of the Product tree. Both were opening
+  // themselves on a first run and taking slots beside the Start screen.
+  rebind(ProblemContribution).to(HiddenProblemsView).inSingletonScope();
+  rebind(OutlineViewContribution).to(HiddenOutlineView).inSingletonScope();
 
   // Why: the same trade, one package further. A shell is a tool this application
   // offers, not one of the two things it is about, so it appears when asked for
@@ -284,7 +297,7 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // because the first registration wins.
   //
   // What still needs binding by hand is `FrontendApplicationContribution`, which
-  // `bindViewContribution` does not touch -- and only for the two views that
+  // `bindViewContribution` does not touch -- and only for the views that
   // implement something from it.
   bindViewContribution(bind, CatalogueViewContribution);
   bind(FrontendApplicationContribution).toService(CatalogueViewContribution);
@@ -294,9 +307,12 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
 
   bindViewContribution(bind, GraphViewContribution);
 
-  // No `FrontendApplicationContribution` here: the Product view opens on request,
-  // so it has nothing of that interface to implement.
+  // `FrontendApplicationContribution` here too, since 2026-09-07: the Product
+  // view opens itself from the session's own signal. Relying on the Product
+  // perspective's `onActivate` meant relying on a switch that is skipped when the
+  // shell already believes that perspective is active -- see the view's header.
   bindViewContribution(bind, ProductViewContribution);
+  bind(FrontendApplicationContribution).toService(ProductViewContribution);
   bindViewContribution(bind, StartViewContribution);
   bind(FrontendApplicationContribution).toService(StartViewContribution);
   bindViewContribution(bind, CreateProductViewContribution);

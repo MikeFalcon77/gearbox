@@ -24,7 +24,7 @@ import { inject, injectable } from "@theia/core/shared/inversify";
 
 import { rowKey, rowName, type Row } from "../../common/protocol";
 import { CatalogueStore } from "../catalogue-store";
-import { GearboxMenus } from "../menus";
+import { VIEW_CATALOGUE } from "../menus";
 import { SelectionService } from "../shell/selection-service";
 
 export const FIND_GEAR: Command = {
@@ -57,7 +57,7 @@ export class CataloguePicker implements CommandContribution, MenuContribution {
   }
 
   registerMenus(menus: MenuModelRegistry): void {
-    menus.registerMenuAction(GearboxMenus.GEARBOX_INSPECT, {
+    menus.registerMenuAction(VIEW_CATALOGUE, {
       commandId: FIND_GEAR.id,
       label: "Find Gear…",
       order: "1",

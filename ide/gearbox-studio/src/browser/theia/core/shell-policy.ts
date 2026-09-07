@@ -41,7 +41,7 @@ import {
 import { injectable, inject } from "@theia/core/shared/inversify";
 
 import { GearboxMenus, VIEW_ADVANCED } from "../../menus";
-import { STUDIO_CONTEXT_KEY } from "../../shell/studio-context-service";
+import { STUDIO_CONTEXT_KEY, StudioContextService } from "../../shell/studio-context-service";
 
 /**
  * Top-level menus this application has.
@@ -229,10 +229,17 @@ export const MENU_KEEP: readonly { readonly path: MenuPath; readonly groups: rea
     groups: ["0_product", "3_save", "5_settings", "6_close"],
   },
   {
-    // `0_primary` is the command palette and `Open View…`; `2_views` holds the
-    // toggles, trimmed to the domain's below; `9_advanced` is where the tools went.
+    // `0_primary` is the command palette and `Open View…`; `1_catalogue` is the
+    // two acts on the gear catalogue; `2_views` holds the toggles, trimmed to the
+    // domain's below; `9_advanced` is where the tools went.
+    //
+    // `1_catalogue` is ours, and it is here rather than under Product because
+    // neither entry is a verb on a product: `Find Gear…` fills the Inspector from
+    // the catalogue, and `Reload Catalogue` re-reads the source roots. They sat in
+    // the Product menu, which is what made that menu look like it had things to
+    // offer with no product open.
     path: CommonMenus.VIEW,
-    groups: ["0_primary", "2_views", "9_advanced"],
+    groups: ["0_primary", "1_catalogue", "2_views", "9_advanced"],
   },
 ];
 
@@ -304,6 +311,8 @@ export const HIDDEN_QUICK_VIEWS: readonly string[] = [
 export class ShellPolicy implements MenuContribution {
   @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
   @inject(QuickViewService) protected readonly quickViews!: QuickViewService;
+  // Read only, and only to know when the bar has to be rebuilt.
+  @inject(StudioContextService) protected readonly contexts!: StudioContextService;
 
   /** Guards the re-prune against the change event its own removals emit. */
   protected pruning = false;
@@ -348,6 +357,29 @@ export class ShellPolicy implements MenuContribution {
       } finally {
         this.pruning = false;
       }
+    });
+
+    // **The menu bar is rebuilt when the context changes, because nothing else
+    // rebuilds it.** `BrowserMainMenuFactory.createMenuBar` refreshes on a
+    // preference change, a keybinding change and a *menu model* change -- and not
+    // on a context-key change (`browser-menu-plugin.js:45-54`). An open menu does
+    // re-evaluate `when` and `isEnabled` as it opens, which is why the entries
+    // inside `Product` were always correct; the top-level label was not, because
+    // its enabled state is decided when the bar is built. So with no product open
+    // at boot the label was right, and it stayed right after a product opened --
+    // which is the same staleness the UX pass saw from the other side, when every
+    // entry was ungated and the label was always live.
+    //
+    // A throwaway registration is the trigger: the registry has no public
+    // "refresh", and `registerMenuAction` fires `onDidChange` for its path. Two
+    // events per context switch, which happens when a person opens or closes a
+    // product -- exactly when a rebuild is wanted.
+    this.contexts.onDidChange(() => {
+      const touch = registry.registerMenuAction([...GearboxMenus.GEARBOX, "0_refresh"], {
+        commandId: "gearbox.context.refresh.noop",
+        label: "",
+      });
+      touch.dispose();
     });
 
     // And commands arrive late too, from the same place. A command registered

@@ -20,6 +20,7 @@ import { Emitter, Event } from "@theia/core/lib/common/event";
 import { MessageService } from "@theia/core/lib/common/message-service";
 import { inject, injectable } from "@theia/core/shared/inversify";
 
+import type { FileAction } from "../../common/generated/FileAction";
 import type { FilePlan } from "../../common/generated/FilePlan";
 import type { GenerateApplyResult } from "../../common/generated/GenerateApplyResult";
 import type { GenerateFileResult } from "../../common/generated/GenerateFileResult";
@@ -43,8 +44,20 @@ export interface GenerateState {
 }
 
 export interface ApplyBlock {
-  readonly id: "generate" | "writes" | "resolution" | "conflict";
+  readonly id: "generate" | "writes" | "resolution" | "conflict" | "nothing";
   readonly reason: string;
+}
+
+/**
+ * Whether a planned action puts bytes on disk.
+ *
+ * The mirror of `FileAction::writes()` (`crates/gearbox-ir/src/fileset.rs`),
+ * which has existed since the plan did and which nothing on this side used. It
+ * is the difference between "the plan is empty of work" and "the plan is empty":
+ * `unchanged` and `kept` are answers, not absences.
+ */
+export function writesBytes(action: FileAction): boolean {
+  return action === "create" || action === "update";
 }
 
 const EMPTY: GenerateState = {
@@ -106,10 +119,25 @@ export class GenerateService {
         reason: "resolution reported errors",
       });
     }
-    if ((this.state.plan?.plans ?? []).some((p) => p.action === "conflict")) {
+    const plans = this.state.plan?.plans ?? [];
+    if (plans.some((p) => p.action === "conflict")) {
       blocks.push({
         id: "conflict",
         reason: "the plan has a conflict",
+      });
+    }
+    // **Nothing to write is a state, and Apply used to accept it.** Every gate
+    // above is about permission or correctness, and an all-`unchanged` plan
+    // passes all of them -- so the button stayed live, the round trip ran, and
+    // the engine answered `written: 0`. A control that is enabled for an
+    // operation with no effect teaches the reader that the count above it is
+    // decoration. Said as a count rather than as "nothing to do", because
+    // `12 unchanged` is the reassuring half of the sentence.
+    if (this.state.status === "ready" && plans.length > 0 && !plans.some((p) => writesBytes(p.action))) {
+      const kept = plans.length;
+      blocks.push({
+        id: "nothing",
+        reason: `generation is up to date — ${kept} file${kept === 1 ? "" : "s"} unchanged`,
       });
     }
     return blocks;

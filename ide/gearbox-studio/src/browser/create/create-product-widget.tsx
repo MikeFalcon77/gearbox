@@ -6,6 +6,9 @@
 // honestly and does not rewrite sources.
 
 import { ReactWidget } from "@theia/core/lib/browser";
+import { CommandRegistry } from "@theia/core/lib/common";
+
+import { SHOW_PRODUCT } from "../shell/session-command-ids";
 import { MessageService } from "@theia/core/lib/common/message-service";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
@@ -36,6 +39,7 @@ export class CreateProductWidget extends ReactWidget {
   @inject(ProductEditService) protected readonly edits!: ProductEditService;
   @inject(WorkspaceService) protected readonly workspace!: WorkspaceService;
   @inject(MessageService) protected readonly messages!: MessageService;
+  @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
   @inject(FileDialogService) protected readonly fileDialog!: FileDialogService;
 
@@ -518,5 +522,9 @@ export class CreateProductWidget extends ReactWidget {
     });
     if (!ok) return;
     this.close();
+    // The product this just made is what a person wants to look at. Asked for
+    // rather than assumed: `ProductViewContribution.mayTakeTheFront` will not
+    // steal the front from a Gearbox surface, and this wizard was one.
+    void this.commands.executeCommand(SHOW_PRODUCT.id);
   }
 }

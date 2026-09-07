@@ -19,6 +19,7 @@
 // a blob, which is both smaller and legible in a stack trace.
 
 import { ApplicationShell, FrontendApplicationContribution } from "@theia/core/lib/browser";
+import { PerspectiveService } from "@theia/core/lib/browser/perspective-service";
 import { FrontendApplicationStateService } from "@theia/core/lib/browser/frontend-application-state";
 import { StorageService } from "@theia/core/lib/browser/storage-service";
 import { inject, injectable } from "@theia/core/shared/inversify";
@@ -56,6 +57,19 @@ export const CLOSED_ON_MIGRATION: readonly string[] = [
   // Safe as a prefix: views contributed *by* extensions are `plugin-view*`, and
   // this matches only `plugins`.
   "plugins",
+  // The Inspector, once, because it **moved** rather than went away. A saved
+  // layout holds it at the bottom, where `defaultWidgetOptions` has no say -- so
+  // a returning person would keep the one-field keyhole the move exists to fix.
+  // Closing is safe here in a way it was not for the terminal: this widget is a
+  // plain `WidgetFactory` binding, so `WidgetManager` drops its cache entry on
+  // dispose (`widget-manager.js:150`) and the next selection builds a fresh one
+  // in the right panel. Version 4 makes the sweep run again.
+  "gearbox.inspector",
+  // Problems: `HiddenProblemsView.initializeLayout` stops a *fresh* profile from
+  // auto-opening it, but a returning layout that already restored the empty
+  // bottom panel still shows it on Home. Close once; `problems.` stays in
+  // `KEPT_COMMAND_PREFIXES` so on-demand open still works. Version 5.
+  "problems",
   // **No `terminal-` here, and that was learned the hard way.** Closing the boot
   // terminal broke the capability: `widget.close()` disposes the widget while
   // `WidgetManager` keeps its entry under the same id, so the next
@@ -69,7 +83,29 @@ export const CLOSED_ON_MIGRATION: readonly string[] = [
 const MIGRATION_KEY = "gearbox.layoutMigration";
 
 /** Bump when `CLOSED_ON_MIGRATION` changes, so the sweep runs again -- once. */
-const MIGRATION_VERSION = 3;
+const MIGRATION_VERSION = 5;
+
+/**
+ * Prefixes detached on **every** perspective switch, not once.
+ *
+ * A subset of `CLOSED_ON_MIGRATION`: only the families a saved *snapshot* can
+ * resurrect, and only ones this application has withdrawn outright rather than
+ * moved. The Inspector is deliberately absent -- it moved to the right panel, so
+ * finding it in a snapshot is not a fault -- and so are the two retired Gearbox
+ * panels, whose widget factories are gone, which means `healLayoutData` cannot
+ * recreate them anyway. Outline is here because it is withdrawn: a one-shot
+ * migration closes a stored layout, but a perspective snapshot can put it back.
+ */
+const SWEPT_ON_EVERY_SWITCH: readonly string[] = [
+  "terminal-",
+  "typehierarchy",
+  "callhierarchy",
+  "outline-view",
+  "notebook",
+  "timeline",
+  "bulk-edit",
+  "plugins",
+];
 
 @injectable()
 export class LayoutMigration implements FrontendApplicationContribution {
@@ -77,6 +113,7 @@ export class LayoutMigration implements FrontendApplicationContribution {
   @inject(StorageService) protected readonly storage!: StorageService;
   @inject(FrontendApplicationStateService)
   protected readonly appState!: FrontendApplicationStateService;
+  @inject(PerspectiveService) protected readonly perspectives!: PerspectiveService;
 
   onStart(): void {
     // After `ready`, because the restorer has to have restored before there is
@@ -84,6 +121,37 @@ export class LayoutMigration implements FrontendApplicationContribution {
     // assembled, and closing a widget that has not been attached yet does nothing
     // at all -- silently, which is the worst version of not working.
     void this.appState.reachedState("ready").then(() => this.migrate());
+    // And again on every perspective switch, for the widgets a *snapshot* brings
+    // back -- see `sweepForbidden`.
+    this.perspectives.onDidChangePerspective(() => this.sweepForbidden());
+  }
+
+  /**
+   * Detach the forbidden widgets a restored snapshot brought back.
+   *
+   * The one-shot migration above is about a person's *stored* layout and runs
+   * once by design. This is about a different mechanism with the same symptom:
+   * `PerspectiveService` snapshots the layout on every switch and restores it on
+   * the way back, and `healLayoutData` **recreates** widgets in that snapshot
+   * whose instances were disposed. So a terminal that a migration closed, or that
+   * a person opened before it was withdrawn, reappears on the second visit to a
+   * context -- observed by a UX pass as "the terminal activated itself after I
+   * closed the product".
+   *
+   * **Detached, not closed.** `widget.parent = null` takes it out of the layout
+   * without disposing it -- the technique Theia's own `detachStrayWidgets` uses,
+   * for the reason its comment gives: another perspective may still need the
+   * instance. Closing here would also repeat the mistake `CLOSED_ON_MIGRATION`
+   * records about `terminal-`, which is the one id this sweep is most likely to
+   * find.
+   */
+  protected sweepForbidden(): void {
+    for (const widget of this.shell.widgets) {
+      if (!SWEPT_ON_EVERY_SWITCH.some((prefix) => widget.id.startsWith(prefix))) continue;
+      if (widget.parent === null) continue;
+      // eslint-disable-next-line no-null/no-null
+      widget.parent = null;
+    }
   }
 
   protected async migrate(): Promise<void> {

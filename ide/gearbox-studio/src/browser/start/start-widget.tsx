@@ -25,7 +25,7 @@ import { CatalogueStore } from "../catalogue-store";
 import { PendingCreate } from "../create/pending-create";
 import { ProductStore } from "../product-store";
 import { EngineConnectionService } from "../shell/engine-connection-service";
-import { ProductSessionService } from "../shell/product-session-service";
+import { ProductSessionService, type RecentEntry } from "../shell/product-session-service";
 import { BROWSE_CATALOGUE, NEW_GEAR, NEW_PRODUCT, OPEN_GEAR, OPEN_PRODUCT } from "../shell/session-command-ids";
 
 @injectable()
@@ -46,7 +46,7 @@ export class StartWidget extends ReactWidget {
    * Held rather than read in `render`: `recent()` is asynchronous -- it goes to
    * `StorageService` -- and a render that starts a promise starts one per frame.
    */
-  protected recent: readonly ProductRef[] = [];
+  protected recent: readonly RecentEntry[] = [];
 
   @postConstruct()
   protected init(): void {
@@ -72,7 +72,7 @@ export class StartWidget extends ReactWidget {
    */
   protected refresh(): void {
     void this.products.ensureDiscovered();
-    void this.session.recent().then((recent) => {
+    void this.session.recentEntries().then((recent) => {
       this.recent = recent;
       this.update();
     });
@@ -109,6 +109,8 @@ export class StartWidget extends ReactWidget {
           </div>
         )}
 
+        {this.renderContinue(connected)}
+
         <div className="gbx-start-actions">
           <button
             type="button"
@@ -134,7 +136,7 @@ export class StartWidget extends ReactWidget {
             disabled={!connected}
             onClick={() => void this.commands.executeCommand(NEW_GEAR.id)}
           >
-            New Gear
+            New Gear…
           </button>
           <button
             type="button"
@@ -163,6 +165,36 @@ export class StartWidget extends ReactWidget {
             <code>product.gdl</code> naming the gears it wants and the profiles it deploys under.
           </div>
         )}
+      </div>
+    );
+  }
+
+  /**
+   * The way back to the last product, and the reason there is one.
+   *
+   * Studio used to open the only product it could find whenever the Product
+   * widget was constructed, so a reload came back into a product nobody had asked
+   * for and Home was unreachable with one in the workspace. Removing that made
+   * Home honest and made returning a click longer, which is what this card pays
+   * back -- named, timed, and one act rather than a picker.
+   */
+  protected renderContinue(connected: boolean): React.ReactNode {
+    const [last] = this.recent;
+    if (last === undefined) return undefined;
+    return (
+      <div className="gbx-start-section" data-start-continue={last.path}>
+        <button
+          type="button"
+          className="gbx-start-primary gbx-start-continue"
+          data-start-action="continue"
+          disabled={!connected}
+          onClick={() => void this.open("recent", last)}
+        >
+          <span className="gbx-start-item-name">Continue {last.label}</span>
+          <span className="gbx-start-item-path">
+            {last.openedAt === undefined ? last.path : `Last opened ${ago(last.openedAt)}`}
+          </span>
+        </button>
       </div>
     );
   }
@@ -227,11 +259,30 @@ export class StartWidget extends ReactWidget {
    */
   protected async open(kind: string, ref: ProductRef): Promise<void> {
     if (kind === "recent") {
-      await this.session.openRecent(ref);
+      await this.session.openRecent({ path: ref.path, label: ref.label });
       // The list may be one shorter now, if the path had rotted.
       this.refresh();
       return;
     }
     await this.session.open(ref);
   }
+}
+
+/**
+ * How long ago, in the coarsest unit that is still true.
+ *
+ * Coarse on purpose: the card answers "is this the thing I was just doing?", and
+ * a count of seconds invites the reader to care about a number that changes while
+ * they look at it. No `Intl.RelativeTimeFormat`, because the shell is not
+ * localised and one English sentence beats a locale-shaped guess.
+ */
+function ago(at: number): string {
+  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
 }

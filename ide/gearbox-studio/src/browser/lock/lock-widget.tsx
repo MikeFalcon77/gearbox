@@ -18,6 +18,7 @@ import { inject, injectable, postConstruct } from "@theia/core/shared/inversify"
 import React from "@theia/core/shared/react";
 
 import type { LockOnDisk } from "../../common/generated/LockOnDisk";
+import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
 import { ProductStore } from "../product-store";
 
 /** `blake3:c4412b91f813…` -> `c4412b91f813`. */
@@ -28,12 +29,29 @@ function shortHash(hash: string): string {
 @injectable()
 export class LockWidget extends ReactWidget {
   static readonly ID = "gearbox.lock";
-  static readonly LABEL = "Gearbox Lock";
+  // **`Resolution Lock`, not `Gearbox Lock`.** Every other view in this shell is
+  // `Gearbox <noun>` because it is a panel of this tool; this one shows a
+  // specific artefact, and "Lock" alone reads as a padlock -- a UX pass said so.
+  // What the panel holds is the lock the *resolution* produced, which is also the
+  // sentence its stale-hash badge is about.
+  static readonly LABEL = "Resolution Lock";
 
   @inject(ProductStore) protected readonly store!: ProductStore;
 
   /** Whether the text below shows the lock on disk instead of the resolved one. */
   protected showingDisk = false;
+
+  /**
+   * Which half of the view is on screen.
+   *
+   * **Summary first**, because the raw canonical text is several hundred lines
+   * and answers a question a person asks second: a UX pass called the panel "a
+   * useful header and then a wall of TOML". The summary is not a second source of
+   * truth -- it is rendered from `ResolvedProduct`, which this widget already
+   * reaches into for `lock_hash` -- and the wall is one click away, unchanged,
+   * because comparing it against a terminal is a real thing people do.
+   */
+  protected showing: "summary" | "raw" = "summary";
 
   @postConstruct()
   protected init(): void {
@@ -119,12 +137,96 @@ export class LockWidget extends ReactWidget {
           </span>
         </div>
         {this.renderDisk(lock.lock_path, disk, drifted)}
-        {/* `readOnly` on a textarea would be editable-looking; a `<pre>` is
-            read-only by construction. Selectable and copyable, because comparing
-            a lock against one in a terminal is a real thing people do. */}
-        <pre className="gbx-lock-text" data-lock-canonical="true">
-          {this.showingDisk && disk !== undefined ? disk.canonical : lock.canonical}
-        </pre>
+
+        <div className="gbx-lock-tabs" role="tablist" aria-label="Lock view">
+          {(["summary", "raw"] as const).map((which) => (
+            <button
+              type="button"
+              key={which}
+              role="tab"
+              className={`gbx-choice ${this.showing === which ? "gbx-choice-on" : ""}`}
+              aria-selected={this.showing === which}
+              data-lock-tab={which}
+              onClick={() => {
+                this.showing = which;
+                this.update();
+              }}
+            >
+              {which === "summary" ? "Summary" : "Raw lock file"}
+            </button>
+          ))}
+        </div>
+
+        {this.showing === "summary" ? (
+          this.renderSummary(state.resolution?.product ?? undefined)
+        ) : (
+          /* `readOnly` on a textarea would be editable-looking; a `<pre>` is
+             read-only by construction. Selectable and copyable, because comparing
+             a lock against one in a terminal is a real thing people do. */
+          <pre className="gbx-lock-text" data-lock-canonical="true">
+            {this.showingDisk && disk !== undefined ? disk.canonical : lock.canonical}
+          </pre>
+        )}
+      </div>
+    );
+  }
+
+  /**
+   * What the lock records, in the terms the lock uses.
+   *
+   * Counted from `ResolvedProduct` -- the same object the header's hash comes
+   * from -- rather than parsed back out of the canonical text. Parsing it here
+   * would be a second TOML reader in the client, which a claim in
+   * `conformance/prd-lock.spec.ts` forbids by grepping this source, and it would
+   * be a second opinion about a file the engine just wrote.
+   */
+  protected renderSummary(product: ResolvedProduct | undefined): React.ReactNode {
+    if (product === undefined) {
+      return (
+        <div className="gbx-empty" data-lock-summary="unavailable">
+          The resolution behind this lock is no longer on screen. Open the raw file, or resolve
+          again.
+        </div>
+      );
+    }
+    const gears = Object.keys(product.gears ?? {}).length;
+    const sources = Object.keys(product.sources ?? {}).length;
+    const processes = (product.processes ?? []).length;
+    const bindings = (product.bindings ?? []).length;
+    const cluster = (product.cluster ?? []).length;
+    const rows: { label: string; value: string }[] = [
+      { label: "sources", value: String(sources) },
+      { label: "gears", value: String(gears) },
+      { label: "processes", value: String(processes) },
+      { label: "bindings", value: String(bindings) },
+      { label: "cluster bindings", value: String(cluster) },
+    ];
+    return (
+      <div className="gbx-lock-summary" data-lock-summary="ready">
+        {rows.map(({ label, value }) => (
+          <div className="gbx-kv" key={label}>
+            <span>{label}</span>
+            <span data-lock-summary-count={label}>{value}</span>
+          </div>
+        ))}
+        <div className="gbx-kv">
+          <span>processes</span>
+          <span>
+            {(product.processes ?? []).map((process) => (
+              <span
+                className="gbx-badge"
+                key={process.name}
+                data-lock-summary-process={process.name}
+                title={`${process.kind}, ${process.gears.length} gear${
+                  process.gears.length === 1 ? "" : "s"
+                }`}
+              >
+                {process.name}
+              </span>
+            ))}
+            {processes === 0 && "—"}
+          </span>
+        </div>
       </div>
     );
   }
@@ -193,6 +295,7 @@ export class LockWidget extends ReactWidget {
               taken when the lock is fetched. An apply from the Generate view
               refreshes it without being asked. */}
           <button
+            type="button"
             className="gbx-lock-toggle"
             data-lock-refresh="true"
             title="read the lock on disk again"
@@ -205,6 +308,7 @@ export class LockWidget extends ReactWidget {
               control that does nothing, which is worse than no control. */}
           {state === "drifted" && (
             <button
+              type="button"
               className="gbx-lock-toggle"
               data-lock-showing={this.showingDisk ? "disk" : "resolved"}
               onClick={() => {

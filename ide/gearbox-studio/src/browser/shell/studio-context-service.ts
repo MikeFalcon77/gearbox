@@ -26,6 +26,7 @@
 
 import { FrontendApplicationContribution } from "@theia/core/lib/browser";
 import { ContextKey, ContextKeyService } from "@theia/core/lib/browser/context-key-service";
+import { FrontendApplicationStateService } from "@theia/core/lib/browser/frontend-application-state";
 import { PerspectiveService } from "@theia/core/lib/browser/perspective-service";
 import { Emitter, Event } from "@theia/core/lib/common/event";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
@@ -57,11 +58,34 @@ export class StudioContextService implements FrontendApplicationContribution {
   @inject(GearSessionService) protected readonly gears!: GearSessionService;
   @inject(PerspectiveService) protected readonly perspectives!: PerspectiveService;
   @inject(ContextKeyService) protected readonly contextKeys!: ContextKeyService;
+  @inject(FrontendApplicationStateService)
+  protected readonly appState!: FrontendApplicationStateService;
 
   protected readonly onDidChangeEmitter = new Emitter<StudioContext>();
   readonly onDidChange: Event<StudioContext> = this.onDidChangeEmitter.event;
 
   protected context: StudioContext = { kind: "home" };
+
+  /**
+   * The perspective switch in flight, so a caller can wait for the layout to
+   * catch up with the context. Never rejects -- see [`settled`].
+   */
+  protected switching: Promise<void> = Promise.resolve();
+
+  /**
+   * Whether the shell is attached and its layout initialized.
+   *
+   * **Until it is, the context is computed but the layout is left alone.**
+   * `FrontendApplication.start` runs every `onStart` *before* `attachShell` and
+   * before `initializeLayout` (`frontend-application.js:59-66`), so a perspective
+   * switched from `onStart` is applied to a shell nobody has attached and is then
+   * overwritten by the restorer -- ADR-0011 records the same trap for opening a
+   * view: "the panel ends up collapsed while its widget stays in the DOM, which
+   * is worse than either". The menus and the header still need the context key
+   * from the first frame, so the two halves are separated rather than delayed
+   * together.
+   */
+  protected layoutReady = false;
 
   /**
    * Assigned in `@postConstruct`, never in a field initializer.
@@ -88,16 +112,45 @@ export class StudioContextService implements FrontendApplicationContribution {
 
   onStart(): void {
     this.recompute();
+    void this.appState.reachedState("ready").then(() => {
+      this.layoutReady = true;
+      this.recompute();
+    });
   }
 
   /**
-   * Recompute from what is open, and act only if it changed.
+   * Resolves once the layout has caught up with the context.
+   *
+   * For a caller that has just opened something and needs the perspective's
+   * `onActivate` to have run before it acts -- `switchPerspective` is a promise
+   * this service used to drop on the floor.
+   */
+  async settled(): Promise<void> {
+    await this.switching;
+  }
+
+  /**
+   * Recompute from what is open, and act on each of the two things separately.
    *
    * `ProductStore.onChanged` fires for every resolution, every profile switch and
-   * every lock fetch; switching a perspective on each of those would fight the
-   * person's own layout. The guard is on the *identity of the object*, not on the
-   * event. Gear sessions win over products when both are somehow set — opening
-   * either closes the other first.
+   * every lock fetch, so the *context* is guarded on the identity of the object
+   * rather than on the event -- firing `onDidChange` per resolution would have
+   * every subscriber rebuild itself for nothing. Gear sessions win over products
+   * when both are somehow set: opening either closes the other first.
+   *
+   * **The layout is reconciled even when the context did not change, and that is
+   * the whole point.** `PerspectiveService.switchPerspective` returns early when
+   * the target is already active (`perspective-service.js:114`), and
+   * `ShellLayoutRestorer` sets `activePerspectiveId` from persisted state before
+   * any of this runs (`shell-layout-restorer.js:189`). So a reload with a product
+   * open used to leave `gearbox.product` active while this service derived `home`
+   * and returned early -- and the *next* open, which does derive `product`, then
+   * asked for the perspective that was already nominally active and got nothing:
+   * no `onActivate`, no Product widget in the centre, no collapsed left panel.
+   * Comparing against the shell's own answer instead of against the previous
+   * context is what closes that. The direction is still one-way -- a perspective
+   * cannot promote itself into a context -- but a perspective that disagrees with
+   * the context is corrected rather than believed.
    */
   protected recompute(): void {
     const gear = this.gears.current;
@@ -108,13 +161,23 @@ export class StudioContextService implements FrontendApplicationContribution {
         : open === undefined
           ? { kind: "home" }
           : { kind: "product", product: open };
-    if (sameContext(this.context, next)) {
-      return;
+    const changed = !sameContext(this.context, next);
+    if (changed) {
+      this.context = next;
+      this.key.set(next.kind);
     }
-    this.context = next;
-    this.key.set(next.kind);
-    void this.perspectives.switchPerspective(perspectiveFor(next));
-    this.onDidChangeEmitter.fire(next);
+
+    const wanted = perspectiveFor(next);
+    if (this.layoutReady && this.perspectives.getActivePerspectiveId() !== wanted) {
+      // Swallowed here rather than at every `settled()` call: a failed layout
+      // switch is already logged by `PerspectiveService`, and an unhandled
+      // rejection on a field nobody happens to await is noise, not a signal.
+      this.switching = this.perspectives.switchPerspective(wanted).catch(() => undefined);
+    }
+
+    if (changed) {
+      this.onDidChangeEmitter.fire(next);
+    }
   }
 }
 

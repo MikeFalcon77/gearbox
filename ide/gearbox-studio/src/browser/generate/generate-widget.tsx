@@ -159,13 +159,13 @@ export class GenerateWidget extends ReactWidget {
           <div className="gbx-generate-counts">
             {(["create", "update", "unchanged", "conflict", "kept"] as const).map((action) =>
               (counts[action] ?? 0) > 0 ? (
-                <span key={action} className="gbx-badge" data-count={action}>
+                <span key={action} className="gbx-badge gbx-badge-count" data-count={action}>
                   {counts[action]} {action}
                 </span>
               ) : undefined,
             )}
             {gen.written !== undefined && (
-              <span className="gbx-badge" data-written-count={gen.written}>
+              <span className="gbx-badge gbx-badge-count" data-written-count={gen.written}>
                 {gen.written} written
               </span>
             )}

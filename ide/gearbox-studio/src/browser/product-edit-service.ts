@@ -60,6 +60,27 @@ export class ProductEditService {
   protected readonly onDraftChangedEmitter = new Emitter<void>();
   readonly onDraftChanged: Event<void> = this.onDraftChangedEmitter.event;
 
+  /**
+   * Bumped whenever the draft is dropped, so a control can be remounted from the
+   * saved intent.
+   *
+   * **One counter, here, because there is one draft.** The Inspector and the
+   * Product view each kept a private `editEpoch` and each bumped its own on
+   * Discard -- while `hasDraft()` is product-wide, so both panels showed
+   * `Apply changes` / `Discard` for a draft either of them could have queued.
+   * Discarding through one panel therefore remounted that panel's inputs and left
+   * the other panel's showing text the file did not contain: the interface
+   * asserting that an edit was dropped while displaying it. A React input whose
+   * `value` prop is unchanged between two renders is not rewritten, so the DOM
+   * keeps whatever the person typed -- which is why the remount is needed at all,
+   * and why it cannot be per-panel.
+   */
+  get epoch(): number {
+    return this.draftEpoch;
+  }
+
+  protected draftEpoch = 0;
+
   /** Whether the open product names this gear directly. */
   inProduct(gear: string): boolean {
     const product = this.product.current.resolution?.product;
@@ -128,10 +149,14 @@ export class ProductEditService {
   discardDraft(path?: string): boolean {
     const target = path ?? this.product.current.open?.path;
     if (target === undefined) return false;
-    if (!this.drafts.has(target)) return false;
-    this.drafts.delete(target);
+    const had = this.drafts.delete(target);
+    // Bumped and fired unconditionally, even with nothing to drop. A caller that
+    // relied on the return value to decide whether to re-render had to know
+    // whether a draft existed, which is this service's business; and a Discard
+    // that renders nothing looks broken whether or not it had work to do.
+    this.draftEpoch += 1;
     this.onDraftChangedEmitter.fire();
-    return true;
+    return had;
   }
 
   /**
@@ -157,6 +182,9 @@ export class ProductEditService {
     });
     if (applied) {
       this.drafts.delete(open.path);
+      // Same remount as a discard: the controls now have to read the saved
+      // intent, which is what the write just changed.
+      this.draftEpoch += 1;
       this.onDraftChangedEmitter.fire();
     }
     return applied;
@@ -205,6 +233,51 @@ export class ProductEditService {
     return out;
   }
 
+  /**
+   * Whether one control's value is a draft rather than what the file says.
+   *
+   * Per control, because the `Apply changes` / `Discard` pair is one per product
+   * and sits in the header: a person who has typed in two panels needs to see
+   * *where* the unapplied edits are, and a single `modified` badge cannot say.
+   */
+  isDraftedConfig(gear: string, key: string): boolean {
+    return this.draftEdits().some(
+      (edit) => edit.kind === "set_config" && edit.gear === gear && edit.key === key,
+    );
+  }
+
+  /**
+   * What the draft says about one config key, if it says anything.
+   *
+   * `"removed"` matters and is not the same as "no draft": a reset queues
+   * `set_config` with no value, which is how the wire spells removing a key, and
+   * a caller asking "is this value the description's?" has to answer *no* for a
+   * key the draft is about to take out. Without this distinction the reset
+   * control stayed on screen after being clicked, offering to reset a value that
+   * was already on its way out.
+   */
+  draftConfigState(gear: string, key: string): "set" | "removed" | undefined {
+    let state: "set" | "removed" | undefined;
+    for (const edit of this.draftEdits()) {
+      if (edit.kind !== "set_config" || edit.gear !== gear || edit.key !== key) continue;
+      state = edit.value === null ? "removed" : "set";
+    }
+    return state;
+  }
+
+  /** Whether this gear's feature list is a draft. */
+  isDraftedFeatures(gear: string): boolean {
+    return this.draftEdits().some((edit) => edit.kind === "set_features" && edit.gear === gear);
+  }
+
+  /** Whether this profile field is a draft. */
+  isDraftedProfileField(profile: string, field: string): boolean {
+    return this.draftEdits().some(
+      (edit) =>
+        edit.kind === "set_profile_field" && edit.profile === profile && edit.field === field,
+    );
+  }
+
   /** Saved features overlaid with the latest draft set_features for `gear`. */
   draftFeatures(gear: string, saved: readonly string[]): string[] {
     let features = [...saved];
@@ -232,12 +305,21 @@ export class ProductEditService {
   }
 
   /**
-   * Dry-run `addGear` for the Add Gear configurator preview.
+   * Dry-run the configurator's whole proposal, and return the text it would write.
+   *
+   * **One batch, because the proposal is one edit.** This used to dry-run
+   * `addGear` alone, and it could not do otherwise: `applyEdits` reads the file,
+   * and the staged features, config and plugins are about a gear the file does
+   * not name yet -- so the panel's "What will be written" showed the `use_gear`
+   * line and nothing else, while the commit wrote twice. With
+   * `ProductEdit::AddGear` in the batch the engine folds the whole proposal onto
+   * the same text and hands back its `after`, so the preview *is* the
+   * serialization rather than a client's account of one.
    *
    * Returns `undefined` when the edit is refused or impossible; the caller shows
    * the engine's reason via the message service already fired here.
    */
-  async previewAddGear(gear: string, source: string): Promise<EditGearResult | undefined> {
+  async previewStagedAdd(edits: readonly ProductEdit[]): Promise<EditGearResult | undefined> {
     const open = this.product.current.open;
     if (open === undefined) {
       this.messages.warn("Open a product before adding gears to it.");
@@ -251,7 +333,7 @@ export class ProductEditService {
       return undefined;
     }
     try {
-      return await this.service.addGear(open.path, gear, source, true);
+      return await this.service.applyEdits(open.path, [...edits], true);
     } catch (error) {
       this.messages.error(messageOf(error));
       return undefined;
@@ -295,16 +377,20 @@ export class ProductEditService {
   }
 
   /**
-   * Commit an Add Gear configurator result: `addGear`, then optional follow-up
-   * `applyEdits` for features/config. The configurator is the confirmation UI, so
-   * there is no second modal -- the dry-run the panel already showed is the
-   * preview ADR-0010 requires.
+   * Commit the configurator's proposal: **one** `applyEdits`, one write.
+   *
+   * The configurator is the confirmation UI, so there is no second modal -- the
+   * dry run the panel already showed is the preview ADR-0010 requires.
+   *
+   * This used to be `addGear` and then a second `applyEdits`, which left a window
+   * where the description named a gear nobody had configured: if the second call
+   * failed -- a refused config key, a dirty buffer arriving between the two --
+   * the product was half-edited and the panel had already closed. The fold in
+   * `apply_product_edits` fails the whole batch on any refusal, so the atomicity
+   * was always available; what was missing was a way to put the addition *in* the
+   * batch.
    */
-  async commitAddGear(
-    gear: string,
-    source: string,
-    followUps: readonly ProductEdit[],
-  ): Promise<boolean> {
+  async commitAddGear(gear: string, edits: readonly ProductEdit[]): Promise<boolean> {
     const open = this.product.current.open;
     if (open === undefined) {
       this.messages.warn("Open a product before adding gears to it.");
@@ -320,7 +406,7 @@ export class ProductEditService {
 
     let preview: EditGearResult;
     try {
-      preview = await this.service.addGear(open.path, gear, source, true);
+      preview = await this.service.applyEdits(open.path, [...edits], true);
     } catch (error) {
       this.messages.error(messageOf(error));
       return false;
@@ -333,24 +419,44 @@ export class ProductEditService {
     // eslint-disable-next-line no-console
     console.info(`Gearbox: writing add ${gear} to ${open.path}`, new Error("write path").stack);
     try {
-      await this.service.addGear(open.path, gear, source, false);
+      await this.service.applyEdits(open.path, [...edits], false);
     } catch (error) {
       this.messages.error(messageOf(error));
+      await this.product.reload();
       return false;
-    }
-
-    if (followUps.length > 0) {
-      try {
-        await this.service.applyEdits(open.path, followUps, false);
-      } catch (error) {
-        this.messages.error(messageOf(error));
-        await this.product.reload();
-        return false;
-      }
     }
 
     await this.product.reload();
     return true;
+  }
+
+  /**
+   * Apply a batch to a named product, with the full gates.
+   *
+   * For a caller that is not editing the *open* product: `Create Gear` finishes
+   * by declaring the new folder as a source of the product it was started from
+   * and adding the gear, and that product is named rather than assumed -- the
+   * panel it runs in has no product session of its own.
+   *
+   * Everything else is the ordinary path: dry run, preview, confirmation, write,
+   * and the dirty-buffer refusal, because a description with unsaved changes is
+   * the one case where writing destroys work (ADR-0010, §9.2 refusal 2).
+   */
+  async applyProductEdits(
+    target: { path: string; label: string },
+    edits: readonly ProductEdit[],
+  ): Promise<boolean> {
+    if (edits.length === 0) return false;
+    return this.applyDescriptionEdit({
+      title: "Add to product",
+      ok: "Add",
+      summary: `${edits.length} edit${edits.length === 1 ? "" : "s"} on ${target.label}`,
+      path: target.path,
+      label: target.label,
+      dryRun: () => this.service.applyEdits(target.path, [...edits], true),
+      commit: () => this.service.applyEdits(target.path, [...edits], false),
+      log: `apply ${edits.length} edit(s) to ${target.path}`,
+    });
   }
 
   /** Line-oriented preview text for an edit dry-run. */

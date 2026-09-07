@@ -169,8 +169,19 @@ export class CatalogueWidget extends ReactWidget {
     }
     const id = row.gear.id;
     const inside = this.edits.inProduct(id);
+    const product = this.product.current.open?.label ?? "the product";
+    // **The whole sentence, as the accessible name.** This was a `title` and an
+    // icon: a screen reader announced the glyph's nothing, and the tooltip only
+    // appeared after a hover nobody using a keyboard performs. The name says
+    // which gear and which product, because the button repeats down a list of
+    // fourteen and "Add" alone is fourteen identical buttons.
+    const label = inside
+      ? `Remove ${row.gear.display_name} from ${product}`
+      : `Add ${row.gear.display_name} to ${product}`;
     return (
       <button
+        type="button"
+        aria-label={label}
         className={`gbx-in-product ${inside ? "gbx-in-product-on" : ""}`}
         data-in-product={inside ? "true" : "false"}
         // `data-toggle-gear` rather than `data-gear`: the graph widget's nodes
@@ -180,8 +191,10 @@ export class CatalogueWidget extends ReactWidget {
         // opens a write confirmation, so the collision was worse than a wrong
         // selection. One attribute, one meaning per document.
         data-toggle-gear={id}
-        title={inside ? `Remove ${id} from the product` : `Add ${id} to the product`}
-        aria-pressed={inside}
+        title={label}
+        // No `aria-pressed`: the *name* already changes with the state, and a
+        // toggle that announces both "Remove ... from Payments Demo" and
+        // "pressed" says the same thing twice in opposite words.
         onClick={(event) => {
           event.stopPropagation();
           if (inside) {
@@ -191,7 +204,7 @@ export class CatalogueWidget extends ReactWidget {
           void this.commands.executeCommand(ADD_GEAR.id, { gearId: id });
         }}
       >
-        <span className={`codicon codicon-${inside ? "check" : "add"}`} />
+        <span className={`codicon codicon-${inside ? "check" : "add"}`} aria-hidden="true" />
       </button>
     );
   }

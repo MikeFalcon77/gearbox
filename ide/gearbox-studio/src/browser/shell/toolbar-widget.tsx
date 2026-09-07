@@ -157,9 +157,44 @@ export class ToolbarWidget extends ReactWidget {
           </span>
         )}
         {this.edits.hasDraft() && (
-          <span className="gbx-badge gbx-toolbar-status" data-status="modified" title="Unapplied draft edits">
-            modified
-          </span>
+          <>
+            <span
+              className="gbx-badge gbx-toolbar-status"
+              data-status="modified"
+              title="Unapplied draft edits"
+            >
+              modified
+            </span>
+            {/* **One pair, here, because there is one draft.** These buttons used
+                to sit in both the Inspector and the Product view, each gated on
+                the product-wide `hasDraft()` -- so editing a profile field lit up
+                a pair in a panel that had nothing to do with it, and the two
+                Discards behaved differently (each remounted only its own panel's
+                inputs). A draft commits as one dry run, one confirmation and one
+                write, so a button that claimed to apply "this section" would be
+                describing something the wire cannot do. The header is where the
+                `modified` badge already says a draft exists; acting on it belongs
+                beside that word. Which controls carry the edits is marked on the
+                controls themselves. */}
+            <button
+              type="button"
+              className="gbx-choice gbx-toolbar-draft"
+              data-draft-apply
+              title="Apply the draft edits to the description"
+              onClick={() => void this.edits.applyDraft()}
+            >
+              Apply changes
+            </button>
+            <button
+              type="button"
+              className="gbx-choice"
+              data-draft-discard
+              title="Drop the draft edits and restore the saved values"
+              onClick={() => this.edits.discardDraft()}
+            >
+              Discard
+            </button>
+          </>
         )}
         {this.renderStatus(state.status, product?.lock_hash !== undefined)}
       </>

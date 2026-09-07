@@ -38,11 +38,35 @@
 .gbx-pending .gbx-row-name { opacity: 0.65; }
 .gbx-waiting { opacity: 0.45; font-style: italic; font-size: 0.9em; }
 
-.gbx-id { opacity: 0.55; font-family: var(--theia-code-font-family); font-size: 0.85em; }
+/* A technical id is secondary, not faint. `opacity: 0.55` on `#DCE6F4` over
+   `#001838` at `0.85em` measured below 4.5:1, and this is the class that carries
+   gear ids, diagnostic codes and product ids -- the strings a person copies. The
+   theme has a colour for exactly this role, so the dimming is a *hue* now rather
+   than a transparency, and it stops compounding with the opacity of whatever
+   contains it. */
+.gbx-id {
+  color: var(--theia-descriptionForeground, var(--theia-foreground));
+  font-family: var(--theia-code-font-family); font-size: 0.85em;
+}
+/* One badge style meant one visual weight for a runtime capability, a file
+   action, a lock state and a process kind -- 34 render sites saying different
+   kinds of thing in identical clothes. Three variants now, still only from
+   `--theia-*` values, so the stylesheet's first rule ("no colours of our own")
+   holds:
+     - the default is *identity* (a capability, a transport, a process);
+     - `-count` is a tally, which should recede rather than compete with the
+       button beside it;
+     - `-warn` (`.gbx-downgraded`, below) is the one that must not blend in.
+   Semantics still come from the `data-*` attributes; these decide weight only. */
 .gbx-badge {
   font-size: 0.75em; padding: 0 5px; border-radius: 8px;
   border: 1px solid var(--theia-badge-background);
   color: var(--theia-badge-foreground); background: var(--theia-badge-background);
+}
+.gbx-badge-count {
+  background: transparent;
+  border-color: var(--theia-editorGroup-border);
+  color: var(--theia-foreground);
 }
 
 .gbx-detail { padding: 4px 2px; }
@@ -354,6 +378,13 @@
    point of merging the two panels that used to answer separately. Wraps to one
    column when the panel is narrow, which is what `flex-wrap` with a min-width
    does without a media query. */
+/* One column, because this is the right panel now.
+   Two columns were right for the bottom strip -- wide and short, where stacking
+   put "why" below the fold. A side panel is the opposite shape, so the sections
+   stack and the panel scrolls, and every control inside has to survive a narrow
+   measure: that is what the `.gbx-kv` and `.gbx-config-field` rules below do.
+   `flex-wrap` with a 380px basis is kept rather than replaced by a media query,
+   so a person who drags the panel wide enough gets the two columns back. */
 .gbx-inspector {
   display: flex; flex-wrap: wrap; gap: 4px 24px;
   align-items: flex-start;
@@ -362,6 +393,23 @@
 .gbx-inspector > .gbx-detail,
 .gbx-inspector > .gbx-explain {
   flex: 1 1 380px; min-width: 0;
+}
+/* In a side panel the label/value grid has to give up its columns, or the value
+   gets a few characters of width and every string wraps to five lines. */
+.theia-side-panel .gbx-inspector .gbx-kv {
+  display: block;
+}
+.theia-side-panel .gbx-inspector .gbx-kv > span:first-child {
+  display: block; margin-bottom: 1px; text-align: left;
+}
+.theia-side-panel .gbx-inspector .gbx-config-field {
+  display: block;
+}
+.theia-side-panel .gbx-inspector .gbx-config-row {
+  flex-wrap: wrap;
+}
+.theia-side-panel .gbx-inspector input:not([type="checkbox"]) {
+  min-width: 0; width: 100%; box-sizing: border-box;
 }
 /* No rule between the columns, and that is a decision. A border would have to
    disappear when the panel wraps to one column -- where a vertical line at the
@@ -424,6 +472,12 @@
   background: var(--theia-editor-background);
   user-select: text;
 }
+
+/* Two halves of the lock, and a strip to choose between them. The summary is
+   first because the canonical text is several hundred lines; both are the same
+   resolution, so this is a reading choice rather than a data one. */
+.gbx-lock-tabs { display: flex; gap: 6px; margin: 10px 0 6px; }
+.gbx-lock-summary { padding: 2px 0; }
 
 /* --- Catalogue: folding and filtering ------------------------------------ */
 
@@ -519,6 +573,12 @@
   border-bottom: 1px solid var(--theia-editorGroup-border);
 }
 .gbx-generate-counts { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+/* "Up to date" is not a warning. Every other reason in this list is something
+   standing between the person and a write they asked for; this one is the write
+   already having happened, so it must not be the colour of a problem. */
+.gbx-generate-blocks li[data-apply-block="nothing"] {
+  color: var(--theia-foreground);
+}
 .gbx-generate-blocks {
   margin: 6px 0 0; padding-left: 20px;
   color: var(--theia-editorWarning-foreground);
@@ -606,6 +666,12 @@
 }
 .gbx-toolbar-empty { opacity: 0.6; font-style: italic; }
 .gbx-toolbar-status { flex: 0 0 auto; }
+/* Apply carries the weight of the pair, because Discard is the safe one and the
+   asymmetry should be visible before the click rather than after it. */
+.gbx-toolbar-draft {
+  border-color: var(--theia-focusBorder);
+  font-weight: 600;
+}
 .gbx-toolbar-status[data-status="working"] { opacity: 0.7; }
 .gbx-toolbar .gbx-choice {
   display: inline-flex;
@@ -651,6 +717,17 @@
 }
 .gbx-start-link:hover { text-decoration: underline; }
 .gbx-start-section { margin-top: 28px; }
+/* The Continue card is the one thing on this screen that resumes work rather
+   than starting it, so it is a block with two lines instead of a button in the
+   row -- a person returning to a product should not have to read five buttons to
+   find the one they want. */
+.gbx-start-continue {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: 100%; text-align: left; padding: 10px 14px;
+}
+.gbx-start-continue .gbx-start-item-path {
+  opacity: 0.8; font-size: 0.85em;
+}
 .gbx-start-items li { display: flex; align-items: center; gap: 8px; }
 .gbx-start-clone {
   flex: 0 0 auto;
@@ -689,6 +766,15 @@
   color: var(--theia-input-foreground, var(--theia-foreground));
 }
 .gbx-create-sources label { flex-direction: row; align-items: center; gap: 8px; }
+/* Whose product this gear is for. A banner rather than a line of prose in the
+   form, because it changes what the whole screen does: the gear is declared as a
+   source of that product and added to it. */
+.gbx-create-banner {
+  margin: 0 0 10px; padding: 6px 10px; line-height: 1.4;
+  border-left: 2px solid var(--theia-focusBorder);
+  background: var(--theia-editorWidget-background);
+}
+
 .gbx-create-sources-note { margin: 0; opacity: 0.75; font-size: 0.9em; }
 .gbx-create-actions { display: flex; gap: 8px; margin-top: 8px; }
 .gbx-create-preview {
@@ -742,8 +828,13 @@
   outline: 1px solid var(--theia-focusBorder, var(--theia-contrastActiveBorder, #0e639c));
   outline-offset: 1px;
 }
-.gbx-draft-actions {
-  display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;
+/* `.gbx-draft-actions` lived here until 2026-09-07, when the Apply/Discard pair
+   moved into the header: one draft, one pair. What replaces it is a marker on the
+   controls that carry the unapplied edits, since a single badge in the header
+   cannot say *where* they are. */
+[data-field-modified="true"] {
+  border-color: var(--theia-focusBorder);
+  background: var(--theia-editorWidget-background);
 }
 .gbx-sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -804,6 +895,70 @@
 .gbx-add-gear-section-body { padding: 4px 12px 12px; }
 .gbx-add-gear-actions { display: flex; gap: 8px; margin-top: 16px; align-items: center; flex-wrap: wrap; }
 .gbx-add-gear-note { opacity: 0.8; line-height: 1.45; margin: 0; }
+
+/* Two weights of inline message, because they are two different statements.
+   An error is a refusal -- the control it sits above will not accept what is in
+   it -- and a note is the resolver's opinion about a value that will be written
+   either way. Rendered above the row rather than after it, so the sentence is
+   read before the button is reached for. */
+/* Feature checkboxes: a wrapping row of monospace names, because a Cargo
+   feature is an identifier and reads as one. */
+/* A shape while the answer is on its way. Three rows because a scaffold writes
+   three files; a pane that reserves the space it will need does not jump when the
+   plan lands, and a jump is what makes a fast operation feel unreliable. No
+   animation: this resolves in a few hundred milliseconds, and a pulse that
+   completes half a cycle reads as a glitch. */
+/* Provenance, in three weights. `explicit` is the only one a person can act on,
+   so it is the only one that carries the foreground colour; `derived` borrows the
+   warning hue because overriding it describes a product that was not resolved;
+   `default` recedes, because it is the absence of a decision. */
+/* The product's stages. The same tab idiom as the Graph's view switch -- one
+   application, one way to switch between views of the same object -- with the
+   Generate link set apart, because it leads out of this panel rather than
+   changing what is in it. */
+.gbx-product-nav {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin: 8px 0 6px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--theia-editorGroup-border);
+}
+.gbx-product-nav .gbx-start-link { margin-left: auto; }
+.gbx-validation { padding: 2px 0; }
+
+.gbx-provenance { font-size: 0.75em; margin-left: 6px; }
+.gbx-provenance-explicit { color: var(--theia-foreground); }
+.gbx-provenance-derived { color: var(--theia-editorWarning-foreground); }
+.gbx-provenance-default { color: var(--theia-descriptionForeground, var(--theia-foreground)); }
+.gbx-config-reset {
+  font: inherit; font-size: 0.75em; cursor: pointer; margin-left: 6px;
+  padding: 0 5px; border-radius: 3px;
+  border: 1px solid var(--theia-editorGroup-border);
+  background: transparent; color: var(--theia-textLink-foreground);
+}
+.gbx-config-reset:hover { background: var(--theia-list-hoverBackground); }
+
+.gbx-skeleton { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
+.gbx-skeleton-row {
+  height: 1.1em; border-radius: 3px;
+  background: var(--theia-editorWidget-background);
+  border: 1px solid var(--theia-editorGroup-border);
+}
+.gbx-skeleton-row:nth-child(2) { width: 80%; }
+.gbx-skeleton-row:nth-child(3) { width: 60%; }
+
+.gbx-feature-choices { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.gbx-feature-choice { display: inline-flex; align-items: center; gap: 5px; }
+.gbx-advanced > summary { cursor: pointer; opacity: 0.75; font-size: 0.9em; }
+.gbx-advanced[open] > summary { margin-bottom: 6px; }
+
+.gbx-inline-error {
+  color: var(--theia-editorError-foreground);
+  font-size: 0.9em; line-height: 1.4; margin: 4px 0 0;
+}
+.gbx-inline-note {
+  color: var(--theia-editorWarning-foreground);
+  font-size: 0.9em; line-height: 1.4; margin: 4px 0 0;
+}
+[aria-invalid="true"] { border-color: var(--theia-editorError-foreground); }
 
 /* Typed config controls. One row per projected field: name, control, and the
    field's own doc comment as the only prose an operator gets. */

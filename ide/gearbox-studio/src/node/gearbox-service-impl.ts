@@ -23,6 +23,7 @@ import type { EditGearResult } from "../common/generated/EditGearResult";
 import type { GenerateApplyResult } from "../common/generated/GenerateApplyResult";
 import type { GenerateFileResult } from "../common/generated/GenerateFileResult";
 import type { GeneratePlanResult } from "../common/generated/GeneratePlanResult";
+import type { GearKind } from "../common/generated/GearKind";
 import type { InitializeResult } from "../common/generated/InitializeResult";
 import type { LockResult } from "../common/generated/LockResult";
 import type { LogParams } from "../common/generated/LogParams";
@@ -380,6 +381,7 @@ export class GearboxServiceImpl implements GearboxService {
     id: string;
     name: string;
     version: string;
+    kind?: GearKind;
     destinationDir: string;
     dryRun: boolean;
   }): Promise<GeneratePlanResult> {
@@ -387,6 +389,10 @@ export class GearboxServiceImpl implements GearboxService {
       id: params.id,
       name: params.name,
       version: params.version,
+      // Omitted rather than defaulted here: `ScaffoldGearParams.kind` has a
+      // serde default, so the engine decides what "unspecified" means and this
+      // client does not hold a second copy of that answer.
+      ...(params.kind === undefined ? {} : { kind: params.kind }),
       destination_dir: params.destinationDir,
       dry_run: params.dryRun,
     });

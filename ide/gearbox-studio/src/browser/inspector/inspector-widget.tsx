@@ -33,10 +33,11 @@ import type { Location } from "../../common/generated/Location";
 import type { ProvenanceEdge } from "../../common/generated/ProvenanceEdge";
 import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
 import type { Row } from "../../common/protocol";
+import { configKeyProblem, unknownConfigKeyNote } from "../../common/config-keys";
 import { CatalogueStore } from "../catalogue-store";
 import { Focus, ProductStore } from "../product-store";
 import { ProductEditService } from "../product-edit-service";
-import { ConfigFields } from "../add-gear/config-fields";
+import { ConfigFields, type ConfigProvenance } from "../add-gear/config-fields";
 import { RevealLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
 import { Selection, SelectionService } from "../shell/selection-service";
@@ -148,8 +149,6 @@ export class InspectorWidget extends ReactWidget {
   protected newConfigKey = "";
   protected newConfigValue = "";
   protected newFeature = "";
-  /** Bumped when Discard must remount inputs from the saved intent. */
-  protected editEpoch = 0;
 
   @postConstruct()
   protected init(): void {
@@ -168,6 +167,12 @@ export class InspectorWidget extends ReactWidget {
     this.toDispose.push(this.products.onChanged(() => this.update()));
     this.toDispose.push(
       this.edits.onDraftChanged(() => {
+        // A draft dropped from the header leaves this panel's half-typed new-key
+        // boxes behind, and they are not part of the draft, so nothing else can
+        // clear them.
+        if (!this.edits.hasDraft()) {
+          this.clearScratch();
+        }
         this.update();
       }),
     );
@@ -280,7 +285,14 @@ export class InspectorWidget extends ReactWidget {
       Object.entries(config).filter(([key]) => !typedKeys.has(key)),
     );
     const features = this.edits.draftFeatures(gearId, picked.features ?? []);
-    const dirty = this.edits.hasDraft();
+    const available = descriptor.available_features ?? [];
+    const chosenFeatures = new Set(features);
+    const extraFeatures = features.filter((feature) => !available.includes(feature));
+    const keyProblem = configKeyProblem(this.newConfigKey);
+    const keyNote =
+      this.newConfigKey === ""
+        ? undefined
+        : unknownConfigKeyNote(this.newConfigKey.trim(), descriptor.config_schema);
 
     return (
       <div className="gbx-product-edit" data-gear-config={gearId}>
@@ -290,11 +302,17 @@ export class InspectorWidget extends ReactWidget {
             fields={fields}
             values={this.edits.draftConfigValues(gearId, picked.config ?? {})}
             onChange={(key, value) => this.queueConfig(gearId, key, value)}
+            provenanceOf={(key) => this.provenanceOf(gearId, key, picked.config ?? {})}
+            isDrafted={(key) => this.edits.isDraftedConfig(gearId, key)}
+            // A reset is a `set_config` with no value, which is how the wire
+            // spells "remove this key" -- so it queues into the same draft and
+            // waits for the same Apply as typing does.
+            onReset={(key) => this.queueConfig(gearId, key, undefined)}
           />
         )}
         <div className="gbx-kv">
           <span>config</span>
-          <span className="gbx-config-list" key={`cfg-${gearId}-${this.editEpoch}`}>
+          <span className="gbx-config-list" key={`cfg-${gearId}-${this.edits.epoch}`}>
             {Object.keys(untyped).length === 0 && "—"}
             {Object.entries(untyped).map(([key, value]) => (
               <label key={key} className="gbx-config-row" data-config-key={key}>
@@ -303,6 +321,9 @@ export class InspectorWidget extends ReactWidget {
                   value={value}
                   aria-label={key}
                   data-config-edit={key}
+                  data-field-modified={
+                    this.edits.isDraftedConfig(gearId, key) ? "true" : undefined
+                  }
                   onChange={(e) => this.queueConfig(gearId, key, e.target.value)}
                 />
                 <button
@@ -319,16 +340,30 @@ export class InspectorWidget extends ReactWidget {
               type="button"
               className="gbx-choice"
               data-add-config={gearId}
+              disabled={this.newConfigKey === "" || keyProblem !== undefined}
               onClick={() => this.queueNewConfig(gearId)}
             >
               Add key
             </button>
+            {keyProblem !== undefined && this.newConfigKey !== "" && (
+              <div className="gbx-inline-error" role="alert" data-config-key-error>
+                {keyProblem}
+              </div>
+            )}
+            {keyNote !== undefined && (
+              <div className="gbx-inline-note" data-config-key-note>
+                {keyNote}
+              </div>
+            )}
             <label className="gbx-config-row">
               <span className="gbx-sr-only">new config key</span>
               <input
                 data-config-new-key
                 placeholder="key"
                 aria-label="new config key"
+                aria-invalid={
+                  keyProblem !== undefined && this.newConfigKey !== "" ? true : undefined
+                }
                 value={this.newConfigKey}
                 onChange={(e) => {
                   this.newConfigKey = e.target.value;
@@ -351,10 +386,48 @@ export class InspectorWidget extends ReactWidget {
         </div>
         <div className="gbx-kv">
           <span>features</span>
-          <span className="gbx-features-list">
-            {features.length === 0 && "—"}
-            {features.map((feature) => (
-              <span className="gbx-badge" key={feature} data-feature={feature}>
+          {/* The crate's own `[features]` table, as checkboxes. One renderer's
+              worth of duplication with the Add Gear panel is deliberate for now:
+              the two carry different state (a draft here, a staged proposal
+              there), and a control that disagreed with itself between them would
+              be worse than two that agree by construction. */}
+          <span className="gbx-features-list" key={`features-${gearId}-${this.edits.epoch}`}>
+            {available.length === 0 && (
+              <span className="gbx-empty" data-features-none>
+                this crate declares no Cargo features
+              </span>
+            )}
+            {available.length > 0 && (
+              <span className="gbx-feature-choices">
+                {available.map((feature) => (
+                  <label
+                    className="gbx-feature-choice"
+                    key={feature}
+                    data-feature-option={feature}
+                    data-field-modified={
+                      this.edits.isDraftedFeatures(gearId) ? "true" : undefined
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      checked={chosenFeatures.has(feature)}
+                      aria-label={feature}
+                      onChange={(e) =>
+                        this.queueFeatures(
+                          gearId,
+                          e.target.checked
+                            ? [...features, feature]
+                            : features.filter((f) => f !== feature),
+                        )
+                      }
+                    />
+                    <code>{feature}</code>
+                  </label>
+                ))}
+              </span>
+            )}
+            {extraFeatures.map((feature) => (
+              <span className="gbx-badge gbx-downgraded" key={feature} data-feature={feature}>
                 {feature}
                 <button
                   type="button"
@@ -371,55 +444,73 @@ export class InspectorWidget extends ReactWidget {
                 </button>
               </span>
             ))}
-            <label className="gbx-config-row" data-feature-new>
-              <span className="gbx-sr-only">new feature</span>
-              <input
-                placeholder="feature"
-                aria-label="new feature"
-                value={this.newFeature}
-                onChange={(e) => {
-                  this.newFeature = e.target.value;
-                  this.update();
-                }}
-              />
-              <button
-                type="button"
-                className="gbx-choice"
-                data-add-feature={gearId}
-                onClick={() => this.queueNewFeature(gearId, features)}
-              >
-                Add feature
-              </button>
-            </label>
+            <details className="gbx-advanced">
+              <summary>Advanced: a feature name not in the table</summary>
+              <label className="gbx-config-row" data-feature-new>
+                <span className="gbx-sr-only">new feature</span>
+                <input
+                  placeholder="feature"
+                  aria-label="new feature"
+                  value={this.newFeature}
+                  onChange={(e) => {
+                    this.newFeature = e.target.value;
+                    this.update();
+                  }}
+                />
+                <button
+                  type="button"
+                  className="gbx-choice"
+                  data-add-feature={gearId}
+                  disabled={this.newFeature.trim() === ""}
+                  onClick={() => this.queueNewFeature(gearId, features)}
+                >
+                  Add feature
+                </button>
+              </label>
+            </details>
           </span>
         </div>
-        {dirty && (
-          <div className="gbx-draft-actions">
-            <button
-              type="button"
-              className="gbx-choice"
-              data-draft-apply
-              onClick={() => void this.edits.applyDraft()}
-            >
-              Apply changes
-            </button>
-            <button
-              type="button"
-              className="gbx-choice"
-              data-draft-discard
-              onClick={() => this.discardDraft()}
-            >
-              Discard
-            </button>
-          </div>
-        )}
       </div>
     );
   }
 
+  /**
+   * Where the value in a control came from.
+   *
+   * Derived from what is already on screen, with no new wire field: the intent
+   * says what the *description* sets, the resolution says what the product will
+   * run with, and the difference between them is what the resolver decided.
+   * `GBX0114` is the engine's opinion about the overlap -- setting a key an
+   * endpoint derives -- and this is the same fact rendered before the warning.
+   */
+  protected provenanceOf(
+    gearId: string,
+    key: string,
+    declared: Readonly<Record<string, unknown>>,
+  ): ConfigProvenance {
+    // The draft wins over the file, because it is what this product will say once
+    // Apply runs: a control just typed into must not read as "the gear's
+    // default", and a key a reset has queued for removal must not still read as
+    // "set by this product".
+    const drafted = this.edits.draftConfigState(gearId, key);
+    if (drafted === "set") return "explicit";
+    // Reset queues removal: the value on disk (and therefore in the last
+    // resolution) is about to go, so do not label it "derived by the resolver"
+    // just because the resolved product still holds the old key.
+    if (drafted === "removed") return "default";
+    if (drafted === undefined && Object.prototype.hasOwnProperty.call(declared, key)) {
+      return "explicit";
+    }
+    const resolved = this.products.current.resolution?.product?.gears?.[gearId]?.config ?? {};
+    if (Object.prototype.hasOwnProperty.call(resolved, key)) return "derived";
+    return "default";
+  }
+
   protected queueNewConfig(gear: string): void {
     const key = this.newConfigKey.trim();
-    if (key === "") return;
+    // The same rule the button is disabled by, restated at the act: a keyboard
+    // Enter, a test, or a future caller does not go through the button.
+    if (key === "" || configKeyProblem(key) !== undefined) return;
     const value = this.newConfigValue;
     if (!this.queueConfig(gear, key, value === "" ? undefined : value)) return;
     this.newConfigKey = "";
@@ -451,13 +542,18 @@ export class InspectorWidget extends ReactWidget {
     this.queueFeatures(gear, [...current, feature]);
   }
 
-  protected discardDraft(): void {
-    this.edits.discardDraft();
-    this.editEpoch++;
+  /**
+   * The scratch boxes this panel owns, cleared when the draft goes.
+   *
+   * The draft itself is dropped from the header now, so this reacts to
+   * `onDraftChanged` rather than being the thing that discards: a half-typed new
+   * key is this widget's state and nobody else can clear it, but it should not
+   * survive a Discard the person asked for somewhere else.
+   */
+  protected clearScratch(): void {
     this.newConfigKey = "";
     this.newConfigValue = "";
     this.newFeature = "";
-    this.update();
   }
 
   protected renderProjected(gear: GearDescriptor): React.ReactNode {

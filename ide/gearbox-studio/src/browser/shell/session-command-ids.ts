@@ -25,7 +25,7 @@ export const CLOSE_PRODUCT = {
 
 export const NEW_GEAR = {
   id: "gearbox.gear.new",
-  label: "Gearbox: New Gear",
+  label: "Gearbox: New Gear…",
 };
 
 export const OPEN_GEAR = {
@@ -49,4 +49,48 @@ export const BROWSE_CATALOGUE = {
   id: "gearbox.catalogue.browse",
   label: "Gearbox: Browse Catalogue",
   shortTitle: "Browse Catalogue",
+};
+
+/**
+ * Show the Conflicts screen, for a caller that means *show* it.
+ *
+ * `gearbox.conflicts.toggle` is what `AbstractViewContribution` registers, and a
+ * toggle closes an open view. That is right for a View-menu entry and wrong for
+ * the Product view's diagnostics summary: clicking "2 conflicts" to make them
+ * disappear is the same defect `BROWSE_CATALOGUE` exists to avoid, and it is
+ * worse here, because the thing being hidden is the reason the line is on screen.
+ */
+/**
+ * Bring the Product workspace forward, for a flow that has just finished with it.
+ *
+ * The wizards end by opening a product (create) or editing one (create a gear for
+ * it) and then closing themselves. `ProductViewContribution.mayTakeTheFront`
+ * refuses to steal the front from a Gearbox surface a person navigated to -- that
+ * rule is what keeps a late activation off the Add Gear panel -- so a flow that
+ * *wants* the product in front says so.
+ */
+export const SHOW_PRODUCT = {
+  id: "gearbox.product.show",
+  label: "Gearbox: Show Product",
+  shortTitle: "Product",
+};
+
+export const SHOW_CONFLICTS = {
+  id: "gearbox.conflicts.show",
+  label: "Gearbox: Show Conflicts",
+  shortTitle: "Conflicts",
+};
+
+/**
+ * Show Generate, for a caller that means *show* it.
+ *
+ * Same defect `SHOW_CONFLICTS` exists to avoid: `gearbox.generate.toggle` closes
+ * an open view, and the Product strip's "Generate →" is navigation, not a
+ * toggle. A click that hides the plan because the plan was already open is the
+ * opposite of what the arrow says.
+ */
+export const SHOW_GENERATE = {
+  id: "gearbox.generate.show",
+  label: "Gearbox: Show Generate",
+  shortTitle: "Generate",
 };

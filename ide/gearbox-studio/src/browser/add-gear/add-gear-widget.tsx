@@ -25,6 +25,8 @@ import type { Diagnostic } from "../../common/generated/Diagnostic";
 import type { EditGearResult } from "../../common/generated/EditGearResult";
 import type { GearDescriptor } from "../../common/generated/GearDescriptor";
 import type { ProductEdit } from "../../common/generated/ProductEdit";
+import { configKeyProblem, unknownConfigKeyNote } from "../../common/config-keys";
+import { pluginsByPoint, pointKey, pointsOf } from "../../common/extension-points";
 import { CatalogueStore } from "../catalogue-store";
 import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
@@ -86,6 +88,15 @@ export class AddGearWidget extends ReactWidget {
    * superseded answer describes a product they are no longer proposing.
    */
   protected impactToken = 0;
+  /**
+   * Same race as `impactToken`, for the text preview.
+   *
+   * `refreshImpact` already discarded stale resolutions; `refreshPreview` did not.
+   * Staging while a dry-run is in flight let an older `after` overwrite a newer
+   * one, and Apply trusts the panel -- so the review could disagree with the
+   * batch about to be written.
+   */
+  protected previewToken = 0;
   protected openSections = new Set<string>([
     "overview",
     "compatibility",
@@ -109,6 +120,7 @@ export class AddGearWidget extends ReactWidget {
         if (this.impactTimer !== undefined) clearTimeout(this.impactTimer);
         // Anything already in flight belongs to a panel that is gone.
         this.impactToken += 1;
+        this.previewToken += 1;
       },
     });
   }
@@ -139,6 +151,10 @@ export class AddGearWidget extends ReactWidget {
     ]);
     this.title.label = this.gearId !== undefined ? `Add ${this.gearId}` : AddGearWidget.LABEL;
     void this.refreshPreview();
+    // Explicit, since `refreshPreview` stopped scheduling it: the two halves of
+    // the answer are now driven by one debounce, and opening the panel is the
+    // one path that is not a control change.
+    this.scheduleImpact();
     this.update();
   }
 
@@ -170,15 +186,19 @@ export class AddGearWidget extends ReactWidget {
   protected async refreshPreview(): Promise<void> {
     const gear = this.descriptor();
     if (gear === undefined) {
+      this.previewToken += 1;
       this.preview = undefined;
       this.previewError = undefined;
+      this.previewing = false;
       this.update();
       return;
     }
+    const token = (this.previewToken += 1);
+    const gearId = gear.id;
     this.previewing = true;
-    this.scheduleImpact();
     this.update();
-    const result = await this.edits.previewAddGear(gear.id, gear.source);
+    const result = await this.edits.previewStagedAdd(this.stagedEdits(gear.id, gear.source));
+    if (token !== this.previewToken || this.gearId !== gearId) return;
     this.previewing = false;
     if (result === undefined) {
       this.preview = undefined;
@@ -197,6 +217,7 @@ export class AddGearWidget extends ReactWidget {
     if (this.impactTimer !== undefined) clearTimeout(this.impactTimer);
     this.impactTimer = undefined;
     this.impactToken += 1;
+    this.previewToken += 1;
     this.impact = undefined;
     this.impactDiagnostics = [];
     this.impactError = undefined;
@@ -204,18 +225,31 @@ export class AddGearWidget extends ReactWidget {
   }
 
   /**
-   * Ask again, after the debounce, what the current proposal would do.
+   * Ask again, after the debounce, what the current proposal would do **and**
+   * what it would write.
    *
    * Called from every control that changes the proposal. `plugins` is the one that
    * genuinely moves the closure -- a plugin is itself a gear -- but features and
-   * config go through the same `followUps`, and a section that updated for some
-   * edits and not others would teach the wrong thing about which edits matter.
+   * config go through the same batch, and a section that updated for some edits
+   * and not others would teach the wrong thing about which edits matter.
+   *
+   * Both halves, since the addition and the follow-ups became one batch: the text
+   * in section 7 is now the fold of everything staged, so it goes stale on
+   * exactly the changes the impact does. Two debounces would have let the two
+   * sections disagree about which proposal they were describing.
    */
   protected scheduleImpact(): void {
     if (this.impactTimer !== undefined) clearTimeout(this.impactTimer);
+    // The proposal changed: anything already in flight describes the previous
+    // one. Bump here, not only when the debounced run starts -- otherwise a
+    // dry-run that finishes during the debounce window overwrites with stale
+    // text (and Apply trusts that panel).
+    this.impactToken += 1;
+    this.previewToken += 1;
     this.impactPending = true;
     this.impactTimer = setTimeout(() => {
       this.impactTimer = undefined;
+      void this.refreshPreview();
       void this.refreshImpact();
     }, IMPACT_DEBOUNCE_MS);
   }
@@ -272,6 +306,19 @@ export class AddGearWidget extends ReactWidget {
     return introduced.filter((diagnostic) => diagnostic.severity === "error");
   }
 
+  /**
+   * The whole proposal as one ordered batch, addition first.
+   *
+   * **Order is the point.** Every edit after the first names a gear, and until
+   * the first has been folded onto the text that gear is not in the description
+   * -- which is why the panel used to send the addition separately and could
+   * preview only that. `apply_product_edits` folds these onto the same text in
+   * order, so the batch is both the exact preview and the atomic write.
+   */
+  protected stagedEdits(gearId: string, source: string): ProductEdit[] {
+    return [{ kind: "add_gear", gear: gearId, source }, ...this.followUps(gearId)];
+  }
+
   protected followUps(gearId: string): ProductEdit[] {
     const edits: ProductEdit[] = [];
     if (this.features.length > 0) {
@@ -296,7 +343,7 @@ export class AddGearWidget extends ReactWidget {
     if (gear === undefined || this.applying) return;
     this.applying = true;
     this.update();
-    const ok = await this.edits.commitAddGear(gear.id, gear.source, this.followUps(gear.id));
+    const ok = await this.edits.commitAddGear(gear.id, this.stagedEdits(gear.id, gear.source));
     this.applying = false;
     if (ok) {
       this.close();
@@ -337,7 +384,7 @@ export class AddGearWidget extends ReactWidget {
                   "2. Compatibility",
                   this.renderCompatibility(gear.id),
                 )}
-                {this.renderSection("features", "3. Features", this.renderFeatures())}
+                {this.renderSection("features", "3. Features", this.renderFeatures(gear))}
                 {this.renderSection("config", "4. Configuration", this.renderConfig())}
                 {this.renderSection("plugins", "5. Plugins", this.renderPlugins(gear))}
                 {this.renderSection("changes", "6. What changes", this.renderChanges())}
@@ -426,8 +473,23 @@ export class AddGearWidget extends ReactWidget {
               if (id === "") return;
               this.gearId = id;
               this.title.label = `Add ${id}`;
+              // **Everything staged was staged about the previous gear.** A
+              // feature name belongs to one crate's `[features]` table, a config
+              // key to one struct, and a plugin to one host's extension point --
+              // so carrying them across a change of subject would produce edits
+              // for a gear that never asked for them, and the plugin list could
+              // survive into a host that declares no point at all.
+              this.features = [];
+              this.plugins = [];
+              this.config = [];
+              this.typed.clear();
+              this.newFeature = "";
+              this.newPlugin = "";
+              this.newConfigKey = "";
+              this.newConfigValue = "";
               this.resetImpact();
               void this.refreshPreview();
+              this.scheduleImpact();
               this.update();
             }}
           >
@@ -506,12 +568,68 @@ export class AddGearWidget extends ReactWidget {
     );
   }
 
-  protected renderFeatures(): React.ReactNode {
+  /**
+   * The crate's own `[features]` table, as checkboxes, plus a way in for a name
+   * the scan could not see.
+   *
+   * `use_gear(..., features = [...])` writes **Cargo** feature names. Nothing
+   * projected the set of real ones, so this was a text box -- where a typo
+   * becomes a feature that does not exist and a build failure two steps later,
+   * and where "No features yet" could not be told from "this gear has none".
+   * `GearDescriptor.available_features` answers both.
+   *
+   * **The list is uncurated, and the label says so.** `types-registry`'s only
+   * feature is `integration`, which gates tests needing a Docker daemon; which
+   * features an integrator should be offered is a declaration nobody has written
+   * (ADR `cpt-gearbox-adr-create-product`, amendment 2026-09-07). Presenting the
+   * projected list as if it were curated would be the drift ADR
+   * `cpt-gearbox-adr-macro-projected-catalogue` exists to prevent.
+   */
+  protected renderFeatures(gear: GearDescriptor): React.ReactNode {
+    const available = gear.available_features ?? [];
+    const chosen = new Set(this.features);
+    // A staged name the crate does not declare: kept and shown, because the scan
+    // reads one manifest and a feature can come from a workspace-level table or
+    // from a rename this projector does not follow. Marked, not hidden.
+    const extra = this.features.filter((feature) => !available.includes(feature));
     return (
       <div className="gbx-features-list" data-add-gear-features>
-        {this.features.length === 0 && <div className="gbx-empty">No features yet.</div>}
-        {this.features.map((feature) => (
-          <span className="gbx-badge" key={feature} data-feature={feature}>
+        {available.length === 0 ? (
+          <div className="gbx-empty" data-add-gear-features-none>
+            This crate declares no Cargo features.
+          </div>
+        ) : (
+          <>
+            <p className="gbx-add-gear-note">
+              Cargo features <code>{gear.package.crate_name}</code> declares. Some may exist for
+              the crate&apos;s own tests rather than for a product.
+            </p>
+            <div className="gbx-feature-choices">
+              {available.map((feature) => (
+                <label
+                  className="gbx-feature-choice"
+                  key={feature}
+                  data-add-gear-feature-option={feature}
+                >
+                  <input
+                    type="checkbox"
+                    checked={chosen.has(feature)}
+                    onChange={(e) => {
+                      this.features = e.target.checked
+                        ? [...this.features, feature]
+                        : this.features.filter((f) => f !== feature);
+                      this.scheduleImpact();
+                      this.update();
+                    }}
+                  />
+                  <code>{feature}</code>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+        {extra.map((feature) => (
+          <span className="gbx-badge gbx-downgraded" key={feature} data-feature={feature}>
             {feature}
             <button
               type="button"
@@ -527,34 +645,41 @@ export class AddGearWidget extends ReactWidget {
             </button>
           </span>
         ))}
-        <label className="gbx-config-row">
-          <span className="gbx-sr-only">new feature</span>
-          <input
-            placeholder="feature"
-            aria-label="new feature"
-            data-add-gear-feature-input
-            value={this.newFeature}
-            onChange={(e) => {
-              this.newFeature = e.target.value;
-              this.update();
-            }}
-          />
-          <button
-            type="button"
-            className="gbx-choice"
-            data-add-gear-feature-add
-            onClick={() => {
-              const feature = this.newFeature.trim();
-              if (feature === "" || this.features.includes(feature)) return;
-              this.features = [...this.features, feature];
-              this.newFeature = "";
-              this.scheduleImpact();
-              this.update();
-            }}
-          >
-            Add feature
-          </button>
-        </label>
+        {/* Advanced, and deliberately last: a name outside the table is either a
+            feature this projector could not see or a mistake, and the two look
+            identical from here. */}
+        <details className="gbx-advanced">
+          <summary>Advanced: a feature name not in the table</summary>
+          <label className="gbx-config-row">
+            <span className="gbx-sr-only">new feature</span>
+            <input
+              placeholder="feature"
+              aria-label="new feature"
+              data-add-gear-feature-input
+              value={this.newFeature}
+              onChange={(e) => {
+                this.newFeature = e.target.value;
+                this.update();
+              }}
+            />
+            <button
+              type="button"
+              className="gbx-choice"
+              data-add-gear-feature-add
+              disabled={this.newFeature.trim() === ""}
+              onClick={() => {
+                const feature = this.newFeature.trim();
+                if (feature === "" || this.features.includes(feature)) return;
+                this.features = [...this.features, feature];
+                this.newFeature = "";
+                this.scheduleImpact();
+                this.update();
+              }}
+            >
+              Add feature
+            </button>
+          </label>
+        </details>
       </div>
     );
   }
@@ -563,7 +688,13 @@ export class AddGearWidget extends ReactWidget {
     // The schema's fields as typed controls, then the untyped rows for anything
     // it does not cover -- a curated `exposes` is a subset, so a key outside it
     // may still be one the gear reads.
-    const fields = this.descriptor()?.config_schema?.fields ?? [];
+    const schema = this.descriptor()?.config_schema;
+    const fields = schema?.fields ?? [];
+    const keyProblem = configKeyProblem(this.newConfigKey);
+    const keyNote =
+      this.newConfigKey === ""
+        ? undefined
+        : unknownConfigKeyNote(this.newConfigKey.trim(), schema);
     return (
       <div className="gbx-config-list" data-add-gear-config>
         {fields.length > 0 && (
@@ -623,12 +754,23 @@ export class AddGearWidget extends ReactWidget {
             </button>
           </label>
         ))}
+        {keyProblem !== undefined && this.newConfigKey !== "" && (
+          <div className="gbx-inline-error" role="alert" data-config-key-error>
+            {keyProblem}
+          </div>
+        )}
+        {keyNote !== undefined && (
+          <div className="gbx-inline-note" data-config-key-note>
+            {keyNote}
+          </div>
+        )}
         <label className="gbx-config-row">
           <span className="gbx-sr-only">new config key</span>
           <input
             placeholder="key"
             aria-label="new config key"
             data-add-gear-config-key
+            aria-invalid={keyProblem !== undefined && this.newConfigKey !== "" ? true : undefined}
             value={this.newConfigKey}
             onChange={(e) => {
               this.newConfigKey = e.target.value;
@@ -650,9 +792,14 @@ export class AddGearWidget extends ReactWidget {
             type="button"
             className="gbx-choice"
             data-add-gear-config-add
+            // Disabled on a key that could not be a field, rather than accepted
+            // and reported after a resolve. `bad key = ...` used to write
+            // cleanly, because a config key is a quoted dict key in the
+            // description -- see `common/config-keys.ts`.
+            disabled={this.newConfigKey === "" || keyProblem !== undefined}
             onClick={() => {
               const key = this.newConfigKey.trim();
-              if (key === "") return;
+              if (key === "" || configKeyProblem(key) !== undefined) return;
               this.config = [...this.config, { key, value: this.newConfigValue }];
               this.newConfigKey = "";
               this.newConfigValue = "";
@@ -667,13 +814,30 @@ export class AddGearWidget extends ReactWidget {
     );
   }
 
+  /**
+   * The plugins this host can actually take, grouped by the point they fill.
+   *
+   * **Unfiltered, this section offered a semantically impossible edit.** Every
+   * gear in the catalogue that fills *any* point was in the list, so
+   * `types-registry` -- three lines under the sentence "Extension points: none
+   * declared." -- could be given `oidc-authn-plugin`, and section 6 then reported
+   * it joining the closure as a "plugin of types-registry". Neither side refused
+   * it: `set_gear_plugins` writes the list it is given, and the engine's check
+   * asks whether *some* selected gear expects the point rather than whether this
+   * host does (GBX0518 is the answer to that half).
+   *
+   * A choice that cannot be right is not offered here at all, rather than offered
+   * and then reported as an error: this is a configurator, and the eCos lesson
+   * the Conflicts screen already follows is that a tool which proposes states it
+   * will later refuse teaches people to distrust it.
+   */
   protected renderPlugins(gear: GearDescriptor): React.ReactNode {
-    const points = gear.extension_points ?? [];
-    const candidates = this.catalogue.current.rows
+    const points = pointsOf(gear);
+    const rows = this.catalogue.current.rows
       .filter((row): row is { kind: "projected"; gear: GearDescriptor } => row.kind === "projected")
-      .map((row) => row.gear)
-      .filter((candidate) => (candidate.fills ?? undefined) !== undefined)
-      .sort((a, b) => a.id.localeCompare(b.id));
+      .map((row) => row.gear);
+    const groups = pluginsByPoint(gear, rows);
+    const candidates = groups.flatMap((group) => group.plugins);
     return (
       <div className="gbx-features-list" data-add-gear-plugins>
         <p className="gbx-add-gear-note">
@@ -689,7 +853,14 @@ export class AddGearWidget extends ReactWidget {
             {(gear.config_schema.fields ?? []).length === 1 ? "" : "s"}.
           </p>
         )}
-        {this.plugins.length === 0 && <div className="gbx-empty">No plugins selected.</div>}
+        {points.length === 0 && (
+          <div className="gbx-empty" data-add-gear-plugins-none>
+            This gear declares no extension point, so there is nothing to plug into it.
+          </div>
+        )}
+        {points.length > 0 && this.plugins.length === 0 && (
+          <div className="gbx-empty">None selected yet.</div>
+        )}
         {this.plugins.map((plugin) => (
           <span className="gbx-badge" key={plugin} data-add-gear-plugin={plugin}>
             {plugin}
@@ -707,6 +878,13 @@ export class AddGearWidget extends ReactWidget {
             </button>
           </span>
         ))}
+        {points.length > 0 && candidates.length === 0 && (
+          <div className="gbx-empty" data-add-gear-plugins-unfilled>
+            Nothing in the catalogue fills{" "}
+            {points.map((point) => point.trait_ident).join(" or ")}.
+          </div>
+        )}
+        {points.length > 0 && candidates.length > 0 && (
         <label className="gbx-config-row">
           <select
             data-add-gear-plugin-pick
@@ -717,10 +895,19 @@ export class AddGearWidget extends ReactWidget {
             }}
           >
             <option value="">Select a plugin…</option>
-            {candidates.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.display_name} ({candidate.id})
-              </option>
+            {/* Grouped when the host declares several points -- `mini-chat`
+                declares an audit point and a model-policy point, and a flat list
+                would leave the reader to work out which of its plugins goes
+                where. `optgroup` rather than a prefix in the label, so the
+                grouping survives a screen reader. */}
+            {groups.map((group) => (
+              <optgroup key={pointKey(group.point)} label={group.point.trait_ident}>
+                {group.plugins.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.display_name} ({candidate.id})
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
           <button
@@ -739,6 +926,7 @@ export class AddGearWidget extends ReactWidget {
             Add plugin
           </button>
         </label>
+        )}
       </div>
     );
   }

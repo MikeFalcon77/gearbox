@@ -87,6 +87,7 @@ export class GraphWidget extends ReactWidget {
         <div className="gbx-view-switch" role="tablist" aria-label="Graph view">
           {VIEWS.map((spec) => (
             <button
+              type="button"
               key={spec.id}
               className={`gbx-view-tab ${this.view === spec.id ? "gbx-view-tab-on" : ""}`}
               data-view={spec.id}
