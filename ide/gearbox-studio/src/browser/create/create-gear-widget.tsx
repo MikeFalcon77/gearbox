@@ -21,6 +21,7 @@ import type { GearKind } from "../../common/generated/GearKind";
 import type { PluginScaffold } from "../../common/generated/PluginScaffold";
 import type { ProductEdit } from "../../common/generated/ProductEdit";
 import { placeNewGear, type HostStanding } from "./gear-edits";
+import { relativePath, relativeTo } from "./paths";
 import type { ScaffoldGearResult } from "../../common/generated/ScaffoldGearResult";
 import { pointsOf } from "../../common/extension-points";
 import { type Row } from "../../common/protocol";
@@ -794,62 +795,6 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
  * Hand-rolled because the browser has no `path`, and the inputs are POSIX
  * absolute paths -- the same reason `resolveFrom` in `ProductSessionService` is.
  */
-/**
- * The path from one directory to another, `..` segments included.
- *
- * **Unlike [`relativeTo`], which refuses to leave its base.** That one answers
- * "is this inside the product's folder", and its `undefined` means "no, and that
- * is a refusal". A `cargo(path = ...)` legitimately climbs out -- the corpus
- * writes `../../tenant-resolver-sdk` -- so this one climbs, and the code it
- * replaced assumed a fixed two levels rather than counting.
- *
- * **Both sides are normalised, and that is not defensive.** One of them comes
- * from `CatalogueStore.absolutePath`, which joins with the separator the
- * engine's own root used -- so on Windows it hands back `C:\...` while the
- * destination this panel built is `C:/...`. Comparing those finds no common
- * segment at all, `undefined` comes back, and the locator silently stays a
- * comment: a feature that works on one platform and quietly does not on another.
- *
- * The comparison is case-insensitive for a Windows root for the same reason it
- * is exact elsewhere: `C:` and `c:` are one drive, and `/Users` and `/users` are
- * two directories.
- */
-function relativePath(from: string, to: string): string | undefined {
-  const slashes = (value: string): string => value.replace(/\\/g, "/");
-  const split = (value: string): string[] =>
-    slashes(value)
-      .replace(/\/+$/, "")
-      .split("/")
-      .filter((part) => part !== "" && part !== ".");
-  const a = split(from);
-  const b = split(to);
-  if (a.length === 0 || b.length === 0) return undefined;
-  // A drive letter or a UNC share is the root, and Windows does not distinguish
-  // its case. Everything else is compared exactly.
-  const rooted = /^[A-Za-z]:$/.test(a[0] ?? "") && /^[A-Za-z]:$/.test(b[0] ?? "");
-  const same = (x: string, y: string, index: number): boolean =>
-    rooted && index === 0 ? x.toLowerCase() === y.toLowerCase() : x === y;
-  let shared = 0;
-  while (shared < a.length && shared < b.length && same(a[shared] ?? "", b[shared] ?? "", shared)) {
-    shared += 1;
-  }
-  // No common root at all means two different volumes, and there is no relative
-  // path between them to write.
-  if (shared === 0) return undefined;
-  const parts = [...new Array<string>(a.length - shared).fill(".."), ...b.slice(shared)];
-  return parts.length === 0 ? "." : parts.join("/");
-}
-
-function relativeTo(descriptionPath: string, to: string): string | undefined {
-  const directory = descriptionPath.replace(/\/[^/]+$/, "");
-  const normalise = (value: string): string => value.replace(/\/+$/, "");
-  const base = normalise(directory);
-  const target = normalise(to);
-  if (target === base) return ".";
-  if (!target.startsWith(`${base}/`)) return undefined;
-  return target.slice(base.length + 1);
-}
-
 /**
  * A source id for a folder: its last segment, kebab-cased.
  *

@@ -15,7 +15,9 @@
 
 import { CatalogueStore } from "../gearbox-studio/lib/browser/catalogue-store.js";
 import { ProductStore } from "../gearbox-studio/lib/browser/product-store.js";
+import { stagedEditsFor } from "../gearbox-studio/lib/browser/add-gear/staged-edits.js";
 import { placeNewGear } from "../gearbox-studio/lib/browser/create/gear-edits.js";
+import { relativePath } from "../gearbox-studio/lib/browser/create/paths.js";
 import {
   catalogueUsable,
   openedSuccessfully,
@@ -706,6 +708,93 @@ const PLACE = { gearId: "ldap-authn-plugin", sourceId: "gears", at: "gears", isP
     placed.reason.includes("authn-resolver") && placed.reason.includes("Add authn-resolver"),
     "and the refusal names the host and what to do about it",
   );
+}
+
+// ================================================= what Add Gear proposes, as edits
+//
+// **A successful new attach is not reachable through the UI on this corpus**, and
+// that is why this is here: every plugin whose host the product has is already
+// attached to it, and every other host is absent. The browser claim asserts the
+// refusals and the absence of a false impact; this asserts the composition that
+// runs when there is something to attach.
+
+{
+  const ordinary = stagedEditsFor({
+    gearId: "cluster",
+    source: "gears-rust",
+    followUps: [{ kind: "set_features", gear: "cluster", features: ["integration"] }],
+  });
+  check(
+    JSON.stringify(ordinary.map((e) => e.kind)) === JSON.stringify(["add_gear", "set_features"]),
+    `an ordinary gear is selected, with its follow-ups (got ${JSON.stringify(ordinary.map((e) => e.kind))})`,
+  );
+}
+
+{
+  // Undecided host: nothing is proposed. Not "add it and let the resolver
+  // complain" -- a plugin has no top-level form at all.
+  const undecided = stagedEditsFor({ gearId: "oidc-authn-plugin", source: "gears-rust", plugin: {}, followUps: [] });
+  check(undecided.length === 0, "a plugin with no host chosen proposes nothing");
+}
+
+{
+  const attached = stagedEditsFor({
+    gearId: "oidc-authn-plugin",
+    source: "gears-rust",
+    plugin: { host: { id: "authn-resolver", source: "gears-rust", standing: "named" } },
+    // Deliberately non-empty: the follow-ups must be dropped, because
+    // `set_config` and `set_features` are span surgery on a `use_gear` entry and
+    // a plugin has none.
+    followUps: [{ kind: "set_config", gear: "oidc-authn-plugin", key: "issuer", value: "x" }],
+  });
+  check(
+    JSON.stringify(attached) ===
+      JSON.stringify([{ kind: "add_plugin", gear: "authn-resolver", plugin: "oidc-authn-plugin" }]),
+    `a plugin is attached and nothing else (got ${JSON.stringify(attached)})`,
+  );
+}
+
+{
+  const promoted = stagedEditsFor({
+    gearId: "rg-tr-plugin",
+    source: "gears-rust",
+    plugin: { host: { id: "tenant-resolver", source: "gears-rust", standing: "closure-only" } },
+    followUps: [],
+  });
+  check(
+    JSON.stringify(promoted.map((e) => e.kind)) === JSON.stringify(["add_gear", "add_plugin"]),
+    `a closure-only host is promoted first (got ${JSON.stringify(promoted.map((e) => e.kind))})`,
+  );
+  check(
+    promoted[0].gear === "tenant-resolver",
+    "and the promotion is of the host, not of the plugin",
+  );
+}
+
+// ============================================== relating two absolute paths
+//
+// Both wrong cases below were unreachable from the platform this was written on.
+// `absolutePath` joins with the separator the engine's root used, so a Windows
+// session hands back `C:\...` against a `C:/...` destination -- and dropping
+// empty segments lost the volume, so two POSIX paths with different first
+// directories looked like different volumes.
+
+{
+  check(relativePath("/a/b", "/x/y") === "../../x/y", "two POSIX paths share `/`");
+  check(relativePath("/a/b/c", "/a/b/c/d") === "d", "a nested path is reached without climbing");
+  check(relativePath("/a/b", "/a/b") === ".", "the same directory is `.`");
+  check(
+    relativePath("C:/a/b", "C:\\a\\x") === "../x",
+    "a Windows root reaches across separators",
+  );
+  check(relativePath("c:/a", "C:/a/b") === "b", "and a drive letter's case is not a difference");
+  check(relativePath("C:/a", "D:/a") === undefined, "two drives have no path between them");
+  check(relativePath("//srv/share/a", "//srv/share/b") === "../b", "one UNC share relates");
+  check(
+    relativePath("//srv/one/a", "//srv/two/b") === undefined,
+    "two UNC shares have no path between them",
+  );
+  check(relativePath("a/b", "/a/b") === undefined, "a relative input has no base to relate from");
 }
 
 console.log(

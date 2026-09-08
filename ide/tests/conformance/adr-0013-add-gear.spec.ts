@@ -257,10 +257,29 @@ test.describe("Add Gear shows consequences before the write", () => {
       await expect(changes).toContainText("Choose the gear", { timeout: 30_000 });
       await expect(changes).not.toContainText("joins the closure");
 
+      // **What this claim cannot reach, said rather than left implied.** A
+      // *successful* new attach is not observable on this corpus: every plugin
+      // whose host the product has is already attached to it -- both authn
+      // plugins are in `payments-demo`'s description -- and every other host is
+      // absent, so there is no `add_plugin` that changes anything. The
+      // composition is checked in `scripts/store-smoke.mjs` against
+      // `add-gear/staged-edits.js`: attach for a named host, promote-then-attach
+      // for a closure-only one, nothing at all with no host, and the follow-ups
+      // dropped because a plugin has no `use_gear` for them to edit.
+      //
+      // What *is* observable is that the already-attached case agrees with
+      // itself, which is the disagreement this replaced: the serialization says
+      // nothing changes rather than proposing a top-level addition.
+      await host.selectOption("authn-resolver");
+      const written = page.locator('[data-add-gear-section="closure"]');
+      await expect(written).toContainText("already attached to authn-resolver", {
+        timeout: 30_000,
+      });
+      await expect(written).not.toContainText("use_gear");
+
       // **And the host does not survive a change of plugin.** It used to: the
       // next plugin was reported as "already attached to authn-resolver" while
       // the section above correctly said that host declares no point it fills.
-      await host.selectOption("authn-resolver");
       await page.locator("[data-add-gear-change]").click();
       await page.locator("[data-add-gear-select]").selectOption("rg-tr-plugin");
       const blocked = "Nothing in this product declares";
@@ -302,12 +321,41 @@ test.describe("Add Gear shows consequences before the write", () => {
       const name = await field.getAttribute("data-config-field");
       await field.locator("input").fill("1.5");
 
-      // No wait: the point is that both are true in the same tick.
-      await expect(page.locator(`[data-config-field-error="${String(name)}"]`)).toBeVisible();
-      await expect(add).toBeDisabled();
-      // And still disabled once the debounce has been and gone.
+      // **Read once, not with a retrying matcher, and that is the whole claim.**
+      // `expect(...).toBeDisabled()` polls for seconds, so it passes whether the
+      // button goes dead on the keystroke or 400 ms later when the debounce
+      // fires -- which is exactly the window this closes. One snapshot of both
+      // facts, taken immediately, is the only formulation that can tell the two
+      // apart.
+      //
+      // `IMPACT_DEBOUNCE_MS` is 400; the budget here is a fifth of that, and it
+      // exists at all because React flushes its render in a microtask rather
+      // than synchronously with `fill`.
+      const snapshot = async (): Promise<{ error: number; disabled: boolean }> =>
+        page.evaluate((field) => {
+          const button = document.querySelector("[data-add-gear-apply]");
+          return {
+            error: document.querySelectorAll(`[data-config-field-error="${field}"]`).length,
+            disabled: button instanceof HTMLButtonElement ? button.disabled : false,
+          };
+        }, String(name));
+
+      const started = Date.now();
+      let seen = await snapshot();
+      while ((seen.error === 0 || !seen.disabled) && Date.now() - started < 80) {
+        seen = await snapshot();
+      }
+      const elapsed = Date.now() - started;
+      expect(seen.error, "the field did not say what is wrong with the value").toBeGreaterThan(0);
+      expect(seen.disabled, `Add was still live ${String(elapsed)}ms after the keystroke`).toBe(
+        true,
+      );
+      expect(elapsed, "this must be decided well inside the 400ms debounce").toBeLessThan(200);
+
+      // And still disabled once the debounce has been and gone -- the guard is
+      // not something the next preview undoes.
       await page.waitForTimeout(1_200);
-      await expect(add).toBeDisabled();
+      expect((await snapshot()).disabled).toBe(true);
 
       await page.locator("[data-add-gear-cancel]").click();
       await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0);

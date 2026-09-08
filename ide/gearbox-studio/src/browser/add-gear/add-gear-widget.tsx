@@ -35,6 +35,7 @@ import { CatalogueStore } from "../catalogue-store";
 import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
 import { ConfigFields, valueProblem } from "./config-fields";
+import { stagedEditsFor } from "./staged-edits";
 import { type Impact, impactOf, isEmpty } from "./impact";
 import type { ContextIdentity, OwnedWidget } from "../shell/screens";
 
@@ -584,17 +585,16 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
    * the rule ADR-0013 already states.
    */
   protected stagedEdits(gearId: string, source: string): ProductEdit[] {
-    const point = this.fillsPoint();
-    if (point === undefined) {
-      return [{ kind: "add_gear", gear: gearId, source }, ...this.followUps(gearId)];
-    }
+    const isPlugin = this.fillsPoint() !== undefined;
     const host = this.hostsForPlugin().find((entry) => entry.id === this.host);
-    if (host === undefined) return [];
-    const promote: ProductEdit[] =
-      host.standing === "closure-only"
-        ? [{ kind: "add_gear", gear: host.id, source: host.source }]
-        : [];
-    return [...promote, { kind: "add_plugin", gear: host.id, plugin: gearId }];
+    return [
+      ...stagedEditsFor({
+        gearId,
+        source,
+        ...(isPlugin ? { plugin: { ...(host === undefined ? {} : { host }) } } : {}),
+        followUps: this.followUps(gearId),
+      }),
+    ];
   }
 
   protected followUps(gearId: string): ProductEdit[] {

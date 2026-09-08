@@ -719,3 +719,40 @@ Both sides are normalised now, and a drive root is compared case-insensitively
 because `C:` and `c:` are one drive while `/Users` and `/users` are two
 directories.
 
+### Two reliability points, neither of them visible from this machine
+
+**A path is a volume and the segments below it.** `relativePath` split on `/` and
+dropped empty segments, which loses the root -- so two POSIX absolute paths with
+different first directories looked like different volumes and answered "there is
+no path between these" when the answer is `../../x/y`, and two different UNC
+shares looked like they shared `server` and produced a path across volumes. The
+volume is parsed now: `/` for POSIX, `C:` for a drive, `//server/share` for UNC,
+compared case-insensitively for the two Windows forms and exactly for POSIX
+because `C:` and `c:` are one drive while `/Users` and `/users` are two
+directories. `undefined` now means what it says -- different volumes -- rather
+than "no common first directory".
+
+It moved to `create/paths.ts` to be checkable at all, and the nine cases are in
+`store-smoke`. Neither wrong case was reachable from the platform this was
+written on, which is the argument for testing the function rather than the
+screen.
+
+**A retrying matcher cannot see a race.** The "invalid value disables Add"
+claim used `expect(add).toBeDisabled()`, which polls for seconds -- so it passed
+whether the button went dead on the keystroke or 400 ms later when the debounce
+fired, and 400 ms later is exactly the window the fix closes. It takes one
+snapshot of both facts now, with a budget of a fifth of `IMPACT_DEBOUNCE_MS`, and
+fails with "Add was still live 80ms after the keystroke" against the previous
+build. The small budget exists only because React flushes its render in a
+microtask rather than synchronously with the keystroke.
+
+**And what the host-flow claim cannot observe is now written into it.** A
+*successful* new attach is unreachable on this corpus: both authn plugins are
+already in `payments-demo`'s description, and every other host is absent, so no
+`add_plugin` changes anything. So the composition moved to
+`add-gear/staged-edits.ts` and `store-smoke` checks it -- attach for a named
+host, promote-then-attach for a closure-only one, nothing at all with no host,
+and the follow-ups dropped because a plugin has no `use_gear` for them to edit.
+The browser claim asserts what it can: that the already-attached case agrees with
+itself rather than proposing a top-level addition.
+
