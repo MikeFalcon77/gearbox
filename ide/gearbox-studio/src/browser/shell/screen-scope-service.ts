@@ -205,10 +205,14 @@ export class ScreenScopeService implements FrontendApplicationContribution {
     const to = identityOf(next);
     if (to === this.applied) return;
 
-    // Before the withdrawal, so a wizard being closed cannot leave an episode
-    // half-applied, and so the preset below is the only thing deciding panels.
-    this.focus.suspend();
-
+    // **No focus-mode reset here, and that is a correction.** Clearing the
+    // episode before the withdrawal discarded the snapshot even when a focus
+    // screen *survives* the transition -- the Graph does, and the Product preset
+    // leaves every panel alone -- so the panels stayed folded with nothing
+    // recording that they were owed back. Withdrawal now drains the episode by
+    // itself: closing a focus screen fires `onDidRemoveWidget`, and the last one
+    // to go triggers the restore. What the preset invalidates it says so about,
+    // below.
     await this.withdraw(to);
     if (!this.isCurrent(to)) return this.enqueue();
 
@@ -220,7 +224,10 @@ export class ScreenScopeService implements FrontendApplicationContribution {
     // opened: `Open Product...` became a button that did nothing. Arranging the
     // room before showing the screen also leaves the focus where it belongs,
     // which is on the screen rather than on the last panel this touched.
-    this.applyPreset(next.kind);
+    // Runs after the withdrawal, so it has the last word on any panel a restore
+    // may just have expanded -- and it tells the focus episode which panels it
+    // has taken over, so a later restore cannot undo them.
+    this.focus.forget(this.applyPreset(next.kind));
     if (!this.isCurrent(to)) return this.enqueue();
 
     await this.reassertPrimary(next);
@@ -253,11 +260,16 @@ export class ScreenScopeService implements FrontendApplicationContribution {
    * stopped and no screen was ever put on screen at all. Measured as a shell
    * that booted to an empty centre.
    */
-  protected applyPreset(kind: ContextKind): void {
+  protected applyPreset(kind: ContextKind): readonly PanelArea[] {
     const preset = PRESETS[kind];
+    const decided: PanelArea[] = [];
     for (const area of PANELS) {
       const intent = preset[area];
       if (intent === "leave") continue;
+      // Named whether or not the panel had to move: the preset has an opinion
+      // about this area either way, and a focus episode must not put back what
+      // the context has decided to keep folded.
+      decided.push(area);
       const expanded = this.shell.isExpanded(area);
       if (intent === "collapse" && expanded) {
         void this.shell.collapsePanel(area);
@@ -265,6 +277,7 @@ export class ScreenScopeService implements FrontendApplicationContribution {
         this.shell.expandPanel(area);
       }
     }
+    return decided;
   }
 
   protected isCurrent(to: ContextIdentity): boolean {

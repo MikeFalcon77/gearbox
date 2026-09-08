@@ -526,10 +526,13 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
       }
     }
 
-    const ok = await this.edits.createProduct({
-      ...params,
-      preview: this.preview,
-    });
+    const ok = await this.edits.createProduct(
+      {
+        ...params,
+        preview: this.preview,
+      },
+      this.ownerIdentity,
+    );
     if (!ok) return;
     this.close();
     // The product this just made is what a person wants to look at. Asked for

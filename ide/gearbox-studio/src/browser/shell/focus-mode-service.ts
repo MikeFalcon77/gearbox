@@ -34,8 +34,15 @@ export class FocusModeService implements FrontendApplicationContribution {
    */
   protected folded: Map<PanelArea, boolean> | undefined;
 
-  /** The screen an episode was opened for, so its close can end the episode. */
-  protected episodeFor: string | undefined;
+  /**
+   * The focus screens currently open, so the *last* one to close ends the episode.
+   *
+   * A set, not one id, and the single-id version was a real defect rather than a
+   * simplification: `Add Gear -> Graph -> close Add Gear` restored all three
+   * panels while the Graph -- which had asked for the room in the same episode --
+   * was still the screen in front of them.
+   */
+  protected episode = new Set<string>();
 
   onStart(): void {
     // **An episode ends when its screen is closed, not when the person looks at
@@ -52,7 +59,10 @@ export class FocusModeService implements FrontendApplicationContribution {
     // wizard keeps the room, which is also the better answer -- the flow is not
     // over, and coming back to a re-folded panel would be its own annoyance.
     this.shell.onDidRemoveWidget((widget) => {
-      if (widget.id === this.episodeFor) this.restore();
+      if (!this.episode.delete(widget.id)) return;
+      // Only when the last one goes. Closing one of two focus screens leaves a
+      // screen that still wants the room.
+      if (this.episode.size === 0) this.restore();
     });
   }
 
@@ -82,8 +92,12 @@ export class FocusModeService implements FrontendApplicationContribution {
    * is looking at something else and the restore is what they expect.
    */
   enterFocus(widgetId: string): void {
+    this.episode.add(widgetId);
+    // One episode spans consecutive focus screens: opening the Graph from Add
+    // Gear performs no panel operation at all, and the snapshot stays the one
+    // taken on the way in. Folding again would also record "already folded" as
+    // the state to restore to, which is how an episode forgets what it owes.
     if (this.folded !== undefined) return;
-    this.episodeFor = widgetId;
     const folded = new Map<PanelArea, boolean>();
     this.folded = folded;
     for (const area of PANELS) {
@@ -112,7 +126,6 @@ export class FocusModeService implements FrontendApplicationContribution {
   protected restore(): void {
     const folded = this.folded;
     this.folded = undefined;
-    this.episodeFor = undefined;
     if (folded === undefined) return;
     for (const area of PANELS) {
       if (folded.get(area) !== true) continue;
@@ -127,8 +140,25 @@ export class FocusModeService implements FrontendApplicationContribution {
    * For a context transition, which decides all three panels itself: a restore
    * racing the preset would leave the layout depending on which finished last.
    */
-  suspend(): void {
-    this.folded = undefined;
-    this.episodeFor = undefined;
+  /**
+   * Forget what this service owes on panels a context preset has just decided.
+   *
+   * **Not `suspend()`, which threw the whole snapshot away.** That was wrong in
+   * exactly the case the design allows: the Graph survives a change of product
+   * (`context-kind`), and the Product preset leaves every panel alone -- so
+   * dropping the snapshot left the panels folded with nothing recording that
+   * they were owed back, and the next close of the Graph restored nothing.
+   *
+   * What a preset does invalidate is the areas it acted on itself: Home folds
+   * all three, and a later restore must not re-expand what Home decided. So the
+   * preset names those areas and only those are forgotten. An episode whose
+   * screens are still open keeps everything else it owes.
+   */
+  forget(areas: readonly PanelArea[]): void {
+    if (this.folded === undefined) return;
+    for (const area of areas) this.folded.delete(area);
+    // Nothing left to give back, and no episode either: the screens that asked
+    // for the room are gone or the preset has taken over every panel.
+    if (this.folded.size === 0 && this.episode.size === 0) this.folded = undefined;
   }
 }

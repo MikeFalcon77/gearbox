@@ -19,6 +19,7 @@
 import {
   expect,
   expectContext,
+  openGraph,
   openProduct,
   productSection,
   resetCatalogueView,
@@ -90,6 +91,61 @@ test.describe("a screen belongs to a subject", () => {
     // Lumino picked when the active tab closed -- the rule that took ten Add Gear
     // claims down the last time anything here was closed.
     await expect(page.locator(".gbx-start")).toBeVisible();
+  });
+});
+
+test.describe("a screen that wants the room", () => {
+  test("the panels come back when the last such screen closes, not the first [ADR-0011 §Amendment: the room is arranged before the screen appears]", async ({
+    freshStudio,
+  }) => {
+    // Found by using the thing: `Add Gear -> Graph -> close Add Gear` gave the
+    // panels back while the Graph -- which had asked for the room in the same
+    // episode -- was still the screen in front of them. The service tracked one
+    // screen per episode, so the first close looked like the last.
+    //
+    // **Read by comparing the panel to its own tab bar**, which is what makes
+    // this independent of how wide a person has dragged it: a collapsed side
+    // panel is its tab bar and nothing else. `lm-mod-current` was tried first and
+    // is not the signal -- `collapse()` nulls the tab bar's `currentTitle`, but
+    // the DOM class stays, so it read as open at 49 pixels wide.
+    // **A fresh app, and that is not caution -- the shared session cannot show
+    // this.** An episode spans consecutive focus screens by design, so a Graph
+    // that an earlier test left open keeps its episode running, and a later
+    // `enterFocus` correctly does nothing. Correct behaviour, unobservable claim.
+    const { page } = freshStudio;
+    await settled(page);
+    const leftOpen = (): Promise<boolean> =>
+      page.evaluate(() => {
+        const panel = document.querySelector("#theia-left-content-panel") as HTMLElement | null;
+        if (panel === null) return false;
+        const bar = panel.querySelector(".lm-TabBar") as HTMLElement | null;
+        return panel.offsetWidth > (bar?.offsetWidth ?? 0) + 8;
+      });
+
+    await openProduct(page, "dev");
+    await revealCatalogue(page);
+    await resetCatalogueView(page);
+    expect(await leftOpen(), "the catalogue must start open for this to mean anything").toBe(true);
+
+    await page.locator('[data-toggle-gear="cluster"]').click();
+    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+    expect(await leftOpen(), "opening the configurator did not fold the catalogue").toBe(false);
+
+    await openGraph(page);
+    // Still one episode: opening a second such screen must not re-snapshot, or
+    // the episode records "already folded" as the state it owes.
+    expect(await leftOpen()).toBe(false);
+
+    await page.locator('[id="shell-tab-gearbox.add-gear"] .lm-TabBar-tabCloseIcon').click();
+    await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0);
+    expect(
+      await leftOpen(),
+      "the panels came back while a screen that wanted the room was still open",
+    ).toBe(false);
+
+    await page.locator('[id="shell-tab-gearbox.graph"] .lm-TabBar-tabCloseIcon').click();
+    await expect(page.locator(".gearbox-graph")).toHaveCount(0);
+    expect(await leftOpen(), "the last close did not give the catalogue back").toBe(true);
   });
 });
 

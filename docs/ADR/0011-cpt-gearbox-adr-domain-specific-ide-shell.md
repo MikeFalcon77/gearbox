@@ -779,15 +779,27 @@ Closing is later, more deliberate, and already relayouting.
 resolves on the next animation frame; awaiting it once put the whole reconciliation behind a frame
 a headless browser never delivered, and the shell booted to an empty centre.
 
-### What folding the catalogue on Home costs
+### Home folds the catalogue, and what that does and does not cost
 
-Two existing claims asserted that catalogue rows are *visible*, not merely attached -- ADR-0009's
-staged load, and this document's own "a catalogue row has a client rectangle". Both now reveal the
-panel first, and both say why in place. The property each was written for survives; what does not
-is that a first-time visitor watches the catalogue stream in without asking. That is the price of
-`Browse Catalogue` being an act rather than a button that reveals what is already on screen, and it
-is recorded here rather than absorbed quietly, because it is a reversal of ADR-0011's own "the
-catalogue is the secondary half of Home".
+Home's job is to choose or create a subject. The Start screen's actions are all subject-selection --
+Continue, New/Open Product, New/Open Gear, the recent list -- and a catalogue permanently open
+beside them made `Browse Catalogue` a button pointing at what was already on screen, which the UX
+pass reported as duplication. So Home folds all three panels and `Browse Catalogue` is the act that
+opens the left one. This reverses this document's own "the catalogue is the secondary half of Home".
+
+**What it does not cost**, checked rather than assumed: the load is unaffected.
+`CatalogueViewContribution.onStart` starts it regardless of visibility, and a folded side panel
+keeps its widget rendered and attached -- measured at fourteen rows behind forty-nine pixels of tab
+bar -- so the projection streams while folded and `Browse Catalogue` opens onto a tree that is
+already there, or still filling if the load is slow. Staged loading remains observable to anyone
+looking at the catalogue, which is what ADR-0009 is about.
+
+**What it does cost** is one thing, and it is narrow: nothing on Home indicates that a load is
+happening, because the catalogue's progress is drawn inside the panel and there is no tab badge.
+Two claims that asserted rows are *visible* rather than merely attached -- ADR-0009's staged load,
+and this document's "a catalogue row has a client rectangle" -- now reveal the panel first and say
+why in place. Observing a stream is a technical guarantee, not a required part of a first
+impression, and it should not be what decides the layout.
 
 ### Three prefixes that never matched
 
@@ -797,6 +809,31 @@ was the fourth instance of a mistake this document already records twice: the wi
 wrong the same way. The sweep also now runs at `ready` as well as on a perspective switch -- someone
 who lands on Home and stays there never causes a switch, so a snapshot-resurrected panel sat there
 untouched.
+
+### An episode belongs to the screens in it, not to one screen
+
+Three defects, all found by using the build rather than by reading it, and all in the same place:
+focus mode tracked one screen per episode.
+
+**`Add Gear -> Graph -> close Add Gear` gave the panels back** while the Graph was still the screen
+in front of them. The episode is now a *set*, and the restore waits for the last member to close.
+
+**A change of product threw the snapshot away.** Reconciliation called a blanket `suspend()` before
+withdrawing, but the Graph is `context-kind` and survives a change of product, and the Product
+preset leaves every panel alone -- so the panels stayed folded with nothing recording that they were
+owed back. Withdrawal now drains the episode by itself: a withdrawn focus screen fires
+`onDidRemoveWidget` like any other close. What a preset *does* invalidate it declares -- it returns
+the areas it decided, and only those are forgotten, so Home's fold cannot later be undone by a
+restore while everything else an episode owes survives.
+
+**And a second `enterFocus` inside an episode must not re-snapshot**, or the episode records
+"already folded" as the state it owes and gives nothing back.
+
+Ownership also stopped one path short of the plan: `createProduct` accepted no owner. It does now,
+checked at entry and again after the confirmation dialog. It protects less than the edit paths do --
+there is no target product to get wrong, because the path is absolute and chosen in the wizard --
+and what it refuses is a wizard whose launch context has moved on completing a write the person has
+stopped expecting.
 
 ### Confirmation
 
@@ -814,6 +851,12 @@ untouched.
 * `adr-0011-ide-shell.spec.ts` asserts the product-to-product rule against `shell/screens.ts`
   directly, and says why: the corpus holds one product, so no browser claim can reach that
   transition. It should become a behavioural claim when there is a second product.
+* `ux-navigation.spec.ts` opens Add Gear, opens the Graph, closes Add Gear, and asserts the
+  catalogue is **still** folded -- then closes the Graph and asserts it comes back. Verified to fail
+  against the single-screen episode with "the panels came back while a screen that wanted the room
+  was still open". It reads a collapsed panel by comparing it to its own tab bar rather than by
+  `lm-mod-current`, which `collapse()` leaves in place, and it runs on a fresh app because an
+  episode an earlier test left open makes the claim unobservable by design.
 
 ## Traceability
 

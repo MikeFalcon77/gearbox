@@ -604,7 +604,15 @@ export class ProductEditService {
     profileId: string;
     cloneFrom?: string;
     preview: string;
-  }): Promise<boolean> {
+  }, owner?: ContextIdentity): Promise<boolean> {
+    // **What this does and does not protect, since it differs from the others.**
+    // There is no target product to get wrong: the path is absolute and chosen
+    // in the wizard. What the check refuses is a wizard whose launch context has
+    // moved on completing a write the person has stopped expecting -- the same
+    // belt-and-braces as the edit paths, for the case where the shell failed to
+    // withdraw it. Withdrawal ordinarily closes it first, which is why this is a
+    // second barrier rather than the only one.
+    if (!this.ownsSubject(owner)) return false;
     let preview: EditGearResult;
     try {
       preview = await this.service.createProduct({ ...params, dryRun: true });
@@ -623,6 +631,8 @@ export class ProductEditService {
       this.messages.warn("The preview changed while the dialog was open. Try again.");
       return false;
     }
+    // Again, because the dialog above is a person taking their time.
+    if (!this.ownsSubject(owner)) return false;
     // eslint-disable-next-line no-console
     console.info(`Gearbox: writing create ${params.path}`, new Error("write path").stack);
     try {

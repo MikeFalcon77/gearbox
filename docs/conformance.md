@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **150** — 145 built, 1 not built, 0 broken, 4 not observed.
+Claims: **151** — 146 built, 1 not built, 0 broken, 4 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -239,6 +239,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 |---|---|---|---|
 | nothing opens itself into the bottom panel on Home | `plan §9.1: an empty domain panel is worse than an absent one` | ✅ built |  |
 | closing a product takes its screens with it | `ADR-0011 §Amendment: a screen belongs to a subject` | ✅ built |  |
+| the panels come back when the last such screen closes, not the first | `ADR-0011 §Amendment: the room is arranged before the screen appears` | ✅ built |  |
 | the Product view is four stages and a way out to Generate | `plan §9.1: Product navigation` | ✅ built |  |
 | a reload with a product open comes back to Home | `plan §9.1: Home is a screen, not an empty area` | ✅ built |  |
 | opening a product leaves the Product workspace on screen | `plan §9.1: Open Product is atomic` | ✅ built |  |
