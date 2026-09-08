@@ -9,6 +9,7 @@
 
 import { ILogger } from "@theia/core/lib/common/logger";
 import { inject, injectable } from "@theia/core/shared/inversify";
+import { randomBytes } from "crypto";
 import { execFile } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
@@ -31,7 +32,7 @@ import type { LockResult } from "../common/generated/LockResult";
 import type { LogParams } from "../common/generated/LogParams";
 import type { ProductEdit } from "../common/generated/ProductEdit";
 import type { ProductLoadResult } from "../common/generated/ProductLoadResult";
-import type { StudioSession } from "../common/protocol";
+import type { GitCloneReview, StudioSession } from "../common/protocol";
 import type { ResolveResult } from "../common/generated/ResolveResult";
 import type { ValidateResult } from "../common/generated/ValidateResult";
 import type { ProgressParams } from "../common/generated/ProgressParams";
@@ -410,32 +411,91 @@ export class GearboxServiceImpl implements GearboxService {
    *
    * Studio-side only: the engine still receives a local path via `clone_from`.
    */
-  async gitCloneProduct(url: string, ref: string | undefined, destDir: string): Promise<string> {
+  /**
+   * One clone attempt: its directory and what was found in it.
+   *
+   * Held here rather than derived from the id, so a `candidateId` can only ever
+   * resolve to a file this layer itself found. Cleared by `discardGitClone`.
+   */
+  protected attempts = new Map<
+    string,
+    { readonly root: string; readonly candidates: Map<string, string> }
+  >();
+
+  async gitCloneProduct(url: string, ref: string | undefined): Promise<GitCloneReview> {
     const trimmed = url.trim();
     if (trimmed === "") {
       throw new Error("git clone URL is empty");
     }
-    const absDest = path.resolve(destDir);
-    if (fs.existsSync(absDest)) {
-      throw new Error(`clone destination already exists: ${absDest}`);
-    }
-    fs.mkdirSync(path.dirname(absDest), { recursive: true });
+
+    // **A fresh directory per attempt, not one keyed on the product id.** The
+    // deterministic destination refused to overwrite -- correctly -- which meant
+    // one failed clone made every retry fail on `already exists`, and the only
+    // way out was to delete a directory by hand.
+    const attemptId = `clone-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
+    const root = path.join(cloneParent(), attemptId);
+    fs.mkdirSync(root, { recursive: true });
+
     const args = ["clone", "--depth", "1"];
     if (ref !== undefined && ref.trim() !== "") {
       args.push("--branch", ref.trim());
     }
-    args.push(trimmed, absDest);
+    args.push(trimmed, root);
+
+    // **Every failure before the return cleans up after itself.** A caller with
+    // no `attemptId` cannot discard anything, so a directory left here is a
+    // directory nobody can name.
     try {
       await execFileAsync("git", args, { maxBuffer: 10 * 1024 * 1024 });
+      const found = findProductGdl(root, 4);
+      if (found.length === 0) {
+        throw new Error(
+          `no product.gdl within four directories of the repository root (${root})`,
+        );
+      }
+      const candidates = new Map<string, string>();
+      const listed = found.map((absolute, index) => {
+        const id = `c${String(index)}`;
+        candidates.set(id, absolute);
+        return { id, relPath: path.relative(root, absolute).replace(/\\/g, "/") };
+      });
+      this.attempts.set(attemptId, { root, candidates });
+      return {
+        attemptId,
+        candidates: listed,
+        // What was checked out, not what was asked for: a person reviewing a
+        // clone of `main` needs to know which `main`.
+        commit: await describeHead(root, "%H"),
+        ...(await headRef(root)),
+      };
     } catch (error) {
+      removeQuietly(root);
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`git clone failed: ${message}`);
+      throw new Error(message.startsWith("no product.gdl") ? message : `git clone failed: ${message}`);
     }
-    const found = findProductGdl(absDest, 4);
-    if (found === undefined) {
-      throw new Error(`no product.gdl under ${absDest}`);
+  }
+
+  async selectClonedProduct(attemptId: string, candidateId: string): Promise<string> {
+    const attempt = this.attempts.get(attemptId);
+    if (attempt === undefined) {
+      throw new Error("that clone is no longer available; clone again");
     }
-    return found;
+    const chosen = attempt.candidates.get(candidateId);
+    if (chosen === undefined) {
+      // Only what this attempt handed out. The browser never names a path, so
+      // there is no path here to validate -- which is the point of the token.
+      throw new Error("that file is not one of the candidates this clone reported");
+    }
+    return chosen;
+  }
+
+  async discardGitClone(attemptId: string): Promise<void> {
+    const attempt = this.attempts.get(attemptId);
+    this.attempts.delete(attemptId);
+    // Unknown, or already gone: succeed. Cancel, a wizard closing, a changed URL
+    // and a late result can all arrive for the same attempt, and cleanup that
+    // throws is cleanup callers learn to skip.
+    if (attempt !== undefined) removeQuietly(attempt.root);
   }
 
   async validate(product?: string): Promise<ValidateResult> {
@@ -491,7 +551,16 @@ export class GearboxServiceImpl implements GearboxService {
 }
 
 /** Breadth-first search for `product.gdl` under `root`, capped at `maxDepth`. */
-function findProductGdl(root: string, maxDepth: number): string | undefined {
+/**
+ * Every `product.gdl` within `maxDepth` of the root, breadth first.
+ *
+ * **All of them, not the first.** A repository with two products is a repository
+ * a person has to choose from, and returning whichever the walk reached first
+ * made that choice silently and unrepeatably. Breadth first so the shallowest --
+ * usually the one meant -- is offered first.
+ */
+function findProductGdl(root: string, maxDepth: number): string[] {
+  const found: string[] = [];
   const queue: Array<{ dir: string; depth: number }> = [{ dir: root, depth: 0 }];
   while (queue.length > 0) {
     const { dir, depth } = queue.shift()!;
@@ -505,12 +574,60 @@ function findProductGdl(root: string, maxDepth: number): string | undefined {
       if (entry.name === ".git") continue;
       const full = path.join(dir, entry.name);
       if (entry.isFile() && entry.name === "product.gdl") {
-        return full;
+        found.push(full);
       }
       if (entry.isDirectory() && depth < maxDepth) {
         queue.push({ dir: full, depth: depth + 1 });
       }
     }
   }
-  return undefined;
+  return found;
+}
+
+/** Where clone attempts live: one directory per attempt, under the repo's own. */
+function cloneParent(): string {
+  return path.join(roots()[0] ?? process.cwd(), "..", ".gearbox", "git-clones");
+}
+
+/** Remove a directory and say nothing: cleanup that throws is cleanup nobody runs. */
+function removeQuietly(dir: string): void {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // Nothing to do about it, and nothing a person could do either. The
+    // directory is under `.gearbox/`, which is gitignored and disposable.
+  }
+}
+
+/** One `git log -1` field of the checkout, or `unknown` when git will not say. */
+async function describeHead(root: string, format: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", root, "log", "-1", `--format=${format}`]);
+    return stdout.trim();
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * The ref the checkout is on, when there is one.
+ *
+ * A `--depth 1` clone of a branch is on that branch; a clone of a tag or a
+ * commit is detached and `symbolic-ref` fails, which is a real answer rather
+ * than an error -- so the field is simply absent.
+ */
+async function headRef(root: string): Promise<{ resolvedRef?: string }> {
+  try {
+    const { stdout } = await execFileAsync("git", [
+      "-C",
+      root,
+      "symbolic-ref",
+      "--short",
+      "HEAD",
+    ]);
+    const ref = stdout.trim();
+    return ref === "" ? {} : { resolvedRef: ref };
+  } catch {
+    return {};
+  }
 }

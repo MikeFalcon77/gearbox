@@ -968,6 +968,16 @@
 }
 .gbx-config-reset:hover { background: var(--theia-list-hoverBackground); }
 
+/* Clone Git's review step: what was checked out, and which product in it. A URL
+   is a thing a person typed; a review is a checkout that exists. */
+.gbx-clone-review {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px; margin: 4px 0;
+  border: 1px solid var(--theia-editorGroup-border); border-radius: 3px;
+  background: var(--theia-editorWidget-background);
+}
+.gbx-clone-review .gbx-kv { gap: 8px; }
+
 /* New Gear's preview: the file plan, then the description the kind decides. The
    paths are identical for all three shapes, so this text is the part of the
    preview that answers the question the Kind control asks. */

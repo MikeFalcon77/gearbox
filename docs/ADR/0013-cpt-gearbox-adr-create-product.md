@@ -517,3 +517,72 @@ backend it started with, so a node-side field that was being sent looked like an
 through three layers of correct code. The frontend has no such trap -- it is served from disk and
 `global-setup` refuses a stale bundle.
 
+## Amendment 2026-09-08: Clone Git reviews before it creates
+
+The flow was one press. A person typed a URL, pressed Create, and behind that press the repository
+was cloned, searched for a `product.gdl`, stamped and written. So "the URL is wrong", "that branch
+does not exist" and "this repository has no product in it" were all failures *of a write* -- and the
+preview pane, which needs a local file, showed a hand-written sketch of what a clone might produce
+rather than anything an engine had said.
+
+Three defects came with it, and each is now a rule.
+
+**A failed attempt left a directory nobody could name.** The destination was
+`.gearbox/git-clones/<product-id>`, deterministic, and the clone correctly refused to overwrite --
+so one failure made every retry fail on `already exists`, and the way out was to delete a directory
+by hand. Each attempt now gets its own directory, and **every failure before the return cleans up
+after itself**: a caller with no `attemptId` cannot discard anything.
+
+**`findProductGdl` returned the first match.** A repository with two products is a repository a
+person has to choose from, and answering with whichever the walk reached first made that choice
+silently and unrepeatably. It collects them all now, breadth first so the shallowest is offered
+first; one is shown as a fact, several as a choice.
+
+**And the browser named a path.** `selectClonedProduct` takes an opaque `candidateId` that the
+attempt itself minted, resolved inside that attempt's own root. An absolute path from a client is a
+path the node layer would have to validate anyway, and validating a token it minted is the smaller
+job -- so the attempt root is not even on the wire.
+
+### The states, and which failures are terminal
+
+```
+idle → cloning → reviewing ⇄ creating → success
+                    └ clone failure → failed
+```
+
+`creating` returns to `reviewing`. A dry run or a create that fails is retryable against the same
+checkout -- a person fixes a field and asks again -- so the reason is kept on the review rather than
+replacing it. Only the clone itself failing is terminal, because then there is nothing to retry
+against.
+
+Terminal transitions discard the attempt: Cancel, the wizard closing, a changed URL or ref, and a
+successful create. A changed URL is in that list for a reason worth stating: the checkout in hand is
+of the URL that produced it, and keeping it would let Create write from a repository the form no
+longer names.
+
+### Cancellation is logical, and says so
+
+Cancel pressed while the clone is running leaves this side with no `attemptId`, and the RPC may then
+*succeed* -- a successful call, so the node layer's own failure cleanup never fires. An operation
+token is what makes that recoverable: a late reply is recognised as unwanted, kept out of the state,
+and **discarded by the id it brought with it** rather than merely ignored.
+
+What it does not do is stop a `git clone` already running. For this iteration a node-side cleanup on
+arrival is enough; killing the process would need the `attemptId` handed out before the clone
+finishes, or a separate start/cancel pair, and that is the next step rather than something the
+current shape pretends to do.
+
+`discardGitClone` is idempotent, and that is a contract rather than a convenience: Cancel, a closing
+wizard, a changed URL and a late reply can all reach it for the same attempt. An unknown or
+already-removed attempt succeeds -- cleanup that throws is cleanup callers learn to skip.
+
+### Confirmation
+
+* `adr-0013-create-product.spec.ts` clones from a repository the test itself creates, so the claim
+  needs no network: `Clone & Review` is unavailable with an empty URL, `Create` stays unavailable
+  until a review exists, the review names the commit actually checked out and the `product.gdl`
+  found, and changing the URL throws the checkout away. Cloning from a local path is enough because
+  what is under review is Studio's flow, not git's.
+* The write itself is not asserted, and for the reason every create claim here shares: it lands in
+  `products/`, which the harness refuses to let a test dirty.
+

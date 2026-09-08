@@ -77,6 +77,34 @@ export const method = {
  * machine is the one thing only the server knows -- and for the reason an IDE
  * lists sketches rather than making a person type a path.
  */
+/**
+ * One `product.gdl` a clone turned out to contain.
+ *
+ * `id` is opaque and is the only handle the browser gets: it is minted by the
+ * node layer for one attempt, so a request naming it cannot ask for a file
+ * outside that attempt's own directory. `relPath` exists to be *shown*.
+ */
+export interface CloneCandidate {
+  readonly id: string;
+  /** Where it is, relative to the clone's root, for display. */
+  readonly relPath: string;
+}
+
+/**
+ * What a clone turned out to be, before anything is created from it.
+ *
+ * The `commit` is here because "cloned `main`" is not what a person needs to
+ * know when a repository moves: what was actually checked out is.
+ */
+export interface GitCloneReview {
+  readonly attemptId: string;
+  /** Every `product.gdl` found, not the first — several is a choice, not a guess. */
+  readonly candidates: readonly CloneCandidate[];
+  readonly commit: string;
+  /** The ref git resolved to, when it reported one. */
+  readonly resolvedRef?: string;
+}
+
 export interface ProductRef {
   /** Absolute path, which is what `loadProduct` and `resolve` take. */
   readonly path: string;
@@ -272,11 +300,40 @@ export interface GearboxService {
   }): Promise<ScaffoldGearResult>;
 
   /**
-   * Shallow-clone a product repository and return the absolute path of the
-   * discovered `product.gdl`. Does not enable `git(...)` sources in a session —
-   * this is only for the Clone Git wizard path.
+   * Shallow-clone a product repository into a temporary place and describe what
+   * was found, without committing to any of it.
+   *
+   * Does not enable `git(...)` sources in a session — this is only the Clone Git
+   * wizard's path, and the engine still receives a local file.
+   *
+   * **Three methods rather than one, because the old one could not express the
+   * flow it was used for.** It returned a single path, so there was nowhere to
+   * report several `product.gdl` candidates, nothing to name the checkout that
+   * was made, and no way to say "throw that away" — a failed attempt left a
+   * directory behind and the deterministic destination made every retry fail on
+   * `already exists`.
    */
-  gitCloneProduct(url: string, ref: string | undefined, destDir: string): Promise<string>;
+  gitCloneProduct(url: string, ref: string | undefined): Promise<GitCloneReview>;
+
+  /**
+   * Take one candidate from an attempt, and get the path the engine will read.
+   *
+   * **A `candidateId`, never a path.** The browser names something this attempt
+   * handed it, and the node layer resolves it inside that attempt's own root —
+   * an absolute path from a client is a path the node layer would have to
+   * validate anyway, and validating a token it minted is the smaller job.
+   */
+  selectClonedProduct(attemptId: string, candidateId: string): Promise<string>;
+
+  /**
+   * Throw an attempt away, with its directory.
+   *
+   * Idempotent, and that is a contract rather than a convenience: Cancel, the
+   * wizard closing, a changed URL and a late result can all reach it for the
+   * same attempt. An unknown or already-removed attempt succeeds — turning
+   * routine cleanup into a failure is how callers learn to skip it.
+   */
+  discardGitClone(attemptId: string): Promise<void>;
 
   /** Everything checkable without resolving. `product` omitted checks only the
    * catalogue. */

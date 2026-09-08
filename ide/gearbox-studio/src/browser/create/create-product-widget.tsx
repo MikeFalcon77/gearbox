@@ -5,7 +5,7 @@
 // ADR-0013 amendment: Blank / Clone Local / Clone Git; clone stamps version
 // honestly and does not rewrite sources.
 
-import { ReactWidget } from "@theia/core/lib/browser";
+import { Message, ReactWidget } from "@theia/core/lib/browser";
 import { CommandRegistry } from "@theia/core/lib/common";
 
 import { SHOW_PRODUCT } from "../shell/session-command-ids";
@@ -15,13 +15,39 @@ import React from "@theia/core/shared/react";
 import { FileDialogService } from "@theia/filesystem/lib/browser";
 import { WorkspaceService } from "@theia/workspace/lib/browser/workspace-service";
 
-import { GearboxService } from "../../common/protocol";
+import { GearboxService, type CloneCandidate } from "../../common/protocol";
 import { ProductEditService } from "../product-edit-service";
 import { EngineConnectionService } from "../shell/engine-connection-service";
 import { ProductSessionService } from "../shell/product-session-service";
 import type { ContextIdentity, OwnedWidget } from "../shell/screens";
 
 export type CreateMode = "blank" | "clone-local" | "clone-git";
+
+/**
+ * Where a Clone Git attempt has got to.
+ *
+ * `reviewing` is the state that did not exist: the old flow went from a URL
+ * straight to a write, so "this repository has no product in it" was found out
+ * after Create had been pressed. `creating` is not a state here -- a create
+ * failure returns to `reviewing` carrying its reason, because the checkout is
+ * still good and a person fixes a field and asks again. Only the clone failing
+ * is terminal, and then there is nothing to retry against.
+ */
+export type CloneState =
+  | { readonly status: "idle" }
+  | { readonly status: "cloning"; readonly url: string }
+  | {
+      readonly status: "reviewing";
+      readonly attemptId: string;
+      readonly candidates: readonly CloneCandidate[];
+      /** Which candidate the preview is of. Empty only if the clone had none. */
+      readonly chosen: string;
+      readonly commit: string;
+      readonly resolvedRef?: string;
+      /** A retryable failure against this checkout: a dry run or a create. */
+      readonly error?: string;
+    }
+  | { readonly status: "failed"; readonly reason: string };
 
 export interface CreateProductState {
   cloneFrom?: string;
@@ -62,6 +88,28 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
   protected cloneFrom: string | undefined;
   protected gitUrl = "";
   protected gitRef = "";
+
+  /**
+   * Where a Clone Git attempt has got to.
+   *
+   * `creating` returns to `reviewing`, it does not leave it: a dry-run or create
+   * failure is retryable against the same checkout, and only the clone itself
+   * failing is terminal. The earlier flow had one path -- Create clones, stamps
+   * and writes -- so the first thing a person saw about a repository was whether
+   * the whole thing had worked.
+   */
+  protected clone: CloneState = { status: "idle" };
+
+  /**
+   * Which clone attempt this widget is allowed to act on.
+   *
+   * **A logical cancellation, and it has to be**: Cancel pressed while the clone
+   * is running leaves this side with no `attemptId`, and the RPC may then
+   * *succeed* -- so the node layer's own failure cleanup never fires. The token
+   * is what lets a late result be recognised as unwanted, kept out of the state,
+   * and discarded by id the moment it arrives.
+   */
+  protected cloneToken = 0;
   /** Editable destination; empty means use the default under the workspace. */
   protected destination = "";
   protected destinationTouched = false;
@@ -92,6 +140,7 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
       this.mode = state?.mode ?? "blank";
       this.gitUrl = "";
       this.gitRef = "";
+      this.abandonClone();
     }
     if (state?.id !== undefined) this.productId = state.id;
     if (state?.name !== undefined) this.name = state.name;
@@ -211,6 +260,188 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
     };
   }
 
+  /**
+   * Stop caring about the attempt in flight, and throw away what exists.
+   *
+   * Bumping the token first is what makes a late success discardable: the reply
+   * arrives, is recognised as unwanted, and is deleted by the id it brought with
+   * it rather than leaking a directory nobody can name.
+   */
+  protected abandonClone(): void {
+    this.cloneToken += 1;
+    const attemptId = this.clone.status === "reviewing" ? this.clone.attemptId : undefined;
+    this.clone = { status: "idle" };
+    if (attemptId !== undefined) {
+      void this.service.discardGitClone(attemptId);
+    }
+  }
+
+  /**
+   * Clone, and describe what is there. Nothing is created by this.
+   *
+   * Backstage separates entering, reviewing, running and the result, and the
+   * reason is this step: a clone is where "the URL was wrong", "the branch does
+   * not exist" and "this repository has no product in it" are found out, and
+   * finding them out during a create means finding them out after a write has
+   * been attempted.
+   */
+  protected async cloneAndReview(): Promise<void> {
+    const url = this.gitUrl.trim();
+    if (url === "") return;
+    this.abandonClone();
+    const token = this.cloneToken;
+    this.clone = { status: "cloning", url };
+    this.update();
+
+    try {
+      const review = await this.service.gitCloneProduct(
+        url,
+        this.gitRef.trim() === "" ? undefined : this.gitRef.trim(),
+      );
+      if (token !== this.cloneToken) {
+        // Cancelled, or the URL changed, while this was in flight. The reply is
+        // a real checkout on disk, so it is discarded by id -- not merely
+        // ignored, which is what left directories behind before.
+        void this.service.discardGitClone(review.attemptId);
+        return;
+      }
+      this.clone = {
+        status: "reviewing",
+        attemptId: review.attemptId,
+        candidates: review.candidates,
+        chosen: review.candidates[0]?.id ?? "",
+        commit: review.commit,
+        ...(review.resolvedRef === undefined ? {} : { resolvedRef: review.resolvedRef }),
+      };
+      await this.previewChosenCandidate();
+    } catch (error) {
+      if (token !== this.cloneToken) return;
+      // Terminal: there is no checkout to retry against. The node layer has
+      // already removed its own directory.
+      this.clone = {
+        status: "failed",
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+    this.update();
+  }
+
+  /** Dry-run the create against the candidate now chosen, and show the text. */
+  protected async previewChosenCandidate(): Promise<void> {
+    if (this.clone.status !== "reviewing" || this.clone.chosen === "") return;
+    const token = this.cloneToken;
+    try {
+      const from = await this.service.selectClonedProduct(this.clone.attemptId, this.clone.chosen);
+      const dry = await this.service.createProduct({
+        ...this.createParams(from, true),
+      });
+      if (token !== this.cloneToken) return;
+      this.preview = dry.after;
+      if (this.clone.status === "reviewing") this.clone = { ...this.clone, error: undefined };
+    } catch (error) {
+      if (token !== this.cloneToken) return;
+      // Retryable: the checkout stands, and a person fixes a field and asks
+      // again. Kept on the review state rather than replacing it.
+      const reason = error instanceof Error ? error.message : String(error);
+      this.preview = reason;
+      if (this.clone.status === "reviewing") this.clone = { ...this.clone, error: reason };
+    }
+    this.update();
+  }
+
+  /**
+   * The clone, what it found, and which of it to use.
+   *
+   * Backstage's shape: enter, review, run, result. What this adds to the review
+   * is the two facts a URL does not carry -- which commit was actually checked
+   * out, and which `product.gdl` in the repository is meant.
+   */
+  protected renderCloneReview(connected: boolean): React.ReactNode {
+    const state = this.clone;
+    return (
+      <div className="gbx-clone-review" data-clone-status={state.status}>
+        <button
+          type="button"
+          className="gbx-choice"
+          data-clone-review
+          // Empty URL is refused by being unavailable, not by a message after
+          // the fact -- the old flow enabled Create with no URL and reported it
+          // afterwards.
+          disabled={!connected || this.gitUrl.trim() === "" || state.status === "cloning"}
+          onClick={() => void this.cloneAndReview()}
+        >
+          {state.status === "cloning" ? "Cloning…" : "Clone & Review"}
+        </button>
+
+        {state.status === "failed" && (
+          <div className="gbx-error" role="alert" data-clone-error>
+            {state.reason}
+          </div>
+        )}
+
+        {state.status === "reviewing" && (
+          <>
+            <div className="gbx-kv">
+              <span>checked out</span>
+              <span data-clone-commit={state.commit}>
+                <code>{state.commit.slice(0, 12)}</code>
+                {state.resolvedRef !== undefined && ` on ${state.resolvedRef}`}
+              </span>
+            </div>
+            {/* One candidate is a fact and reads as one; several is a choice,
+                and choosing the first silently is what this replaced. */}
+            {state.candidates.length === 1 ? (
+              <div className="gbx-kv">
+                <span>found</span>
+                <span data-clone-candidate={state.candidates[0]?.id}>
+                  <code>{state.candidates[0]?.relPath}</code>
+                </span>
+              </div>
+            ) : (
+              <label>
+                Which product
+                <select
+                  data-clone-candidate-pick
+                  value={state.chosen}
+                  disabled={!connected}
+                  onChange={(e) => {
+                    if (this.clone.status !== "reviewing") return;
+                    this.clone = { ...this.clone, chosen: e.target.value };
+                    this.update();
+                    void this.previewChosenCandidate();
+                  }}
+                >
+                  {state.candidates.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.relPath}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {state.error !== undefined && (
+              <div className="gbx-error" role="alert" data-clone-retryable>
+                {state.error}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  /**
+   * Closing the wizard throws away a checkout nobody asked to keep.
+   *
+   * The last of the terminal transitions, and the one that is easy to forget:
+   * a person who clones and then closes the panel has abandoned the attempt as
+   * surely as one who presses Cancel.
+   */
+  protected override onCloseRequest(message: Message): void {
+    this.abandonClone();
+    super.onCloseRequest(message);
+  }
+
   protected async refreshPreview(): Promise<void> {
     if (!this.engine.isConnected) {
       this.preview = "";
@@ -218,13 +449,24 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
       return;
     }
     if (this.mode === "clone-git") {
-      // Preview needs a local file; git clone runs only on Create.
+      // **No invented preview any more.** This used to render a hand-written
+      // sketch of what a clone might produce, because a real dry run needs a
+      // local file and the clone only happened on Create -- so the pane showed
+      // something no engine had said. Now the clone is its own step: before it
+      // there is nothing to preview, and after it the preview is the engine's
+      // own dry run against the file that was actually found.
+      if (this.clone.status === "reviewing") {
+        await this.previewChosenCandidate();
+        return;
+      }
       this.preview =
-        this.gitUrl.trim() === ""
-          ? "Enter a git URL. Preview runs after Create clones the repository."
-          : `# Clone from ${this.gitUrl.trim()}${this.gitRef.trim() !== "" ? ` @ ${this.gitRef.trim()}` : ""}\n` +
-            `# then stamp id/name/version into:\n#   ${this.productPath()}\n` +
-            `product(\n    id = "${this.productId}",\n    name = "${this.name}",\n    version = "${this.version}",\n    # sources kept from the cloned file\n)\n`;
+        this.clone.status === "cloning"
+          ? "Cloning…"
+          : this.clone.status === "failed"
+            ? this.clone.reason
+            : this.gitUrl.trim() === ""
+              ? "Enter a git URL, then Clone & Review."
+              : "Clone & Review first: the preview is the engine's answer about the file it finds.";
       this.update();
       return;
     }
@@ -354,6 +596,10 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
                   disabled={!connected}
                   onChange={(e) => {
                     this.gitUrl = e.target.value;
+                    // Same rule as the ref: the checkout in hand is of the URL
+                    // that produced it, and keeping it would let Create write
+                    // from a repository the field no longer names.
+                    this.abandonClone();
                     this.schedulePreview();
                   }}
                 />
@@ -367,10 +613,14 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
                   placeholder="branch or tag"
                   onChange={(e) => {
                     this.gitRef = e.target.value;
+                    // A different ref is a different checkout, so the one in
+                    // hand is thrown away rather than silently reused.
+                    this.abandonClone();
                     this.schedulePreview();
                   }}
                 />
               </label>
+              {this.renderCloneReview(connected)}
             </>
           )}
           <label>
@@ -465,7 +715,14 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
               type="button"
               className="theia-button main"
               data-create-submit
-              disabled={!connected || (cloning && this.mode === "clone-local" && !this.cloneFrom)}
+              // A mode that clones needs something to clone *from*, and for git
+              // that is a review rather than a URL: a URL is a thing a person
+              // typed, and a review is a checkout that exists.
+              disabled={
+                !connected ||
+                (cloning && this.mode === "clone-local" && !this.cloneFrom) ||
+                (this.mode === "clone-git" && this.clone.status !== "reviewing")
+              }
               onClick={() => void this.create()}
             >
               Create
@@ -492,40 +749,32 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
 
     let cloneFrom = this.mode === "clone-local" ? this.cloneFrom : undefined;
     if (this.mode === "clone-git") {
-      const url = this.gitUrl.trim();
-      if (url === "") {
-        this.messages.error("Enter a git URL to clone.");
+      // **No cloning here any more.** Create acts on what Review found: the
+      // checkout already exists, the candidate is already chosen, and the
+      // preview the confirmation compares against is the engine's own dry run
+      // against that file. Cloning inside Create is what made "the URL is wrong"
+      // and "this repository has no product" into failures of a write.
+      if (this.clone.status !== "reviewing") {
+        this.messages.error("Clone & Review first, so there is something to create from.");
         return;
       }
-      const destDir = `${this.workspaceRoot()}/.gearbox/git-clones/${this.productId}`.replace(
-        /\\/g,
-        "/",
-      );
       try {
-        cloneFrom = await this.service.gitCloneProduct(
-          url,
-          this.gitRef.trim() === "" ? undefined : this.gitRef.trim(),
-          destDir,
+        cloneFrom = await this.service.selectClonedProduct(
+          this.clone.attemptId,
+          this.clone.chosen,
         );
       } catch (error) {
-        this.messages.error(error instanceof Error ? error.message : String(error));
+        // Retryable: the attempt is gone or the candidate is not one it reported,
+        // and either way the answer is to clone again.
+        const reason = error instanceof Error ? error.message : String(error);
+        this.clone = { ...this.clone, error: reason };
+        this.messages.error(reason);
+        this.update();
         return;
       }
     }
 
     const params = this.createParams(cloneFrom, false);
-    // Dry-run for git after clone so the preview dialog shows real surgery text.
-    if (this.mode === "clone-git" && cloneFrom !== undefined) {
-      try {
-        const dry = await this.service.createProduct({ ...params, dryRun: true });
-        this.preview = dry.after;
-        this.update();
-      } catch (error) {
-        this.messages.error(error instanceof Error ? error.message : String(error));
-        return;
-      }
-    }
-
     const ok = await this.edits.createProduct(
       {
         ...params,
@@ -533,7 +782,18 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
       },
       this.ownerIdentity,
     );
-    if (!ok) return;
+    if (!ok) {
+      // The checkout stands and a person fixes a field and retries. Only a
+      // successful create discards it, below.
+      if (this.clone.status === "reviewing") {
+        this.clone = { ...this.clone, error: "The product was not created. Fix the fields and try again." };
+        this.update();
+      }
+      return;
+    }
+    // Terminal, and the only success path: the file has been copied into the
+    // product's own place, so the checkout has nothing left to hold.
+    this.abandonClone();
     this.close();
     // The product this just made is what a person wants to look at. Asked for
     // rather than assumed: `ProductViewContribution.mayTakeTheFront` will not

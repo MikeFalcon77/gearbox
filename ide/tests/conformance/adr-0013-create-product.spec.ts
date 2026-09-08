@@ -1,7 +1,7 @@
 // ADR cpt-gearbox-adr-create-product — create, clone and in-description edits.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -96,6 +96,75 @@ test.describe("create and clone a product", () => {
     await expect(page.locator("[data-resolved-profile]")).toBeVisible({ timeout: 60_000 });
     expect(existsSync(join(REPO, "products", id, "product.gdl"))).toBe(true);
   });
+
+  test(
+    "Clone Git reviews the checkout before it creates anything [ADR-0013 §Amendment: clone review]",
+    async ({ freshStudio }) => {
+      // The flow was: type a URL, press Create, and the clone, the search for a
+      // `product.gdl` and the write all happened behind that one press. So "the
+      // URL is wrong", "that branch does not exist" and "this repository has no
+      // product in it" were all failures *of a write*, and a failed attempt left
+      // a directory whose deterministic name made every retry fail on `already
+      // exists`.
+      //
+      // Cloned from a local repository this test makes, so the claim needs no
+      // network and no fixture repository to exist anywhere: `git clone` takes a
+      // path, and what is under review is Studio's flow rather than git's.
+      const { page } = freshStudio;
+      const origin = join(REPO, "ide", ".tmp-clone-origin");
+      rmSync(origin, { recursive: true, force: true });
+      try {
+        execFileSync("git", ["init", "-q", "--initial-branch", "trunk", origin]);
+        execFileSync("git", ["-C", origin, "config", "user.email", "t@example.invalid"]);
+        execFileSync("git", ["-C", origin, "config", "user.name", "Test"]);
+        writeFileSync(join(origin, "product.gdl"), readFileSync(DEMO, "utf8"));
+        execFileSync("git", ["-C", origin, "add", "product.gdl"]);
+        execFileSync("git", ["-C", origin, "commit", "-qm", "one product"]);
+        const head = execFileSync("git", ["-C", origin, "rev-parse", "HEAD"], {
+          encoding: "utf8",
+        }).trim();
+
+        await settled(page);
+        await openCreateWizard(page);
+        await page.locator('[data-create-modes] [data-create-mode="clone-git"]').click();
+
+        // Refused by being unavailable, not by a message after the fact: Create
+        // used to be enabled with no URL at all and said so only once pressed.
+        const review = page.locator("[data-clone-review]");
+        await expect(review).toBeDisabled();
+        const create = page.locator("[data-create-submit]");
+        await expect(create).toBeDisabled();
+
+        await page.locator("[data-clone-git-url]").fill(origin);
+        await expect(review).toBeEnabled();
+        // Still nothing to create from: a URL is a thing a person typed, and a
+        // review is a checkout that exists.
+        await expect(create).toBeDisabled();
+
+        await review.click();
+        await expect(page.locator("[data-clone-status='reviewing']")).toBeVisible({
+          timeout: 60_000,
+        });
+
+        // The two facts a URL does not carry. The commit, because "cloned trunk"
+        // is not what a person needs to know when a repository moves...
+        await expect(page.locator("[data-clone-commit]")).toHaveAttribute("data-clone-commit", head);
+        // ...and which `product.gdl` in the repository is meant. One is a fact
+        // and reads as one; several would be a choice.
+        await expect(page.locator("[data-clone-candidate]")).toContainText("product.gdl");
+        await expect(create).toBeEnabled();
+
+        // And the checkout belongs to the URL that produced it: changing the
+        // field throws it away rather than letting Create write from a
+        // repository the form no longer names.
+        await page.locator("[data-clone-git-url]").fill(`${origin}-elsewhere`);
+        await expect(page.locator("[data-clone-status='idle']")).toBeVisible();
+        await expect(create).toBeDisabled();
+      } finally {
+        rmSync(origin, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("mode selector is visible on New Product from Start [ADR-0013 amendment]", async ({
     freshStudio,
