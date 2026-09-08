@@ -212,7 +212,7 @@ contain assignments only.
 |---|---|---|
 | `role(...)`, `sharded`, `instance_addressable` | **Downgraded** | parsed into `declared_roles` for forward-compat, **excluded from resolution**; GBX0601/0602 `Warning` citing `bootstrap/oop.rs` |
 | `provider("redis"\|"k8s-lease"\|"etcd"\|"nats")` | **Rejected** | GBX0505 `Error` listing the actual registry contents |
-| `registry(package, version)` source | **Rejected** | GBX0605 — use `path()` or `git()` |
+| `registry(package, version)` source | **Rejected, later shipped** | was GBX0605; cargo now fetches the package and its Cargo closure, and the code is retired |
 | `transport.grpc` on a cut edge | **Downgraded** | GBX0402 `Warning`, forced to `rest` |
 | `kind = service()` / plugin model | **Deferred** | unknown kwarg (GBX0106) — no runtime concept behind it |
 | Deployment profile as a runtime type | **Reframed** | GBX0606 `Hint` once per resolve |
@@ -433,7 +433,7 @@ a scoped one, one cluster scope bound twice, and a duplicate profile id. Disjoin
 
 `GBX0107` (`GdlDowngraded`, "accepted for forward compatibility but excluded from resolution") has no
 honest firing site at evaluation time: every case it was meant to cover has a more specific code —
-`GBX0601`/`GBX0602` for roles and shards, `GBX0605` for registry sources. It also carries
+`GBX0601`/`GBX0602` for roles and shards. It also carries
 `requires_evidence = true`, so firing it would mean citing a runtime limitation it does not name.
 Either it belongs to the resolver (M4) or it should be retired the way `GBX0201`-`GBX0205` were; not
 invented a use for in the meantime.

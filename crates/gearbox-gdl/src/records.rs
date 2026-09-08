@@ -299,8 +299,9 @@ gdl_record! {
 gdl_record! {
     /// `path(...)`, `git(...)` or `registry(...)`.
     ///
-    /// `registry` is accepted so the diagnostic can name it (GBX0605) rather than
-    /// reporting an unknown function, which would read as a typo.
+    /// All three name a real source. A registry source is the registry rather
+    /// than one package -- `prefix` is what turns a gear id into a package name
+    /// -- and the fetching is cargo's, in `gearbox_engine::registry`.
     SourceAtRecord as "gdl_source_at" {
         /// `path`, `git` or `registry`.
         pub kind: String,

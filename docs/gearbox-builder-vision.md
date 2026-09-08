@@ -886,13 +886,20 @@ Source model:
 ```text
 path        implemented
 git         implemented (tag, rev or branch; a branch must pin something)
-registry    NOT implemented - refused with GBX0605
+registry    implemented (cargo fetches; `prefix` names the package)
 ```
 
-**`registry` is refused, not merely absent.** No registry client exists in `gears-rust`: a gear is a
-Cargo path or git dependency, and there is nothing to fetch a published gear from. `registry(...)` is
-still spelled in the GDL vocabulary purely so the diagnostic can name it and point at `path()` or
-`git()`, rather than reporting an unknown function — which would read as a typo.
+**`registry` is implemented by letting cargo do it.** No registry client of our own: a published gear
+crate carries `src/` with its `#[toolkit::gear]` attribute and its `gear.gdl` beside `Cargo.toml`, and
+cargo unpacks it into a directory that is, in shape, exactly what a source root wants — so the whole
+catalogue, projection included, works on a registry gear without special handling. A synthesised
+manifest plus `cargo metadata` buys the download, the unpack, authentication, offline mode, version
+resolution and any corporate mirror the machine is configured with. The closure arrives with it,
+because a gear's co-location dependencies are real Cargo dependencies. `prefix` turns a gear id into a
+package name (`api-gateway` → `cf-gears-api-gateway`), and `use_gear(package = ...)` is the exit for a
+gear that does not follow the house naming; a wrong guess is not silent either, since the fetched
+crate's own `gear.gdl` declares its `crate_name` and GBX0209 checks it against the real
+`Cargo.toml`.
 
 A `git` source pinned to a **branch** is accepted and recorded as not immutable
 (`SourceDecl::is_immutable()`), because a lock built from a branch is repeatable but not

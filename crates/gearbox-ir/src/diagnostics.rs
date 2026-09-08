@@ -632,8 +632,21 @@ diagnostic_codes! {
     /// implemented.
     GapNoRemoteSpawnBackend = "GBX0604", RuntimeGap, Warning, true, "only local process spawning is implemented";
 
-    /// A registry-sourced gear was requested. Out of scope for this release.
-    GapRegistrySource = "GBX0605", RuntimeGap, Error, false, "registry sources are not supported";
+    // GBX0605 is deliberately absent. It refused a `registry(...)` source as
+    // out of scope, on the grounds that nothing existed to fetch a published
+    // gear with. That stopped being true: `gearbox_engine::registry` synthesises
+    // a seed manifest and lets `cargo metadata` do the download, the unpack,
+    // authentication, offline mode and any configured mirror, so a registry
+    // source resolves like any other and nothing refuses it. A code with no
+    // firing site is a claim the tool no longer makes.
+    //
+    // It was also the one member of this range exempt from
+    // `requires_evidence`, because it asserted a scope decision of this tool
+    // rather than a limitation of the runtime -- so retiring it makes the range
+    // mean one thing again.
+    //
+    // The code is not reused: a lock or a transcript naming GBX0605 should stay
+    // findable rather than silently meaning something else.
 
     /// The deployment profile is a composition-time concept, not a runtime type.
     ///

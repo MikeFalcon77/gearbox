@@ -119,11 +119,6 @@ fn every_runtime_gap_code_requires_evidence() {
         .iter()
         .filter(|c| c.domain() == DiagnosticDomain::RuntimeGap)
     {
-        // The one exception is the registry-source refusal, which is a scope
-        // decision of this tool, not a statement about the runtime.
-        if *code == DiagnosticCode::GapRegistrySource {
-            continue;
-        }
         assert!(
             code.requires_evidence(),
             "`{code}` asserts a runtime limitation but does not require evidence"
