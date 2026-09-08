@@ -756,3 +756,68 @@ and the follow-ups dropped because a plugin has no `use_gear` for them to edit.
 The browser claim asserts what it can: that the already-attached case agrees with
 itself rather than proposing a top-level addition.
 
+
+### One `undefined` for four different refusals
+
+`CreateGearWidget.pluginScaffold()` returned `PluginScaffold | undefined`, and the
+consumer spread it: `...(scaffold === undefined ? {} : { plugin: scaffold })`. So
+four unrelated states -- a host key the catalogue no longer declares, an SDK
+`absolutePath` cannot resolve, a destination that is not absolute, and an SDK on
+another volume -- all omitted the whole `plugin` field. The engine then wrote the
+`sdk` locator as a comment, which is the *correct* answer to a request that names
+no host, and **Create stayed enabled**. A person who had just been told by the
+picker that "the locator is written from this host" got a plugin that cannot load.
+
+Confirming the reported case turned up a worse one of the same shape.
+`destinationDir()` is `""` when no folder is open, so the `from` argument became
+`/<gearId>` -- which *parses* as POSIX-absolute, so nothing refused and a **live**
+locator was computed relative to a root that does not exist. A fabricated locator
+rather than a dropped one, and the only thing between it and disk was
+`plan === undefined` on the button, a guard that exists for a different reason.
+
+The decision moved to `create/plugin-locator.ts` and answers with four arms:
+
+| arm | when | what the panel does |
+| --- | --- | --- |
+| `none` | not a plugin, or no host chosen | nothing: the commented locator is the answer, and this is the state a person opens in |
+| `ready` | the locator resolves | sends `plugin`, says the locator is written from this host |
+| `draft` | the SDK is on another volume | names both roots, keeps Create live under a different label |
+| `blocked` | the other three | names the cause beside the picker, disables Create |
+
+`none` is the arm a three-state type would have missed. It is the documented
+intent of the commented `sdk` line (`PluginScaffold`), so folding it into `draft`
+would put a warning and a renamed button in front of someone who has simply not
+chosen yet.
+
+`draft` is the only refusal that is a legitimate degradation rather than an
+inconsistency: an SDK on another drive has no relative path from here on any
+platform, so the crate is still worth writing. It renames the action -- `Create
+draft` standalone, `Create without adding` in a product -- and **skips
+`addToProduct` entirely**, because attaching a plugin whose locator is a comment
+turns a healthy product into a knowingly incomplete one. The other three are
+disagreements between the panel and the session, and writing anything would put
+the disagreement on disk.
+
+`relativePath` stays the decision throughout; `volumeOf` is used only to *explain
+a refusal that already happened*, so there is no second implementation of the
+volume rule and the explanation cannot disagree with the decision. The roots are
+reported as `volumeOf` folded them, since that is the identity that was compared.
+
+Nine cases are in `store-smoke`, and three of the four refusals are unreachable
+from a browser here -- one volume on this machine, every corpus SDK inside its own
+source root, and a catalogue reload that returns the same hosts. The browser claim
+gained what it *can* see: `[data-create-gear-locator]` absent with Create enabled
+while no host is chosen, which turns the prose "the panel says why rather than
+disabling Create over it" into a checked assertion, and a named refusal for a
+relative destination. Be exact about what is new there: Create was already
+disabled, because the engine refuses a relative `destination_dir`. What is new is
+a reason beside the control that caused it, computed from panel state rather than
+waited on.
+
+**A known hazard, deliberately not fixed here.** When an SDK lies *outside* its
+source root, `RelPath::resolve` errors, `merge::cargo_ref` pushes `bad_crate_path`
+and falls back to `gdl_dir.clone()` -- so `CargoRef.path` points at the *gear's
+own folder* and `absolutePath` returns a wrong-but-plausible answer instead of
+refusing. No arm above catches it, and the client cannot: detecting it would mean
+inferring from a coincidence. It is engine behaviour shared with `package`, the
+catalogue already reports the diagnostic, and no gear in this corpus triggers it.

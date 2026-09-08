@@ -199,6 +199,14 @@ test.describe("what the tool may write", () => {
       await expect
         .poll(async () => (await gdl.textContent()) ?? "", { timeout: 30_000 })
         .toContain("# sdk = cargo(");
+      // **Asserted, not only asserted about.** The sentence above was the whole
+      // claim for this state, and it checked the `gear.gdl` alone -- so the
+      // difference between "the commented locator is the right answer" and "the
+      // locator was silently dropped and Create is live anyway" was invisible.
+      // `[data-create-gear-locator]` is the element the other three states
+      // render; `none` is the one arm that renders nothing.
+      await expect(page.locator("[data-create-gear-locator]")).toHaveCount(0);
+      await expect(page.locator("[data-create-gear-submit]")).toBeEnabled({ timeout: 30_000 });
 
       // The picker is grouped by host and labelled by the trait, because the
       // trait is the identity: the key is `sdk_lib::TraitIdent` and never a
@@ -223,6 +231,21 @@ test.describe("what the tool may write", () => {
       expect((await gdl.textContent()) ?? "", "a link line needs the library identifier").toMatch(
         /lib = "[a-z0-9_]+"/,
       );
+      await expect(page.locator("[data-create-gear-locator]")).toHaveCount(0);
+
+      // **And the refusal is named beside the picker that promised the
+      // locator.** Be exact about what is new: Create was already disabled for a
+      // relative destination, because the engine refuses one -- so the preview
+      // pane went blank and nothing said which control was at fault. The reason
+      // here is computed from the panel's own state, which is why it does not
+      // wait on a dry run, and it is the only observable one of the four: the
+      // other three need a second volume, an SDK outside its source root, or a
+      // catalogue reload that drops a host.
+      await page.locator("[data-create-gear-destination]").fill("gears");
+      const refusal = page.locator('[data-create-gear-locator="blocked"]');
+      await expect(refusal).toBeVisible({ timeout: 30_000 });
+      await expect(refusal).toContainText("absolute path");
+      await expect(page.locator("[data-create-gear-submit]")).toBeDisabled();
     },
   );
 

@@ -15,13 +15,11 @@ import { EngineConnectionService } from "../shell/engine-connection-service";
 import { gearIdProblem, gearVersionProblem } from "../../common/gear-identity";
 import { CommandRegistry } from "@theia/core/lib/common";
 
-import type { ExtensionPointDecl } from "../../common/generated/ExtensionPointDecl";
-import type { GearDescriptor } from "../../common/generated/GearDescriptor";
 import type { GearKind } from "../../common/generated/GearKind";
-import type { PluginScaffold } from "../../common/generated/PluginScaffold";
 import type { ProductEdit } from "../../common/generated/ProductEdit";
 import { placeNewGear, type HostStanding } from "./gear-edits";
-import { relativePath, relativeTo } from "./paths";
+import { relativeTo } from "./paths";
+import { pluginLocatorFor, type HostPoint, type LocatorOutcome } from "./plugin-locator";
 import type { ScaffoldGearResult } from "../../common/generated/ScaffoldGearResult";
 import { pointsOf } from "../../common/extension-points";
 import { type Row } from "../../common/protocol";
@@ -186,7 +184,7 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
    * engine has already sent. `pointKey` is the identity -- `sdk_lib::TraitIdent`,
    * never a derived short name, for the reason `extension-points.ts` records.
    */
-  protected hosts(): { host: GearDescriptor; point: ExtensionPointDecl; key: string }[] {
+  protected hosts(): HostPoint[] {
     return this.catalogue.current.rows
       .filter((row): row is Extract<Row, { kind: "projected" }> => row.kind === "projected")
       .flatMap((row) =>
@@ -199,42 +197,25 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
   }
 
   /**
-   * The locator for the chosen point, or `undefined` when none is chosen.
+   * Whether the chosen host's `sdk` locator can be written, and what to say.
    *
-   * **Derived from the host's own `package`, not typed by anyone.** `crate_name`
-   * and `lib_ident` come off the descriptor the engine projected, and the path is
-   * expressed relative to where this gear is about to be written -- which is what
-   * `gear.gdl` means by `path`, and what makes the locator point somewhere real.
+   * **The decision is in `create/plugin-locator.ts`, and it used to be a
+   * `PluginScaffold | undefined` here.** That shape collapsed four unrelated
+   * refusals into one silent omission of the whole `plugin` field: the engine
+   * then commented the locator, Create stayed enabled, and the picker had
+   * already promised "the locator is written from this host". This reads the
+   * widget's state and delegates; the arms below decide what is rendered and
+   * whether Create is offered.
    */
-  protected pluginScaffold(): PluginScaffold | undefined {
-    if (this.kind !== "plugin" || this.point === "") return undefined;
-    const chosen = this.hosts().find((entry) => entry.key === this.point);
-    if (chosen === undefined) return undefined;
-
-    // **The SDK's own crate, and a path computed from where things actually
-    // are.** This used to take `crate_name` and `path` from the *host's*
-    // package: for Authentication Resolver that produced
-    // `crate_name = "cf-gears-authn-resolver"` beside `lib =
-    // "authn_resolver_sdk"` -- a host crate wearing an SDK's library identifier
-    // -- at a path invented from a fixed `../../`. The point now carries the
-    // SDK's whole locator, which is the one the host's own description declares.
-    const sdk = chosen.point.sdk;
-    const sdkAbsolute = this.catalogue.absolutePath(chosen.host.source, sdk.path);
-    if (sdkAbsolute === undefined) return undefined;
-    // `path` in a `cargo(...)` is relative to the description's own directory,
-    // and this description will live in `<destination>/<id>/`.
-    const path = relativePath(`${this.destinationDir()}/${this.gearId}`, sdkAbsolute);
-    if (path === undefined) return undefined;
-    return {
-      crate_name: sdk.crate_name,
-      lib_ident: sdk.lib_ident,
-      path,
-      // Left to the `impl` unless the host declares more than one point: which
-      // trait a crate implements is read, and declaring it is an escape hatch.
-      ...(pointsOf(chosen.host).length > 1
-        ? { plugin_interface: chosen.point.trait_ident }
-        : {}),
-    };
+  protected locatorOutcome(): LocatorOutcome {
+    return pluginLocatorFor({
+      isPlugin: this.kind === "plugin",
+      pointKey: this.point,
+      destinationDir: this.destinationDir(),
+      gearId: this.gearId,
+      hosts: this.hosts(),
+      absolutePath: (source, relative) => this.catalogue.absolutePath(source, relative),
+    });
   }
 
   protected schedulePreview(): void {
@@ -250,13 +231,17 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
       return;
     }
     const token = ++this.previewToken;
+    // One call, one local: asking twice let the two answers differ, which for a
+    // decision this cheap is only a way for the preview to describe a request
+    // that was not sent.
+    const locator = this.locatorOutcome();
     try {
       const answer = await this.service.scaffoldGear({
         id: this.gearId,
         name: this.name,
         version: this.version,
         kind: this.kind,
-        ...(this.pluginScaffold() === undefined ? {} : { plugin: this.pluginScaffold() }),
+        ...(locator.kind === "ready" ? { plugin: locator.scaffold } : {}),
         destinationDir: this.destinationDir(),
         dryRun: true,
       });
@@ -372,7 +357,7 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
    * `pointKey` is `sdk_lib::TraitIdent` and never a derived short name, which is
    * the mistake GBX0206 exists to catch.
    */
-  protected renderHostPicker(connected: boolean): React.ReactNode {
+  protected renderHostPicker(connected: boolean, locator: LocatorOutcome): React.ReactNode {
     const hosts = this.hosts();
     if (hosts.length === 0) {
       return (
@@ -416,11 +401,45 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
             </optgroup>
           ))}
         </select>
-        <span className="gbx-create-note">
-          {this.point === ""
-            ? "Without a host the sdk locator is written as a comment, because a locator pointing nowhere makes the gear fail to load."
-            : "The locator is written from this host, and this plugin is attached to it in the product."}
-        </span>
+        {/* **Derived from the outcome, not from `this.point === ""`.** The
+            second sentence below is a promise, and in the two states where the
+            locator cannot be written it was a false one -- said in a note while
+            the reason sat nowhere. Now the note speaks for the two states that
+            have nothing to report, and the message under it speaks for the two
+            that do. */}
+        {locator.kind === "none" && (
+          <span className="gbx-create-note">
+            Without a host the sdk locator is written as a comment, because a locator pointing
+            nowhere makes the gear fail to load.
+          </span>
+        )}
+        {locator.kind === "ready" && (
+          <span className="gbx-create-note">
+            The locator is written from this host, and this plugin is attached to it in the
+            product.
+          </span>
+        )}
+        {/* Beside the control that promised the locator, which is this one, and
+            before anything is written. An engine refusal would arrive on the
+            other side of the screen 400 ms later -- and for three of these four
+            causes it would not arrive at all, because the request simply omits
+            the field. */}
+        {locator.kind === "blocked" && (
+          <span className="gbx-inline-error" role="alert" data-create-gear-locator="blocked">
+            {locator.reason}
+          </span>
+        )}
+        {/* A note, not an error: an SDK on another volume has no relative path
+            from here on any platform, so a commented locator is the honest
+            answer and the crate is still worth writing. */}
+        {locator.kind === "draft" && (
+          <span className="gbx-inline-note" data-create-gear-locator="draft">
+            {locator.reason}
+            {this.product !== undefined &&
+              ` ${this.product.label} is left untouched: a plugin whose locator is a comment ` +
+                `cannot be attached to a host. Choose a destination on the SDK's volume to add it.`}
+          </span>
+        )}
       </label>
     );
   }
@@ -457,6 +476,7 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
     const idProblem = gearIdProblem(this.gearId);
     const versionProblem = gearVersionProblem(this.version);
     const placement = this.placementProblem();
+    const locator = this.locatorOutcome();
     return (
       <div className="gbx-create gbx-create-gear">
         <div className="gbx-create-form">
@@ -508,7 +528,7 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
               <option value="minimal">Minimal — a crate and a name</option>
             </select>
           </label>
-          {this.kind === "plugin" && this.renderHostPicker(connected)}
+          {this.kind === "plugin" && this.renderHostPicker(connected, locator)}
           <label>
             Gear id
             <input
@@ -594,17 +614,34 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
               // the gear will be added to the product; a live Create over a
               // plugin with no host made that promise and then broke it after
               // writing the crate.
+              //
+              // A `blocked` locator joins them for the same reason: the crate
+              // would be written with an `sdk` line the engine commented out,
+              // which is a gear that cannot load. `draft` does not -- see the
+              // label below.
               disabled={
               !connected ||
               this.applying ||
               this.plan === undefined ||
               idProblem !== undefined ||
               versionProblem !== undefined ||
-              placement !== undefined
+              placement !== undefined ||
+              locator.kind === "blocked"
             }
               onClick={() => void this.create()}
             >
-              Create
+              {/* **The label says what the click does.** A cross-volume SDK
+                  still produces a useful crate, so the action stays live -- but
+                  the locator is a comment, and in a product the plugin is not
+                  attached, because attaching one that cannot load would turn a
+                  healthy product into a knowingly incomplete one. Calling that
+                  `Create` would have been the same false promise the banner
+                  used to make. */}
+              {locator.kind !== "draft"
+                ? "Create"
+                : this.product === undefined
+                  ? "Create draft"
+                  : "Create without adding"}
             </button>
             <button
               type="button"
@@ -750,19 +787,28 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
       this.messages.warn(blocked);
       return;
     }
+    // **The same reason, one field over.** A `blocked` locator means the crate
+    // would land with its `sdk` line commented out -- a gear that cannot load --
+    // and asking afterwards leaves that on disk. The button is already disabled
+    // on this; the guard is here because `create()` is also the commit point and
+    // the catalogue can reload between a render and a click.
+    const locator = this.locatorOutcome();
+    if (locator.kind === "blocked") {
+      this.messages.warn(locator.reason);
+      return;
+    }
     this.applying = true;
     this.update();
     try {
       // The same request the preview made, `dry_run` apart. Sending a different
       // one would make the preview a description of something else, which is the
       // rule ADR-0010 states as "a preview is not optional".
-      const plugin = this.pluginScaffold();
       const result = await this.service.scaffoldGear({
         id: this.gearId,
         name: this.name,
         version: this.version,
         kind: this.kind,
-        ...(plugin === undefined ? {} : { plugin }),
+        ...(locator.kind === "ready" ? { plugin: locator.scaffold } : {}),
         destinationDir: this.destinationDir(),
         dryRun: false,
       });
@@ -771,6 +817,21 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
       const gearId = this.gearId;
       this.messages.info(`Created gear at ${root}`);
       this.close();
+      // **A draft is not added, and the button said so.** Its `sdk` locator is a
+      // comment, so `add_gear_plugin` would attach a plugin that cannot load to
+      // a host that is otherwise fine -- a healthy product made knowingly
+      // incomplete by a step the person did not ask for.
+      if (locator.kind === "draft") {
+        if (product !== undefined) {
+          this.messages.warn(
+            `${gearId} was created at ${root} as a draft, and ${product.label} was left ` +
+              `unchanged: its sdk locator is a comment. Move the gear to the SDK's volume, ` +
+              `then add it from the product.`,
+          );
+        }
+        await this.gears.openGear(root);
+        return;
+      }
       if (product !== undefined) {
         await this.addToProduct(product, gearId);
         return;

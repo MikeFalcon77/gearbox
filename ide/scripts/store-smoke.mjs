@@ -18,6 +18,7 @@ import { ProductStore } from "../gearbox-studio/lib/browser/product-store.js";
 import { stagedEditsFor } from "../gearbox-studio/lib/browser/add-gear/staged-edits.js";
 import { placeNewGear } from "../gearbox-studio/lib/browser/create/gear-edits.js";
 import { relativePath } from "../gearbox-studio/lib/browser/create/paths.js";
+import { pluginLocatorFor } from "../gearbox-studio/lib/browser/create/plugin-locator.js";
 import {
   catalogueUsable,
   openedSuccessfully,
@@ -795,6 +796,158 @@ const PLACE = { gearId: "ldap-authn-plugin", sourceId: "gears", at: "gears", isP
     "two UNC shares have no path between them",
   );
   check(relativePath("a/b", "/a/b") === undefined, "a relative input has no base to relate from");
+}
+
+// ============================================ whether a plugin's sdk locator fits
+//
+// Here rather than in a spec for the same reason the block above is: three of
+// the four refusals cannot be reached from a browser on this corpus. There is
+// one volume on this machine, and every SDK under `../gears-rust` sits inside
+// its own source root at a valid `RelPath`, so `absolutePath` never says no and
+// a catalogue reload never drops a host that was just chosen.
+//
+// What this replaced returned `PluginScaffold | undefined`, and the consumer
+// spread it -- so all four causes silently omitted the whole `plugin` field, the
+// engine commented the locator, and Create stayed enabled.
+
+{
+  const point = {
+    trait_ident: "AuthNResolverPluginClient",
+    sdk_lib: "authn_resolver_sdk",
+    sdk: {
+      crate_name: "cf-gears-authn-resolver-sdk",
+      lib_ident: "authn_resolver_sdk",
+      path: "authn-resolver-sdk",
+    },
+  };
+  const second = { ...point, trait_ident: "AuthNResolverAdmin" };
+  const host = (points) => ({
+    id: "authn-resolver",
+    source: "gears-rust",
+    extension_points: points,
+  });
+  const hostPoint = (points = [point]) => ({
+    key: "authn-resolver::AuthNResolverPluginClient",
+    host: host(points),
+    point,
+  });
+  const roots = { "gears-rust": "/corpus/gears-rust" };
+  const absolutePath = (source, relative) =>
+    roots[source] === undefined ? undefined : `${roots[source]}/${relative}`;
+  const ask = (overrides) =>
+    pluginLocatorFor({
+      isPlugin: true,
+      pointKey: "authn-resolver::AuthNResolverPluginClient",
+      destinationDir: "/corpus/gears",
+      gearId: "my-plugin",
+      hosts: [hostPoint()],
+      absolutePath,
+      ...overrides,
+    });
+
+  // A stale key on a non-plugin kind: the engine refuses `plugin` on `service`,
+  // so the kind decides before the key is read.
+  check(ask({ isPlugin: false }).kind === "none", "a non-plugin ignores a leftover host key");
+  // The state a person opens the picker in, and the regression guard for it: the
+  // commented locator is the *right* answer here, so nothing may block.
+  const undecided = ask({ pointKey: "" });
+  check(
+    undecided.kind === "none",
+    `no host chosen is not a problem (got ${undecided.kind})`,
+  );
+
+  const ready = ask({});
+  check(ready.kind === "ready", `a resolvable host writes the locator (got ${ready.kind})`);
+  // The SDK's crate, not the host's -- the bug `ExtensionPointDecl::sdk` was
+  // added to kill: the host's package produced `cf-gears-authn-resolver` beside
+  // `lib = "authn_resolver_sdk"`.
+  check(
+    ready.scaffold?.crate_name === "cf-gears-authn-resolver-sdk" &&
+      ready.scaffold?.lib_ident === "authn_resolver_sdk",
+    "and it names the SDK's crate rather than the host's",
+  );
+  // A literal, so a regression in the arithmetic is visible rather than
+  // restated: `/corpus/gears/my-plugin` -> `/corpus/gears-rust/authn-resolver-sdk`.
+  check(
+    ready.scaffold?.path === "../../gears-rust/authn-resolver-sdk",
+    `the path climbs out of the gear's own folder (got ${ready.scaffold?.path})`,
+  );
+  check(
+    ready.scaffold?.plugin_interface === undefined,
+    "one declared point leaves the trait to the impl",
+  );
+  const twoPoints = ask({ hosts: [hostPoint([point, second])] });
+  check(
+    twoPoints.scaffold?.plugin_interface === "AuthNResolverPluginClient",
+    "two declared points make the trait an explicit escape hatch",
+  );
+
+  const stale = ask({ hosts: [] });
+  check(
+    stale.kind === "blocked" && stale.reason.includes("authn-resolver::AuthNResolverPluginClient"),
+    "a host the catalogue dropped is blocked, by the key the picker showed",
+  );
+
+  const unresolvable = ask({ absolutePath: () => undefined });
+  check(
+    unresolvable.kind === "blocked" &&
+      unresolvable.reason.includes("gears-rust") &&
+      unresolvable.reason.includes("authn-resolver-sdk"),
+    "an SDK the catalogue cannot locate is blocked, naming the source and the path",
+  );
+
+  // The defect itself: today's shape drops the field here and says nothing.
+  const relative = ask({ destinationDir: "gears" });
+  check(
+    relative.kind === "blocked" && relative.reason.includes("gears"),
+    `a relative destination is blocked rather than dropped (got ${relative.kind})`,
+  );
+
+  // **The fabricated-locator case.** With no folder open the destination is
+  // empty, `${destinationDir}/${gearId}` is `/my-plugin`, and that parses as
+  // POSIX-absolute -- so nothing refused and a live locator was computed
+  // relative to a root that does not exist.
+  const noFolder = ask({ destinationDir: "" });
+  check(
+    noFolder.kind === "blocked",
+    `no folder open is stated, not computed from a fictional root (got ${noFolder.kind})`,
+  );
+
+  // Two volumes: a legitimate degradation, so `draft` and not `blocked`.
+  const drives = ask({
+    destinationDir: "C:/work/gears",
+    absolutePath: () => "D:/corpus/gears-rust/authn-resolver-sdk",
+  });
+  check(
+    drives.kind === "draft" && drives.reason.includes("c:") && drives.reason.includes("d:"),
+    `two drives are a draft naming both roots (got ${drives.kind}: ${drives.reason ?? ""})`,
+  );
+  const shares = ask({
+    destinationDir: "//srv/one/gears",
+    absolutePath: () => "//srv/two/authn-resolver-sdk",
+  });
+  check(
+    shares.kind === "draft" &&
+      shares.reason.includes("//srv/one") &&
+      shares.reason.includes("//srv/two"),
+    "and so are two UNC shares",
+  );
+
+  // The invariants the widget leans on: a message wherever it renders one, and
+  // a scaffold only where it sends one.
+  const all = [undecided, ready, twoPoints, stale, unresolvable, relative, noFolder, drives, shares];
+  check(
+    all.every((outcome) =>
+      outcome.kind === "ready"
+        ? outcome.scaffold !== undefined && outcome.reason === undefined
+        : outcome.kind === "none"
+          ? outcome.reason === undefined && outcome.scaffold === undefined
+          : outcome.reason !== "" &&
+            outcome.reason !== undefined &&
+            outcome.scaffold === undefined,
+    ),
+    "every outcome carries exactly what its arm promises",
+  );
 }
 
 console.log(
