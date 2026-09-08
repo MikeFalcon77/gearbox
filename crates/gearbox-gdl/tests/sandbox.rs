@@ -348,6 +348,50 @@ gear(package = LEFT, name = "Demo")
     assert!(codes.is_empty(), "a diamond should load cleanly: {codes:?}");
 }
 
+/// A fragment may bind names. Declaring is the loading file's job.
+///
+/// The rule always held, but only by accident: the fragment evaluator carried no
+/// sink, so `gear()` failed inside it with `internal error: no GdlSink installed
+/// on the evaluator` -- a message that blames the tool for what the file did, and
+/// one a genuine wiring bug would produce word for word. What is asserted here is
+/// the message and the location, not just the code, because the code was already
+/// right and useless.
+#[test]
+fn a_fragment_may_not_declare_a_gear() {
+    let fx = Fixture::new("declares");
+    fs::write(
+        fx.root().join("declaring.gdl"),
+        "gear(package = cargo(crate_name = \"c\", lib = \"c\"))\n",
+    )
+    .expect("write declaring");
+
+    let outcome = GdlEngine::new().eval_gear(
+        &fx.identity(),
+        "load(\"//declaring.gdl\", \"X\")\ngear(package = cargo(crate_name = \"c\", lib = \"c\"))\n",
+    );
+
+    let reported: Vec<_> = outcome.diagnostics.iter().collect();
+    assert_eq!(reported.len(), 1, "{reported:?}");
+    let d = reported[0];
+    assert_eq!(d.code, DiagnosticCode::GdlEval);
+    assert!(
+        d.message.contains("declaring.gdl") && !d.message.contains("internal error"),
+        "the fragment's author must be told it is their file: {:?}",
+        d.message
+    );
+    assert!(
+        d.location
+            .as_ref()
+            .is_some_and(|l| l.uri.ends_with("declaring.gdl")),
+        "an editor opening this must land on the fragment: {:?}",
+        d.location
+    );
+    assert!(
+        outcome.value.is_none(),
+        "the load failed, so nothing is built"
+    );
+}
+
 #[test]
 fn a_broken_fragment_is_a_parse_error_on_the_fragment() {
     let fx = Fixture::new("parse");

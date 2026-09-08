@@ -36,14 +36,15 @@ use starlark::values::FrozenHeapName;
 use gearbox_ir::{Diagnostic, DiagnosticCode, Diagnostics, Location};
 
 use crate::declarative::{dialect, scan_forbidden_tokens};
+use crate::sink::GdlSink;
 
-/// Sentinel the parent evaluation matches so it does not also emit GBX0102
-/// for a fragment whose GBX0103 diagnostics are already recorded.
-pub const FORBIDDEN_RECORDED: &str = "contains a construct GDL does not permit";
-
-/// Sentinel the parent evaluation matches so a fragment parse failure is not
-/// restated as a parent-file `GdlEval`.
-pub const PARSE_RECORDED: &str = "fragment does not parse";
+/// Sentinels saying a fragment failure already recorded its own diagnostic,
+/// with the fragment's own span, so the parent evaluation must not restate it as
+/// a GBX0102 on the loading file. Matched through [`is_recorded`] rather than by
+/// the caller, so adding a fourth is a change in one place.
+const FORBIDDEN_RECORDED: &str = "contains a construct GDL does not permit";
+const PARSE_RECORDED: &str = "fragment does not parse";
+const DECLARES_RECORDED: &str = "fragment declares a gear or a product";
 
 /// Bound on a loaded fragment. A description is not a program; a megabyte of
 /// it is a runaway `load()`, not a legitimate include.
@@ -278,17 +279,46 @@ impl<'a> GdlLoader<'a> {
         // `set_loader` borrows it for the evaluator's whole lifetime.
         let nested = self.nested(path.parent().unwrap_or(&self.root).to_path_buf());
 
-        Module::with_temp_heap(|module| {
+        // A fragment gets its own sink rather than none at all. With none,
+        // `gear()` inside a fragment failed in `globals::sink()` with an
+        // internal-error message -- which blamed the tool for what the file did,
+        // and made a genuine wiring bug indistinguishable from an ordinary
+        // mistake in a description. With one, the call lands somewhere and is
+        // refused below, by name.
+        let sink = GdlSink::new();
+
+        let frozen = Module::with_temp_heap(|module| {
             {
                 let mut eval = Evaluator::new(&module);
                 apply_eval_limits(&mut eval);
+                eval.extra = Some(&sink);
                 eval.set_loader(&nested);
                 eval.eval_module(ast, self.globals)?;
             }
             module
-                .freeze_named(FrozenHeapName::User(Box::new(uri)))
+                .freeze_named(FrozenHeapName::User(Box::new(uri.clone())))
                 .map_err(|e| other(format!("cannot freeze `{}`: {e:?}", path.display())))
-        })
+        })?;
+
+        // A fragment binds names; it does not declare. Both slots and the
+        // duplicate flag are checked, so `gear()`, `product()` and two of either
+        // are one answer. Reported against the fragment's own URI for the same
+        // reason the parse error is: attributing it to the loading file is how an
+        // editor opens the wrong document.
+        if sink.take_gear().is_some() || sink.take_product().is_some() || sink.saw_duplicate() {
+            self.state.borrow_mut().diagnostics.push(
+                Diagnostic::error(
+                    DiagnosticCode::GdlEval,
+                    format!("`{uri}` is loaded as a fragment and declares a gear or a product"),
+                    "a fragment binds names -- `SDK = cargo(...)` -- and nothing else; move the \
+                     declaration into a gear.gdl or product.gdl of its own",
+                )
+                .at(Location::file(uri)),
+            );
+            return Err(other(format!("`{}` {DECLARES_RECORDED}", path.display())));
+        }
+
+        Ok(frozen)
     }
 }
 
@@ -320,6 +350,19 @@ impl FileLoader for GdlLoader<'_> {
         state.cache.insert(real, module.clone());
         Ok(module)
     }
+}
+
+/// Whether a fragment failure already recorded its own diagnostic.
+///
+/// Asked by the parent evaluation instead of matching the sentinels itself: each
+/// of the three carries the fragment's own span, and restating one as a GBX0102
+/// on the loading file would hide the location that matters.
+#[must_use]
+pub fn is_recorded(error: &starlark::Error) -> bool {
+    let message = error.to_string();
+    [FORBIDDEN_RECORDED, PARSE_RECORDED, DECLARES_RECORDED]
+        .iter()
+        .any(|sentinel| message.contains(sentinel))
 }
 
 /// Whether a load failure was an escape attempt rather than a missing or
