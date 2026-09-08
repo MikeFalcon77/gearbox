@@ -2047,6 +2047,36 @@ here to refuse: a client-side regex would be a rule this repository does not hav
 gear that accepts the value. What is wrong is one sentence in another repository's doc comment, which
 is where a fix belongs.
 
+#### Validation is a screen, and one row renders a diagnostic everywhere
+
+The third UX pass called the Validation stage "a screen-transition": a centre panel holding
+`0 errors / 2 warnings` and two nearly identical buttons -- `Open Conflicts` and `Show conflicts` --
+while the rows that carry the code, the remedy and the location lived only on the Conflicts panel at
+the bottom. A stage whose entire content is a way to leave it is not a stage, and a person who
+navigated to it had navigated to the wrong place by definition. eCos shows the full list beside its
+counter and its suggested fixes; DaVinci treats validation as a step of its own before generation.
+
+The cause was not the stage, though. `Diagnostic[]` had **five consumers and four renderers**: the
+Conflicts row, the Product view's counts, the Add Gear panel's key-value lines, the catalogue's
+code-and-message, and `ResolutionMarkers` turning the same array into Problems markers. Only the
+first showed `help`, `location`, `related` and `evidence` -- so in three places out of four a
+diagnostic was a sentence with no way to act on it, and the panel a diagnostic happened to land in
+decided whether its remedy was visible.
+
+So the row moved to `browser/diagnostics/diagnostics-list.tsx`, unchanged, and the four renderers
+became one. Validation opens with the summary and then shows the list; `Open Conflicts` survives as
+one demoted link, because the bottom panel is still where the list is read *while* looking at the
+tree that caused it -- duplication was never the objection, a screen made only of navigation was.
+The one-line summary that appears on every other stage is suppressed on Validation, where it would
+be a second, smaller copy of the summary that stage now opens with.
+
+Two adopters gained something they had been missing rather than merely changing shape. The Add Gear
+panel's "what this would introduce" now carries the location of the line that causes each new
+diagnostic, at the moment a person is deciding whether to accept it; the catalogue's failed
+projections now link to the `gear.gdl` that failed, which is the most actionable thing about them.
+`density` distinguishes an aside inside another panel from a screen, and it is **spacing only** --
+a compact list that hid `help` would give back exactly what one renderer exists to prevent.
+
 ### 9.2 Writing to a description, and the four refusals
 
 The catalogue toggle is the only thing in Studio that writes a file a person owns, so the checks in

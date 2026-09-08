@@ -166,14 +166,46 @@
   color: var(--theia-textLink-foreground); cursor: pointer; font: inherit;
 }
 .gbx-conflict-explain:hover { text-decoration: underline; }
+
+/* One line of failure text, and all this class is left doing: the Graph's "the
+   last resolution failed" note. The four `.gbx-diagnostic-*` rules that used to
+   follow it described the catalogue's own diagnostic row, and that row is now
+   `.gbx-conflict` like every other -- a stylesheet keeping rules for markup
+   nobody writes is where the next reader looks for a renderer that is not
+   there. */
 .gbx-diagnostic {
   display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline;
   padding: 3px 4px; border-bottom: 1px solid var(--theia-editorGroup-border);
 }
-.gbx-diagnostic-message { flex: 1 1 240px; word-break: break-word; }
-.gbx-diagnostic-help { flex: 1 0 100%; opacity: 0.65; font-size: 0.9em; }
-.gbx-diagnostic-error .gbx-id { color: var(--theia-editorError-foreground); opacity: 1; }
-.gbx-diagnostic-warning .gbx-id { color: var(--theia-editorWarning-foreground); opacity: 1; }
+
+/* The same rows at a smaller weight, for a list that is an aside inside another
+   panel rather than a screen: the catalogue's failed projections and the Add Gear
+   panel's "what this would introduce". **Spacing only** -- one renderer exists so
+   that the panel a diagnostic lands in cannot decide whether its remedy is
+   visible, and a `compact` list that hid `help` would give that back. */
+.gbx-conflicts-compact .gbx-conflict { padding: 3px 4px 4px; font-size: 0.95em; }
+.gbx-conflicts-compact .gbx-conflict-help { margin: 1px 0 0 22px; font-size: 0.95em; }
+.gbx-conflicts-compact .gbx-conflict-links { margin: 2px 0 0 22px; }
+
+/* The Validation stage: the summary, then the same list. It was two counts and
+   two buttons pointing elsewhere. */
+.gbx-validation-head {
+  display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap;
+  padding-bottom: 6px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--theia-editorGroup-border);
+}
+.gbx-validation-head .gbx-kv { flex: 0 0 auto; gap: 6px; }
+
+/* The catalogue's own heading for its diagnostics. Not `gbx-diagnostics-label`,
+   which is the Product view's one-line summary: two panels wearing one class
+   made an unscoped read of it pick whichever rendered first. */
+.gbx-diagnostics-title {
+  text-transform: uppercase;
+  font-size: 0.85em;
+  letter-spacing: 0.05em;
+  opacity: 0.65;
+  padding: 2px 0;
+}
 
 .gbx-svg { display: block; }
 .gbx-node { fill: var(--theia-editorWidget-background); stroke: var(--theia-editorGroup-border); }

@@ -186,6 +186,47 @@ test.describe("the product has stages", () => {
   });
 });
 
+test.describe("validation is a stage, not a doorway", () => {
+  test("Validation shows the diagnostics rather than a way to reach them [plan §9.1: Validation is a screen]", async ({
+    studio,
+  }) => {
+    // The finding: a centre panel holding two counts and two nearly identical
+    // buttons, while the rows carrying the code, the remedy and the location
+    // lived only in the bottom panel. Asserted as the three things that changed:
+    // the summary is there, the rows are there, and the duplicate button is not.
+    const { page } = studio;
+    await openProduct(page, "dev");
+    await productSection(page, "validation");
+
+    const stage = page.locator("[data-product-validation]");
+    await expect(stage).toBeVisible();
+
+    // The counts stay -- they are the orientation the list is read against.
+    await expect(stage.locator("[data-validation-errors]")).toBeVisible();
+    await expect(stage.locator("[data-validation-warnings]")).toBeVisible();
+
+    // The rows themselves, in the stage rather than only in the bottom panel,
+    // and each naming its code: a diagnostic without one cannot be looked up.
+    const rows = stage.locator(".gbx-conflict");
+    const count = await rows.count();
+    expect(count, "this profile resolves with at least one diagnostic to show").toBeGreaterThan(0);
+    const codes = await rows.evaluateAll((all) =>
+      all.map((r) => r.getAttribute("data-conflict-code")),
+    );
+    expect(codes.every((code) => code !== null && code.length > 0)).toBe(true);
+
+    // And the remedy, which is the half three of the four old renderers dropped.
+    expect(await stage.locator(".gbx-conflict-help").count()).toBeGreaterThan(0);
+
+    // The one-line summary is suppressed *here* and nowhere else: on this stage
+    // it would be a second copy of the summary above, beside a button
+    // duplicating the link below it.
+    await expect(page.locator("[data-show-conflicts]")).toHaveCount(0);
+    await productSection(page, "topology");
+    await expect(page.locator("[data-show-conflicts]")).toHaveCount(1);
+  });
+});
+
 test.describe("opening a product is one act", () => {
   test("a reload with a product open comes back to Home [plan §9.1: Home is a screen, not an empty area]", async ({
     freshStudio,

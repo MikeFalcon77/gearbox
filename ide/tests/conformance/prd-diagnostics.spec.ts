@@ -38,7 +38,12 @@ test.describe("diagnostics reach a person", () => {
     // reporting a resolver diagnostic as evidence that the catalogue renders
     // catalogue diagnostics, which is precisely the kind of pass-for-the-wrong-
     // reason this suite exists to prevent.
-    const rendered = studio.page.locator(".gearbox-catalogue .gbx-diagnostic");
+    // `.gbx-conflict`, since 2026-09-08: the catalogue renders the same row as
+    // every other consumer of `Diagnostic[]`. Updated even though this claim
+    // currently skips on a clean corpus -- a selector that cannot match is a
+    // claim that will never observe what it says, and the skip would have hidden
+    // that indefinitely.
+    const rendered = studio.page.locator(".gearbox-catalogue .gbx-conflict");
     const count = await rendered.count();
     test.skip(
       count === 0,

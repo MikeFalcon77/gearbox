@@ -8,10 +8,14 @@
 // **A second consumer of `ProductStore.diagnostics`, not a second source.**
 // `ResolutionMarkers` already turns the same array into Problems markers, and
 // keeping one array with two renderers is what makes the Problems view and this
-// panel unable to disagree. What this adds is what a marker cannot carry: the
-// `help` sentence, the `evidence` citation, the `related` locations, and the
-// `subject` -- which is a graph node, so a click here can point the Inspector at
-// the thing being complained about.
+// panel unable to disagree.
+//
+// **And the row itself is no longer this file's.** It moved to
+// `diagnostics/diagnostics-list.tsx` unchanged, because the Product view's
+// Validation stage needs the same row and had been reduced to two counts and a
+// button pointing here -- a screen whose whole content was a way to leave it.
+// What this file keeps is what is particular to a *screen* of conflicts: the
+// profile it is about, and `Resolve again`.
 //
 // `Resolve again` means exactly that. There is no automatic resolver and none is
 // promised: the engine reports what it cannot decide, a person edits the
@@ -22,49 +26,16 @@ import { CommandRegistry } from "@theia/core/lib/common";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
-import type { Diagnostic } from "../../common/generated/Diagnostic";
-import type { Location } from "../../common/generated/Location";
-import type { Severity } from "../../common/generated/Severity";
+import {
+  DiagnosticsList,
+  errorsIn,
+  summarise,
+  worstFirst,
+} from "../diagnostics/diagnostics-list";
 import { ProductStore } from "../product-store";
 import { RevealService } from "../reveal-service";
-import { Selection, SelectionService } from "../shell/selection-service";
+import { SelectionService } from "../shell/selection-service";
 import { RESOLVE_PRODUCT } from "../view-contributions";
-
-/** Worst first. A list that buries the error under three hints is sorted wrong. */
-const ORDER: Record<Severity, number> = { error: 0, warning: 1, info: 2, hint: 3 };
-
-const ICON: Record<Severity, string> = {
-  error: "error",
-  warning: "warning",
-  info: "info",
-  hint: "lightbulb",
-};
-
-/**
- * The selection a diagnostic's `subject` names, if it names one this can select.
- *
- * `NodeId` is `{kind}:{payload}` and the format is part of the wire contract, so
- * parsing it here is reading the contract rather than guessing. An unrecognised
- * kind returns `undefined` and the row simply is not clickable -- a profile node
- * is a perfectly good subject and there is nothing for the Inspector to say about
- * it, which is different from a parse that failed.
- */
-export function selectionOf(subject: string | null | undefined): Selection | undefined {
-  if (subject === null || subject === undefined) return undefined;
-  const at = subject.indexOf(":");
-  if (at < 0) return undefined;
-  const kind = subject.slice(0, at);
-  const payload = subject.slice(at + 1);
-  if (kind === "gear" || kind === "process") {
-    return { kind, id: payload };
-  }
-  if (kind === "binding") {
-    const bar = payload.indexOf("|");
-    if (bar < 0) return undefined;
-    return { kind: "binding", consumer: payload.slice(0, bar), contract: payload.slice(bar + 1) };
-  }
-  return undefined;
-}
 
 @injectable()
 export class ConflictsWidget extends ReactWidget {
@@ -98,15 +69,14 @@ export class ConflictsWidget extends ReactWidget {
       );
     }
 
-    const diagnostics = [...state.diagnostics].sort(
-      (a, b) => ORDER[a.severity] - ORDER[b.severity],
-    );
-    const errors = diagnostics.filter((d) => d.severity === "error").length;
+    const diagnostics = worstFirst(state.diagnostics);
 
     return (
       <div className="gbx-conflicts" data-conflicts-count={diagnostics.length}>
         <div className="gbx-conflicts-head">
-          <span className="gbx-conflicts-summary">{this.summarise(diagnostics.length, errors)}</span>
+          <span className="gbx-conflicts-summary">
+            {summarise(diagnostics.length, errorsIn(diagnostics))}
+          </span>
           <span className="gbx-badge" data-conflicts-profile={state.profile ?? ""}>
             {state.profile ?? "—"}
           </span>
@@ -130,116 +100,14 @@ export class ConflictsWidget extends ReactWidget {
             Nothing to report: the <code>{state.profile}</code> resolution raised no diagnostics.
           </div>
         ) : (
-          <ul className="gbx-conflicts-list">
-            {diagnostics.map((diagnostic, index) => this.renderOne(diagnostic, index))}
-          </ul>
+          <DiagnosticsList
+            diagnostics={diagnostics}
+            sorted
+            onReveal={(location) => void this.reveals.revealLocation(location)}
+            onExplain={(selection) => this.selection.select(selection)}
+          />
         )}
       </div>
     );
-  }
-
-  /** "3 conflicts" is wrong when two of them are hints. */
-  protected summarise(total: number, errors: number): string {
-    if (total === 0) return "No conflicts";
-    if (errors === 0) return `${total} ${total === 1 ? "diagnostic" : "diagnostics"}, none blocking`;
-    const rest = total - errors;
-    const head = `${errors} ${errors === 1 ? "conflict" : "conflicts"}`;
-    return rest === 0 ? head : `${head}, and ${rest} more ${rest === 1 ? "diagnostic" : "diagnostics"}`;
-  }
-
-  protected renderOne(diagnostic: Diagnostic, index: number): React.ReactNode {
-    const selection = selectionOf(diagnostic.subject);
-    return (
-      <li
-        className={`gbx-conflict gbx-conflict-${diagnostic.severity}`}
-        key={`${diagnostic.code}-${index}`}
-        data-conflict-code={diagnostic.code}
-        data-conflict-severity={diagnostic.severity}
-        data-conflict-subject={diagnostic.subject ?? ""}
-      >
-        <div className="gbx-conflict-head">
-          <span className={`${codicon(ICON[diagnostic.severity])} gbx-conflict-icon`} />
-          <span className="gbx-id">{diagnostic.code}</span>
-          <span className="gbx-conflict-message">{diagnostic.message}</span>
-        </div>
-
-        {/* `help` is required for errors (`cpt-gearbox-nfr-actionable-diagnostics`),
-            so its absence on one is worth seeing rather than smoothing over. */}
-        {diagnostic.help !== null && diagnostic.help !== undefined && (
-          <div className="gbx-conflict-help">{diagnostic.help}</div>
-        )}
-        {diagnostic.severity === "error" &&
-          (diagnostic.help === null || diagnostic.help === undefined) && (
-            <div className="gbx-conflict-help gbx-error" role="alert">
-              This error carries no help text, which `cpt-gearbox-nfr-actionable-diagnostics`
-              requires. That is a defect in the engine, not in the description.
-            </div>
-          )}
-
-        <div className="gbx-conflict-links">
-          {this.renderLocation(diagnostic.location ?? undefined, "in")}
-          {(diagnostic.related ?? []).map((related, at) => (
-            <span className="gbx-conflict-related" key={`${related.message}-${at}`}>
-              {related.message} {this.renderLocation(related.location, "at")}
-            </span>
-          ))}
-          {selection !== undefined && (
-            <button
-              type="button"
-              className="gbx-conflict-explain"
-              data-conflict-explain={diagnostic.subject ?? ""}
-              // The `subject` field exists for exactly this: "the graph node this
-              // concerns, so a client can select it".
-              onClick={() => this.selection.select(selection)}
-            >
-              explain {label(selection)}
-            </button>
-          )}
-          {/* The `file:line` in `gears-rust` that substantiates a claim about a
-              runtime limitation (`cpt-gearbox-nfr-evidence-cited`). Shown as text
-              rather than as a link: it points into the corpus, which is a
-              different tree from the descriptions, and a link that may not open is
-              worse than a citation that reads. */}
-          {diagnostic.evidence !== null && diagnostic.evidence !== undefined && (
-            <span className="gbx-conflict-evidence" title="evidence in gears-rust">
-              {diagnostic.evidence}
-            </span>
-          )}
-        </div>
-      </li>
-    );
-  }
-
-  protected renderLocation(
-    location: Location | undefined,
-    preposition: string,
-  ): React.ReactNode {
-    if (location === undefined || location === null) return undefined;
-    const line = location.range.start.line + 1;
-    const name = location.uri.split("/").pop() ?? location.uri;
-    return (
-      <a
-        className="gbx-conflict-where"
-        href={location.uri}
-        onClick={(event) => {
-          event.preventDefault();
-          void this.reveals.revealLocation(location);
-        }}
-      >
-        {preposition} {name}:{line}
-      </a>
-    );
-  }
-}
-
-function label(selection: Selection): string {
-  switch (selection.kind) {
-    case "gear":
-    case "process":
-      return selection.id;
-    case "binding":
-      return `${selection.consumer} → ${selection.contract}`;
-    case "catalogue-row":
-      return selection.key;
   }
 }

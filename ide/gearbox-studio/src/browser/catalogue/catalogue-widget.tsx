@@ -21,6 +21,7 @@ import type { Diagnostic } from "../../common/generated/Diagnostic";
 import type { FailedRoot } from "../../common/generated/FailedRoot";
 import { Row, rowKey } from "../../common/protocol";
 import { CatalogueStore } from "../catalogue-store";
+import { DiagnosticsList } from "../diagnostics/diagnostics-list";
 import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
 import { RevealService } from "../reveal-service";
@@ -420,24 +421,29 @@ export class CatalogueWidget extends ReactWidget {
    * to project became a row that says `parsing…` under a finished progress bar
    * with no explanation anywhere.
    */
+  /**
+   * What the load could not do, in the same rows every other panel uses.
+   *
+   * The wrapper keeps a class of its own -- not `gbx-group-label`, which means "a
+   * category of gears" and is read as exactly that by the suite -- but the title
+   * is no longer `gbx-diagnostics-label`. That class belongs to the Product
+   * view's one-line summary, and having both meant an unscoped read of it picked
+   * whichever panel happened to render first.
+   *
+   * `compact`, because this is an aside inside a tree rather than a screen. It is
+   * spacing only: a catalogue diagnostic keeps its location link, which points at
+   * the `gear.gdl` that failed to project -- the most actionable thing about it,
+   * and previously not shown at all.
+   */
   protected renderDiagnostics(diagnostics: readonly Diagnostic[]): React.ReactNode {
     return (
-      <div className="gbx-diagnostics">
-        {/* Its own class, not `gbx-group-label`: that one means "a category of
-            gears", and the conformance suite reads it as exactly that. */}
-        <div className="gbx-diagnostics-label">diagnostics ({diagnostics.length})</div>
-        {diagnostics.map((diagnostic, index) => (
-          <div
-            className={`gbx-diagnostic gbx-diagnostic-${diagnostic.severity}`}
-            key={`${diagnostic.code}:${index}`}
-          >
-            <span className="gbx-id">{diagnostic.code}</span>
-            <span className="gbx-diagnostic-message">{diagnostic.message}</span>
-            {diagnostic.help !== null && diagnostic.help !== undefined && (
-              <span className="gbx-diagnostic-help">{diagnostic.help}</span>
-            )}
-          </div>
-        ))}
+      <div className="gbx-diagnostics" data-catalogue-diagnostics={diagnostics.length}>
+        <div className="gbx-diagnostics-title">diagnostics ({diagnostics.length})</div>
+        <DiagnosticsList
+          diagnostics={diagnostics}
+          density="compact"
+          onReveal={(location) => void this.reveals.revealLocation(location)}
+        />
       </div>
     );
   }

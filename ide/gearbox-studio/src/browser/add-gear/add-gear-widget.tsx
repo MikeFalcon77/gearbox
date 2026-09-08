@@ -27,6 +27,8 @@ import type { GearDescriptor } from "../../common/generated/GearDescriptor";
 import type { ProductEdit } from "../../common/generated/ProductEdit";
 import { configKeyProblem, unknownConfigKeyNote } from "../../common/config-keys";
 import { pluginsByPoint, pointKey, pointsOf } from "../../common/extension-points";
+import { DiagnosticsList } from "../diagnostics/diagnostics-list";
+import { RevealService } from "../reveal-service";
 import { CatalogueStore } from "../catalogue-store";
 import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
@@ -65,6 +67,9 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
   @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
   @inject(ProductStore) protected readonly products!: ProductStore;
   @inject(ProductEditService) protected readonly edits!: ProductEditService;
+  // A diagnostic row can open the line that causes it, which is the half of a
+  // diagnostic this panel used to drop.
+  @inject(RevealService) protected readonly reveals!: RevealService;
 
   protected gearId: string | undefined;
   protected features: string[] = [];
@@ -1075,27 +1080,31 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
     );
   }
 
+  /**
+   * What this proposal would introduce, in the same rows the Conflicts screen uses.
+   *
+   * These were key-value lines carrying code, message and help, which is three of
+   * the six fields a diagnostic has -- so a `location` pointing at the line that
+   * causes the problem, and the `related` places it also touches, were dropped
+   * exactly where a person is deciding whether to accept them. One renderer, so
+   * the panel a diagnostic appears in cannot decide whether its remedy is
+   * visible.
+   *
+   * No `onExplain`: the subject of one of these is a node in a resolution that
+   * does not exist yet, so there is nothing for the Inspector to be pointed at.
+   * The control is omitted rather than rendered dead.
+   */
   protected renderImpactDiagnostics(diagnostics: readonly Diagnostic[]): React.ReactNode {
     return (
       <div className="gbx-impact-group" data-add-gear-impact-diagnostics>
         <div className="gbx-impact-title">
           {diagnostics.length === 1 ? "1 new diagnostic" : `${diagnostics.length} new diagnostics`}
         </div>
-        {diagnostics.map((diagnostic, index) => (
-          <div
-            className="gbx-kv"
-            key={`${diagnostic.code}-${index}`}
-            data-impact-diagnostic={diagnostic.severity}
-          >
-            <span className="gbx-id">{diagnostic.code}</span>
-            <span>
-              {diagnostic.message}
-              {diagnostic.help !== null && diagnostic.help !== undefined && (
-                <span className="gbx-add-gear-note"> {diagnostic.help}</span>
-              )}
-            </span>
-          </div>
-        ))}
+        <DiagnosticsList
+          diagnostics={diagnostics}
+          density="compact"
+          onReveal={(location) => void this.reveals.revealLocation(location)}
+        />
       </div>
     );
   }

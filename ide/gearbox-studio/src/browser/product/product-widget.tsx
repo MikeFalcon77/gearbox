@@ -25,6 +25,12 @@ import type { InclusionReason } from "../../common/generated/InclusionReason";
 import type { ResolvedBinding } from "../../common/generated/ResolvedBinding";
 import type { ResolvedProcess } from "../../common/generated/ResolvedProcess";
 import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
+import {
+  DiagnosticsList,
+  errorsIn,
+  summarise,
+  worstFirst,
+} from "../diagnostics/diagnostics-list";
 import { ProductStore } from "../product-store";
 import { ProductEditService } from "../product-edit-service";
 import { PendingCreateGear } from "../create/pending-create-gear";
@@ -32,6 +38,7 @@ import { ProductSessionService } from "../shell/product-session-service";
 import { ADD_GEAR, NEW_GEAR, SHOW_CONFLICTS, SHOW_GENERATE } from "../shell/session-command-ids";
 import { RevealLink, RevealPathLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
+import { SelectionService } from "../shell/selection-service";
 
 /**
  * The stages of a product, in the order they are worked through.
@@ -60,6 +67,10 @@ export class ProductWidget extends ReactWidget {
   // write boundary, which is what makes a product outside this checkout editable.
   @inject(ProductSessionService) protected readonly session!: ProductSessionService;
   @inject(RevealService) protected readonly reveals!: RevealService;
+  // For the `explain` control on a diagnostic row: `Diagnostic.subject` names a
+  // graph node so that a client can select it, and the Inspector is what answers
+  // about a selection.
+  @inject(SelectionService) protected readonly selection!: SelectionService;
   @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
   @inject(PendingCreateGear) protected readonly pendingGear!: PendingCreateGear;
 
@@ -318,12 +329,15 @@ export class ProductWidget extends ReactWidget {
 
         {product && this.renderSection(product)}
 
-        {/* The summary line stays on every section, not only on Validation. It is
+        {/* The summary line stays on every section **except Validation**. It is
             one line, it is the only thing on this panel that says something is
             wrong, and a person who has navigated to Topology is exactly the
-            person who needs to know that the resolution complained. Validation
-            is where the same array is read *through*, on the Conflicts screen. */}
-        {renderDiagnosticsSummary(state.diagnostics, () => this.showConflicts())}
+            person who needs to know that the resolution complained. On Validation
+            it would be a second, smaller copy of the summary that stage now opens
+            with, next to a button duplicating the link below it -- which is the
+            pair a UX pass called two nearly identical buttons. */}
+        {this.section !== "validation" &&
+          renderDiagnosticsSummary(state.diagnostics, () => this.showConflicts())}
       </div>
     );
   }
@@ -704,19 +718,41 @@ export class ProductWidget extends ReactWidget {
    * rather than a second full list. This section is the summary with room for the
    * sentence that says where to go.
    */
+  /**
+   * The diagnostics, read here rather than pointed at.
+   *
+   * **This stage used to be a doorway.** It rendered two counts and two nearly
+   * identical buttons -- `Open Conflicts` and `Show conflicts` -- while the rows
+   * that carry the code, the remedy and the location lived only on the Conflicts
+   * screen. A stage whose entire content is a way to leave it is not a stage, and
+   * a person who navigated to Validation had navigated to the wrong place by
+   * definition. eCos shows the list with its counts; DaVinci treats validation as
+   * a step of its own before generation. This is that.
+   *
+   * Summary first, then the list. The counts are the orientation -- how bad is
+   * this, and is it blocking -- and orientation before detail is the order every
+   * screen in this application reads in.
+   *
+   * `Open Conflicts` stays, demoted to one link, because the bottom panel is
+   * still where the list is read *while* looking at the tree that caused it.
+   * Duplication was never the objection; a screen made only of navigation was.
+   */
   protected renderValidation(): React.ReactNode {
-    const diagnostics = this.store.current.diagnostics;
-    const errors = diagnostics.filter((d) => d.severity === "error").length;
+    const diagnostics = worstFirst(this.store.current.diagnostics);
+    const errors = errorsIn(diagnostics);
     const warnings = diagnostics.filter((d) => d.severity === "warning").length;
     return (
       <div className="gbx-validation" data-product-validation>
-        <div className="gbx-kv">
-          <span>errors</span>
-          <span data-validation-errors={errors}>{errors}</span>
-        </div>
-        <div className="gbx-kv">
-          <span>warnings</span>
-          <span data-validation-warnings={warnings}>{warnings}</span>
+        <div className="gbx-validation-head">
+          <span className="gbx-conflicts-summary">{summarise(diagnostics.length, errors)}</span>
+          <div className="gbx-kv">
+            <span>errors</span>
+            <span data-validation-errors={errors}>{errors}</span>
+          </div>
+          <div className="gbx-kv">
+            <span>warnings</span>
+            <span data-validation-warnings={warnings}>{warnings}</span>
+          </div>
         </div>
         {diagnostics.length === 0 ? (
           <div className="gbx-empty">
@@ -725,17 +761,20 @@ export class ProductWidget extends ReactWidget {
           </div>
         ) : (
           <>
-            <p className="gbx-add-gear-note">
-              Each one carries its code, what to do about it, and where it came from. The
-              Conflicts screen is where they can be read and acted on.
-            </p>
+            <DiagnosticsList
+              diagnostics={diagnostics}
+              sorted
+              onReveal={(location) => void this.reveals.revealLocation(location)}
+              onExplain={(selection) => this.selection.select(selection)}
+            />
             <button
               type="button"
-              className="gbx-start-primary"
+              className="gbx-choice"
               data-validation-open-conflicts
+              title="The same list in the bottom panel, readable beside the tree"
               onClick={() => this.showConflicts()}
             >
-              Open Conflicts
+              Open beside the tree
             </button>
           </>
         )}
