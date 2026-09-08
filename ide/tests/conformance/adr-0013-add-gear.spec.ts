@@ -216,6 +216,104 @@ test.describe("Add Gear shows consequences before the write", () => {
     },
   );
 
+  test(
+    "a plugin is attached to a host, and the impact is of that [ADR-0013 §Amendment: a plugin is not a selected gear]",
+    async ({ studio }) => {
+      // **The write was right and the preview described something else.** The
+      // batch became `add_plugin`, but "What changes" still asked the engine what
+      // a top-level `use_gear` would do -- so for a plugin with no eligible host
+      // the panel said "Nothing in this product declares
+      // TenantResolverPluginClient" *and* "1 gear joins the closure", and offered
+      // "you can still add it" beside a disabled button. One proposal, two
+      // descriptions, and only one of them was the one that would be written.
+      const { page } = studio;
+      await openProduct(page, "dev");
+      await revealCatalogue(page);
+      await resetCatalogueView(page);
+
+      // `oidc-authn-plugin` fills the point `authn-resolver` declares, and the
+      // product has that host -- so this is the case that works.
+      await page.locator('[data-toggle-gear="oidc-authn-plugin"]').click();
+      await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+
+      // The plugin path replaces features/config/plugins: `set_config` and
+      // `set_features` are span surgery on a `use_gear` entry, and a plugin has
+      // none, so offering them would offer a choice that cannot be right.
+      await expect(page.locator("[data-add-gear-host]")).toBeVisible();
+      await expect(page.locator('[data-add-gear-section="features"]')).toHaveCount(0);
+
+      const host = page.locator("[data-add-gear-host-pick]");
+      await expect(host).toBeVisible();
+      const offered = await host
+        .locator("option")
+        .evaluateAll((all) => all.map((o) => (o as HTMLOptionElement).value).filter((v) => v !== ""));
+      expect(offered, "the host that declares the point should be offered").toContain(
+        "authn-resolver",
+      );
+
+      // Nothing is asked of the engine until a host is chosen, and the panes say
+      // why rather than describing an addition nobody proposed.
+      const changes = page.locator('[data-add-gear-section="changes"]');
+      await expect(changes).toContainText("Choose the gear", { timeout: 30_000 });
+      await expect(changes).not.toContainText("joins the closure");
+
+      // **And the host does not survive a change of plugin.** It used to: the
+      // next plugin was reported as "already attached to authn-resolver" while
+      // the section above correctly said that host declares no point it fills.
+      await host.selectOption("authn-resolver");
+      await page.locator("[data-add-gear-change]").click();
+      await page.locator("[data-add-gear-select]").selectOption("rg-tr-plugin");
+      const blocked = "Nothing in this product declares";
+      await expect(page.locator("[data-add-gear-host-none]")).toContainText(blocked, {
+        timeout: 30_000,
+      });
+      // The impact repeats the blocking reason instead of resolving a proposal
+      // that does not exist.
+      await expect(changes).toContainText(blocked, { timeout: 30_000 });
+      await expect(changes).not.toContainText("joins the closure");
+      await expect(page.locator("[data-add-gear-apply]")).toBeDisabled();
+
+      await page.locator("[data-add-gear-cancel]").click();
+      await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0);
+    },
+  );
+
+  test(
+    "an invalid value disables Add before the next debounce [plan §9.1: checked where the caret is]",
+    async ({ studio }) => {
+      // The window this closes: the field said `internal_auth_cache_ttl_secs is
+      // an integer` while `Add to Product` stayed live until the next 400 ms
+      // debounce turned it off. Asserted immediately after the keystroke, which
+      // is the only moment that distinguishes the fix from what it replaced.
+      const { page } = studio;
+      await openProduct(page, "dev");
+      await revealCatalogue(page);
+      await resetCatalogueView(page);
+      await page.locator('[data-toggle-gear="grpc-hub"]').click();
+      await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+
+      const add = page.locator("[data-add-gear-apply]");
+      await expect(add).toBeEnabled({ timeout: 60_000 });
+
+      const ints = page.locator('[data-config-field-kind="int"]');
+      const count = await ints.count();
+      test.skip(count === 0, "this gear exposes no integer field to make invalid");
+      const field = ints.first();
+      const name = await field.getAttribute("data-config-field");
+      await field.locator("input").fill("1.5");
+
+      // No wait: the point is that both are true in the same tick.
+      await expect(page.locator(`[data-config-field-error="${String(name)}"]`)).toBeVisible();
+      await expect(add).toBeDisabled();
+      // And still disabled once the debounce has been and gone.
+      await page.waitForTimeout(1_200);
+      await expect(add).toBeDisabled();
+
+      await page.locator("[data-add-gear-cancel]").click();
+      await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0);
+    },
+  );
+
   test("a config key that no field could be is refused at the row [plan §9.1: checked where the caret is]", async ({
     studio,
   }) => {

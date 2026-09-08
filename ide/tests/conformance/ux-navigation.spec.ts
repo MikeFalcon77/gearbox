@@ -275,45 +275,31 @@ test.describe("validation is a stage, not a doorway", () => {
   test("what a proposal would introduce is the same row, at a smaller weight [plan §9.1: Validation is a screen]", async ({
     studio,
   }) => {
-    // The half of this that is easy to get wrong is not the list -- it is that a
-    // *compact* list stays a full diagnostic. Three of the four renderers this
-    // replaced showed code, message and help at most, so the location of the line
-    // causing a new problem was dropped exactly where a person is deciding
-    // whether to accept it.
+    // **Reported unobserved, and the reason is a fix rather than a gap.** This
+    // used to drive `rg-tr-plugin`, the one gear whose addition introduced a
+    // diagnostic -- and it introduced one *because the preview was describing the
+    // wrong operation*: it asked the engine what a top-level `use_gear` of a
+    // plugin would do, which is the form this build refuses to write. With the
+    // preview computed from the batch that will actually be written, no proposal
+    // on this corpus introduces a diagnostic, so there is no compact list to look
+    // at. Tried all nine addable gears, plugins with a host chosen included.
     //
-    // `rg-tr-plugin`, and the gear is not arbitrary: it is the only one in this
-    // corpus whose addition introduces a diagnostic. Found by trying all fourteen
-    // rather than by reading the resolver, and named here so the next person does
-    // not have to repeat that.
-    const { page } = studio;
-    await openProduct(page, "dev");
-    await revealCatalogue(page);
-    await resetCatalogueView(page);
-
-    const toggle = page.locator('[data-toggle-gear="rg-tr-plugin"]');
-    await expect(toggle).toHaveAttribute("data-in-product", "false");
-    await toggle.click();
-    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
-
-    const group = page.locator("[data-add-gear-impact-diagnostics]");
-    await expect(group).toBeVisible({ timeout: 60_000 });
-    await expect(group.locator("ul.gbx-conflicts-compact")).toHaveCount(1);
-
-    const row = group.locator(".gbx-conflict").first();
-    await expect(row).toHaveAttribute("data-conflict-code", /GBX\d{4}/);
-    // The remedy and the place, which is what "the same row" has to mean.
-    await expect(row.locator(".gbx-conflict-help")).toBeVisible();
-    await expect(row.locator(".gbx-conflict-where")).toBeVisible();
-    // And no `explain`: the subject of one of these is a node in a resolution
-    // that does not exist yet, so the control is omitted rather than rendered
-    // dead. Asserting the absence, because a dead button is what the old
-    // key-value rows were being replaced to avoid.
-    await expect(group.locator("[data-conflict-explain]")).toHaveCount(0);
-
-    // Nothing was written and nothing is left open: the panel is a dry run, and a
-    // wizard left on screen holds a focus episode the next claim would inherit.
-    await page.locator("[data-add-gear-cancel]").click();
-    await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0);
+    // What still holds is asserted at the source, the way the `ensurePlan` rule
+    // is: the panel renders the shared row at compact density rather than a
+    // key-value line of its own. The DOM half returns as soon as the corpus has a
+    // proposal that introduces a diagnostic.
+    const widget = readFileSync(
+      join(IDE, "gearbox-studio/src/browser/add-gear/add-gear-widget.tsx"),
+      "utf8",
+    );
+    expect(widget, "Add Gear should render diagnostics with the shared row").toMatch(
+      /<DiagnosticsList[\s\S]{0,200}density="compact"/,
+    );
+    test.skip(
+      true,
+      "no proposal on this corpus introduces a diagnostic: the one that did was previewing a plugin as a top-level gear, which this build refuses",
+    );
+    await expect(studio.page.locator("[data-add-gear-impact-diagnostics]")).toHaveCount(0);
   });
 });
 

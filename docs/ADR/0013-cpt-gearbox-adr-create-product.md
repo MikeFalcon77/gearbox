@@ -664,3 +664,58 @@ the button's `disabled` now and repeated in `apply()`, because a keybinding, a
 stale render or a click landing in the same tick as a keystroke all reach the
 write without the button having been re-evaluated.
 
+### The preview has to be of the operation that will happen
+
+A second live pass found the placement fix half-done, and the half that was
+missing is the more interesting one.
+
+The *write* went through `stagedEdits()` and became `add_plugin`. "What changes"
+did not: it still called `previewResolution(gear, source, followUps)`, which sent
+a top-level `add: { gear, source }` alongside the edits. So one proposal had two
+descriptions, and they disagreed the moment a proposal stopped being a top-level
+addition. For `rg-tr-plugin`, which no host in this product can take, the panel
+said all of this at once:
+
+* "Nothing in this product declares TenantResolverPluginClient";
+* "1 gear joins the closure";
+* the diagnostics of a hypothetical top-level addition;
+* "you can still add it", beside a disabled button.
+
+The write was right and the main preview described a forbidden operation.
+`previewResolution` now takes **the same array** the dry run and the write get,
+and no `add`: `ProductEdit::AddGear` is expressible as an edit, so one array says
+everything and `resolve_preview` already folds `edits` on their own. Nothing is
+sent at all while a plugin has no host -- an empty proposal is not a question the
+engine can answer, and both panes repeat the blocking reason instead.
+
+**One claim went from ✅ to ⚪ because of this, and that is the right direction.**
+"What a proposal would introduce is the same row, at a smaller weight" drove
+`rg-tr-plugin` -- the only gear whose addition introduced a diagnostic -- and it
+introduced one *because the preview was describing the wrong operation*. With the
+preview honest, no proposal on this corpus introduces a diagnostic, so the row has
+nothing to render. Tried all nine addable gears, plugins with a host chosen
+included. The density property is asserted at the source meanwhile; the DOM half
+returns when the corpus has such a proposal.
+
+### A staged proposal belongs to one gear
+
+`this.host` survived a change of plugin, so `OIDC -> authn-resolver -> another
+plugin` reported the new plugin as "already attached to authn-resolver" while the
+section above correctly said that host declares no point it fills. Eight fields
+were being cleared by hand in two places that had drifted; `resetProposal()` is
+one method, used by opening the panel, choosing a gear and choosing a different
+one. Everything in it belongs to one gear and to no other -- a feature name to one
+crate's `[features]` table, a config key to one struct, a host to one plugin's
+point.
+
+### A path is not a string with slashes in it
+
+`relativePath` documented that both its arguments already used `/`, and one of
+them does not: `CatalogueStore.absolutePath` joins with the separator the engine's
+own root used, so on Windows it returns `C:\...` while the destination the panel
+built is `C:/...`. No common segment, `undefined`, and the locator silently stays
+a comment -- a feature that works on one platform and quietly does not on another.
+Both sides are normalised now, and a drive root is compared case-insensitively
+because `C:` and `c:` are one drive while `/Users` and `/users` are two
+directories.
+

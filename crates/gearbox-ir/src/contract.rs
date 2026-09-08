@@ -329,7 +329,7 @@ pub struct GrpcProjection {
 /// in practice -- `cf-api-contracts` has library identifier `cf_api_contracts`,
 /// not `api_contracts`. Deriving it would silently emit a link line that does
 /// not compile.
-//  because  carries one and is itself ordered -- points
+// Ordered because ExtensionPointDecl carries one and is itself ordered: points
 // are sorted for stable output, and a locator inside one has to compare for that
 // to hold.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]

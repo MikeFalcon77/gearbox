@@ -419,21 +419,27 @@ export class ProductEditService {
    * debounce, and a message toast per failed preview would be noise. The panel
    * reports it in place.
    */
-  async previewResolution(
-    gear: string,
-    source: string,
-    followUps: readonly ProductEdit[],
-  ): Promise<ResolutionPreview> {
+  async previewResolution(edits: readonly ProductEdit[]): Promise<ResolutionPreview> {
     const open = this.product.current.open;
     if (open === undefined) {
       return { ok: false, reason: "Open a product to see what adding this would change." };
+    }
+    if (edits.length === 0) {
+      return { ok: false, reason: "Nothing is staged yet, so there is nothing to resolve." };
     }
     try {
       return { ok: true, resolution: await this.service.resolvePreview({
         path: open.path,
         profile: this.product.current.profile,
-        add: { gear, source },
-        edits: followUps,
+        // **The same array the dry run and the write get, and no `add`.** The
+        // separate `add: { gear, source }` parameter was a second description of
+        // the proposal, and the two disagreed the moment a proposal stopped being
+        // a top-level addition: a plugin is attached with `add_plugin`, while the
+        // preview went on asking what would happen if it were added as a gear --
+        // so the panel showed "1 gear joins the closure" beside its own refusal
+        // to add it that way. `ProductEdit::AddGear` is expressible as an edit,
+        // so one array says everything and the engine folds it in order.
+        edits: [...edits],
       }) };
     } catch (error) {
       // **The reason travels, and the toast still does not.** Returning

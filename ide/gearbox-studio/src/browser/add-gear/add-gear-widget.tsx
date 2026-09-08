@@ -154,15 +154,9 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
 
   openWith(state?: AddGearState): void {
     this.gearId = state?.gearId;
-    this.features = [];
-    this.plugins = [];
-    this.host = "";
-    this.config = [];
-    this.typed = new Map();
-    this.newFeature = "";
-    this.newPlugin = "";
-    this.newConfigKey = "";
-    this.newConfigValue = "";
+    // The same reset a change of gear does, because opening the panel *is* one:
+    // the previous visit staged its edits about whatever it was told to add.
+    this.resetProposal();
     this.preview = undefined;
     this.previewError = undefined;
     this.previewing = false;
@@ -212,6 +206,31 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
     return `${id} is already pulled into the closure (not named directly). Adding it makes the product ask for it explicitly.`;
   }
 
+  /**
+   * Why there is nothing to resolve or write yet, if there is nothing.
+   *
+   * **A plugin with no host stages no edits at all**, and asking the engine
+   * about an empty proposal produced the worst of both: the section said "choose
+   * a host" while the impact pane described a top-level addition nobody had
+   * asked for. Repeating the reason in both places is the honest answer -- the
+   * question they answer has no answer yet.
+   */
+  protected proposalProblem(): string | undefined {
+    const point = this.fillsPoint();
+    if (point === undefined) return undefined;
+    const hosts = this.hostsForPlugin();
+    if (hosts.length === 0) {
+      return (
+        `Nothing in this product declares ${point.trait_ident}, so there is nothing for ` +
+        `this plugin to fill. Add a gear that declares it first.`
+      );
+    }
+    if (this.host === "") {
+      return `Choose the gear ${this.descriptor()?.id ?? "this plugin"} fills, above.`;
+    }
+    return undefined;
+  }
+
   protected async refreshPreview(): Promise<void> {
     const gear = this.descriptor();
     if (gear === undefined) {
@@ -222,9 +241,19 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
       this.update();
       return;
     }
-    // Same rule as the impact: a value that cannot be written is not sent to be
-    // written. The engine's refusal would arrive as a failure of the whole
-    // proposal, beside a field that already says what is wrong with it.
+    // Same rule as the impact: nothing is sent while the proposal is not one.
+    const blocking = this.proposalProblem();
+    if (blocking !== undefined) {
+      this.previewToken += 1;
+      this.preview = undefined;
+      this.previewError = blocking;
+      this.previewing = false;
+      this.update();
+      return;
+    }
+    // And a value that cannot be written is not sent to be written: the engine's
+    // refusal would arrive as a failure of the whole proposal, beside a field
+    // that already says what is wrong with it.
     const problem = this.stagedProblem();
     if (problem !== undefined) {
       this.previewToken += 1;
@@ -328,7 +357,44 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
    * something: a person who has just made a field invalid should see why the
    * answer is missing, not an answer that quietly stopped updating.
    */
+  /**
+   * Forget everything staged about the gear that was the subject.
+   *
+   * **One method, used by every change of subject**, because the list had grown
+   * to eight fields and the two places that change the subject had drifted: the
+   * host a plugin was to be attached to survived a change of plugin, so
+   * `OIDC -> authn-resolver -> another plugin` reported the new plugin as
+   * "already attached to authn-resolver" while the section above correctly said
+   * `authn-resolver` declares no point it fills.
+   *
+   * Everything here belongs to one gear and to no other: a feature name to one
+   * crate's `[features]` table, a config key to one struct, a plugin list to one
+   * host's extension point, and a host to one plugin's point.
+   */
+  protected resetProposal(): void {
+    this.features = [];
+    this.plugins = [];
+    this.config = [];
+    this.typed.clear();
+    this.host = "";
+    this.newFeature = "";
+    this.newPlugin = "";
+    this.newConfigKey = "";
+    this.newConfigValue = "";
+    this.resetImpact();
+  }
+
   protected async refreshImpact(): Promise<void> {
+    const blocking = this.proposalProblem();
+    if (blocking !== undefined) {
+      this.impactToken += 1;
+      this.impactPending = false;
+      this.impact = undefined;
+      this.impactDiagnostics = [];
+      this.impactError = blocking;
+      this.update();
+      return;
+    }
     const problem = this.stagedProblem();
     if (problem !== undefined) {
       this.impactToken += 1;
@@ -353,11 +419,13 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
     this.impactPending = true;
     this.update();
 
-    const result = await this.edits.previewResolution(
-      gear.id,
-      gear.source,
-      this.followUps(gear.id),
-    );
+    // **The same array the dry run and the write get.** It used to pass the gear
+    // and its source as a separate `add`, which is a second description of the
+    // proposal -- and the two disagreed as soon as a proposal stopped being a
+    // top-level addition. For a plugin the write was `add_plugin` while this went
+    // on asking what a top-level `use_gear` would do, so the panel reported "1
+    // gear joins the closure" next to its own refusal to add it that way.
+    const result = await this.edits.previewResolution(this.stagedEdits(gear.id, gear.source));
     if (token !== this.impactToken) return;
 
     this.impactPending = false;
@@ -655,6 +723,7 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
                   (this.fillsPoint() !== undefined && this.host === "") ||
                   this.preview?.changed !== true
                 }
+                data-add-gear-apply
                 onClick={() => void this.apply()}
               >
                 {this.applying ? "Adding…" : "Add to Product"}
@@ -721,21 +790,7 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
               if (id === "") return;
               this.gearId = id;
               this.title.label = `Add ${id}`;
-              // **Everything staged was staged about the previous gear.** A
-              // feature name belongs to one crate's `[features]` table, a config
-              // key to one struct, and a plugin to one host's extension point --
-              // so carrying them across a change of subject would produce edits
-              // for a gear that never asked for them, and the plugin list could
-              // survive into a host that declares no point at all.
-              this.features = [];
-              this.plugins = [];
-              this.config = [];
-              this.typed.clear();
-              this.newFeature = "";
-              this.newPlugin = "";
-              this.newConfigKey = "";
-              this.newConfigValue = "";
-              this.resetImpact();
+              this.resetProposal();
               void this.refreshPreview();
               this.scheduleImpact();
               this.update();
@@ -793,8 +848,8 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
           onClick={() => {
             this.gearId = undefined;
             this.preview = undefined;
-            this.resetImpact();
             this.title.label = AddGearWidget.LABEL;
+            this.resetProposal();
             this.update();
           }}
         >

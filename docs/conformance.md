@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **158** — 152 built, 1 not built, 0 broken, 5 not observed.
+Claims: **160** — 153 built, 1 not built, 0 broken, 6 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -108,6 +108,8 @@ Rust, and the ADRs' own Confirmation sections say which.
 | a host is offered only the plugins that fill its own points | `plan §9.1: the surface offers only what is applicable` | ✅ built |  |
 | What will be written names every staged edit, not just the gear | `plan §9.1: the review is the exact serialization` | ✅ built |  |
 | free keys are behind Advanced, and a bad value is refused at the field | `plan §9.1: checked where the caret is` | ⚪ not observed | this gear exposes no enum field, so there is no closed set to leave |
+| a plugin is attached to a host, and the impact is of that | `ADR-0013 §Amendment: a plugin is not a selected gear` | ✅ built |  |
+| an invalid value disables Add before the next debounce | `plan §9.1: checked where the caret is` | ✅ built |  |
 | a config key that no field could be is refused at the row | `plan §9.1: checked where the caret is` | ✅ built |  |
 | features are the crate's own, and absence says so | `plan §9.1: features are projected` | ✅ built |  |
 | errors warn beside the button and never disable it | `—` | ⚪ not observed | no gear in this corpus makes the resolution fail when added, so the warning cannot be observed here |
@@ -245,7 +247,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the panels come back when the last such screen closes, not the first | `ADR-0011 §Amendment: the room is arranged before the screen appears` | ✅ built |  |
 | the Product view is four stages and a way out to Generate | `plan §9.1: Product navigation` | ✅ built |  |
 | Validation shows the diagnostics rather than a way to reach them | `plan §9.1: Validation is a screen` | ✅ built |  |
-| what a proposal would introduce is the same row, at a smaller weight | `plan §9.1: Validation is a screen` | ✅ built |  |
+| what a proposal would introduce is the same row, at a smaller weight | `plan §9.1: Validation is a screen` | ⚪ not observed | no proposal on this corpus introduces a diagnostic: the one that did was previewing a plugin as a top-level gear, which this build refuses |
 | the wait is four named steps that advance | `plan §9.1: opening is staged` | ✅ built |  |
 | Overview reports the shape, the tree and the sources without asking for any of it | `plan §9.1: Overview is the product at a glance` | ✅ built |  |
 | a reload with a product open comes back to Home | `plan §9.1: Home is a screen, not an empty area` | ✅ built |  |
