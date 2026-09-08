@@ -170,19 +170,30 @@ export class ProductWidget extends ReactWidget {
     void this.commands.executeCommand(SHOW_GENERATE.id);
   }
 
+  /**
+   * Leave a refused open, and put the session back where it was.
+   *
+   * **Re-opening, not merely dismissing, and the difference is not cosmetic.**
+   * The first step of an open re-initializes the engine on the *new* product's
+   * folder -- that is what the `workspace` step is -- so a refusal at `describe`
+   * or `catalogue` leaves the store holding A while the engine is pointed at B.
+   * Clearing the screen alone would show A looking perfectly healthy while
+   * Resolve, an edit and Generate all went through a session configured for a
+   * product that never opened, with B's write boundary.
+   *
+   * So the way out of a refusal is the same act as opening A in the first place:
+   * it re-runs the four steps and the engine ends up where the screen says it is.
+   * With no previous product there is no session to restore and dismissing is the
+   * whole of it.
+   */
+  protected leaveFailedOpen(previous: ProductRef | undefined): void {
+    this.session.dismissOpening();
+    if (previous === undefined) return;
+    void this.session.open(previous);
+  }
+
   protected render(): React.ReactNode {
     const state = this.store.current;
-
-    if (state.status === "error") {
-      return (
-        <div className="gbx-product">
-          <div className="gbx-error" role="alert">
-            {state.error}
-          </div>
-          {renderDiagnosticsSummary(state.diagnostics, () => this.showConflicts())}
-        </div>
-      );
-    }
 
     // Opening, and saying which part of it. `ProductSessionService` restarts the
     // engine twice to derive this product's source roots and write boundary,
@@ -190,11 +201,18 @@ export class ProductWidget extends ReactWidget {
     // who sees the previous screen concludes the click missed. The name is the
     // product's, because "Loading..." with no subject is what an application that
     // has lost track of itself says.
+    //
     // **By identity, not by "nothing is open".** Testing `state.open ===
     // undefined` meant that switching from one product to another showed the
     // *old* product for the whole three seconds -- and, if the new one refused,
     // hid the refusal completely: the store still held the previous product, so
     // the panel had something to render and rendered that.
+    //
+    // **And before the error branch, which is the other half of the same
+    // mistake.** A store holding a *failed* A answered `status === "error"` first,
+    // so opening B kept A's error on screen for the whole open and then in place
+    // of B's own refusal. A product's error is the product's; it must not outlive
+    // the moment another product becomes the subject.
     //
     // Once the store holds the product being opened, the panel is that product's
     // and its own `resolving…` line and error box take over -- which is why a
@@ -204,7 +222,18 @@ export class ProductWidget extends ReactWidget {
     if (opening.status !== "idle" && state.open?.path !== opening.product.path) {
       return (
         <div className="gbx-product">
-          {renderOpening(opening, state.open, () => this.session.dismissOpening())}
+          {renderOpening(opening, state.open, (previous) => this.leaveFailedOpen(previous))}
+        </div>
+      );
+    }
+
+    if (state.status === "error") {
+      return (
+        <div className="gbx-product">
+          <div className="gbx-error" role="alert">
+            {state.error}
+          </div>
+          {renderDiagnosticsSummary(state.diagnostics, () => this.showConflicts())}
         </div>
       );
     }
@@ -1303,7 +1332,7 @@ const STEP_ICON: Readonly<Record<StepState, string>> = {
 function renderOpening(
   opening: Exclude<OpeningState, { status: "idle" }>,
   previous: ProductRef | undefined,
-  dismiss: () => void,
+  leave: (previous: ProductRef | undefined) => void,
 ): React.ReactNode {
   const at = OPENING_STAGES.indexOf(opening.stage);
   const failed = opening.status === "failed";
@@ -1339,14 +1368,17 @@ function renderOpening(
           <div className="gbx-error" data-opening-reason>
             {opening.reason}
           </div>
-          {/* A refusal is left standing, which means it has to be dismissable:
-              with another product still open in the store, this screen is the
-              only thing between a person and the product they had. */}
+          {/* A refusal is left standing, which means it has to be leavable: with
+              another product still open in the store, this screen is the only
+              thing between a person and the product they had -- and getting back
+              to it means re-opening it, not just clearing this. See
+              `leaveFailedOpen`. */}
           <button
             type="button"
             className="gbx-choice"
             data-opening-dismiss
-            onClick={dismiss}
+            data-opening-reopen={previous?.path ?? ""}
+            onClick={() => leave(previous)}
           >
             {previous === undefined ? "Dismiss" : `Back to ${previous.label}`}
           </button>

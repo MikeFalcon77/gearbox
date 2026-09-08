@@ -368,6 +368,28 @@ test.describe("an open says which part of it is slow", () => {
       0,
     );
     expect(new Set(samples.map((s) => s.stage)).size, "the step never changed").toBeGreaterThan(1);
+
+    // **And the branch that renders this comes before the one that renders a
+    // product's error**, which is an ordering that broke once and cannot be
+    // observed here: with a *failed* product in the store, `status === "error"`
+    // answered first, so opening another product kept the old one's error on
+    // screen for the whole open and then in place of the new one's refusal.
+    //
+    // Asserted on the source because reaching it needs two products and a
+    // failure, and this corpus has one product and no way to make it fail (see
+    // the note below). An ordering bug of this shape returns silently.
+    const widget = readFileSync(
+      join(IDE, "gearbox-studio/src/browser/product/product-widget.tsx"),
+      "utf8",
+    );
+    const openingBranch = widget.indexOf('opening.status !== "idle"');
+    const errorBranch = widget.indexOf('state.status === "error"');
+    expect(openingBranch, "the opening branch is gone").toBeGreaterThan(0);
+    expect(errorBranch, "the error branch is gone").toBeGreaterThan(0);
+    expect(
+      openingBranch < errorBranch,
+      "a product's error is rendered before another product's open, so it outlives its subject",
+    ).toBe(true);
   });
 
   // **There is no browser claim for a refused open, and that is a finding rather

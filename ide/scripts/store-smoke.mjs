@@ -515,8 +515,14 @@ function productService(overrides) {
 // injects `MonacoTextModelService` and `WorkspaceService` as tokens, and loading
 // those in Node reaches Monaco's ESM `.css` imports. So the decisions live in
 // `shell/opening-outcome.js`, which imports nothing but types, and this is what
-// checks them. The *sequence* is checked in the browser, where killing the engine
-// makes the first step fail for real.
+// checks them.
+//
+// **The sequence is not checked anywhere, and that is deliberate rather than
+// pending.** Killing the engine looks like the way to fail the first step and is
+// not: `initialize` spawns a new engine on every call, so an open that begins
+// with `catalogue.load` gets a fresh one and succeeds -- tried, and the panel duly
+// never reported a failure. What the browser does check is the happy sequence,
+// in `conformance/ux-navigation.spec.ts`: four steps, named, advancing.
 
 const REF_A = { path: "/repo/products/a/product.gdl", label: "products/a" };
 

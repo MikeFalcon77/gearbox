@@ -2108,7 +2108,17 @@ A refusal stops the list at the step that refused and keeps its reason -- a
 description says. The message service still gets the reason, since a refusal
 nobody saw looks like a hang, but the screen that was counting the steps is where
 the answer belongs. It is left standing when the open returns, so it needs a way
-out: the panel offers `Back to <the product that is still open>`.
+out.
+
+**And the way out re-opens the previous product rather than clearing the
+screen.** The first step of an open re-initializes the engine on the *new*
+product's folder -- that is what the `workspace` step is -- so a refusal at
+`describe` or `catalogue` leaves the store holding A while the engine is pointed
+at B. Dismissing alone would show A looking healthy while Resolve, an edit and
+Generate went through a session configured for a product that never opened, with
+B's write boundary. So `Back to A` is the same act as opening A in the first
+place. With no previous product there is nothing to restore and `Dismiss` is the
+whole of it.
 
 **Three of those attributions were wrong when this first landed, and a review
 found all three.** They shared a cause: the failure paths could not be reached
@@ -2124,7 +2134,12 @@ from a browser, so nothing checked them.
   trusts to reopen things that worked.
 * And the panel showed an open's progress only when *nothing* was open, so
   switching from one product to another showed the old one for the whole three
-  seconds and hid a refusal completely. It compares identity now.
+  seconds and hid a refusal completely. It compares identity now -- and that
+  branch runs **before** the one that renders a product's error, which is the same
+  mistake from the other side: a store holding a failed A answered `error` first,
+  so opening B kept A's error on screen for the whole open and then in place of
+  B's refusal. A product's error is the product's, and must not outlive the moment
+  another product becomes the subject.
 
 The decisions live in `browser/shell/opening-outcome.ts`, which imports nothing
 but types, and the sequence in the service calls them. That split is what makes
@@ -2138,6 +2153,13 @@ an omission.** Killing the engine looks like the way in and is not: `initialize`
 spawns a new engine on every call, so an open that begins with `catalogue.load`
 gets a fresh one and succeeds. Verified by trying it. A `⚪ not observed` row
 would suggest a later run might see it, and none can.
+
+What that leaves unmeasured is stated rather than glossed: the refusal *screen* --
+its reason, and that `Back to A` restores A's session -- rests on the decisions
+in `opening-outcome.ts` plus review, because reaching it needs two products and a
+product that fails. The branch order is pinned against the source, since an
+ordering bug of that shape returns silently; a second product in the corpus would
+turn all of it into behaviour.
 
 **The stage after.** Overview now reports what the product *is*, from data
 `ProductStore` already holds: how many gears and how many of those nobody asked
