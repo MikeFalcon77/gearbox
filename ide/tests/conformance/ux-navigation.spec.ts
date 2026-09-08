@@ -24,6 +24,7 @@ import {
   productSection,
   resetCatalogueView,
   revealCatalogue,
+  runCommand,
   settled,
   test,
 } from "../fixtures/studio";
@@ -293,6 +294,121 @@ test.describe("validation is a stage, not a doorway", () => {
     // wizard left on screen holds a focus episode the next claim would inherit.
     await page.locator("[data-add-gear-cancel]").click();
     await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0);
+  });
+});
+
+test.describe("an open says which part of it is slow", () => {
+  test("the wait is four named steps that advance [plan §9.1: opening is staged]", async ({
+    freshStudio,
+  }) => {
+    // Three seconds of `Loading payments-demo…` cannot tell a slow catalogue from
+    // a description that will never evaluate, and an open is two engine spawns
+    // plus a catalogue load. So the panel names the four steps and says which one
+    // it is on.
+    //
+    // A fresh app and the picker, not the Continue card: there are no recents on
+    // a first run, and clicking `Open Product…` is the path that exists.
+    const { page } = freshStudio;
+    await settled(page);
+    await runCommand(page, "Open Product…");
+    const options = page.locator(`.quick-input-list [role="option"]`);
+    await options.first().waitFor({ state: "visible", timeout: 30_000 });
+    await options.filter({ hasText: "payments-demo" }).first().click();
+
+    // Sampled, because the claim is about *advancing* -- a single reading cannot
+    // tell a checklist from a picture of one.
+    const samples: { stage: string | null; done: number; steps: number; label: string }[] = [];
+    for (let round = 0; round < 120; round += 1) {
+      const snap = await page.evaluate(() => {
+        const el = document.querySelector("[data-opening-stage]");
+        return {
+          stage: el?.getAttribute("data-opening-stage") ?? null,
+          label: el?.getAttribute("data-product-opening") ?? "",
+          steps: document.querySelectorAll("[data-step]").length,
+          done: document.querySelectorAll("[data-step].gbx-opening-done").length,
+        };
+      });
+      if (snap.stage !== null) samples.push(snap);
+      if ((await page.locator("[data-resolved-profile]").count()) > 0) break;
+      await page.waitForTimeout(80);
+    }
+
+    expect(samples.length, "the open finished without the panel ever saying so").toBeGreaterThan(0);
+    // All four steps, always: a list that grew as it went would hide how much is
+    // left, which is the question a wait raises.
+    expect(new Set(samples.map((s) => s.steps))).toEqual(new Set([4]));
+    // The product's name, because "Loading…" with no subject is what an
+    // application that has lost track of itself says.
+    expect(samples[0]?.label).toContain("payments-demo");
+    // It starts on the first step with nothing ticked -- a checklist that
+    // pre-ticks its steps is a progress bar in a costume -- and it advances.
+    expect(samples[0]?.stage).toBe("workspace");
+    expect(samples[0]?.done).toBe(0);
+    expect(Math.max(...samples.map((s) => s.done)), "no step was ever completed").toBeGreaterThan(
+      0,
+    );
+    expect(new Set(samples.map((s) => s.stage)).size, "the step never changed").toBeGreaterThan(1);
+  });
+
+  test("a refused open stops at the step that refused [plan §9.1: opening is staged]", async ({
+    studio,
+  }) => {
+    // Written and named, and **not observable on this corpus**: every product
+    // here opens. Inducing a failure means a description that does not evaluate
+    // or declares a `git(...)` source, and writing one under `products/` is what
+    // `global-setup` refuses and the fixture fails a test for.
+    //
+    // Reported as unobserved rather than left unwritten, because the arm exists
+    // and is the reason `OpeningState` carries a stage and a reason at all: the
+    // panel keeps the failure instead of reverting to a picker as though nothing
+    // had been attempted.
+    test.skip(true, "no product in this corpus fails to open, so the failed arm cannot be reached");
+    await expect(studio.page.locator("[data-opening-reason]")).toHaveCount(0);
+  });
+});
+
+test.describe("Overview says what the product is", () => {
+  test("Overview reports the shape, the tree and the sources without asking for any of it [plan §9.1: Overview is the product at a glance]", async ({
+    studio,
+  }) => {
+    // The stage was two rows -- a profile and a link -- which made the emptiest
+    // screen in the application the one every open lands on.
+    const { page } = studio;
+    await openProduct(page, "dev");
+    await productSection(page, "overview");
+
+    const gears = page.locator("[data-overview-gears]");
+    const processes = page.locator("[data-overview-processes]");
+    await expect(gears).toBeVisible();
+    await expect(processes).toBeVisible();
+    expect(Number(await gears.getAttribute("data-overview-gears"))).toBeGreaterThan(0);
+    expect(Number(await processes.getAttribute("data-overview-processes"))).toBeGreaterThan(0);
+    // The count that surprises people: a closure nobody asked for.
+    await expect(gears).toHaveText(/\d+/);
+    await expect(page.locator("[data-figure='gears']")).toContainText("pulled in");
+
+    // The sources are the description's, so a root that failed to load is named.
+    const sources = page.locator("[data-overview-sources]");
+    await expect(sources).toBeVisible();
+    expect(Number(await sources.getAttribute("data-overview-sources"))).toBeGreaterThan(0);
+
+    // **Arriving on the stage must not start work.** `ensurePlan` is a round trip
+    // to the engine, and a render that asked for one would do it on every repaint
+    // of a panel that repaints on every store change. So the status reports what
+    // the service happens to know, and "not planned yet" is an answer.
+    const status = page.locator("[data-overview-generate]");
+    const before = await status.getAttribute("data-overview-generate");
+    expect(before).not.toBe("planning");
+    await productSection(page, "gears");
+    await productSection(page, "overview");
+    await expect(status).toHaveAttribute("data-overview-generate", String(before));
+
+    // A count with no way through is trivia: the figures move between stages.
+    await page.locator("[data-figure='processes']").click();
+    await expect(page.locator('[data-product-section="topology"]')).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 });
 

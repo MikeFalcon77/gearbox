@@ -2077,6 +2077,57 @@ projections now link to the `gear.gdl` that failed, which is the most actionable
 `density` distinguishes an aside inside another panel from a screen, and it is **spacing only** --
 a compact list that hid `help` would give back exactly what one renderer exists to prevent.
 
+#### Opening is staged, and Overview is the product at a glance
+
+Two complaints from the third UX pass, and they are the same complaint at two
+moments: the panel had nothing to say. During an open the centre was blank for
+several seconds while the header said `resolving…`; after it, the stage every open
+lands on held a profile and a link to a file.
+
+**The wait.** An open is two engine spawns and a catalogue load -- `initialize`
+with the product's own directory, evaluate the description, `initialize` again
+with the roots it declares, then load the catalogue and resolve. Roughly three
+seconds on this corpus, which is long enough that *which* three seconds matters:
+one line reading `Loading payments-demo…` cannot tell a slow catalogue from a
+description that will never evaluate. `ProductSessionService` now publishes an
+`OpeningState` -- a discriminated union, not a stage beside a boolean, because the
+two can disagree -- and the panel renders the four steps with the one in flight
+marked. All four are shown from the start: a list that grew as it went would hide
+how much is left, which is the question a wait raises. A step not yet reached is
+an outline rather than a tick, because a checklist that pre-ticks its steps is a
+progress bar in a costume.
+
+The `resolve` step is the one nobody sees, and that is correct: `ProductStore.open`
+sets the open product before resolving, so by then the panel is the product's own
+and its `resolving…` line has taken over. The checklist covers getting *to* the
+product.
+
+A refusal stops the list at the step that refused and keeps its reason. Every
+branch of `doOpen` that returned `false` now names its step -- a `git(...)` source
+and a description with no roots belong to `describe`, not to `catalogue`, because
+nothing has been loaded and what is wrong is what the description says. The
+message service still gets the reason, since a refusal nobody saw looks like a
+hang, but the screen that was counting the steps is where the answer belongs.
+That arm is written as a claim and reported **unobserved**: every product in this
+corpus opens, and inducing a failure means writing a description under
+`products/` that does not evaluate, which is what `global-setup` refuses.
+
+**The stage after.** Overview now reports what the product *is*, from data
+`ProductStore` already holds: how many gears and how many of those nobody asked
+for, how many processes and bindings, whether a generated tree exists for this
+resolution, and which source roots the description declares. The figures are
+buttons into the stage that can act on them, because a count with no way through
+is trivia.
+
+Two deliberate restraints. The generation status is **read from
+`GenerateService`'s cache and never planned from here** -- `ensurePlan` is a round
+trip, and a render that asked for one would do it on every repaint of a panel that
+repaints on every store change, so "not planned for this resolution yet" is an
+answer rather than a reason to go and find out. And Overview does **not** list the
+diagnostics: the one-line summary below it already says how many there are and
+leads to the stage that reads them, and adding a third rendering of that array is
+precisely what the shared row was extracted to stop.
+
 ### 9.2 Writing to a description, and the four refusals
 
 The catalogue toggle is the only thing in Studio that writes a file a person owns, so the checks in

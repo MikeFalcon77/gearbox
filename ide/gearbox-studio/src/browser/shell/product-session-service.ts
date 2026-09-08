@@ -59,6 +59,54 @@ export interface RecentEntry extends ProductRef {
 }
 
 /**
+ * The four steps an open takes, named after what each one is waiting for.
+ *
+ * They are the steps the header of this file already documents, and they are
+ * published rather than merely commented because three seconds of "Loading" is
+ * long enough that *which* three seconds matters -- and because a failure has to
+ * say which step refused. Every branch below that returns `false` has a step it
+ * belongs to.
+ */
+export type OpeningStage = "workspace" | "describe" | "catalogue" | "resolve";
+
+export const OPENING_STAGES: readonly OpeningStage[] = [
+  "workspace",
+  "describe",
+  "catalogue",
+  "resolve",
+];
+
+/** What each step is waiting for, in the words a person would use. */
+export const OPENING_LABEL: Readonly<Record<OpeningStage, string>> = {
+  workspace: "starting the engine on the product's folder",
+  describe: "reading the description",
+  catalogue: "loading the gears it declares",
+  resolve: "resolving the default profile",
+};
+
+/**
+ * Whether an open is running, and how far it got.
+ *
+ * **A discriminated union rather than a stage beside a boolean**, because the
+ * two can disagree and did: a bare `openingRef` said only *that* something was
+ * happening, so a refusal cleared it and left the panel with nothing to show but
+ * the picker again -- the message went to a toast and the screen forgot which
+ * step had failed. `failed` keeps both the step and the reason, which is what a
+ * person needs in order to try the right thing next.
+ */
+export type OpeningState =
+  | { readonly status: "idle" }
+  | { readonly status: "opening"; readonly stage: OpeningStage; readonly product: ProductRef }
+  | {
+      readonly status: "failed";
+      readonly stage: OpeningStage;
+      readonly product: ProductRef;
+      readonly reason: string;
+    };
+
+const IDLE: OpeningState = { status: "idle" };
+
+/**
  * How many to keep.
  *
  * Short on purpose: a Recent list is a shortcut, and one that needs scrolling has
@@ -99,17 +147,70 @@ export class ProductSessionService {
    * had missed. This is what lets the Product view open *first*, with the name of
    * the thing it is waiting for.
    */
-  protected openingRef: ProductRef | undefined;
+  protected openingState: OpeningState = IDLE;
 
-  protected readonly onDidChangeOpeningEmitter = new Emitter<ProductRef | undefined>();
+  protected readonly onDidChangeOpeningEmitter = new Emitter<OpeningState>();
 
-  /** Fires when an open starts and when it finishes, successfully or not. */
-  readonly onDidChangeOpening: Event<ProductRef | undefined> =
-    this.onDidChangeOpeningEmitter.event;
+  /** Fires when an open starts, changes step, succeeds, or refuses. */
+  readonly onDidChangeOpening: Event<OpeningState> = this.onDidChangeOpeningEmitter.event;
 
-  /** The product being opened right now, if any. */
+  /** How far the open in flight has got, or why the last one stopped. */
+  get openingProgress(): OpeningState {
+    return this.openingState;
+  }
+
+  /**
+   * The product being opened right now, if any.
+   *
+   * Kept as the narrow question, because that is what the Product view's "may I
+   * be on screen" test asks -- and a failed open must answer `undefined` there:
+   * the panel should show what went wrong, not go on waiting.
+   */
   get opening(): ProductRef | undefined {
-    return this.openingRef;
+    return this.openingState.status === "opening" ? this.openingState.product : undefined;
+  }
+
+  /**
+   * End the open, unless it refused.
+   *
+   * **A refusal is left standing**: clearing it would put the panel back to a
+   * picker a beat after saying what went wrong, which is how the reason used to
+   * survive only as a toast.
+   *
+   * A method rather than three lines in `open`'s `finally`, because
+   * `doOpen` mutates this field and the compiler cannot see that from there --
+   * it narrows the field to the value `open` assigned and then reports the
+   * `failed` test as unreachable. Reading it where nothing has narrowed it is
+   * the honest fix; a cast would have silenced the same question.
+   */
+  protected settleOpening(): void {
+    if (this.openingState.status === "failed") return;
+    this.openingState = IDLE;
+    this.onDidChangeOpeningEmitter.fire(this.openingState);
+  }
+
+  /** Move to the next step of the open in flight. Ignored once it has ended. */
+  protected enterStage(stage: OpeningStage): void {
+    if (this.openingState.status !== "opening") return;
+    this.openingState = { status: "opening", stage, product: this.openingState.product };
+    this.onDidChangeOpeningEmitter.fire(this.openingState);
+  }
+
+  /**
+   * Stop the open at the step that refused, and say why.
+   *
+   * The message still goes to the message service -- a refusal a person did not
+   * see is a refusal that looks like a hang -- and it also stays here, so the
+   * panel that was showing the steps can show which one stopped instead of
+   * reverting to a picker as though nothing had been attempted.
+   */
+  protected failStage(stage: OpeningStage, reason: string): false {
+    if (this.openingState.status === "opening") {
+      this.openingState = { status: "failed", stage, product: this.openingState.product, reason };
+      this.onDidChangeOpeningEmitter.fire(this.openingState);
+    }
+    this.messages.error(reason);
+    return false;
   }
 
   /**
@@ -251,17 +352,16 @@ export class ProductSessionService {
   async open(ref: ProductRef): Promise<boolean> {
     const pending = this.inFlight;
     if (pending !== undefined) return pending;
+    this.openingState = { status: "opening", stage: "workspace", product: ref };
+    this.onDidChangeOpeningEmitter.fire(this.openingState);
     const started = this.doOpen(ref);
     this.inFlight = started;
-    this.openingRef = ref;
-    this.onDidChangeOpeningEmitter.fire(ref);
     try {
       return await started;
     } finally {
       if (this.inFlight === started) {
         this.inFlight = undefined;
-        this.openingRef = undefined;
-        this.onDidChangeOpeningEmitter.fire(undefined);
+        this.settleOpening();
       }
     }
   }
@@ -292,14 +392,15 @@ export class ProductSessionService {
     // Step 2: read what the description declares. `loadProduct` is evaluation
     // only -- nothing is joined against the catalogue -- which is exactly why it
     // works with no roots declared yet.
+    this.enterStage("describe");
     let intent;
     try {
       intent = (await this.service.loadProduct(ref.path)).intent;
     } catch (error) {
-      this.messages.error(
+      return this.failStage(
+        "describe",
         `${ref.label} could not be evaluated, so it cannot be opened: ${messageOf(error)}`,
       );
-      return false;
     }
 
     const roots: string[] = [];
@@ -317,26 +418,40 @@ export class ProductSessionService {
 
     if (refused.length > 0) {
       // Named, not counted: which source cannot be reached is the actionable part.
-      this.messages.error(
+      // Attributed to `describe`, not to `catalogue`: nothing has been loaded
+      // yet, and what went wrong is what the description says.
+      return this.failStage(
+        "describe",
         `${ref.label} declares ${refused.join(", ")} as a git source, and fetching one is not ` +
           `built yet. Point it at a local path, or open a product that does.`,
       );
-      return false;
     }
     if (roots.length === 0) {
-      this.messages.error(`${ref.label} declares no source roots, so there are no gears to compose.`);
-      return false;
+      return this.failStage(
+        "describe",
+        `${ref.label} declares no source roots, so there are no gears to compose.`,
+      );
     }
 
     // Step 3 and 4: the real session, then the catalogue and the product.
+    this.enterStage("catalogue");
     const session: StudioSession = { roots, workspace };
     await this.catalogue.load(session);
+    this.enterStage("resolve");
     await this.products.open(ref);
     const opened = this.products.current.open !== undefined;
     if (opened) {
       await this.remember(ref);
+      return true;
     }
-    return opened;
+    // `ProductStore.open` reports its own failure through its error state, which
+    // the panel renders -- but the *open* stopped here, and a panel still showing
+    // four steps in progress would be the one thing on screen that disagrees.
+    return this.failStage(
+      "resolve",
+      this.products.current.error ??
+        `${ref.label} could not be resolved, so it was not opened.`,
+    );
   }
 }
 

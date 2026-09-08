@@ -32,9 +32,15 @@ import {
   worstFirst,
 } from "../diagnostics/diagnostics-list";
 import { ProductStore } from "../product-store";
+import { GenerateService } from "../generate/generate-service";
 import { ProductEditService } from "../product-edit-service";
 import { PendingCreateGear } from "../create/pending-create-gear";
-import { ProductSessionService } from "../shell/product-session-service";
+import {
+  OPENING_LABEL,
+  OPENING_STAGES,
+  ProductSessionService,
+  type OpeningState,
+} from "../shell/product-session-service";
 import { ADD_GEAR, NEW_GEAR, SHOW_CONFLICTS, SHOW_GENERATE } from "../shell/session-command-ids";
 import { RevealLink, RevealPathLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
@@ -67,6 +73,9 @@ export class ProductWidget extends ReactWidget {
   // write boundary, which is what makes a product outside this checkout editable.
   @inject(ProductSessionService) protected readonly session!: ProductSessionService;
   @inject(RevealService) protected readonly reveals!: RevealService;
+  // Read only. Overview reports whether a plan exists; it never asks for one --
+  // see `renderGenerationStatus`.
+  @inject(GenerateService) protected readonly generate!: GenerateService;
   // For the `explain` control on a diagnostic row: `Diagnostic.subject` names a
   // graph node so that a client can select it, and the Inspector is what answers
   // about a selection.
@@ -107,6 +116,11 @@ export class ProductWidget extends ReactWidget {
     this.addClass("gearbox-product");
     this.toDispose.push(this.store.onChanged(() => this.update()));
     this.toDispose.push(this.edits.onDraftChanged(() => this.update()));
+    // Overview reports whether a generated tree exists, so it has to hear when
+    // that answer changes -- a plan arriving, an apply writing, or the plan being
+    // dropped as stale. Subscribing rather than polling, and reading rather than
+    // asking: see `renderGenerationStatus`.
+    this.toDispose.push(this.generate.onChanged(() => this.update()));
     // An open takes two engine spawns; without this the panel renders its
     // "choose a product" list for three seconds while one is already opening.
     this.toDispose.push(this.session.onDidChangeOpening(() => this.update()));
@@ -169,21 +183,15 @@ export class ProductWidget extends ReactWidget {
       );
     }
 
-    // Opening, and saying so. `ProductSessionService` restarts the engine twice
-    // to derive this product's source roots and write boundary, which is around
-    // three seconds on this corpus -- long enough that a person who sees the
-    // previous screen concludes the click missed. The name is the product's,
-    // because "Loading..." with no subject is what an application that has lost
-    // track of itself says.
-    const opening = this.session.opening;
-    if (state.open === undefined && opening !== undefined) {
-      return (
-        <div className="gbx-product">
-          <div className="gbx-progress" data-product-opening={opening.label} aria-busy="true">
-            Loading {opening.label}…
-          </div>
-        </div>
-      );
+    // Opening, and saying which part of it. `ProductSessionService` restarts the
+    // engine twice to derive this product's source roots and write boundary,
+    // which is around three seconds on this corpus -- long enough that a person
+    // who sees the previous screen concludes the click missed. The name is the
+    // product's, because "Loading..." with no subject is what an application that
+    // has lost track of itself says.
+    const opening = this.session.openingProgress;
+    if (state.open === undefined && opening.status !== "idle") {
+      return <div className="gbx-product">{renderOpening(opening)}</div>;
     }
 
     if (state.open === undefined) {
@@ -340,6 +348,12 @@ export class ProductWidget extends ReactWidget {
           renderDiagnosticsSummary(state.diagnostics, () => this.showConflicts())}
       </div>
     );
+  }
+
+  /** Move to a stage, from somewhere other than the strip. */
+  protected showSection(section: ProductSection): void {
+    this.section = section;
+    this.update();
   }
 
   /** Whichever stage is selected, rendered from the same resolution. */
@@ -563,7 +577,133 @@ export class ProductWidget extends ReactWidget {
           </span>
         </div>
 
+        {this.renderShape(product)}
+        {this.renderGenerationStatus()}
+        {this.renderSources()}
       </>
+    );
+  }
+
+  /**
+   * What this product *is*, in the four numbers the other stages each hold one of.
+   *
+   * The stage was two rows -- the profile and a link to the file -- which made
+   * Overview the emptiest screen in the application and the one every open lands
+   * on. Every number here is already in `ProductStore.current`, so this reads
+   * rather than asks; each one links to the stage that can be acted on, because a
+   * count with no way through is trivia.
+   *
+   * Asked-for against pulled-in is the same split `renderGears` computes, from
+   * the same field, for the reason that split exists at all: a closure that a
+   * person did not ask for is the thing about this model that surprises people.
+   */
+  protected renderShape(product: ResolvedProduct): React.ReactNode {
+    const entries = Object.entries(product.gears);
+    const asked = entries.filter(([, gear]) =>
+      gear.selected_by.some((reason) => reason.reason === "selected"),
+    ).length;
+    const processes = product.processes.length;
+    const bindings = (product.bindings ?? []).length;
+    const cluster = (product.cluster ?? []).length;
+    return (
+      <div className="gbx-overview-figures" data-overview-figures>
+        <button
+          type="button"
+          className="gbx-figure"
+          data-figure="gears"
+          onClick={() => this.showSection("gears")}
+        >
+          <span className="gbx-figure-value" data-overview-gears={entries.length}>
+            {entries.length}
+          </span>
+          <span className="gbx-figure-label">
+            gears — {asked} asked for, {entries.length - asked} pulled in
+          </span>
+        </button>
+        <button
+          type="button"
+          className="gbx-figure"
+          data-figure="processes"
+          onClick={() => this.showSection("topology")}
+        >
+          <span className="gbx-figure-value" data-overview-processes={processes}>
+            {processes}
+          </span>
+          <span className="gbx-figure-label">
+            {processes === 1 ? "process" : "processes"}
+            {bindings > 0 && `, ${bindings} ${bindings === 1 ? "binding" : "bindings"}`}
+            {cluster > 0 && `, ${cluster} in the cluster`}
+          </span>
+        </button>
+      </div>
+    );
+  }
+
+  /**
+   * Whether a generated tree exists for this resolution.
+   *
+   * **Read from the cache, never planned from here.** `GenerateService.ensurePlan`
+   * is a round trip to the engine, and calling it from a render would make
+   * arriving on a screen do work -- once per paint, on a panel that repaints on
+   * every store change. So this reports what the service happens to know: "not
+   * planned yet" is an honest answer and a link, not a reason to go and find out.
+   */
+  protected renderGenerationStatus(): React.ReactNode {
+    const generate = this.generate.current;
+    const plans = generate.plan?.plans ?? [];
+    const writes = plans.filter((plan) => plan.action !== "unchanged").length;
+    const summary =
+      generate.status === "planning"
+        ? "planning…"
+        : generate.status === "error"
+          ? (generate.error ?? "the last plan failed")
+          : generate.plan === undefined
+            ? "not planned for this resolution yet"
+            : writes === 0
+              ? `${plans.length} files, all unchanged`
+              : `${writes} of ${plans.length} files would change`;
+    return (
+      <div className="gbx-kv">
+        <span>generated tree</span>
+        <span className="gbx-links" data-overview-generate={generate.status}>
+          {summary}{" "}
+          <button
+            type="button"
+            className="gbx-conflict-explain"
+            data-overview-open-generate
+            onClick={() => this.showGenerate()}
+          >
+            open Generate
+          </button>
+        </span>
+      </div>
+    );
+  }
+
+  /**
+   * The source roots this product declares, each openable.
+   *
+   * From the *intent* rather than from the resolution: what a person can change
+   * is what the description says, and a root that failed to load is exactly the
+   * one worth being able to click. `at` is relative to the description's own
+   * directory, which is how the IR defines it, so it is shown as written rather
+   * than resolved -- the resolved form is an absolute path nobody typed.
+   */
+  protected renderSources(): React.ReactNode {
+    const intent = this.store.current.intent;
+    const sources = Object.entries(intent?.sources ?? {});
+    if (sources.length === 0) return undefined;
+    return (
+      <div className="gbx-kv">
+        <span>{sources.length === 1 ? "source" : "sources"}</span>
+        <span className="gbx-links" data-overview-sources={sources.length}>
+          {sources.map(([id, source]) => (
+            <span className="gbx-badge" key={id} data-overview-source={id}>
+              {id} · {source.kind === "path" ? source.at : source.kind}
+            </span>
+          ))}
+        </span>
+      </div>
     );
   }
 
@@ -1104,6 +1244,87 @@ function describeInclusion(reason: InclusionReason): string {
  * §9 asks the Product view for "a diagnostics summary", which is what this is: a
  * count, the worst severity, and the way to the detail.
  */
+/**
+ * The four steps of an open, and which one it is on.
+ *
+ * **A checklist rather than a spinner, because three seconds is long enough for
+ * "which three seconds" to matter.** Opening a product restarts the engine twice
+ * and loads a catalogue; a person watching one line that says `Loading
+ * payments-demo…` cannot tell a slow catalogue from a description that will
+ * never evaluate. Each step says what it is waiting for, in the words a person
+ * would use rather than the method names underneath.
+ *
+ * And a refusal stops the list at the step that refused, with its reason. The
+ * message service still gets it -- a refusal nobody saw looks like a hang -- but
+ * the screen that was counting the steps is where the answer belongs, rather
+ * than the screen reverting to a picker as though nothing had been tried.
+ */
+type StepState = "done" | "busy" | "waiting" | "failed";
+
+/**
+ * The icon per step state, as literal `codicon(...)` calls.
+ *
+ * A table rather than a conditional inside the call, so that the names are
+ * statically visible: `regression.spec.ts` reads `codicon("x")` out of these
+ * sources and checks each against the codicon stylesheet, and a name assembled
+ * from a ternary escapes that check silently.
+ *
+ * `waiting` is an outline and `done` is a tick, and the difference is the point:
+ * a checklist that pre-ticks its steps is a progress bar in a costume.
+ */
+const STEP_ICON: Readonly<Record<StepState, string>> = {
+  done: codicon("pass"),
+  busy: codicon("circle-large-outline"),
+  waiting: codicon("circle-large-outline"),
+  failed: codicon("error"),
+};
+
+function renderOpening(opening: Exclude<OpeningState, { status: "idle" }>): React.ReactNode {
+  const at = OPENING_STAGES.indexOf(opening.stage);
+  const failed = opening.status === "failed";
+  return (
+    <div
+      className="gbx-opening"
+      data-product-opening={opening.product.label}
+      data-opening-stage={opening.stage}
+      data-opening-status={opening.status}
+      aria-busy={!failed}
+      role={failed ? "alert" : "status"}
+    >
+      <div className="gbx-opening-head">
+        {failed ? `Could not open ${opening.product.label}` : `Opening ${opening.product.label}…`}
+      </div>
+      <ol className="gbx-opening-steps">
+        {OPENING_STAGES.map((stage, index) => {
+          // Three states, and the third is why this is not a progress bar: done,
+          // the one in flight, and not yet reached. A step that never ran must
+          // not read as a step that passed.
+          const state: StepState =
+            index < at ? "done" : index === at ? (failed ? "failed" : "busy") : "waiting";
+          return (
+            <li key={stage} className={`gbx-opening-step gbx-opening-${state}`} data-step={stage}>
+              <span className={`${STEP_ICON[state]} gbx-opening-icon`} />
+              <span>{OPENING_LABEL[stage]}</span>
+            </li>
+          );
+        })}
+      </ol>
+      {failed && (
+        <div className="gbx-error" data-opening-reason>
+          {opening.reason}
+        </div>
+      )}
+      {!failed && (
+        <div className="gbx-skeleton" aria-hidden="true">
+          <span className="gbx-skeleton-row" />
+          <span className="gbx-skeleton-row" />
+          <span className="gbx-skeleton-row" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function renderDiagnosticsSummary(
   diagnostics: readonly Diagnostic[],
   show: () => void,

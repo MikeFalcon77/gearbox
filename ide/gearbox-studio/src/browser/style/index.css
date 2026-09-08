@@ -968,6 +968,34 @@
 }
 .gbx-config-reset:hover { background: var(--theia-list-hoverBackground); }
 
+/* Overview's figures. Buttons, not decoration: a count with no way through to
+   the stage that can act on it is trivia, and this stage is where every open
+   lands. */
+.gbx-overview-figures { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
+.gbx-figure {
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+  padding: 6px 10px; min-width: 12em; text-align: left;
+  background: var(--theia-editorWidget-background);
+  border: 1px solid var(--theia-editorGroup-border); border-radius: 3px;
+  color: inherit; font: inherit; cursor: pointer;
+}
+.gbx-figure:hover { border-color: var(--theia-focusBorder); }
+.gbx-figure-value { font-size: 1.5em; font-weight: 600; line-height: 1.1; }
+.gbx-figure-label { opacity: 0.75; font-size: 0.9em; }
+
+/* Opening a product: four steps, because three seconds is long enough that
+   *which* three seconds matters. A step that has not run yet is an outline, not a
+   tick -- a checklist that pre-ticks its steps is a progress bar wearing a
+   costume. */
+.gbx-opening { padding: 10px 12px; max-width: 46em; }
+.gbx-opening-head { font-weight: 600; margin-bottom: 8px; }
+.gbx-opening-steps { list-style: none; margin: 0 0 8px; padding: 0; }
+.gbx-opening-step { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
+.gbx-opening-waiting { opacity: 0.45; }
+.gbx-opening-busy { font-weight: 600; }
+.gbx-opening-done .gbx-opening-icon { color: var(--theia-editorInfo-foreground); }
+.gbx-opening-failed .gbx-opening-icon { color: var(--theia-editorError-foreground); }
+
 .gbx-skeleton { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
 .gbx-skeleton-row {
   height: 1.1em; border-radius: 3px;
