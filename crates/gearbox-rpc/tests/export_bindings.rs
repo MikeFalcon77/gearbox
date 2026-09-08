@@ -32,8 +32,8 @@ use gearbox_rpc::protocol::{
     GeneratePlanResult, InitializeParams, InitializeResult, LockParams, LockResult, LogParams,
     PreviewAddGear, ProductEdit, ProductLoadParams, ProductLoadResult, ProfileFieldEntry,
     ProgressParams, RemoveProfileParams, ResolveParams, ResolvePreviewParams, ResolveResult,
-    ScaffoldGearParams, SetConfigParams, SetFeaturesParams, SetProfileFieldParams, ValidateParams,
-    ValidateResult,
+    ScaffoldGearParams, ScaffoldGearResult, SetConfigParams, SetFeaturesParams,
+    SetProfileFieldParams, ValidateParams, ValidateResult,
 };
 use ts_rs::{Config, TS};
 
@@ -83,6 +83,7 @@ fn export_roots(cfg: &Config) {
     CreateProductParams::export_all(cfg).expect("export CreateProductParams");
     CreateSourceEntry::export_all(cfg).expect("export CreateSourceEntry");
     ScaffoldGearParams::export_all(cfg).expect("export ScaffoldGearParams");
+    ScaffoldGearResult::export_all(cfg).expect("export ScaffoldGearResult");
     LockParams::export_all(cfg).expect("export LockParams");
     LockResult::export_all(cfg).expect("export LockResult");
     ValidateParams::export_all(cfg).expect("export ValidateParams");

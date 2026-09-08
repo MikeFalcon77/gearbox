@@ -139,6 +139,101 @@ pub fn set_gear_features(
     })
 }
 
+/// A named list argument on a call, located inside that call's own text.
+///
+/// The list-shaped counterpart of the dict lookup `set_dict_key_on_call` does.
+/// `Ok(None)` means the argument is absent, which is a state a caller acts on;
+/// an argument that is present but not a list literal is a refusal, because
+/// appending to `plugins = helper(...)` would mean guessing what it evaluates to.
+fn list_arg_on_call(
+    uri: &str,
+    text: &str,
+    name: &str,
+) -> Result<Option<crate::edit::NamedList>, Diagnostics> {
+    let ast = parse_call(uri, text)?;
+    let args = call_args(ast.statement())
+        .ok_or_else(|| refuse(uri, "expected a call expression", "fix the entry shape"))?;
+    let Some(arg) = args
+        .iter()
+        .find(|arg| matches!(&arg.node, ArgumentP::Named(n, _) if n.node == name))
+    else {
+        return Ok(None);
+    };
+    let ArgumentP::Named(_, value) = &arg.node else {
+        unreachable!("matched Named above");
+    };
+    let ExprP::List(entries) = &value.node else {
+        return Err(refuse(
+            uri,
+            &format!("`{name}` is not a list literal"),
+            "write it as a literal list so it can be edited surgically",
+        ));
+    };
+    Ok(Some(crate::edit::NamedList::of(
+        value.span,
+        entries.iter().map(|entry| entry.span).collect(),
+    )))
+}
+
+/// Add one plugin to a gear's `plugins = [...]`, leaving the others alone.
+///
+/// **Append-only, and that is the whole point of it existing beside
+/// [`set_gear_plugins`].** That one replaces the list with bare `plugin("id")`
+/// entries -- its own doc says profiles and per-plugin config stay manual -- so
+/// using it to attach one plugin to `payments-demo`'s `authn-resolver` would
+/// silently drop `profiles = ["dev", "local"]` and `config = {"mode":
+/// "accept_all"}` from the two entries already there. A visual authoring tool
+/// cannot own an edit that destroys what it did not write.
+///
+/// Idempotent: a plugin the list already names yields [`Edit::Unchanged`], which
+/// is the convention every edit in this module follows.
+///
+/// # Errors
+/// When the gear is not named by a `use_gear` in `gears`, when `plugins` is
+/// present but not a literal list, or when the description does not parse.
+pub fn add_gear_plugin(
+    uri: &str,
+    source: &str,
+    gear: &str,
+    plugin: &str,
+) -> Result<Edit, Diagnostics> {
+    let list = named_list_literal(uri, source, "gears")?;
+    let entry = find_gear_entry(source, &list, gear).ok_or_else(|| {
+        refuse(
+            uri,
+            &format!("no `use_gear` naming `{gear}` in `gears`"),
+            "add the host gear first, then attach the plugin to it",
+        )
+    })?;
+    let text = slice(source, entry);
+    let rendered = format!("plugin({})", quote_string(plugin));
+
+    let new_entry = match list_arg_on_call(uri, text, "plugins")? {
+        // No `plugins` yet: the argument arrives with this one entry in it.
+        None => set_named_arg_on_call(uri, text, "plugins", Some(&format!("[{rendered}]")))?,
+        Some(plugins) => {
+            // Already there, whatever else that entry carries. Compared by the
+            // name the entry *names*, not by the rendered text, so an existing
+            // `plugin("x", profiles = [...])` counts as present.
+            if plugins
+                .entries()
+                .iter()
+                .any(|entry| names_entry(text, *entry, plugin))
+            {
+                return Ok(Edit::Unchanged);
+            }
+            insert_entry(text, &plugins, &rendered)
+        }
+    };
+
+    if new_entry == text {
+        return Ok(Edit::Unchanged);
+    }
+    Ok(Edit::Changed {
+        source: replace_span(source, entry, &new_entry),
+    })
+}
+
 /// Replace a gear's `plugins = [plugin("..."), ...]` list.
 ///
 /// Each entry is a bare `plugin("id")` — profiles and per-plugin config stay

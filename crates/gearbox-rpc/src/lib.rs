@@ -39,8 +39,8 @@ use crate::protocol::{
     GeneratePlanResult, InitializeParams, InitializeResult, LockOnDisk, LockParams, LockResult,
     LogParams, ProductEdit, ProductLoadParams, ProductLoadResult, ProgressParams,
     RemoveProfileParams, ResolveParams, ResolvePreviewParams, ResolveResult, ResolvedRoot,
-    ScaffoldGearParams, ServerInfo, SetConfigParams, SetFeaturesParams, SetProfileFieldParams,
-    ValidateParams, ValidateResult, error_code, method,
+    ScaffoldGearParams, ScaffoldGearResult, ServerInfo, SetConfigParams, SetFeaturesParams,
+    SetProfileFieldParams, ValidateParams, ValidateResult, error_code, method,
 };
 
 /// Why the server could not run.
@@ -837,6 +837,9 @@ fn apply_product_edits(
             ProductEdit::SetFeatures { gear, features } => {
                 gearbox_gdl::edit::set_gear_features(uri, &current, gear, features)?
             }
+            ProductEdit::AddPlugin { gear, plugin } => {
+                gearbox_gdl::edit::add_gear_plugin(uri, &current, gear, plugin)?
+            }
             ProductEdit::SetPlugins { gear, plugins } => {
                 gearbox_gdl::edit::set_gear_plugins(uri, &current, gear, plugins)?
             }
@@ -1119,6 +1122,18 @@ fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) 
         );
     }
 
+    // A locator on a `service` or `minimal` scaffold has nowhere to be written,
+    // so it is a client mistake rather than a field to ignore. Refused rather
+    // than dropped: silently discarding half a request is how a client learns
+    // the wrong contract.
+    if params.plugin.is_some() && params.kind != crate::protocol::GearKind::Plugin {
+        return error(
+            id,
+            error_code::EDIT_REFUSED,
+            "`plugin` describes what a plugin fills, so it only applies to `kind = \"plugin\"`",
+        );
+    }
+
     let files = match scaffold_gear_files(params) {
         Ok(files) => files,
         Err(message) => return error(id, error_code::EDIT_REFUSED, &message),
@@ -1188,13 +1203,19 @@ fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) 
 
     ok(
         id,
-        &GeneratePlanResult {
-            plans,
-            diagnostics: Vec::new(),
-            out_root: out_root.display().to_string().replace('\\', "/"),
-            // Scaffolding renders no product templates, so nothing can be
-            // overridden here -- an empty list is the truth, not a stub.
-            overridden_templates: Vec::new(),
+        &ScaffoldGearResult {
+            plan: GeneratePlanResult {
+                plans,
+                diagnostics: Vec::new(),
+                out_root: out_root.display().to_string().replace('\\', "/"),
+                // Scaffolding renders no product templates, so nothing can be
+                // overridden here -- an empty list is the truth, not a stub.
+                overridden_templates: Vec::new(),
+            },
+            // The text this method already built and evaluated. Carried because
+            // the three file *paths* are the same for all three kinds, so a
+            // preview of paths alone showed the shape choice doing nothing.
+            gear_gdl: gdl.to_owned(),
         },
     )
 }
@@ -1236,7 +1257,7 @@ gear(
 {shape})
 "#,
         comment = params.name.replace(['\n', '\r'], " "),
-        shape = gdl_shape(params.kind),
+        shape = gdl_shape(params.kind, params.plugin.as_ref()),
     );
 
     let cargo = format!(
@@ -1276,7 +1297,74 @@ path = "src/lib.rs"
 /// with the sentence that says what decides it -- and to leave it commented until
 /// there is something true to write. A scaffold that emitted placeholders would
 /// hand its author a description to repair rather than one to fill in.
-fn gdl_shape(kind: crate::protocol::GearKind) -> &'static str {
+fn gdl_shape(
+    kind: crate::protocol::GearKind,
+    plugin: Option<&crate::protocol::PluginScaffold>,
+) -> std::borrow::Cow<'static, str> {
+    // A host chosen from a loaded catalogue makes the locator a fact, so it is
+    // written live rather than as the comment the rest of this function returns.
+    // The comment exists because an `sdk` pointing nowhere makes the gear fail to
+    // load; a path the engine itself projected does not point nowhere.
+    if let (crate::protocol::GearKind::Plugin, Some(plugin)) = (kind, plugin) {
+        return std::borrow::Cow::Owned(plugin_shape(plugin));
+    }
+    std::borrow::Cow::Borrowed(gdl_shape_commented(kind))
+}
+
+/// The live `sdk` locator, and `plugin_interface` only when it was given.
+///
+/// Rendered through `quote_string`, not `{:?}`: this text is evaluated as GDL
+/// immediately afterwards, and Rust's debug escaping is not Starlark's. A path
+/// with a backslash in it would otherwise produce a file that reads fine and
+/// does not evaluate.
+fn plugin_shape(plugin: &crate::protocol::PluginScaffold) -> String {
+    use gearbox_gdl::edit::quote_string;
+
+    let interface = plugin
+        .plugin_interface
+        .as_deref()
+        .map_or_else(String::new, |name| {
+            format!(
+                r"
+    # Declared because reading the `impl` cannot decide -- a crate implementing
+    # two plugin interfaces. A name no `pub trait` in the sdk backs is refused
+    # (GBX0516), so this is an escape hatch and never a declaration of intent.
+    plugin_interface = {},
+",
+                quote_string(name)
+            )
+        });
+
+    format!(
+        r#"
+    # `description`, `category` and `visibility` are yours to fill in.
+    #
+    # description = "What this plugin does, in one sentence.",
+    # category = "core-platform-integration",
+    # visibility = "internal",
+
+    # **The locator that makes this a plugin**, written from the host you chose.
+    # Which of the SDK's traits this crate implements is read from the `impl`,
+    # not declared here.
+    sdk = cargo(
+        crate_name = {crate_name},
+        lib = {lib},
+        path = {path},
+    ),
+{interface}
+    # A plugin's own `vendor` and `priority` are the join key its host's selector
+    # matches against, and both are read from this crate's config struct. What is
+    # declared is only that they are worth showing an integrator.
+    #
+    # config_schema = config(exposes = ["vendor", "priority"]),
+"#,
+        crate_name = quote_string(&plugin.crate_name),
+        lib = quote_string(&plugin.lib_ident),
+        path = quote_string(&plugin.path),
+    )
+}
+
+fn gdl_shape_commented(kind: crate::protocol::GearKind) -> &'static str {
     match kind {
         // What this method has always written: a crate and a name, with the one
         // hint that applies to every gear.

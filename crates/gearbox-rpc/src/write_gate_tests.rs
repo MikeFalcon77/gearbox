@@ -231,6 +231,7 @@ fn scaffold_refuses_a_dotdot_id() {
             name: "Escape".to_owned(),
             version: "0.1.0".to_owned(),
             kind: crate::protocol::GearKind::Minimal,
+            plugin: None,
             destination_dir: dest.display().to_string(),
             dry_run: false,
         },
@@ -244,6 +245,109 @@ fn scaffold_refuses_a_dotdot_id() {
         !dest.join("Cargo.toml").exists(),
         "parent dest must stay unchanged"
     );
+}
+
+/// A plugin scaffold given a host writes the locator live, and it still evaluates.
+///
+/// The commented shape exists because an `sdk` pointing nowhere makes the gear
+/// fail to load. A host picked out of a loaded catalogue is not nowhere -- but
+/// writing the locator live means writing GDL from strings that came off the
+/// wire, and this is the gate that says the result still parses as a gear.
+///
+/// Quoting is the part that would fail silently: a path with a backslash or a
+/// quote in it, escaped Rust-debug style rather than Starlark style, produces a
+/// file that reads fine and does not evaluate.
+#[test]
+fn a_plugin_scaffold_with_a_host_writes_a_live_locator() {
+    use crate::protocol::{GearKind, PluginScaffold};
+
+    let files = super::scaffold_gear_files(&ScaffoldGearParams {
+        id: "ldap-authn-plugin".to_owned(),
+        name: "LDAP AuthN".to_owned(),
+        version: "0.1.0".to_owned(),
+        kind: GearKind::Plugin,
+        plugin: Some(PluginScaffold {
+            crate_name: "cf-gears-authn-resolver-sdk".to_owned(),
+            lib_ident: "authn_resolver_sdk".to_owned(),
+            path: "../../authn-resolver-sdk".to_owned(),
+            plugin_interface: Some("AuthNResolverPluginClient".to_owned()),
+        }),
+        destination_dir: "/tmp".to_owned(),
+        dry_run: true,
+    })
+    .expect("the shape renders");
+
+    let gdl = &files
+        .iter()
+        .find(|(rel, _, _)| rel == "gear.gdl")
+        .expect("a gear.gdl")
+        .1;
+
+    // Live, not commented: every one of these lines is `#`-prefixed without a host.
+    assert!(
+        gdl.contains("sdk = cargo("),
+        "the locator is still commented: {gdl}"
+    );
+    assert!(
+        gdl.contains(r#"crate_name = "cf-gears-authn-resolver-sdk""#),
+        "{gdl}"
+    );
+    assert!(gdl.contains(r#"lib = "authn_resolver_sdk""#), "{gdl}");
+    assert!(
+        gdl.contains(r#"path = "../../authn-resolver-sdk""#),
+        "{gdl}"
+    );
+    assert!(
+        gdl.contains(r#"plugin_interface = "AuthNResolverPluginClient""#),
+        "{gdl}"
+    );
+
+    // And it evaluates as a gear description, which is the scaffold's own gate.
+    let identity = gearbox_gdl::FileIdentity {
+        uri: "file:///tmp/ldap-authn-plugin/gear.gdl".to_owned(),
+        source: gearbox_ir::SourceId::new("scaffold").expect("kebab"),
+        gdl_path: gearbox_ir::RelPath::new("gear.gdl").expect("valid"),
+        load_paths: None,
+    };
+    let outcome = gearbox_gdl::GdlEngine::new().eval_gear(&identity, gdl);
+    assert!(
+        outcome.value.is_some(),
+        "a live locator must still evaluate: {:?}",
+        outcome.diagnostics
+    );
+}
+
+/// Without a host, the locator stays a comment.
+///
+/// The other half of the same decision, asserted so that "absent keeps the old
+/// behaviour" is a check rather than a promise in a doc comment.
+#[test]
+fn a_plugin_scaffold_without_a_host_keeps_the_commented_locator() {
+    use crate::protocol::GearKind;
+
+    let files = super::scaffold_gear_files(&ScaffoldGearParams {
+        id: "ldap-authn-plugin".to_owned(),
+        name: "LDAP AuthN".to_owned(),
+        version: "0.1.0".to_owned(),
+        kind: GearKind::Plugin,
+        plugin: None,
+        destination_dir: "/tmp".to_owned(),
+        dry_run: true,
+    })
+    .expect("the shape renders");
+
+    let gdl = &files
+        .iter()
+        .find(|(rel, _, _)| rel == "gear.gdl")
+        .expect("a gear.gdl")
+        .1;
+    assert!(gdl.contains("# sdk = cargo("), "{gdl}");
+    for line in gdl.lines() {
+        assert!(
+            !line.trim_start().starts_with("sdk = cargo("),
+            "an uncommented locator with no host to point at: {gdl}"
+        );
+    }
 }
 
 /// Every shape evaluates, and each one offers what its kind needs.
@@ -263,6 +367,7 @@ fn every_scaffold_shape_evaluates_and_carries_its_own_hints() {
             name: "Payments Audit".to_owned(),
             version: "0.1.0".to_owned(),
             kind,
+            plugin: None,
             destination_dir: "/tmp".to_owned(),
             dry_run: true,
         })

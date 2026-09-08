@@ -489,6 +489,19 @@ pub enum ProductEdit {
         gear: String,
         features: Vec<String>,
     },
+    /// Attach one plugin to a host gear, leaving its other plugins alone.
+    ///
+    /// **Not `SetPlugins` with one more entry, and the difference is data.**
+    /// `set_gear_plugins` rewrites the list as bare `plugin("id")` entries -- its
+    /// own documentation says profiles and per-plugin config stay manual -- so
+    /// using it to attach a plugin to `payments-demo`'s `authn-resolver` drops
+    /// `profiles` and `config` from the two entries already there. A visual
+    /// authoring tool cannot own an edit that destroys what it did not write, so
+    /// attaching is its own operation and appends.
+    AddPlugin {
+        gear: String,
+        plugin: String,
+    },
     SetPlugins {
         gear: String,
         plugins: Vec<String>,
@@ -537,6 +550,25 @@ pub struct CreateProductParams {
     pub dry_run: bool,
 }
 
+/// What `gearbox/gear/scaffold` answers.
+///
+/// `GeneratePlanResult` plus the description's own text, and the addition is what
+/// makes the shape choice visible: the three files and their paths are identical
+/// for all three kinds, so a preview of paths alone showed `Service` and `Plugin`
+/// as the same answer -- which a UX pass duly read as the choice doing nothing.
+///
+/// One field, not a payload per file. `FilePlan` is a preview line and stays one;
+/// `gear.gdl` is the only file whose *content* is the decision being previewed,
+/// and the dry run has already built and evaluated it, so carrying it costs
+/// nothing.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ScaffoldGearResult {
+    #[serde(flatten)]
+    pub plan: GeneratePlanResult,
+    /// The `gear.gdl` this scaffold would write.
+    pub gear_gdl: String,
+}
+
 /// What kind of gear is being scaffolded.
 ///
 /// **Three shapes, and the corpus is what decided there are three.** Of the
@@ -565,6 +597,30 @@ pub enum GearKind {
     Plugin,
 }
 
+/// The SDK a scaffolded plugin implements, and the point it fills.
+///
+/// Shaped like the `cargo(...)` locator a `gear.gdl` writes, because that is what
+/// it becomes. Chosen from a host gear the catalogue has already projected, so
+/// every field here is something the engine told the client earlier.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct PluginScaffold {
+    /// The SDK crate's package name, e.g. `cf-gears-authn-resolver-sdk`.
+    pub crate_name: String,
+    /// Its library identifier, e.g. `authn_resolver_sdk`. Never derived from the
+    /// package name -- a crate with an explicit `[lib]` differs, and deriving it
+    /// emits a link line that does not compile.
+    pub lib_ident: String,
+    /// Where the SDK crate lives, relative to the gear being scaffolded.
+    pub path: String,
+    /// The plugin-API trait, when reading the `impl` cannot decide.
+    ///
+    /// Optional for the reason the commented form gives: which trait a crate
+    /// implements is read from the `impl`, so declaring it is an escape hatch for
+    /// a crate implementing two, never a statement of intent.
+    #[serde(default)]
+    pub plugin_interface: Option<String>,
+}
+
 /// `gearbox/gear/scaffold` -- tier-0 gear crate under a writable destination.
 ///
 /// Writes `{destination_dir}/{id}/gear.gdl`, `Cargo.toml`, and `src/lib.rs`.
@@ -581,6 +637,21 @@ pub struct ScaffoldGearParams {
     /// before the field existed -- so an older client keeps its behaviour.
     #[serde(default)]
     pub kind: GearKind,
+    /// What this plugin fills, when the kind is [`GearKind::Plugin`].
+    ///
+    /// **Absent keeps the commented shape, and that shape exists for a reason.**
+    /// An `sdk` locator pointing at a directory that does not exist makes the
+    /// gear fail to load, and `plugin_interface` naming a trait no `pub trait`
+    /// backs is refused (GBX0516) -- so with nothing to point at, a scaffold
+    /// writes the declarations as comments rather than produce a description
+    /// that is already wrong.
+    ///
+    /// Present means the client picked a host out of a loaded catalogue, so the
+    /// locator is a fact rather than a guess and can be written live. That is
+    /// also what makes the kind visible in the preview: it is the same three
+    /// files either way, and only the text differs.
+    #[serde(default)]
+    pub plugin: Option<PluginScaffold>,
     /// Parent directory; the gear lands in `{destination_dir}/{id}/`.
     pub destination_dir: String,
     /// Preview only, like every other write method on this protocol.

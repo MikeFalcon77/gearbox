@@ -31,9 +31,9 @@
 mod edit_call;
 
 pub use edit_call::{
-    CreateProductParams, add_profile, add_source, clone_product_text, is_secret_config_key,
-    quote_string, remove_profile, render_product_template, set_gear_config, set_gear_features,
-    set_gear_plugins, set_profile_field,
+    CreateProductParams, add_gear_plugin, add_profile, add_source, clone_product_text,
+    is_secret_config_key, quote_string, remove_profile, render_product_template, set_gear_config,
+    set_gear_features, set_gear_plugins, set_profile_field,
 };
 
 use std::collections::BTreeSet;
@@ -122,6 +122,24 @@ pub(crate) struct NamedList {
     span: Span,
     /// The spans of the entries already in it.
     entries: Vec<Span>,
+}
+
+impl NamedList {
+    /// A list located somewhere other than the top-level `product(...)`.
+    ///
+    /// `plugins` lives inside one `use_gear(...)` entry, so it cannot be found by
+    /// [`named_list_literal`], which walks the product call. [`insert_entry`]
+    /// only needs the two spans, and it is what keeps an appended entry indented
+    /// like its neighbours -- so the sibling module builds one of these rather
+    /// than growing a second insertion routine.
+    pub(crate) fn of(span: Span, entries: Vec<Span>) -> Self {
+        Self { span, entries }
+    }
+
+    /// The entries, for a caller deciding whether one of them is already there.
+    pub(crate) fn entries(&self) -> &[Span] {
+        &self.entries
+    }
 }
 
 /// Find a named list literal on the top-level `product(...)` call.

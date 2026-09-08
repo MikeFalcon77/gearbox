@@ -855,6 +855,149 @@ fn add_source_inserts_a_path_entry() {
     );
 }
 
+/// The shape `payments-demo` actually has: a multiline list whose entries carry
+/// `profiles` and `config`, with a comment between them and a trailing comma.
+///
+/// Written out rather than reduced, because every one of those features is a
+/// thing an append can destroy, and the corpus is where they occur together.
+const HOST_WITH_PLUGINS: &str = r#"product(
+    gears = [
+        use_gear("api-gateway", source = "gears-rust"),
+        # authn-resolver routes to whichever plugin implements its point.
+        use_gear("authn-resolver", source = "gears-rust",
+            plugins = [
+                # `local` takes the static plugin for the same reason `dev` does.
+                plugin("static-authn-plugin", profiles = ["dev", "local"],
+                       config = {"mode": "accept_all"}),
+                plugin("oidc-authn-plugin", profiles = ["prod"],
+                       config = {"issuer": "https://id.example.com"}),
+            ],
+        ),
+    ],
+)
+"#;
+
+#[test]
+fn add_gear_plugin_appends_and_leaves_the_others_alone() {
+    let edited = add_gear_plugin(
+        URI,
+        HOST_WITH_PLUGINS,
+        "authn-resolver",
+        "ldap-authn-plugin",
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    assert!(
+        edited.contains(r#"plugin("ldap-authn-plugin")"#),
+        "the new plugin is not there: {edited}"
+    );
+    // **The regression this exists for.** `set_gear_plugins` rewrites the list as
+    // bare `plugin("id")` entries, so using it here would drop both of these.
+    assert!(
+        edited.contains(r#"profiles = ["dev", "local"]"#),
+        "an existing entry lost its profiles: {edited}"
+    );
+    assert!(
+        edited.contains(r#"config = {"mode": "accept_all"}"#),
+        "an existing entry lost its config: {edited}"
+    );
+    assert!(
+        edited.contains(r#"config = {"issuer": "https://id.example.com"}"#),
+        "the second entry lost its config: {edited}"
+    );
+    // Comments are part of what a person wrote, and a re-serialising edit is
+    // exactly what loses them.
+    assert!(
+        edited.contains("# `local` takes the static plugin"),
+        "a comment inside the list was lost: {edited}"
+    );
+    assert!(
+        edited.contains("# authn-resolver routes to whichever plugin"),
+        "a comment above the entry was lost: {edited}"
+    );
+    // And nothing else moved: the other gear is untouched.
+    assert!(
+        edited.contains(r#"use_gear("api-gateway", source = "gears-rust"),"#),
+        "another entry was reshaped: {edited}"
+    );
+}
+
+#[test]
+fn add_gear_plugin_is_idempotent() {
+    // By the name the entry *names*, not by the rendered text: the existing entry
+    // is `plugin("static-authn-plugin", profiles = ..., config = ...)`, which does
+    // not match `plugin("static-authn-plugin")` as a string.
+    assert_eq!(
+        add_gear_plugin(
+            URI,
+            HOST_WITH_PLUGINS,
+            "authn-resolver",
+            "static-authn-plugin"
+        )
+        .expect("editable"),
+        Edit::Unchanged
+    );
+}
+
+#[test]
+fn add_gear_plugin_creates_the_argument_when_absent() {
+    let source = r#"product(
+    gears = [
+        use_gear("authn-resolver", source = "gears-rust"),
+    ],
+)
+"#;
+    let edited = add_gear_plugin(URI, source, "authn-resolver", "static-authn-plugin")
+        .expect("editable")
+        .changed()
+        .expect("changed")
+        .to_owned();
+    assert!(
+        edited.contains(r#"plugins = [plugin("static-authn-plugin")]"#),
+        "{edited}"
+    );
+}
+
+#[test]
+fn add_gear_plugin_refuses_a_plugins_argument_it_cannot_read() {
+    // Refused rather than guessed: appending to something that is not a list
+    // means deciding what `helper(...)` evaluates to, which is the evaluator's
+    // job and not a span surgeon's.
+    let source = r#"product(
+    gears = [
+        use_gear("authn-resolver", source = "gears-rust", plugins = pick_plugins()),
+    ],
+)
+"#;
+    let refused = add_gear_plugin(URI, source, "authn-resolver", "static-authn-plugin")
+        .expect_err("a non-literal plugins argument must be refused");
+    assert!(
+        format!("{refused:?}").contains("not a list literal"),
+        "{refused:?}"
+    );
+}
+
+#[test]
+fn add_gear_plugin_refuses_a_host_the_product_does_not_name() {
+    // The three host states the wizard has to distinguish start here: a host only
+    // in the closure is not named by a `use_gear`, so it has to be promoted to
+    // one before a plugin can be attached to it.
+    let source = r#"product(
+    gears = [
+        use_gear("api-gateway", source = "gears-rust"),
+    ],
+)
+"#;
+    let refused = add_gear_plugin(URI, source, "authn-resolver", "static-authn-plugin")
+        .expect_err("a host that is not named must be refused");
+    let text = format!("{refused:?}");
+    assert!(text.contains("authn-resolver"), "{text}");
+    assert!(text.contains("add the host gear first"), "{text}");
+}
+
 #[test]
 fn set_gear_plugins_writes_plugin_list() {
     let source = r#"product(
