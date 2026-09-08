@@ -15,6 +15,12 @@
 
 import { CatalogueStore } from "../gearbox-studio/lib/browser/catalogue-store.js";
 import { ProductStore } from "../gearbox-studio/lib/browser/product-store.js";
+import {
+  catalogueUsable,
+  openedSuccessfully,
+  sourceRootsOf,
+  sourcesUsable,
+} from "../gearbox-studio/lib/browser/shell/opening-outcome.js";
 
 let failures = 0;
 function check(ok, what) {
@@ -495,6 +501,103 @@ function productService(overrides) {
   await store.ensureDiscovered();
   await store.ensureDiscovered();
   check(listed === 1, `discovery happens once however often the panel opens (got ${listed})`);
+}
+
+// ============================================== the decisions a staged open makes
+//
+// **The failure paths, which no browser claim can reach and which were wrong.**
+// Every product in the corpus opens, so the conformance suite sees only the happy
+// path, and inducing a refusal means writing a description under `products/` that
+// does not evaluate -- which `global-setup` refuses. A UX review found three rules
+// broken here, all of them invisible for that reason.
+//
+// `ProductSessionService` itself cannot be constructed outside a browser: it
+// injects `MonacoTextModelService` and `WorkspaceService` as tokens, and loading
+// those in Node reaches Monaco's ESM `.css` imports. So the decisions live in
+// `shell/opening-outcome.js`, which imports nothing but types, and this is what
+// checks them. The *sequence* is checked in the browser, where killing the engine
+// makes the first step fail for real.
+
+const REF_A = { path: "/repo/products/a/product.gdl", label: "products/a" };
+
+// -------------------------------- a git source is a description problem
+{
+  const sources = sourceRootsOf(
+    { sources: { upstream: { kind: "git", at: "https://example.invalid/x.git" } } },
+    (at) => `/resolved/${at}`,
+  );
+  check(sources.roots.length === 0, "a git source contributes no root");
+  check(sources.refused[0] === "upstream", "and is named rather than counted");
+
+  const outcome = sourcesUsable("products/a", sources);
+  check(outcome.ok === false, "a product whose only source is git cannot be opened");
+  // The attribution is the claim: nothing has been loaded when this runs, so
+  // pointing at the catalogue step would point past the step a person can fix.
+  check(
+    outcome.reason.includes("git source") && outcome.reason.includes("upstream"),
+    "and the reason names the source and what is missing",
+  );
+}
+
+// -------------------------------- no sources at all
+{
+  const outcome = sourcesUsable("products/a", sourceRootsOf({ sources: {} }, (at) => at));
+  check(outcome.ok === false, "a product with no sources cannot be opened");
+  check(outcome.reason.includes("no source roots"), "and says so");
+}
+
+// -------------------------------- paths are resolved against the description
+{
+  const sources = sourceRootsOf(
+    { sources: { "gears-rust": { kind: "path", at: "../../gears-rust" } } },
+    (at) => `/repo/products/a/${at}`,
+  );
+  check(sources.roots[0] === "/repo/products/a/../../gears-rust", "a path source is resolved");
+  check(sourcesUsable("products/a", sources).ok === true, "and is usable");
+}
+
+// -------------------------------- a catalogue load reports through state
+{
+  // The whole reason `catalogueUsable` exists: `load()` resolves either way and
+  // records the failure on `current`, so awaiting it proves nothing.
+  check(catalogueUsable({ status: "ready" }, "x").ok === true, "a loaded catalogue is usable");
+  const failed = catalogueUsable({ status: "error", error: "spawn failed" }, "the engine died");
+  check(failed.ok === false, "a catalogue in error is not usable");
+  check(
+    failed.reason === "the engine died: spawn failed",
+    `and carries the store's own reason (got ${JSON.stringify(failed.reason)})`,
+  );
+  const silent = catalogueUsable({ status: "error" }, "the engine died");
+  check(
+    silent.reason.includes("no reason was reported"),
+    "an error with no message says that rather than reading as empty",
+  );
+}
+
+// -------------------------------- what counts as an open that succeeded
+{
+  // The dangerous one. `ProductStore.open` sets `open` in its first update and
+  // leaves it set on failure, so `open !== undefined` was true whatever happened
+  // -- and an unresolvable product went into Recent, the list a person trusts to
+  // reopen things that worked.
+  check(
+    openedSuccessfully(REF_A, { status: "ready", open: REF_A }).ok === true,
+    "a resolved product opened",
+  );
+  const loading = openedSuccessfully(REF_A, { status: "loading", open: REF_A });
+  check(loading.ok === false, "a product still loading has not opened");
+  const errored = openedSuccessfully(REF_A, {
+    status: "error",
+    open: REF_A,
+    error: "GBX0101: two gears claim one id",
+  });
+  check(errored.ok === false, "a product that failed to resolve has not opened");
+  check(errored.reason.includes("GBX0101"), "and the store's reason is what is reported");
+  const other = openedSuccessfully(REF_A, {
+    status: "ready",
+    open: { path: "/repo/products/b/product.gdl", label: "products/b" },
+  });
+  check(other.ok === false, "a *different* product being ready is not this one opening");
 }
 
 console.log(

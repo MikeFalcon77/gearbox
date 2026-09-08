@@ -16,6 +16,9 @@
 // These two tests therefore drive the shell the way a person does and assert
 // visibility with no reveal anywhere.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import {
   expect,
   expectContext,
@@ -28,6 +31,23 @@ import {
   settled,
   test,
 } from "../fixtures/studio";
+
+const IDE = join(__dirname, "../..");
+
+/**
+ * Kill every `gearbox rpc`, so the next request has no engine.
+ *
+ * A copy of `adr-0011-session-trust.spec.ts`'s helper rather than a shared one,
+ * and deliberately: a fixture that can kill the engine is a fixture every test
+ * can reach for, and there are exactly two claims that should.
+ */
+function killEngines(): void {
+  try {
+    execFileSync("pkill", ["-f", "gearbox rpc"]);
+  } catch {
+    // `pkill` exits 1 when nothing matched, which is not a failure here.
+  }
+}
 
 test.describe("Home is the start screen and nothing else", () => {
   test("nothing opens itself into the bottom panel on Home [plan §9.1: an empty domain panel is worse than an absent one]", async ({
@@ -350,21 +370,21 @@ test.describe("an open says which part of it is slow", () => {
     expect(new Set(samples.map((s) => s.stage)).size, "the step never changed").toBeGreaterThan(1);
   });
 
-  test("a refused open stops at the step that refused [plan §9.1: opening is staged]", async ({
-    studio,
-  }) => {
-    // Written and named, and **not observable on this corpus**: every product
-    // here opens. Inducing a failure means a description that does not evaluate
-    // or declares a `git(...)` source, and writing one under `products/` is what
-    // `global-setup` refuses and the fixture fails a test for.
-    //
-    // Reported as unobserved rather than left unwritten, because the arm exists
-    // and is the reason `OpeningState` carries a stage and a reason at all: the
-    // panel keeps the failure instead of reverting to a picker as though nothing
-    // had been attempted.
-    test.skip(true, "no product in this corpus fails to open, so the failed arm cannot be reached");
-    await expect(studio.page.locator("[data-opening-reason]")).toHaveCount(0);
-  });
+  // **There is no browser claim for a refused open, and that is a finding rather
+  // than an omission.** Every product in this corpus opens; writing one that does
+  // not evaluate means putting it under `products/`, which `global-setup` refuses.
+  // Killing the engine looks like the way in and is not: `initialize` spawns a new
+  // engine on every call, so an open that begins with `catalogue.load` gets a
+  // fresh one and succeeds -- verified by trying it, and the panel duly never
+  // reported a failure.
+  //
+  // So the failure paths are checked deterministically in
+  // `scripts/store-smoke.mjs` against `shell/opening-outcome.js`, which is where
+  // the decisions live and which imports nothing but types: a `git(...)` source
+  // belongs to `describe`, a catalogue that reports `status: "error"` stops its
+  // own step, and a product the store did not resolve is not an open at all. That
+  // script runs in `npm run verify`. A `⚪ not observed` row here would suggest a
+  // later run might see it, and none can.
 });
 
 test.describe("Overview says what the product is", () => {
@@ -394,14 +414,27 @@ test.describe("Overview says what the product is", () => {
 
     // **Arriving on the stage must not start work.** `ensurePlan` is a round trip
     // to the engine, and a render that asked for one would do it on every repaint
-    // of a panel that repaints on every store change. So the status reports what
-    // the service happens to know, and "not planned yet" is an answer.
+    // of a panel that repaints on every store change.
+    //
+    // Asserted at the source, because the observable version is not sound: a plan
+    // that completed between two readings leaves the status looking untouched, so
+    // "the status did not change" is a check that passes when the rule is broken.
+    // What the rule actually says is that this widget never calls `ensurePlan`,
+    // and that is a statement about the source -- the same shape as the codicon
+    // and accessibility claims, which read these files for the same reason.
+    const widget = readFileSync(
+      join(IDE, "gearbox-studio/src/browser/product/product-widget.tsx"),
+      "utf8",
+    );
+    expect(
+      /ensurePlan\s*\(/.test(widget),
+      "the Product view asks the engine for a plan while rendering",
+    ).toBe(false);
+    // And the visible half: the stage reports a status rather than a spinner,
+    // which is what "not planned yet is an answer" means.
     const status = page.locator("[data-overview-generate]");
-    const before = await status.getAttribute("data-overview-generate");
-    expect(before).not.toBe("planning");
-    await productSection(page, "gears");
-    await productSection(page, "overview");
-    await expect(status).toHaveAttribute("data-overview-generate", String(before));
+    await expect(status).toBeVisible();
+    expect(await status.getAttribute("data-overview-generate")).not.toBe("planning");
 
     // A count with no way through is trivia: the figures move between stages.
     await page.locator("[data-figure='processes']").click();

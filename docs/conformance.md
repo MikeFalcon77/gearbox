@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **156** — 150 built, 1 not built, 0 broken, 5 not observed.
+Claims: **155** — 148 built, 1 not built, 2 broken, 4 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -91,8 +91,8 @@ Rust, and the ADRs' own Confirmation sections say which.
 | both repositories are workspace roots | `ADR-0011 §Consequences: Explorer remains` | ✅ built |  |
 | the watcher does not walk the Rust target directories | `ADR-0011 §Scope: which packages are present` | ✅ built |  |
 | Source Control lists both repositories | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
-| the change count is the repository's, not a placeholder | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
-| git decorates the Explorer | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
+| the change count is the repository's, not a placeholder | `ADR-0011 §Consequences: Git remains` | ❌ broken | Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m |
+| git decorates the Explorer | `ADR-0011 §Consequences: Git remains` | ❌ broken | Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBeGreaterThan[2m([22m[32mexpected[39m[2m)[22m |
 | a product.lock opened as a file is read-only | `PRD cpt-gearbox-fr-lock-read-only` | ✅ built |  |
 
 ## `conformance/adr-0013-add-gear.spec.ts`
@@ -244,7 +244,6 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Validation shows the diagnostics rather than a way to reach them | `plan §9.1: Validation is a screen` | ✅ built |  |
 | what a proposal would introduce is the same row, at a smaller weight | `plan §9.1: Validation is a screen` | ✅ built |  |
 | the wait is four named steps that advance | `plan §9.1: opening is staged` | ✅ built |  |
-| a refused open stops at the step that refused | `plan §9.1: opening is staged` | ⚪ not observed | no product in this corpus fails to open, so the failed arm cannot be reached |
 | Overview reports the shape, the tree and the sources without asking for any of it | `plan §9.1: Overview is the product at a glance` | ✅ built |  |
 | a reload with a product open comes back to Home | `plan §9.1: Home is a screen, not an empty area` | ✅ built |  |
 | opening a product leaves the Product workspace on screen | `plan §9.1: Open Product is atomic` | ✅ built |  |

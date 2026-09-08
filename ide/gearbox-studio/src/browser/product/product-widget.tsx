@@ -25,6 +25,7 @@ import type { InclusionReason } from "../../common/generated/InclusionReason";
 import type { ResolvedBinding } from "../../common/generated/ResolvedBinding";
 import type { ResolvedProcess } from "../../common/generated/ResolvedProcess";
 import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
+import type { ProductRef } from "../../common/protocol";
 import {
   DiagnosticsList,
   errorsIn,
@@ -189,9 +190,23 @@ export class ProductWidget extends ReactWidget {
     // who sees the previous screen concludes the click missed. The name is the
     // product's, because "Loading..." with no subject is what an application that
     // has lost track of itself says.
+    // **By identity, not by "nothing is open".** Testing `state.open ===
+    // undefined` meant that switching from one product to another showed the
+    // *old* product for the whole three seconds -- and, if the new one refused,
+    // hid the refusal completely: the store still held the previous product, so
+    // the panel had something to render and rendered that.
+    //
+    // Once the store holds the product being opened, the panel is that product's
+    // and its own `resolving…` line and error box take over -- which is why a
+    // refusal at `resolve` is not shown here: by then the product *is* the
+    // subject, and its error belongs beside it rather than in a checklist.
     const opening = this.session.openingProgress;
-    if (state.open === undefined && opening.status !== "idle") {
-      return <div className="gbx-product">{renderOpening(opening)}</div>;
+    if (opening.status !== "idle" && state.open?.path !== opening.product.path) {
+      return (
+        <div className="gbx-product">
+          {renderOpening(opening, state.open, () => this.session.dismissOpening())}
+        </div>
+      );
     }
 
     if (state.open === undefined) {
@@ -681,13 +696,19 @@ export class ProductWidget extends ReactWidget {
   }
 
   /**
-   * The source roots this product declares, each openable.
+   * The source roots this product declares, as written.
    *
    * From the *intent* rather than from the resolution: what a person can change
    * is what the description says, and a root that failed to load is exactly the
-   * one worth being able to click. `at` is relative to the description's own
-   * directory, which is how the IR defines it, so it is shown as written rather
-   * than resolved -- the resolved form is an absolute path nobody typed.
+   * one worth seeing named. `at` is relative to the description's own directory,
+   * which is how the IR defines it, so it is shown as written rather than
+   * resolved -- the resolved form is an absolute path nobody typed.
+   *
+   * **Not links, and the earlier version of this comment promised otherwise.** A
+   * source root is a directory, and `RevealPathLink` opens a file in the editor;
+   * a link that resolves to a folder either does nothing or opens something
+   * arbitrary inside it. The description itself is one row above and is openable,
+   * which is where a person goes to change any of this.
    */
   protected renderSources(): React.ReactNode {
     const intent = this.store.current.intent;
@@ -1279,7 +1300,11 @@ const STEP_ICON: Readonly<Record<StepState, string>> = {
   failed: codicon("error"),
 };
 
-function renderOpening(opening: Exclude<OpeningState, { status: "idle" }>): React.ReactNode {
+function renderOpening(
+  opening: Exclude<OpeningState, { status: "idle" }>,
+  previous: ProductRef | undefined,
+  dismiss: () => void,
+): React.ReactNode {
   const at = OPENING_STAGES.indexOf(opening.stage);
   const failed = opening.status === "failed";
   return (
@@ -1310,9 +1335,22 @@ function renderOpening(opening: Exclude<OpeningState, { status: "idle" }>): Reac
         })}
       </ol>
       {failed && (
-        <div className="gbx-error" data-opening-reason>
-          {opening.reason}
-        </div>
+        <>
+          <div className="gbx-error" data-opening-reason>
+            {opening.reason}
+          </div>
+          {/* A refusal is left standing, which means it has to be dismissable:
+              with another product still open in the store, this screen is the
+              only thing between a person and the product they had. */}
+          <button
+            type="button"
+            className="gbx-choice"
+            data-opening-dismiss
+            onClick={dismiss}
+          >
+            {previous === undefined ? "Dismiss" : `Back to ${previous.label}`}
+          </button>
+        </>
       )}
       {!failed && (
         <div className="gbx-skeleton" aria-hidden="true">

@@ -36,13 +36,28 @@ import { MessageService } from "@theia/core/lib/common/message-service";
 import { MonacoTextModelService } from "@theia/monaco/lib/browser/monaco-text-model-service";
 import { inject, injectable } from "@theia/core/shared/inversify";
 
-import type { SourceDecl } from "../../common/generated/SourceDecl";
 import { GearboxService, type ProductRef, type StudioSession } from "../../common/protocol";
 import { WorkspaceService } from "@theia/workspace/lib/browser/workspace-service";
 
 import { CatalogueStore } from "../catalogue-store";
+import {
+  catalogueUsable,
+  openedSuccessfully,
+  sourceRootsOf,
+  sourcesUsable,
+  type OpeningStage,
+} from "./opening-outcome";
 import { ProductStore } from "../product-store";
 import { GearSessionService } from "./gear-session-service";
+
+// The steps and their words live in `opening-outcome.ts`, beside the decisions
+// that attribute a failure to one of them. Re-exported because the Product view
+// reads them and this is the service it already imports.
+export {
+  OPENING_LABEL,
+  OPENING_STAGES,
+  type OpeningStage,
+} from "./opening-outcome";
 
 /** Where the Recent list lives. Per browser profile, like any other Theia state. */
 const RECENT_KEY = "gearbox.recentProducts";
@@ -57,32 +72,6 @@ const RECENT_KEY = "gearbox.recentProducts";
 export interface RecentEntry extends ProductRef {
   readonly openedAt?: number;
 }
-
-/**
- * The four steps an open takes, named after what each one is waiting for.
- *
- * They are the steps the header of this file already documents, and they are
- * published rather than merely commented because three seconds of "Loading" is
- * long enough that *which* three seconds matters -- and because a failure has to
- * say which step refused. Every branch below that returns `false` has a step it
- * belongs to.
- */
-export type OpeningStage = "workspace" | "describe" | "catalogue" | "resolve";
-
-export const OPENING_STAGES: readonly OpeningStage[] = [
-  "workspace",
-  "describe",
-  "catalogue",
-  "resolve",
-];
-
-/** What each step is waiting for, in the words a person would use. */
-export const OPENING_LABEL: Readonly<Record<OpeningStage, string>> = {
-  workspace: "starting the engine on the product's folder",
-  describe: "reading the description",
-  catalogue: "loading the gears it declares",
-  resolve: "resolving the default profile",
-};
 
 /**
  * Whether an open is running, and how far it got.
@@ -185,6 +174,21 @@ export class ProductSessionService {
    */
   protected settleOpening(): void {
     if (this.openingState.status === "failed") return;
+    this.openingState = IDLE;
+    this.onDidChangeOpeningEmitter.fire(this.openingState);
+  }
+
+  /**
+   * Forget a refusal, so the previous subject owns the screen again.
+   *
+   * Needed because a failure is deliberately left standing: with product A open
+   * and B refused at `describe`, the store still holds A while the panel shows
+   * B's failure, and without this there is no way back to A short of opening it
+   * again. Nothing to do when an open is in flight -- that is not a state a
+   * person can dismiss.
+   */
+  dismissOpening(): void {
+    if (this.openingState.status !== "failed") return;
     this.openingState = IDLE;
     this.onDidChangeOpeningEmitter.fire(this.openingState);
   }
@@ -388,6 +392,16 @@ export class ProductSessionService {
     // load has not finished. `initialize` treats that empty list as "use defaults"
     // rather than "open nothing", so this step stays safe in that window.
     await this.catalogue.load({ roots: this.catalogue.rootPaths(), workspace });
+    // **`load` does not reject, and that is the whole reason this line exists.**
+    // `CatalogueStore.load` records a failure as `status: "error"` on its own
+    // state -- the panel renders it -- and returns normally. So awaiting it and
+    // carrying on attributed an engine that would not start to whichever step
+    // failed next: `describe` here, `resolve` after the second load.
+    const spawned = catalogueUsable(
+      this.catalogue.current,
+      `The engine could not be started on ${ref.label}'s folder`,
+    );
+    if (!spawned.ok) return this.failStage("workspace", spawned.reason);
 
     // Step 2: read what the description declares. `loadProduct` is evaluation
     // only -- nothing is joined against the catalogue -- which is exactly why it
@@ -403,55 +417,32 @@ export class ProductSessionService {
       );
     }
 
-    const roots: string[] = [];
-    const refused: string[] = [];
-    // Typed explicitly: `sources` is a mapped type keyed by `SourceId`, and
-    // `Object.entries` widens its values to `unknown`.
-    const declared = Object.entries(intent.sources ?? {}) as [string, SourceDecl][];
-    for (const [id, source] of declared) {
-      if (source.kind === "path") {
-        roots.push(resolveFrom(directory, source.at));
-      } else {
-        refused.push(id);
-      }
-    }
-
-    if (refused.length > 0) {
-      // Named, not counted: which source cannot be reached is the actionable part.
-      // Attributed to `describe`, not to `catalogue`: nothing has been loaded
-      // yet, and what went wrong is what the description says.
-      return this.failStage(
-        "describe",
-        `${ref.label} declares ${refused.join(", ")} as a git source, and fetching one is not ` +
-          `built yet. Point it at a local path, or open a product that does.`,
-      );
-    }
-    if (roots.length === 0) {
-      return this.failStage(
-        "describe",
-        `${ref.label} declares no source roots, so there are no gears to compose.`,
-      );
-    }
+    const sources = sourceRootsOf(intent, (at) => resolveFrom(directory, at));
+    const usable = sourcesUsable(ref.label, sources);
+    if (!usable.ok) return this.failStage("describe", usable.reason);
+    const roots = [...sources.roots];
 
     // Step 3 and 4: the real session, then the catalogue and the product.
     this.enterStage("catalogue");
     const session: StudioSession = { roots, workspace };
     await this.catalogue.load(session);
+    const loaded = catalogueUsable(
+      this.catalogue.current,
+      `${ref.label}'s gears could not be loaded from ${roots.join(", ")}`,
+    );
+    if (!loaded.ok) return this.failStage("catalogue", loaded.reason);
+
     this.enterStage("resolve");
     await this.products.open(ref);
-    const opened = this.products.current.open !== undefined;
-    if (opened) {
+    const resolved = openedSuccessfully(ref, this.products.current);
+    if (resolved.ok) {
       await this.remember(ref);
       return true;
     }
-    // `ProductStore.open` reports its own failure through its error state, which
-    // the panel renders -- but the *open* stopped here, and a panel still showing
-    // four steps in progress would be the one thing on screen that disagrees.
-    return this.failStage(
-      "resolve",
-      this.products.current.error ??
-        `${ref.label} could not be resolved, so it was not opened.`,
-    );
+    // The store also renders its own error, and that is the surface a person
+    // should end up on: this stops the open and says why, and the panel shows
+    // the product with its error rather than four steps still in progress.
+    return this.failStage("resolve", resolved.reason);
   }
 }
 

@@ -2102,15 +2102,42 @@ sets the open product before resolving, so by then the panel is the product's ow
 and its `resolving…` line has taken over. The checklist covers getting *to* the
 product.
 
-A refusal stops the list at the step that refused and keeps its reason. Every
-branch of `doOpen` that returned `false` now names its step -- a `git(...)` source
-and a description with no roots belong to `describe`, not to `catalogue`, because
-nothing has been loaded and what is wrong is what the description says. The
-message service still gets the reason, since a refusal nobody saw looks like a
-hang, but the screen that was counting the steps is where the answer belongs.
-That arm is written as a claim and reported **unobserved**: every product in this
-corpus opens, and inducing a failure means writing a description under
-`products/` that does not evaluate, which is what `global-setup` refuses.
+A refusal stops the list at the step that refused and keeps its reason -- a
+`git(...)` source and a description with no roots belong to `describe`, not to
+`catalogue`, because nothing has been loaded and what is wrong is what the
+description says. The message service still gets the reason, since a refusal
+nobody saw looks like a hang, but the screen that was counting the steps is where
+the answer belongs. It is left standing when the open returns, so it needs a way
+out: the panel offers `Back to <the product that is still open>`.
+
+**Three of those attributions were wrong when this first landed, and a review
+found all three.** They shared a cause: the failure paths could not be reached
+from a browser, so nothing checked them.
+
+* `CatalogueStore.load` **does not reject.** It records a failure as
+  `status: "error"` on its own state and returns normally, so awaiting it and
+  carrying on blamed an engine that never started on whichever step failed next.
+* `ProductStore.open` sets `open` in its **first** update and leaves it set on
+  failure -- deliberately, so the panel can render the error beside the product it
+  is about. So `open !== undefined` was true whatever happened: an unresolvable
+  product reported a successful open and went into Recent, the list a person
+  trusts to reopen things that worked.
+* And the panel showed an open's progress only when *nothing* was open, so
+  switching from one product to another showed the old one for the whole three
+  seconds and hid a refusal completely. It compares identity now.
+
+The decisions live in `browser/shell/opening-outcome.ts`, which imports nothing
+but types, and the sequence in the service calls them. That split is what makes
+them checkable: `ProductSessionService` cannot be constructed outside a browser --
+it injects `MonacoTextModelService` and `WorkspaceService` as tokens, and loading
+those in Node reaches Monaco's ESM `.css` imports -- so `scripts/store-smoke.mjs`
+checks the decisions directly, and `npm run verify` runs it.
+
+**There is no browser claim for a refused open, and that is a finding rather than
+an omission.** Killing the engine looks like the way in and is not: `initialize`
+spawns a new engine on every call, so an open that begins with `catalogue.load`
+gets a fresh one and succeeds. Verified by trying it. A `⚪ not observed` row
+would suggest a later run might see it, and none can.
 
 **The stage after.** Overview now reports what the product *is*, from data
 `ProductStore` already holds: how many gears and how many of those nobody asked
@@ -2123,10 +2150,24 @@ Two deliberate restraints. The generation status is **read from
 `GenerateService`'s cache and never planned from here** -- `ensurePlan` is a round
 trip, and a render that asked for one would do it on every repaint of a panel that
 repaints on every store change, so "not planned for this resolution yet" is an
-answer rather than a reason to go and find out. And Overview does **not** list the
-diagnostics: the one-line summary below it already says how many there are and
-leads to the stage that reads them, and adding a third rendering of that array is
-precisely what the shared row was extracted to stop.
+answer rather than a reason to go and find out. That rule is asserted against the
+source rather than against the screen, because the observable version is not
+sound: a plan that completed between two readings leaves the status looking
+untouched, so "the status did not change" passes when the rule is broken.
+
+The declared source roots are shown **as written and not as links**: a source root
+is a directory, the link component opens a file, and a link resolving to a folder
+either does nothing or opens something arbitrary inside it. The description itself
+is one row above and is openable, which is where a person goes to change any of
+this.
+
+And Overview does **not** list the
+diagnostics, for a reason about this stage rather than about the renderer: an
+overview says what the product is, and Validation is the stage where diagnostics
+are *read*. The one-line summary below already says how many there are and leads
+there. (The shared row of §9.1 above removed four differing implementations of one
+row; it says nothing about how many places may show a list, and citing it here
+would be borrowing an argument that does not apply.)
 
 ### 9.2 Writing to a description, and the four refusals
 
