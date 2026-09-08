@@ -172,7 +172,7 @@ cluster.leader_election(profile, capabilities = [])
 cluster.lock(profile, capabilities = [])
 ```
 
-`profile` has no default. It must match `impl ClusterProfile { const NAME }` on the gear.
+`profile` has no default. It must match `impl ClusterProfile { const NAME }` on the gear — a name no marker supplies is **GBX0508**, caught here rather than at startup, where it would be `ProfileNotBound`. The scope belongs to the product's coordination domain, not to the gear: the examples below have a gear requiring `event-broker` and a product binding it, which is the same join key seen from both sides.
 
 ### `role(...)` → role
 
@@ -421,8 +421,8 @@ gear(
         ),
     ],
     requires = [
-        cluster.cache(profile = "payments-audit", capabilities = [cluster_cap.linearizable]),
-        cluster.leader_election(profile = "payments-audit"),
+        cluster.cache(profile = "event-broker", capabilities = [cluster_cap.linearizable]),
+        cluster.leader_election(profile = "event-broker"),
     ],
     serves = [endpoint(name = "rest", via = "rest_host")],
 )

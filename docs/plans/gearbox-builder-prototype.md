@@ -274,8 +274,8 @@ gear(
         # `profile` is mandatory and is a join key: it must name a profile this
         # crate implements as `impl ClusterProfile { const NAME }`. No default --
         # a defaulted `"default"` would resolve to a scope nothing registered.
-        cluster.cache(profile = "payments-audit", capabilities = [cluster_cap.linearizable]),
-        cluster.leader_election(profile = "payments-audit"),
+        cluster.cache(profile = "event-broker", capabilities = [cluster_cap.linearizable]),
+        cluster.leader_election(profile = "event-broker"),
     ],
 
     serves = [endpoint(name = "rest", via = "rest_host")],
@@ -403,11 +403,14 @@ arrive via `colocated_deps` closure, which is exactly the fact the Graph widget 
 
 **What shipped in M2, and where it differs from the example above.**
 `products/payments-demo/product.gdl` exists and evaluates
-(`gearbox product --file products/payments-demo/product.gdl`). It lists the four slice gears rather
+(`gearbox product --file products/payments-demo/product.gdl`). It lists the four slice gears plus `cluster`, rather
 than five: `payments-audit` was to be the new custom gear, and it never arrived — M6 turned out not
 to need it, because the description's own severable edge already splits `api-contracts` into a second
-process. A `use_gear` naming it would still reference a gear no source provides. Its cluster scope is `event-broker`, the one profile
-name a real `impl ClusterProfile` supplies.
+process. A `use_gear` naming it would still reference a gear no source provides. Its cluster scope,
+`event-broker`, went to `api-contracts-consumer` instead: that crate now carries the
+`impl ClusterProfile` marker, so the scope has a requester that exists. `cluster` itself has to be
+selected explicitly — nothing pulls it, because the only gear declaring `deps = [cluster]` has no
+description, and without it in the closure the provider registry is empty.
 
 Three surface decisions settled by implementing it:
 
@@ -1110,7 +1113,7 @@ rendering an empty frame that is indistinguishable from a broken view.
 Three things the implementation learned from the data, none of them in §9:
 
 * **The interesting profile is `prod`, not the default `dev`.** On `dev` the demo product resolves
-  to two local bindings, one process of eight gears and no cluster at all -- every view would render
+  to two local bindings and one process of nine gears -- every view would render
   truthfully and show nothing that could have made it wrong. So the conformance tests for these
   views resolve `prod`, where the same description severs a contract edge and splits into three
   processes.
@@ -1128,15 +1131,11 @@ Three things the implementation learned from the data, none of them in §9:
   `prd-studio.spec.ts` enforces -- rendering a mechanism is consuming a projected fact, while
   branching on one would be taking over a resolver decision.
 
-Two claims stay honest rather than green, and both are corpus limits:
+One claim stays honest rather than green, and it is a corpus limit. The other was the cluster
+view, and it is now observed: `api-contracts-consumer` requires the `event-broker` scope, so a
+`ResolvedClusterBinding` reaches the view in every profile. The empty state it used to show is
+still reachable and still asserted -- by a product that requires nothing.
 
-* **The cluster view is built and cannot be observed.** A `ResolvedClusterBinding` exists only where
-  a gear requires a primitive, and no `gear.gdl` in the corpus declares `cluster.cache`,
-  `cluster.lock` or `cluster.leader_election` -- in any profile. The product does declare a provider
-  for its `event-broker` scope, so the empty state says exactly that: the provider is waiting for a
-  requester. The requester arrives with `payments-audit` (§10). The conformance row is
-  **not observed**, and the observable half -- that the absence is explained -- is asserted before
-  the skip.
 * **Processes do not overlap on this corpus, in any profile.** `prod`'s extra anchors declare no
   `deps`, so their closures are singletons and its three boxes hold 6 + 1 + 1 of the same eight
   gears `dev` puts in one. The view states this in words instead of letting an absent repeated chip
@@ -1822,7 +1821,8 @@ kind this cannot generate is a compile error at the `match` instead of a value a
 field reached the Studio, where it told operators that worker entry points were unbuilt. An
 always-empty report is one nobody can read.
 
-**What is deliberately not done:** the live run of §12 step 3, and `payments-audit`. The reason is
+**What is deliberately not done:** `payments-audit`. (The live run of §12 step 3 has since been
+done; see M6.) The reason is
 not caution. `oop_http` is fully implemented in the runtime and covered by its own tests, but
 **nothing in `gears-rust` uses it** — the runtime's own design note says there are no checked-in
 `oop_http` configs, and its one real worker, `calculator-oop`, takes the legacy gRPC path. A
@@ -2322,7 +2322,13 @@ workspace-member entries. Nothing else in that repo changes.
 | **M3** — **done** | `gearbox validate` | `gearbox validate --root ../gears-rust` → 0 errors, and with `--product` → 0 errors on the real product; GBX0208 and GBX0301 each proved against the real tree (`bss-ledger` is undescribed, `api-gatewey` is a typo); GBX0209 proved on temporary trees because the repository has no wrong declaration to point at; GBX0207 retired with a differential test in its place | M2, M8a |
 | **M4** — **done** | Resolver + explain + lock | all three profiles diff clean against `fixtures/*/product.lock`; every GBX03xx–06xx code reachable; determinism loop | M8a |
 | **M5** — **done** | Crate + config generators; **embedded runs** | acceptance §12 step 2 in full | — |
-| **M6** — **done** | Host-workers | `make oop-run`: the generated host starts the generated worker, the worker serves its own probes, and the `PaymentApi@v1` binding resolves **remote through the directory**. `payments-audit` was never needed -- the corpus supplied a severable pair. The evidence is `readiness: dependency resolved`, not the `wire_outcome=Remote` line §12 named: that one is DEBUG and unreachable (the runtime builds its filter from the configuration's `logging` targets and `RUST_LOG` only caps it), while the readiness line is emitted **only** for a directory-resolved remote -- a local or statically-overridden dependency is marked resolved without ever reaching that loop | M7 |
+| **M6** — **done** | Host-workers | `make oop-run`: the generated host starts the generated worker, the worker serves its own probes, and the `PaymentApi@v1` binding resolves **remote through the directory**. `payments-audit` was never needed -- the corpus supplied a severable pair. The run now also starts
+the cluster gear against a real postgres, because `api-contracts-consumer` requires the
+`event-broker` scope and `local` binds it to that backend: the backend runs its migrations and
+creates `cluster.cluster_cache` and `cluster.cluster_lock`. Two generator defects had to be fixed
+before it would start, and neither was reachable until something required a scope -- `secret_ref`
+was written as a string where the gear reads a `SecretRef { name }`, and a `serde_json::Number`
+leaked its private representation into the YAML. The evidence is `readiness: dependency resolved`, not the `wire_outcome=Remote` line §12 named: that one is DEBUG and unreachable (the runtime builds its filter from the configuration's `logging` targets and `RUST_LOG` only caps it), while the readiness line is emitted **only** for a directory-resolved remote -- a local or statically-overridden dependency is marked resolved without ever reaching that loop | M7 |
 | **M7** — **done** | Docker + Helm + `values.schema.json` | acceptance §12 step 4 minus `kubeconform`/`kind` (neither is installed); `helm lint`/`helm template`, schema `--set` rejection, GBX0603, ConfigMap `api-contracts` | M6 |
 | **M8a** — **done** | JSON-RPC + TS types | `node ide/scripts/rpc-smoke.mjs` drives initialize → catalogue over real framing, 15/15; `cargo test -p gearbox-rpc`; stdout carries nothing but JSON-RPC | from M1 |
 | **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Inspector, Graph, Product, Conflicts, Lock, Generate, Start, the product header and the two working contexts are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Electron is still open | after M4 + M8a |
@@ -2457,9 +2463,11 @@ Run it; assert both REST surfaces answer and `WireOutcome::Local` appears for al
 with no readiness gate.
 
 **Step 3 — host-workers.** `make oop-run`. **Done**, and the step as first written could not have
-been: it named `gbx-payments-audit`, a gear nobody wrote, and required Postgres, which nothing in
-this product needs -- no gear demands a cluster primitive, so the declared postgres profile
-resolves to nothing and the directory is an in-memory map inside the host.
+been: it named `gbx-payments-audit`, a gear nobody wrote. It was also right about Postgres for the wrong
+reason: at the time no gear demanded a cluster primitive, so the declared postgres profile resolved
+to nothing. `api-contracts-consumer` now requires the `event-broker` scope, `local` binds it to
+postgres, and the step needs a reachable database -- `PG_HOST` and `PG_PASSWORD` in the
+environment. The directory is still an in-memory map inside the host.
 
 Against what the corpus actually supplies: host `gateway`, worker `api-contracts` on
 `127.0.0.1:8090`. Asserts that the binary the host is configured to start is the one the build
@@ -2484,10 +2492,11 @@ gearbox resolve … --format json | jq -e '.diagnostics[] | select(.code=="GBX06
 ```
 Optional: `kind` + `kind load docker-image` + `helm install --wait`.
 
-**Step 5 — negative cluster case.** Add `cluster_cap.prefix_watch` to the cache requirement; expect
-a non-zero exit, no lock, and both `GBX0502` (no provider satisfies `{linearizable, prefix_watch}`
-— with the per-provider ✔/✘ table and the `CacheFeatures::new(false)` citation) and `GBX0503`
-(`standalone` is process-local but `audit` has replicas=2).
+**Step 5 — negative cluster case.** **Executable now**, and executed: add `cluster_cap.prefix_watch`
+to the cache requirement in `api-contracts-consumer/gear.gdl` and the resolve exits non-zero with no
+lock and `GBX0502`, naming the provider that cannot answer (`postgres: missing
+cluster.cache.prefix-watch`). `GBX0503` is the neighbouring case -- `standalone` is process-local and
+`audit` has replicas=2 -- reachable by binding dev's provider in a spread profile.
 
 **Step 6 — determinism.** Resolve three times → one distinct `blake3`. Apply generate twice →
 `git status --porcelain` empty the second time.
@@ -2534,10 +2543,12 @@ narrative; Generate shows 0 conflicts, and after hand-editing `values.yaml` a re
 5. **Cluster coordination beyond `standalone` + `postgres`.** Leader election has *zero* registered
    providers and always resolves to the SDK CAS default.
 6. **`prefix_watch` in any distributed setting.** GBX0502 is the correct answer, not a workaround.
-7. **The cluster gear in a running product** — it is wired into no runnable app today;
-   `payments-audit` will be the first. Expect real friction (migration ordering vs the `db`
-   lifecycle phase, `ClusterProfile` scope naming, CAS backends rejecting weak consistency).
-   **Budget a milestone-sized slip on M6 for this specifically.**
+7. **The cluster gear in a running product** — ~~it is wired into no runnable app today~~. Done, and
+   the friction was where this predicted it: `ClusterProfile` scope naming (the marker is the join
+   key, and GBX0508 is what catches a name nothing implements) and the shape of the generated
+   configuration (two defects, neither reachable until a scope was required). What remains untried
+   is a *consumer* resolving the facades: the requester declares the marker and the backend runs,
+   but nothing calls `ClusterCacheV1::resolver(hub)` yet.
 8. **Cutting the interesting real-world edges.** 33 of 39 gears use `deps`; `types_registry` is
    pulled by ~22. The resolver never cuts an undeclared edge — it *reports* it with the literal
    annotation to add. That report is the deliverable; actually cutting those edges needs the
