@@ -751,6 +751,53 @@ and `apply()` and `file()` refuse a plan that is not a plan of what is on screen
 computed from the cached plan, so without that the gates could be evaluated against one product
 while the write went to another.
 
+### The room is arranged before the screen appears
+
+Per-context layout is imperative now, because `chromeOptions.collapseAreas` applies on a
+perspective's *first* activation only -- Theia runs the chrome loop in the branch where no saved
+layout exists -- so it had silently stopped working on every visit after the first.
+
+Three rules came out of building it, and all three were learned by breaking them.
+
+**A panel operation must never land on a screen the person is already using.** Collapsing or
+expanding relayouts the shell; React replaces nodes; a click already in flight is lost between
+mousedown and mouseup. Measured three times: the `Open Product...` quick-input dismissed on Home,
+the Product view's stage tabs refusing to switch, and the Graph's own view switch taking focus and
+doing nothing. So the preset runs **before** the context's screen is put in front, and a focus
+episode folds **before** its screen opens.
+
+**A preset acts only on a transition, and only where it has something to say.** Home folds all
+three panels; Product and Gear `leave` all three. That is not a weaker version of folding the
+catalogue -- Home already folded it, so a product entered from Home starts folded, and the only
+thing a product preset could ever collapse is a panel the person opened *on purpose*.
+
+**A focus episode ends when its screen closes, not when the person looks elsewhere.** Restoring on
+"the current tab changed" put an animated panel resize on top of the screen just navigated to.
+Closing is later, more deliberate, and already relayouting.
+
+`collapsePanel` is never awaited. It applies its change synchronously and returns a promise that
+resolves on the next animation frame; awaiting it once put the whole reconciliation behind a frame
+a headless browser never delivered, and the shell booted to an empty centre.
+
+### What folding the catalogue on Home costs
+
+Two existing claims asserted that catalogue rows are *visible*, not merely attached -- ADR-0009's
+staged load, and this document's own "a catalogue row has a client rectangle". Both now reveal the
+panel first, and both say why in place. The property each was written for survives; what does not
+is that a first-time visitor watches the catalogue stream in without asking. That is the price of
+`Browse Catalogue` being an act rather than a button that reveals what is already on screen, and it
+is recorded here rather than absorbed quietly, because it is a reversal of ADR-0011's own "the
+catalogue is the secondary half of Home".
+
+### Three prefixes that never matched
+
+`Type Hierarchy` was still in the bottom panel after being suppressed in four places, and the reason
+was the fourth instance of a mistake this document already records twice: the widget id is
+`theia-typehierarchy`, not `typehierarchy`. `theia-timeline` and `theia-bulk-edit-container` were
+wrong the same way. The sweep also now runs at `ready` as well as on a perspective switch -- someone
+who lands on Home and stays there never causes a switch, so a snapshot-resurrected panel sat there
+untouched.
+
 ### Confirmation
 
 * `adr-0011-ide-shell.spec.ts` asserts in **both** directions that `View` offers Add Gear, Resolution

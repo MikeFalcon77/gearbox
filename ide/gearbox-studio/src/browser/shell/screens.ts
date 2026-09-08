@@ -65,12 +65,20 @@ const ALL_KINDS: readonly ContextKind[] = ["home", "product", "gear"];
  *
  * Two entries are worth reading twice.
  *
- * **The Graph is `availableIn: all` and `context-instance`**, which is not a
- * contradiction -- it is the reason the two axes are separate. Its `deps` view
- * reads the *catalogue* and needs no product, so gating the command would take
- * it away from Home, where three claims reach it. But it also holds
- * per-subject state -- the selected view and a focused gear id from one
- * product's closure -- so it may not survive a change of product.
+ * **The Graph is `availableIn: all` and `context-kind`, and its staleness is
+ * fixed where the staleness is.** It holds per-subject state -- a focused gear
+ * id from one product's closure -- so a stale one is a real complaint. But it is
+ * also the one screen that is *valid with no product*: its co-location view
+ * reads the catalogue, and three claims reach it from Home. Withdrawing it on
+ * every change of subject therefore destroyed a screen that the new context can
+ * hold perfectly well, and destroyed it mid-interaction -- observed as a view
+ * switch that silently did not take, because the widget behind the click had
+ * been rebuilt and a fresh one starts on co-location.
+ *
+ * So the widget survives and `GraphWidget` clears what belonged to the previous
+ * product. Closing a screen is the right answer when nothing in it means
+ * anything any more, which is true of the five product screens above and is not
+ * true of this one.
  *
  * **The Inspector is `global`**, and its subject gate is a context key rather
  * than a lifetime: what makes it empty is an absent *selection*, not an absent
@@ -97,7 +105,7 @@ export const SCREENS: readonly Screen[] = [
     lifetime: "context-instance",
     focus: true,
   },
-  { widgetId: "gearbox.graph", availableIn: ALL_KINDS, lifetime: "context-instance", focus: true },
+  { widgetId: "gearbox.graph", availableIn: ALL_KINDS, lifetime: "context-kind", focus: true },
   { widgetId: "gearbox.catalogue", availableIn: ALL_KINDS, lifetime: "global" },
   { widgetId: "gearbox.inspector", availableIn: ALL_KINDS, lifetime: "global" },
 ];

@@ -16,6 +16,7 @@ import {
   expectContext,
   openProduct,
   paletteOffers,
+  revealCatalogue,
   productSection,
   runCommand,
   test,
@@ -155,6 +156,13 @@ test.describe("the narrowed shell", () => {
   });
 
   test("a catalogue row has a client rectangle [ADR-0011 §Confirmation]", async ({ studio }) => {
+    // **Revealed first, since 2026-09-08.** Home folds all three side panels, so
+    // the catalogue is not on screen until something asks for it -- the second
+    // claim in this suite to pay that price, after ADR-0009's staged load. What
+    // this claim is about is unchanged and is still worth asserting: a row is a
+    // laid-out element rather than a node that exists and renders to nothing,
+    // which is the failure it was written for.
+    await revealCatalogue(studio.page);
     const visible = await studio.page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll(".gearbox-catalogue .gbx-row"));
       return {
@@ -648,9 +656,16 @@ test.describe("structural claims", () => {
     const b = "product:file:///b/product.gdl";
 
     const moved: string[] = screens.outOfScope(a, b);
-    for (const id of ["gearbox.add-gear", "gearbox.product", "gearbox.generate", "gearbox.graph"]) {
+    for (const id of ["gearbox.add-gear", "gearbox.product", "gearbox.generate", "gearbox.lock"]) {
       expect(moved, `${id} survives a change of product`).toContain(id);
     }
+
+    // **The Graph is deliberately not in that list.** It is the one screen that
+    // is valid with no product -- its co-location view reads the catalogue --
+    // so withdrawing it on a change of subject destroys a screen the new context
+    // can hold, and destroys it mid-interaction. Its per-product state is
+    // cleared by the widget instead; the claim here is that the table says so.
+    expect(moved, "the Graph is withdrawn rather than cleared").not.toContain("gearbox.graph");
 
     // The other direction, which is what stops the rule being "close everything
     // always": re-resolving the same product is not a change of subject, and a

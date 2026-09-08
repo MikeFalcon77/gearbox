@@ -119,6 +119,12 @@ test.describe("where the views live", () => {
 
     // And Conflicts stays below, because it is read *while* looking at the tree
     // that caused the complaint.
+    //
+    // A product first: Conflicts is a product's screen and its command is scoped
+    // to that context, so with nothing open it is not in the palette -- which is
+    // the gate working. The claim here is about *where* the panel lives, and it
+    // needs a product to have one at all.
+    await openProduct(studio.page, "dev");
     await openConflicts(studio.page);
     const conflicts = await studio.page.evaluate(
       () => document.querySelector("#theia-bottom-content-panel .gbx-conflicts") !== null,

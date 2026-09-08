@@ -65,6 +65,21 @@ export class GraphWidget extends ReactWidget {
   /** The gear whose co-location closure is painted, if any. */
   protected focus: string | undefined;
 
+  /**
+   * The product the state above belongs to.
+   *
+   * A painted closure is a set of gears from one product's resolution, so
+   * carrying it into another product would paint an answer about something that
+   * is no longer open. The panel is not closed when the product changes -- its
+   * co-location view reads the catalogue and is valid with no product at all --
+   * so the staleness is cleared here, where it lives.
+   *
+   * By path, and only on a change of *product*: switching profiles re-resolves
+   * the same subject, and dropping the painted closure on every profile click
+   * would take away the comparison the three resolution views exist for.
+   */
+  protected subject: string | undefined;
+
   @postConstruct()
   protected init(): void {
     this.id = GraphWidget.ID;
@@ -76,7 +91,13 @@ export class GraphWidget extends ReactWidget {
     // the other three follow the product as profiles are switched. Subscribing to
     // only one was how the catalogue's in-product toggles failed to appear.
     this.toDispose.push(this.catalogue.onChanged(() => this.update()));
-    this.toDispose.push(this.product.onChanged(() => this.update()));
+    this.toDispose.push(
+      this.product.onChanged(() => {
+        this.forgetOtherProduct();
+        this.update();
+      }),
+    );
+    this.subject = this.product.current.open?.path;
     this.update();
   }
 
@@ -172,6 +193,14 @@ export class GraphWidget extends ReactWidget {
   protected showView(view: GraphView): void {
     this.view = view;
     this.update();
+  }
+
+  /** Drop what belonged to the previous product. See [`subject`]. */
+  protected forgetOtherProduct(): void {
+    const open = this.product.current.open?.path;
+    if (open === this.subject) return;
+    this.subject = open;
+    this.focus = undefined;
   }
 
   protected toggleFocus(id: string): void {

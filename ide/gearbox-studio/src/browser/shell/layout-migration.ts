@@ -33,11 +33,23 @@ import { inject, injectable } from "@theia/core/shared/inversify";
  * assuming they agreed is how the camelCase mistake in that list happened.
  */
 export const CLOSED_ON_MIGRATION: readonly string[] = [
+  // **Three of these had a `theia-` prefix nobody had read**, which is the fourth
+  // time in this repository that a family was suppressed everywhere except where
+  // it actually lives. `TypeHierarchyTreeWidget.WIDGET_ID` is `theia-typehierarchy`,
+  // the timeline is `theia-timeline`, and bulk edit is
+  // `theia-bulk-edit-container` -- so `typehierarchy`, `timeline` and `bulk-edit`
+  // matched nothing at all, and a UX pass duly reported Type Hierarchy still
+  // sitting in the bottom panel on Home. `callhierarchy` and `outline-view` are
+  // the ids as written. Read out of the packages, not guessed; the claim that
+  // reads the rendered panel is what makes the next one of these visible.
+  "theia-typehierarchy",
   "typehierarchy",
   "callhierarchy",
   "outline-view",
   "notebook",
+  "theia-timeline",
   "timeline",
+  "theia-bulk-edit",
   "bulk-edit",
   "debug",
   "test-",
@@ -83,7 +95,7 @@ export const CLOSED_ON_MIGRATION: readonly string[] = [
 const MIGRATION_KEY = "gearbox.layoutMigration";
 
 /** Bump when `CLOSED_ON_MIGRATION` changes, so the sweep runs again -- once. */
-const MIGRATION_VERSION = 5;
+const MIGRATION_VERSION = 6;
 
 /**
  * Prefixes detached on **every** perspective switch, not once.
@@ -98,11 +110,15 @@ const MIGRATION_VERSION = 5;
  */
 const SWEPT_ON_EVERY_SWITCH: readonly string[] = [
   "terminal-",
+  // Both spellings, for the reason `CLOSED_ON_MIGRATION` gives above.
+  "theia-typehierarchy",
   "typehierarchy",
   "callhierarchy",
   "outline-view",
   "notebook",
+  "theia-timeline",
   "timeline",
+  "theia-bulk-edit",
   "bulk-edit",
   "plugins",
 ];
@@ -120,7 +136,15 @@ export class LayoutMigration implements FrontendApplicationContribution {
     // anything to close. `onStart` alone runs while the shell is still being
     // assembled, and closing a widget that has not been attached yet does nothing
     // at all -- silently, which is the worst version of not working.
-    void this.appState.reachedState("ready").then(() => this.migrate());
+    void this.appState.reachedState("ready").then(() => {
+      void this.migrate();
+      // And once at `ready`, not only on a switch. A person who lands on Home and
+      // stays there never causes a perspective change, so a snapshot-resurrected
+      // panel sat in the bottom bar untouched -- which is how Type Hierarchy was
+      // still on screen after both the migration and the sweep were supposed to
+      // have dealt with it. (The prefix was also wrong; both halves were needed.)
+      this.sweepForbidden();
+    });
     // And again on every perspective switch, for the widgets a *snapshot* brings
     // back -- see `sweepForbidden`.
     this.perspectives.onDidChangePerspective(() => this.sweepForbidden());

@@ -41,11 +41,13 @@ import {
 import { SelectionService } from "./shell/selection-service";
 import {
   availableIn,
+  focusScreens,
   identityOf,
   whenClauseFor,
   type ContextIdentity,
   type OwnedWidget,
 } from "./shell/screens";
+import { FocusModeService } from "./shell/focus-mode-service";
 import {
   HAS_SELECTION_KEY,
   STUDIO_CONTEXT_KEY,
@@ -95,6 +97,7 @@ export const RESOLVE_PRODUCT: Command = {
 @injectable()
 export abstract class ScopedViewContribution<T extends Widget> extends AbstractViewContribution<T> {
   @inject(StudioContextService) protected readonly contexts!: StudioContextService;
+  @inject(FocusModeService) protected readonly focus!: FocusModeService;
 
   /**
    * Whether this view may be opened in the context that is current.
@@ -185,6 +188,23 @@ export abstract class ScopedViewContribution<T extends Widget> extends AbstractV
 
   protected currentIdentity(): ContextIdentity {
     return identityOf(this.contexts.current);
+  }
+
+  /**
+   * Open this view, folding the side panels first when it is a screen that
+   * wants the room.
+   *
+   * **Before, and awaited.** Folding after the widget is on screen relayouts it
+   * under whatever the person is already doing, and a collapse that replaces the
+   * node between mousedown and mouseup produces no click at all -- measured on
+   * the Graph's own view switch. Arranging the room first is the same rule the
+   * context preset follows for the same reason.
+   */
+  protected async openFocused(args?: Parameters<this["openView"]>[0]): Promise<void> {
+    if (focusScreens().includes(this.viewId)) {
+      this.focus.enterFocus(this.viewId);
+    }
+    await this.openView(args ?? { activate: true, reveal: true });
   }
 }
 
@@ -414,7 +434,7 @@ export class CreateProductViewContribution extends ScopedViewContribution<Create
    */
   protected override async revealView(): Promise<unknown> {
     if (this.tryGetWidget() !== undefined) {
-      return this.openView({ activate: true, reveal: true });
+      return this.openFocused();
     }
     return this.openCreate();
   }
@@ -431,7 +451,7 @@ export class CreateProductViewContribution extends ScopedViewContribution<Create
     );
     this.stampOwner(widget);
     widget.openWith(state);
-    await this.openView({ activate: true, reveal: true });
+    await this.openFocused();
   }
 }
 
@@ -456,7 +476,7 @@ export class CreateGearViewContribution extends ScopedViewContribution<CreateGea
   /** Reveals rather than re-seeds -- see the product wizard's `revealView`. */
   protected override async revealView(): Promise<unknown> {
     if (this.tryGetWidget() !== undefined) {
-      return this.openView({ activate: true, reveal: true });
+      return this.openFocused();
     }
     return this.openCreate();
   }
@@ -466,7 +486,7 @@ export class CreateGearViewContribution extends ScopedViewContribution<CreateGea
     const widget = await this.widgetManager.getOrCreateWidget<CreateGearWidget>(CreateGearWidget.ID);
     this.stampOwner(widget);
     widget.openWith(state);
-    await this.openView({ activate: true, reveal: true });
+    await this.openFocused();
   }
 }
 
@@ -503,7 +523,7 @@ export class AddGearViewContribution extends ScopedViewContribution<AddGearWidge
   /** Reveals rather than re-seeds -- see `CreateProductViewContribution`. */
   protected override async revealView(): Promise<unknown> {
     if (this.tryGetWidget() !== undefined) {
-      return this.openView({ activate: true, reveal: true });
+      return this.openFocused();
     }
     return this.openAdd();
   }
@@ -533,12 +553,18 @@ export class AddGearViewContribution extends ScopedViewContribution<AddGearWidge
     const widget = await this.widgetManager.getOrCreateWidget<AddGearWidget>(AddGearWidget.ID);
     this.stampOwner(widget);
     widget.openWith(state);
-    await this.openView({ activate: true, reveal: true });
+    await this.openFocused();
   }
 }
 
 @injectable()
 export class GraphViewContribution extends ScopedViewContribution<GraphWidget> {
+  /** The graph is a drawing; it takes the room, like the wizards. */
+  protected override async revealView(): Promise<unknown> {
+    if (this.tryGetWidget()?.isVisible === true) return this.closeView();
+    return this.openFocused();
+  }
+
   constructor() {
     super({
       widgetId: GraphWidget.ID,
@@ -678,8 +704,17 @@ export class ProductViewContribution
   }
 
   onStart(): void {
+    // **The opening signal only.** This used to listen to the context as well,
+    // and that second subscription is now `ScreenScopeService.reassertPrimary`'s
+    // job -- keeping both meant two components activating this view for the same
+    // transition, at different points in the same second, and the second one
+    // re-rendered the panel under whatever the person had just clicked. Measured
+    // as the Product view's own stage tabs refusing to switch.
+    //
+    // What stays is the part the context cannot express: `onDidChangeOpening`
+    // fires *before* there is a product, so the panel can say which product it is
+    // waiting for during the two engine spawns an open costs.
     this.session.onDidChangeOpening(() => void this.openIfProduct());
-    this.contexts.onDidChange(() => void this.openIfProduct());
   }
 
   /**

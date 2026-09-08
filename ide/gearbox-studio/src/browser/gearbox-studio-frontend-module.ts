@@ -77,6 +77,7 @@ import { ProductSessionService } from "./shell/product-session-service";
 import { EngineConnectionService } from "./shell/engine-connection-service";
 import { SelectionService } from "./shell/selection-service";
 import { SessionCommands } from "./shell/session-commands";
+import { FocusModeService } from "./shell/focus-mode-service";
 import { ScreenScopeService } from "./shell/screen-scope-service";
 import { StudioContextService } from "./shell/studio-context-service";
 import { ToolbarContribution } from "./shell/toolbar-contribution";
@@ -233,6 +234,14 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // imperative activation in the application: `StartViewContribution` and the
   // perspectives' `onActivate` both used to open their own view, before the
   // layout had settled, which is what this replaces.
+  // Why a service of its own: `ScreenScopeService` reaches the view
+  // contributions to put a context's screen in front, and the view contributions
+  // reach this to fold the panels before opening a wizard. Importing both ways
+  // closed a module cycle that stopped the frontend booting outright, so the
+  // piece both sides need sits below both of them.
+  bind(FocusModeService).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(FocusModeService);
+
   bind(ScreenScopeService).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(ScreenScopeService);
 

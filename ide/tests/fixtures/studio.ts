@@ -255,6 +255,11 @@ export async function settled(page: Page): Promise<void> {
   // selection, which is what fills it, so waiting for it here would wait for a
   // selection nobody has made. The Start screen is the honest boot-complete
   // signal for the Home context every session begins in.
+  //
+  // **Folding the catalogue on Home does not affect this**, which was worth
+  // checking rather than assuming: a collapsed side panel keeps its widget
+  // rendered and attached -- 14 rows, 49 pixels of tab bar -- so the sampler
+  // still counts what it has always counted.
   await page.waitForSelector(".gbx-start", { state: "attached", timeout: 60_000 });
 }
 
@@ -743,8 +748,38 @@ function escapeForRegExp(text: string): string {
  * view closes it. Returns silently when the tab does not exist, because a caller
  * that then waits on a section gets a better failure than this could produce.
  */
+/**
+ * Make sure something is selected, so subject-gated surfaces are reachable.
+ *
+ * A catalogue row is the cheapest subject there is: it needs no product, and the
+ * catalogue is always loaded. Returns immediately when a selection already
+ * exists -- most callers arrive with one.
+ */
+export async function ensureSelection(page: Page): Promise<void> {
+  // **`data-inspecting`, not a selected catalogue row.** The first version of
+  // this asked whether a *row* was selected, which is false for every selection
+  // made anywhere else -- a process, a binding, a conflict's subject -- so it
+  // helpfully clicked a row and destroyed the selection the caller had just
+  // made. The Inspector publishes what it is inspecting; that is the question.
+  const inspecting = page.locator(".gbx-inspector[data-inspecting]:not([data-inspecting=''])");
+  if ((await inspecting.count()) > 0) return;
+  const selectedRow = page.locator(".gearbox-catalogue .gbx-row[aria-selected='true']");
+  if ((await selectedRow.count()) > 0) return;
+  await revealCatalogue(page);
+  const row = page.locator(".gearbox-catalogue .gbx-row").first();
+  await row.waitFor({ state: "visible", timeout: 60_000 });
+  await row.click();
+}
+
 export async function revealInspector(page: Page): Promise<void> {
   await refuseIfDialogOpen(page, "revealing the Inspector");
+  // **A subject first, because the panel is gated on having one.** The Inspector
+  // answers about a selection, so with none it is not in the palette and not in
+  // `Open View...` -- a panel whose entire content is "select something" is worse
+  // than an absent one. That is the gate working, not a helper to loosen, so this
+  // does what a person does: pick something, then ask for the panel about it.
+  // Cheap when a selection already exists, which is the ordinary case.
+  await ensureSelection(page);
   // The right panel since 2026-09-07, and not pinned to it here: a returning
   // person's saved layout may still hold the Inspector at the bottom, and this
   // helper's job is to bring the panel forward wherever the shell has it.

@@ -7,7 +7,7 @@
 // (see fixtures/studio.ts). A snapshot after the load would pass even if the
 // tree had appeared all at once.
 
-import { expect, settled, test, type Sample } from "../fixtures/studio";
+import { expect, revealCatalogue, settled, test, type Sample } from "../fixtures/studio";
 
 /** Samples where rows are on screen and at least one is still pending. */
 function stagedWindow(timeline: Sample[]): Sample[] {
@@ -22,10 +22,23 @@ test.describe("staged catalogue loading", () => {
     const timeline = await freshStudio.timeline();
     const last = timeline[timeline.length - 1];
     expect(last.rows).toBeGreaterThan(0);
+
+    // **Revealed first, since 2026-09-08, and that is a cost this claim should
+    // state rather than absorb.** Home now folds all three side panels, so on a
+    // first run nobody is looking at the catalogue while it loads -- which is
+    // the experience ADR-0009 exists to protect. What survives is the property
+    // the ADR is actually about: every row that has arrived is on screen for
+    // someone who has the panel open, rather than the tree appearing all at once
+    // when the last projection lands.
+    //
     // Visible, not merely attached: a collapsed side panel keeps its widget in
     // the DOM, and an earlier version of this check passed against a blank
-    // screen for exactly that reason.
-    expect(last.visibleRows).toBe(last.rows);
+    // screen for exactly that reason -- which is now the ordinary state of Home
+    // and is why the reveal is explicit.
+    await revealCatalogue(freshStudio.page);
+    const shown = await freshStudio.timeline();
+    const after = shown[shown.length - 1];
+    expect(after.visibleRows).toBe(after.rows);
   });
 
   test("rows are on screen while still pending [ADR-0009 §Decision Drivers: time to first row]", async ({

@@ -59,24 +59,18 @@ export class GearboxPerspectives implements PerspectiveContribution {
       id: PRODUCT_PERSPECTIVE,
       label: "Product",
       viewPlacements: new Map<string, ApplicationShell.Area>(),
-      // The catalogue is a source of components, not the subject of this context.
-      // Collapsing rather than closing: it stays one click away, and the Explorer
-      // and git fold with it.
-      //
-      // Due to be replaced by the per-context layout preset, and **not removed
-      // ahead of it**: `collapseAreas` applies on a perspective's first
-      // activation only (`perspective-service.js:130-144` runs the chrome loop in
-      // the branch where no saved layout exists), so it is already a no-op for
-      // anyone returning to a context they have visited -- but removing it before
-      // the preset exists would leave the first visit uncollapsed as well, which
-      // is a regression on the way to a fix.
-      chromeOptions: { collapseAreas: ["left"] },
+      // **`chromeOptions.collapseAreas` is gone**, and the intent it carried is
+      // not: `ScreenScopeService` folds the catalogue on entering this context,
+      // and folds all three panels on Home. What was wrong with declaring it here
+      // is that it applies on a perspective's *first* activation only -- Theia
+      // runs the chrome loop in the branch where no saved layout exists
+      // (`perspective-service.js:130-144`) -- so it silently stopped working on
+      // the second visit to a context, which is every visit after the first.
     });
     service.registerPerspective({
       id: GEAR_PERSPECTIVE,
       label: "Gear",
       viewPlacements: new Map<string, ApplicationShell.Area>(),
-      chromeOptions: { collapseAreas: ["left"] },
     });
   }
 }

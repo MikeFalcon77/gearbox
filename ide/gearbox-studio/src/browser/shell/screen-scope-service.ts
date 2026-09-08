@@ -27,12 +27,63 @@ import { FrontendApplicationStateService } from "@theia/core/lib/browser/fronten
 import { inject, injectable } from "@theia/core/shared/inversify";
 import type { Widget } from "@theia/core/shared/@lumino/widgets";
 
+/**
+ * What a context does to one side panel.
+ *
+ * Three values, not two, and `leave` is the one that matters: it is what stops a
+ * preset fighting a person who deliberately reopens a panel. Presets apply on a
+ * *transition* only, so reopening the Inspector inside the product context is
+ * not a transition and nothing re-collapses it.
+ */
+type PanelIntent = "expand" | "collapse" | "leave";
+
+type Preset = Readonly<Record<PanelArea, PanelIntent>>;
+
+/**
+ * The layout each context asks for.
+ *
+ * **Home folds all three, which reverses a stated position** -- ADR-0011 had the
+ * catalogue beside Start as Home's second half. The UX pass that asked for this
+ * also pointed out what the old arrangement cost: `Browse Catalogue` on the
+ * Start screen was a button that revealed a panel already on screen. With the
+ * left panel folded it becomes the act it is named after, and Start gets the
+ * whole centre.
+ *
+ * **Product and Gear leave all three alone, and that is not a weaker version of
+ * folding the catalogue -- it is the same outcome without the fight.** Home
+ * already folds everything, so a product entered from Home starts folded; the
+ * only case where a product preset would have anything to collapse is one where
+ * the person opened a panel *on purpose* during the previous context. Taking it
+ * away then is what `leave` exists to prevent.
+ *
+ * And it removes a real hazard rather than a hypothetical one. A collapse
+ * relayouts the shell, React replaces nodes, and a click already in flight is
+ * lost between mousedown and mouseup -- measured twice: the `Open Product...`
+ * quick-input dismissed on Home, and the Product view's own stage tabs refusing
+ * to switch. Home's fold is safe because it runs before the screen appears; a
+ * fold on entering a product cannot be, because a product takes three seconds to
+ * arrive and the person is already looking at it.
+ */
+const PRESETS: Readonly<Record<ContextKind, Preset>> = {
+  home: { left: "collapse", right: "collapse", bottom: "collapse" },
+  product: { left: "leave", right: "leave", bottom: "leave" },
+  gear: { left: "leave", right: "leave", bottom: "leave" },
+};
+
 import {
   GearAuthorViewContribution,
   ProductViewContribution,
   StartViewContribution,
 } from "../view-contributions";
-import { OwnedWidget, identityOf, outOfScope, type ContextIdentity } from "./screens";
+import { FocusModeService, PANELS, type PanelArea } from "./focus-mode-service";
+import {
+  OwnedWidget,
+  identityOf,
+  outOfScope,
+  screenFor,
+  type ContextIdentity,
+  type ContextKind,
+} from "./screens";
 import { StudioContextService, type StudioContext } from "./studio-context-service";
 
 @injectable()
@@ -47,6 +98,7 @@ export class ScreenScopeService implements FrontendApplicationContribution {
   @inject(StartViewContribution) protected readonly start!: StartViewContribution;
   @inject(ProductViewContribution) protected readonly product!: ProductViewContribution;
   @inject(GearAuthorViewContribution) protected readonly gear!: GearAuthorViewContribution;
+  @inject(FocusModeService) protected readonly focus!: FocusModeService;
 
   /**
    * The identity a reconcile ran to completion for.
@@ -61,6 +113,24 @@ export class ScreenScopeService implements FrontendApplicationContribution {
   protected running: Promise<void> = Promise.resolve();
   protected queued = false;
 
+  /**
+   * Which subject each open screen was opened under.
+   *
+   * **Stamped when the widget joins the shell, not when a wizard seeds it**, and
+   * that distinction is a bug fix rather than tidiness. Withdrawal is not
+   * instantaneous: it waits for the perspective switch, and opening a product
+   * takes about three seconds, so a person can open a screen *while* the
+   * reconciliation for that same product is still running. Deciding by declared
+   * scope alone, the sweep would then close a screen that belongs to the product
+   * that had just finished opening -- observed as a Graph that vanished
+   * immediately after being asked for.
+   *
+   * Keyed by widget id and read alongside `OwnedWidget.ownerIdentity`, which the
+   * wizards also record for the write boundary: both are taken from the same
+   * `identityOf(current)` at the same moment, so they cannot disagree.
+   */
+  protected owners = new Map<string, ContextIdentity>();
+
   onStart(): void {
     // No payload. A queued pass that captured a context and then awaited would
     // act on a subject that has since moved -- see `reconcile`, which re-reads.
@@ -70,6 +140,24 @@ export class ScreenScopeService implements FrontendApplicationContribution {
     // the boot case is exactly where a restored layout may hold a Product tab
     // saved into the Home snapshot.
     void this.appState.reachedState("ready").then(() => this.enqueue());
+    // **The main tab, never the event's payload.** `onDidChangeCurrentWidget` is
+    // fired from the shell's own `FocusTracker`, so it also fires when focus
+    // moves into the catalogue or the Inspector, carrying that widget. What this
+    // is about is which screen occupies the centre.
+    this.shell.onDidAddWidget((widget) => this.stampOnAdd(widget));
+    this.shell.onDidRemoveWidget((widget) => this.owners.delete(widget.id));
+  }
+
+  /** Record the subject a screen was opened under. See [`owners`]. */
+  protected stampOnAdd(widget: Widget): void {
+    if (screenFor(widget.id)?.lifetime !== "context-instance") return;
+    this.owners.set(widget.id, identityOf(this.contexts.current));
+  }
+
+  /** What a screen belongs to: its own record if it kept one, else ours. */
+  protected ownerOf(widget: Widget): ContextIdentity | undefined {
+    const own = OwnedWidget.is(widget) ? widget.ownerIdentity : undefined;
+    return own ?? this.owners.get(widget.id);
   }
 
   /**
@@ -117,13 +205,66 @@ export class ScreenScopeService implements FrontendApplicationContribution {
     const to = identityOf(next);
     if (to === this.applied) return;
 
+    // Before the withdrawal, so a wizard being closed cannot leave an episode
+    // half-applied, and so the preset below is the only thing deciding panels.
+    this.focus.suspend();
+
     await this.withdraw(to);
+    if (!this.isCurrent(to)) return this.enqueue();
+
+    // **The panels before the screen, and that order was measured.** With the
+    // preset last, the layout settled *after* the context's screen appeared --
+    // and appearing is what everything downstream waits for, the conformance
+    // fixture included. So three panels collapsed a moment after a person could
+    // already click, and the collapse dismissed a quick-input they had just
+    // opened: `Open Product...` became a button that did nothing. Arranging the
+    // room before showing the screen also leaves the focus where it belongs,
+    // which is on the screen rather than on the last panel this touched.
+    this.applyPreset(next.kind);
     if (!this.isCurrent(to)) return this.enqueue();
 
     await this.reassertPrimary(next);
     if (!this.isCurrent(to)) return this.enqueue();
 
     this.applied = to;
+  }
+
+  /**
+   * Fold the panels this context does not want, and leave the rest alone.
+   *
+   * Imperative rather than declared, because `chromeOptions.collapseAreas`
+   * applies on a perspective's **first** activation only -- Theia runs the
+   * chrome loop in the branch where no saved layout exists
+   * (`perspective-service.js:130-144`) -- so it was already a no-op for anyone
+   * returning to a context they had visited.
+   *
+   * Safe where `activateWidget` was not: `SidePanelHandler.collapse()` sets
+   * `currentTitle = null` and returns an `animationFrame()`. No `waitForRevealed`,
+   * no 2.25-second `waitForActivation`, no focus change, no dispose. `expand()`
+   * with no id restores `state.lastActiveTabIndex`, which `collapse()` never
+   * clears, so the tab the person had is the tab that comes back and this
+   * service keeps no record of its own.
+   *
+   * **The returned promise is deliberately not awaited.** It resolves on the next
+   * animation frame, and the layout change has already been applied
+   * synchronously before it is returned -- so awaiting buys nothing and can cost
+   * everything: a browser that throttles `requestAnimationFrame` never settles
+   * it, and this sits in front of `reassertPrimary`, so the whole reconciliation
+   * stopped and no screen was ever put on screen at all. Measured as a shell
+   * that booted to an empty centre.
+   */
+  protected applyPreset(kind: ContextKind): void {
+    const preset = PRESETS[kind];
+    for (const area of PANELS) {
+      const intent = preset[area];
+      if (intent === "leave") continue;
+      const expanded = this.shell.isExpanded(area);
+      if (intent === "collapse" && expanded) {
+        void this.shell.collapsePanel(area);
+      } else if (intent === "expand" && !expanded) {
+        this.shell.expandPanel(area);
+      }
+    }
   }
 
   protected isCurrent(to: ContextIdentity): boolean {
@@ -147,8 +288,14 @@ export class ScreenScopeService implements FrontendApplicationContribution {
     const doomed: Widget[] = [];
     for (const widget of this.shell.widgets) {
       if (!widget.isAttached) continue;
-      const owned = OwnedWidget.is(widget) ? widget.ownerIdentity : undefined;
-      if (declared.has(widget.id) || (owned !== undefined && owned !== to)) {
+      const owner = this.ownerOf(widget);
+      // **A recorded owner outranks the declared scope, and only in one
+      // direction: it can save a screen, never condemn one.** A screen opened
+      // while this very reconciliation was in flight carries the subject that is
+      // arriving, and closing it would undo an act the person had already
+      // completed. A screen with no owner at all falls back to the declaration.
+      if (owner === to) continue;
+      if (declared.has(widget.id) || owner !== undefined) {
         doomed.push(widget);
       }
     }
