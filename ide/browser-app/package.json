@@ -3,6 +3,9 @@
   "name": "gearbox-browser-app",
   "version": "0.1.0",
   "dependencies": {
+    "@theia/ai-anthropic": "1.75.0",
+    "@theia/ai-chat": "1.75.0",
+    "@theia/ai-chat-ui": "1.75.0",
     "@theia/core": "1.75.0",
     "@theia/editor": "1.75.0",
     "@theia/filesystem": "1.75.0",
@@ -44,6 +47,8 @@
         "defaultTheme": "gearbox-fabric",
         "preferences": {
           "workbench.colorTheme": "gearbox-fabric",
+          "//ai-features": "Theia AI ships off unless something says otherwise. `@theia/ai-ide` is deliberately NOT installed -- it drags puppeteer-core and an AI terminal surface, which ADR-0011 withdrew -- and it is that package that would rebind AIActivationService to be preference-gated. Without it the service defaults to active, so this key is a statement rather than a switch: the shell offers the chat on purpose. The API key is read from ANTHROPIC_API_KEY in the backend's environment and is never written here.",
+          "ai-features.AiEnable.enableAI": true,
           "editor.fontFamily": "'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace",
           "files.enableTrash": false,
           "//files.watcherExclude": "Not optional once a workspace is opened. The roots are two Rust checkouts, and `target/` in either is multi-gigabyte -- Theia would walk both. `.gearbox/` is generated output, regenerated wholesale, so watching it reports churn nobody acts on.",

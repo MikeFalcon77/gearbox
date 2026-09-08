@@ -4,9 +4,13 @@
   "private": true,
   "description": "Gearbox Studio: browse the gear catalogue the engine projects.",
   "main": "lib/common/index.js",
-  "files": ["lib", "src"],
+  "files": [
+    "lib",
+    "src"
+  ],
   "//dependencies": "Every package this extension imports from, declared. @theia/debug and @theia/test were imported by the two hidden-view overrides and not declared -- it compiled only because npm hoists them into the root node_modules, which is the same shape of bug as an unanchored .gitignore pattern: fine locally, broken in a clean install. Note this comment sits at the top level: a `//` key *inside* `dependencies` is a package name as far as npm is concerned.",
   "dependencies": {
+    "@theia/ai-core": "1.75.0",
     "@theia/core": "1.75.0",
     "@theia/debug": "1.75.0",
     "@theia/editor": "1.75.0",

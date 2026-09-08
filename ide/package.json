@@ -16,6 +16,11 @@
   "//": "Every @theia/* pinned to the one version in theia-version.txt, and repeated here as overrides. A transitive ^ pulls a second @theia/core copy, which breaks inversify identity -- the most common Theia build failure.",
   "//monaco-editor-core": "Not on theia-version.txt's schedule -- it tracks Monaco, and 1.108.201 is what @theia/monaco 1.75.0 asks for. Pinned for the same reason as the rest and then some: StandaloneServices is a module-level singleton, so a second copy would hand gearbox-studio's monaco.languages.register a different ILanguageService than the one MonacoTextmateService waits on, and .gdl would render as plaintext with no error anywhere.",
   "overrides": {
+    "@theia/ai-anthropic": "1.75.0",
+    "@theia/ai-chat": "1.75.0",
+    "@theia/ai-chat-ui": "1.75.0",
+    "@theia/ai-core": "1.75.0",
+    "@theia/ai-core-ui": "1.75.0",
     "@theia/core": "1.75.0",
     "@theia/editor": "1.75.0",
     "@theia/filesystem": "1.75.0",

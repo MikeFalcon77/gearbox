@@ -1,5 +1,6 @@
 // Frontend wiring: the views, two stores, one proxied service.
 
+import { bindToolProvider } from "@theia/ai-core";
 import { FrontendApplicationContribution, bindViewContribution } from "@theia/core/lib/browser";
 import { PerspectiveContribution } from "@theia/core/lib/browser/perspective-service";
 import { WebSocketConnectionProvider } from "@theia/core/lib/browser/messaging";
@@ -18,6 +19,7 @@ import { LanguageGrammarDefinitionContribution } from "@theia/monaco/lib/browser
 import { GEARBOX_SERVICE_PATH, GearboxClient, GearboxService } from "../common/protocol";
 import { CatalogueStore } from "./catalogue-store";
 import { GenerateService } from "./generate/generate-service";
+import { ProductGearTool } from "./ai/product-tools";
 import { ProductEditService } from "./product-edit-service";
 import { ProductStore } from "./product-store";
 import { ResolutionMarkers } from "./resolution-markers";
@@ -346,4 +348,10 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bindViewContribution(bind, ConflictsViewContribution);
   bindViewContribution(bind, LockViewContribution);
   bindViewContribution(bind, GenerateViewContribution);
+
+  // What the chat may do to a product. `bindToolProvider` is Theia AI's own
+  // helper, and the tool it registers holds no policy: it calls the same
+  // `ProductEditService.toggle` the catalogue's control calls, so the preview
+  // and the refusal on unsaved changes are the ones already in place.
+  bindToolProvider(ProductGearTool, bind);
 });
