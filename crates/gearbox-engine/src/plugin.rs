@@ -49,11 +49,23 @@ pub fn project(
         return PluginProjection::default();
     };
 
+    // The locator, resolved the way every other `CargoRef` in the catalogue is:
+    // `path` as written is relative to the description's own directory, and what
+    // the catalogue records is relative to the *source root* -- which is what
+    // makes it resolvable by a client that knows where that root is. The same
+    // call `merge` makes for `package`, for the same reason.
+    let sdk_ref =
+        crate::merge::cargo_ref(sdk, &identity.gdl_path.parent(), "sdk", uri, diagnostics);
+
     let points: Vec<ExtensionPointDecl> = gearbox_project::project_extension_points(sdk_files)
         .into_iter()
         .map(|p| ExtensionPointDecl {
             trait_ident: p.trait_ident,
             sdk_lib: sdk.lib_ident.clone(),
+            // Carried whole. A client writing `sdk = cargo(...)` for a new
+            // plugin needs the crate name and the path as well as the library
+            // identifier, and this is where all three are known.
+            sdk: sdk_ref.clone(),
         })
         .collect();
 
@@ -112,6 +124,7 @@ pub fn project(
         .unwrap_or(ExtensionPointDecl {
             trait_ident,
             sdk_lib: sdk.lib_ident.clone(),
+            sdk: sdk_ref,
         });
 
     PluginProjection {

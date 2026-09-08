@@ -209,17 +209,25 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
     if (this.kind !== "plugin" || this.point === "") return undefined;
     const chosen = this.hosts().find((entry) => entry.key === this.point);
     if (chosen === undefined) return undefined;
-    // The SDK is the crate that declares the trait, which the descriptor names by
-    // its library identifier. The host's own package is where it lives.
-    const pkg = chosen.host.package;
+
+    // **The SDK's own crate, and a path computed from where things actually
+    // are.** This used to take `crate_name` and `path` from the *host's*
+    // package: for Authentication Resolver that produced
+    // `crate_name = "cf-gears-authn-resolver"` beside `lib =
+    // "authn_resolver_sdk"` -- a host crate wearing an SDK's library identifier
+    // -- at a path invented from a fixed `../../`. The point now carries the
+    // SDK's whole locator, which is the one the host's own description declares.
+    const sdk = chosen.point.sdk;
+    const sdkAbsolute = this.catalogue.absolutePath(chosen.host.source, sdk.path);
+    if (sdkAbsolute === undefined) return undefined;
+    // `path` in a `cargo(...)` is relative to the description's own directory,
+    // and this description will live in `<destination>/<id>/`.
+    const path = relativePath(`${this.destinationDir()}/${this.gearId}`, sdkAbsolute);
+    if (path === undefined) return undefined;
     return {
-      crate_name: pkg.crate_name,
-      lib_ident: chosen.point.sdk_lib,
-      // Relative to the gear being scaffolded, which lands in
-      // `<destination>/<id>/`. The host's crate path is relative to *its* source
-      // root, so this is two levels up and across -- the same shape the corpus
-      // writes by hand (`../../authn-resolver-sdk`).
-      path: `../../${pkg.path}`,
+      crate_name: sdk.crate_name,
+      lib_ident: sdk.lib_ident,
+      path,
       // Left to the `impl` unless the host declares more than one point: which
       // trait a crate implements is read, and declaring it is an escape hatch.
       ...(pointsOf(chosen.host).length > 1
@@ -276,6 +284,7 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
         gearId,
         sourceId,
         at,
+        isPlugin: this.kind === "plugin",
         ...(this.kind === "plugin" && chosen !== undefined
           ? {
               host: {
@@ -293,6 +302,39 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
       return undefined;
     }
     return [...placed.edits];
+  }
+
+  /**
+   * Why this gear cannot be put into the product it was started for, if it cannot.
+   *
+   * The same decision `editsFor` makes, asked before anything is written. `undefined`
+   * when there is no product to add to -- a standalone gear is placed nowhere and
+   * has nothing to refuse.
+   */
+  protected placementProblem(): string | undefined {
+    if (this.product === undefined) return undefined;
+    const at = relativeTo(this.product.path, this.destinationDir());
+    if (at === undefined) return undefined;
+    const chosen = this.hosts().find((entry) => entry.key === this.point);
+    const placed = placeNewGear(
+      {
+        gearId: this.gearId,
+        sourceId: sourceIdFor(at),
+        at,
+        isPlugin: this.kind === "plugin",
+        ...(this.kind === "plugin" && chosen !== undefined
+          ? {
+              host: {
+                id: chosen.host.id,
+                source: chosen.host.source,
+                standing: this.standingOf(chosen.host.id),
+              },
+            }
+          : {}),
+      },
+      this.product.label,
+    );
+    return placed.ok ? undefined : placed.reason;
   }
 
   /**
@@ -413,6 +455,7 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
     // indication of which field it was about.
     const idProblem = gearIdProblem(this.gearId);
     const versionProblem = gearVersionProblem(this.version);
+    const placement = this.placementProblem();
     return (
       <div className="gbx-create gbx-create-gear">
         <div className="gbx-create-form">
@@ -428,6 +471,14 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
               Creating a gear for <strong>{this.product.label}</strong>. It will be added to that
               product when you create it.
             </p>
+          )}
+          {/* Beside the promise it qualifies, rather than as a message after a
+              click: this is the reason the gear cannot go into that product, and
+              it is knowable before anything is written. */}
+          {placement !== undefined && (
+            <div className="gbx-inline-error" role="alert" data-create-gear-placement>
+              {placement}
+            </div>
           )}
           {!connected && (
             <div className="gbx-error" role="alert" data-engine-status="disconnected">
@@ -538,12 +589,17 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
               type="button"
               className="theia-button main"
               data-create-gear-submit
+              // And on a placement that cannot happen. The banner above promises
+              // the gear will be added to the product; a live Create over a
+              // plugin with no host made that promise and then broke it after
+              // writing the crate.
               disabled={
               !connected ||
               this.applying ||
               this.plan === undefined ||
               idProblem !== undefined ||
-              versionProblem !== undefined
+              versionProblem !== undefined ||
+              placement !== undefined
             }
               onClick={() => void this.create()}
             >
@@ -682,6 +738,17 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
     // behind with nothing naming it -- so the wizard asks first whether it is
     // still working on what it was opened for.
     if (!this.edits.ownsSubject(this.ownerIdentity)) return;
+    // **Before the scaffold, like the owner check beside it.** The placement
+    // refusal used to be computed after `scaffoldGear` had written the crate, so
+    // a plugin with no host -- or one whose host the product does not use -- left
+    // a directory on disk that nothing named. The wizard knows both answers
+    // before it writes; asking afterwards is what made the promise in the banner
+    // false.
+    const blocked = this.placementProblem();
+    if (blocked !== undefined) {
+      this.messages.warn(blocked);
+      return;
+    }
     this.applying = true;
     this.update();
     try {
@@ -727,6 +794,34 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
  * Hand-rolled because the browser has no `path`, and the inputs are POSIX
  * absolute paths -- the same reason `resolveFrom` in `ProductSessionService` is.
  */
+/**
+ * The path from one directory to another, `..` segments included.
+ *
+ * **Unlike [`relativeTo`], which refuses to leave its base.** That one answers
+ * "is this inside the product's folder", and its `undefined` means "no, and that
+ * is a refusal". A `cargo(path = ...)` legitimately climbs out -- the corpus
+ * writes `../../tenant-resolver-sdk` -- so this one climbs, and the earlier code
+ * assumed a fixed two levels rather than counting.
+ *
+ * Both paths are absolute and already `/`-separated by the callers.
+ */
+function relativePath(from: string, to: string): string | undefined {
+  const split = (value: string): string[] =>
+    value.replace(/\/+$/, "").split("/").filter((part) => part !== "" && part !== ".");
+  const a = split(from);
+  const b = split(to);
+  if (a.length === 0 || b.length === 0) return undefined;
+  let shared = 0;
+  while (shared < a.length && shared < b.length && a[shared] === b[shared]) shared += 1;
+  // No common prefix at all means two different roots -- on Windows, two drives
+  // -- and there is no relative path between them to write.
+  if (shared === 0) return undefined;
+  const up = new Array(a.length - shared).fill("..");
+  const down = b.slice(shared);
+  const parts = [...up, ...down];
+  return parts.length === 0 ? "." : parts.join("/");
+}
+
 function relativeTo(descriptionPath: string, to: string): string | undefined {
   const directory = descriptionPath.replace(/\/[^/]+$/, "");
   const normalise = (value: string): string => value.replace(/\/+$/, "");

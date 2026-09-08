@@ -1,7 +1,7 @@
 // ADR cpt-gearbox-adr-create-product — create, clone and in-description edits.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -112,6 +112,7 @@ test.describe("create and clone a product", () => {
       // network and no fixture repository to exist anywhere: `git clone` takes a
       // path, and what is under review is Studio's flow rather than git's.
       const { page } = freshStudio;
+      const cloned = "conformance-cloned";
       const origin = join(REPO, "ide", ".tmp-clone-origin");
       rmSync(origin, { recursive: true, force: true });
       try {
@@ -155,14 +156,48 @@ test.describe("create and clone a product", () => {
         await expect(page.locator("[data-clone-candidate]")).toContainText("product.gdl");
         await expect(create).toBeEnabled();
 
-        // And the checkout belongs to the URL that produced it: changing the
-        // field throws it away rather than letting Create write from a
-        // repository the form no longer names.
+        // The checkout belongs to the URL that produced it: changing the field
+        // throws it away rather than letting Create write from a repository the
+        // form no longer names. Checked here, before the create consumes it.
         await page.locator("[data-clone-git-url]").fill(`${origin}-elsewhere`);
         await expect(page.locator("[data-clone-status='idle']")).toBeVisible();
         await expect(create).toBeDisabled();
+        await page.locator("[data-clone-git-url]").fill(origin);
+        await review.click();
+        await expect(page.locator("[data-clone-status='reviewing']")).toBeVisible({
+          timeout: 60_000,
+        });
+        await expect(create).toBeEnabled();
+
+        // **And it creates.** The claim used to stop here, at "Create is
+        // enabled", which is exactly where the happy path was broken: the
+        // checkout landed beside the repository rather than inside the declared
+        // workspace, so the engine refused `clone_from` as a path outside the
+        // workspace and every source root -- correctly -- and Create failed
+        // after a clone that had worked. A review step that does not end in a
+        // product is a review of nothing.
+        await page.locator("[data-create-id]").fill(cloned);
+        await page.locator("[data-create-name]").fill("Cloned From Git");
+        await expect(page.locator(".gbx-create-preview")).toContainText(`id = "${cloned}"`, {
+          timeout: 30_000,
+        });
+        await create.click();
+        await acceptPreview(page);
+        await expect(page.locator("[data-resolved-profile]")).toBeVisible({ timeout: 90_000 });
+        expect(existsSync(join(REPO, "products", cloned, "product.gdl"))).toBe(true);
+
+        // The checkout has nothing left to hold, so a successful create discards
+        // it -- one of the terminal transitions, and the one that would leak a
+        // directory per product if it were forgotten.
+        await expect(page.locator("[data-clone-status]")).toHaveCount(0);
+        const attempts = join(REPO, ".gearbox", "git-clones");
+        expect(
+          existsSync(attempts) ? readdirSync(attempts) : [],
+          "a successful create left its checkout behind",
+        ).toEqual([]);
       } finally {
         rmSync(origin, { recursive: true, force: true });
+        removeProductDir(cloned);
       }
     },
   );

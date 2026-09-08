@@ -351,7 +351,7 @@ fn lookup<'a>(
 /// the engine actually read. `RelPath::new` used to stand here, which rejects
 /// `..` -- so a legitimate `path = "../payments-audit-sdk"` was stored as `.`,
 /// pointing the catalogue at the description's directory instead of the SDK's.
-fn cargo_ref(
+pub(crate) fn cargo_ref(
     record: &gearbox_gdl::records::CargoRecord,
     gdl_dir: &RelPath,
     field: &str,

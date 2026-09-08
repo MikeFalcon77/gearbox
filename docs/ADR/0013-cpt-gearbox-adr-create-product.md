@@ -586,3 +586,81 @@ already-removed attempt succeeds -- cleanup that throws is cleanup callers learn
 * The write itself is not asserted, and for the reason every create claim here shares: it lands in
   `products/`, which the harness refuses to let a test dirty.
 
+## Amendment 2026-09-08 (later the same day): four defects a live pass found
+
+The plugin and clone work above was written, reviewed against the code, and then
+*used*. Four things it got wrong, two of them blocking, and each is worth keeping
+because none of them was visible from the diff.
+
+### A checkout has to land inside the write boundary
+
+Clone attempts went to `<first source root>/../.gearbox/git-clones`, which is
+beside the repository rather than inside it -- so the engine refused the resulting
+`clone_from` as *"outside the declared workspace and every source root"*, exactly
+as it should. Create failed after a clone that had worked, which is the failure
+the review step exists to remove.
+
+The boundary is the workspace the session declared, so the node layer remembers
+that value at `initialize` and puts attempts under it. Not the browser's own
+notion of a workspace root: two places computing one boundary is how they end up
+disagreeing.
+
+**The claim stopped one step short of finding this**, at "Create is enabled", and
+that is the more useful lesson. A review step that does not end in a product is a
+review of nothing, so the claim now goes through preview, Create, the product
+opening, and the checkout being gone afterwards.
+
+### `sdk_lib` is not enough to name a crate
+
+The live locator took `crate_name` and `path` from the **host's** package, because
+`ExtensionPointDecl` carried only `trait_ident` and `sdk_lib`. For Authentication
+Resolver that produced `crate_name = "cf-gears-authn-resolver"` beside
+`lib = "authn_resolver_sdk"` -- a host crate wearing an SDK's library identifier
+-- at a path invented from a fixed `../../`.
+
+A correct locator could not be built from what was projected, so the projection
+changed: `ExtensionPointDecl` now carries the SDK's whole `CargoRef`, resolved the
+way every other one in the catalogue is -- `path` relative to the source root the
+host was read from, which is what makes it resolvable by a client that knows
+where that root is. `sdk_lib` stays beside it because *it* is the join key that
+`qualified()` spells and the selector matches on; a client reaching into a
+locator to rebuild a key would be worse.
+
+The wizard then computes the path rather than assuming a depth: from
+`<destination>/<id>/`, where the new description will live, to the SDK's actual
+directory. `relativePath` climbs with `..` where `relativeTo` refuses to -- the
+first answers "how do I get there", the second "is this inside my folder", and
+they are different questions.
+
+### A plugin with no host is not an ordinary gear
+
+`placeNewGear` distinguished nothing: `host === undefined` meant both "an ordinary
+gear" and "a plugin whose host is not decided", and both took the ordinary path --
+so a plugin with no host got the top-level `use_gear` that the same file's comment
+forbids. It takes `isPlugin` now and refuses, because the only form a plugin takes
+in a description is an entry inside a host's `use_gear`: there is no edit to make.
+
+Two more holes in the same contract. The refusal was computed *after*
+`scaffoldGear` had written the crate, so a plugin the product could not take left
+a directory nothing named -- it is checked before the scaffold now, beside the
+owner check, and the Create button carries it so the banner's promise is not made
+and then broken.
+
+And **ordinary Add Gear still offered existing plugins as gears.** `stagedEdits`
+always began with `add_gear` and never looked at `fills`, so choosing
+`oidc-authn-plugin` from the catalogue wrote `use_gear("oidc-authn-plugin", ...)`.
+It now asks which host, restricted to hosts the product has *and* that declare the
+point the plugin fills, and stages `add_plugin` -- promoting a closure-only host
+in the same previewed batch. The features, config and plugins sections are not
+offered for a plugin, because `set_config` and `set_features` are span surgery on
+a `use_gear` entry and a plugin has none: a choice that cannot be right is not
+offered, which is this document's own rule.
+
+### Early validation had a 400 ms window
+
+A field showing `priority is an integer` sat next to a live `Add to Product` until
+the next debounce turned it off. The check lived only in the debounce; it is in
+the button's `disabled` now and repeated in `apply()`, because a keybinding, a
+stale render or a click landing in the same tick as a keystroke all reach the
+write without the button having been re-evaluated.
+

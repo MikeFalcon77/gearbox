@@ -123,8 +123,23 @@ export class GearboxServiceImpl implements GearboxService {
     this.client = client;
   }
 
+  /**
+   * The write boundary this session declared, remembered.
+   *
+   * **Needed because a clone has to land inside it.** The engine refuses a
+   * `clone_from` outside the declared workspace and every source root, so a
+   * checkout parked next to the repository was read as an attempt to read from
+   * nowhere -- which is what it was. The browser knows a workspace root too, but
+   * the boundary is *this* value, and having two places compute it is how they
+   * end up disagreeing.
+   */
+  protected workspace = findRepoRoot(__dirname);
+
   async initialize(session?: StudioSession): Promise<InitializeResult> {
     this.disposeEngine();
+    // From the session when there is one. The fixed repository root is only a
+    // default for the catalogue-only case.
+    this.workspace = session?.workspace ?? findRepoRoot(__dirname);
     // Empty `roots` means "use the defaults", not "open nothing". The frontend
     // reaches that after a reload, when `CatalogueStore.rootPaths()` is still
     // empty because the boot load has not installed `rootsById` yet; passing the
@@ -182,7 +197,7 @@ export class GearboxServiceImpl implements GearboxService {
         // From the session when there is one. The fixed repository root is only a
         // default for the catalogue-only case: a product opened from elsewhere
         // would otherwise be readable and unwritable, which is the worst of both.
-        workspace: session?.workspace ?? findRepoRoot(__dirname),
+        workspace: this.workspace,
       },
       INITIALIZE_TIMEOUT_MS,
     );
@@ -433,7 +448,7 @@ export class GearboxServiceImpl implements GearboxService {
     // one failed clone made every retry fail on `already exists`, and the only
     // way out was to delete a directory by hand.
     const attemptId = `clone-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
-    const root = path.join(cloneParent(), attemptId);
+    const root = path.join(cloneParent(this.workspace), attemptId);
     fs.mkdirSync(root, { recursive: true });
 
     const args = ["clone", "--depth", "1"];
@@ -584,9 +599,18 @@ function findProductGdl(root: string, maxDepth: number): string[] {
   return found;
 }
 
-/** Where clone attempts live: one directory per attempt, under the repo's own. */
-function cloneParent(): string {
-  return path.join(roots()[0] ?? process.cwd(), "..", ".gearbox", "git-clones");
+/**
+ * Where clone attempts live: one directory per attempt, **inside the workspace**.
+ *
+ * It used to be beside the first source root -- `<root>/../.gearbox/git-clones`
+ * -- which put it outside the declared workspace, and the engine refused the
+ * resulting `clone_from` for exactly the reason it should: a path outside the
+ * workspace and every source root is a path this session may not read. Create
+ * then failed after a clone that had worked, which is the shape of failure the
+ * review step exists to remove.
+ */
+function cloneParent(workspace: string): string {
+  return path.join(workspace, ".gearbox", "git-clones");
 }
 
 /** Remove a directory and say nothing: cleanup that throws is cleanup nobody runs. */

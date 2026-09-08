@@ -27,6 +27,8 @@ import type { GearDescriptor } from "../../common/generated/GearDescriptor";
 import type { ProductEdit } from "../../common/generated/ProductEdit";
 import { configKeyProblem, unknownConfigKeyNote } from "../../common/config-keys";
 import { pluginsByPoint, pointKey, pointsOf } from "../../common/extension-points";
+import type { ExtensionPointDecl } from "../../common/generated/ExtensionPointDecl";
+import type { HostStanding } from "../create/gear-edits";
 import { DiagnosticsList } from "../diagnostics/diagnostics-list";
 import { RevealService } from "../reveal-service";
 import { CatalogueStore } from "../catalogue-store";
@@ -73,6 +75,14 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
 
   protected gearId: string | undefined;
   protected features: string[] = [];
+
+  /**
+   * The host a chosen *plugin* will be attached to.
+   *
+   * Empty until decided, and a plugin cannot be added until it is: the only form
+   * a plugin takes in a description is an entry inside a host's `use_gear`.
+   */
+  protected host = "";
   protected plugins: string[] = [];
   protected newFeature = "";
   protected newPlugin = "";
@@ -115,6 +125,8 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
   protected openSections = new Set<string>([
     "overview",
     "compatibility",
+    // The plugin path's own section, in place of features/config/plugins.
+    "host",
     "features",
     "config",
     "plugins",
@@ -144,6 +156,7 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
     this.gearId = state?.gearId;
     this.features = [];
     this.plugins = [];
+    this.host = "";
     this.config = [];
     this.typed = new Map();
     this.newFeature = "";
@@ -158,6 +171,7 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
     this.openSections = new Set([
       "overview",
       "compatibility",
+      "host",
       "features",
       "config",
       "plugins",
@@ -235,9 +249,14 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
       this.previewError = "Could not preview this add.";
     } else {
       this.preview = result;
+      // A plugin is attached and a gear is named, so an unchanged description
+      // means two different things -- and saying "already named" about a plugin
+      // describes a form the corpus never uses.
       this.previewError = result.changed
         ? undefined
-        : `${gear.id} is already named by the product.`;
+        : this.fillsPoint() !== undefined
+          ? `${gear.id} is already attached to ${this.host === "" ? "that gear" : this.host}.`
+          : `${gear.id} is already named by the product.`;
     }
     this.update();
   }
@@ -389,8 +408,125 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
    * preview only that. `apply_product_edits` folds these onto the same text in
    * order, so the batch is both the exact preview and the atomic write.
    */
+  /**
+   * Which host in this product the plugin will be attached to.
+   *
+   * Restricted to hosts the product already has *and* that declare the point
+   * this plugin fills: attaching needs a `use_gear` to attach to, and the point
+   * has to match or the resolver is being told something untrue. A host the
+   * closure pulled in is promoted to an explicit selection in the same batch,
+   * which is a visible change to the description and is previewed as one.
+   */
+  protected renderHostChoice(): React.ReactNode {
+    const point = this.fillsPoint();
+    if (point === undefined) return undefined;
+    const hosts = this.hostsForPlugin();
+    return (
+      <div data-add-gear-host>
+        <div className="gbx-kv">
+          <span>fills</span>
+          <span>
+            <code>{pointKey(point)}</code>
+          </span>
+        </div>
+        {hosts.length === 0 ? (
+          <div className="gbx-empty" data-add-gear-host-none>
+            Nothing in this product declares <code>{point.trait_ident}</code>, so there is nothing
+            for this plugin to fill. Add a gear that declares it first.
+          </div>
+        ) : (
+          <label className="gbx-config-row">
+            <span>Attach to</span>
+            <select
+              data-add-gear-host-pick
+              value={this.host}
+              onChange={(e) => {
+                this.host = e.target.value;
+                this.scheduleImpact();
+                this.update();
+              }}
+            >
+              <option value="">— choose the gear it fills —</option>
+              {hosts.map((host) => (
+                <option key={host.id} value={host.id}>
+                  {host.id}
+                  {host.standing === "closure-only" ? " (will be named explicitly)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+    );
+  }
+
+  /**
+   * The gear this panel is about, when it is a plugin rather than a gear.
+   *
+   * `fills` is what says so, and it is projected from the plugin-API trait the
+   * SDK declares -- so this is reading the catalogue rather than guessing from a
+   * name.
+   */
+  protected fillsPoint(): ExtensionPointDecl | undefined {
+    return this.descriptor()?.fills?.point ?? undefined;
+  }
+
+  /**
+   * The hosts in this product that declare the point the chosen plugin fills.
+   *
+   * Restricted to the product, because attaching needs a host the description
+   * has -- and to the *matching* point, because `fillsPointOf` is the predicate
+   * that stops `types-registry` being given an authentication plugin.
+   */
+  protected hostsForPlugin(): { id: string; source: string; standing: HostStanding }[] {
+    const point = this.fillsPoint();
+    if (point === undefined) return [];
+    const wanted = pointKey(point);
+    const state = this.products.current;
+    const resolved = state.resolution?.product;
+    const rows = this.catalogue.current.rows;
+    const out: { id: string; source: string; standing: HostStanding }[] = [];
+    for (const row of rows) {
+      if (row.kind !== "projected") continue;
+      if (!pointsOf(row.gear).some((p) => pointKey(p) === wanted)) continue;
+      const id = row.gear.id;
+      const named = state.intent?.selected_gears?.some((sel) => sel.gear === id) === true;
+      const inClosure = resolved !== null && resolved !== undefined && id in resolved.gears;
+      if (!named && !inClosure) continue;
+      out.push({ id, source: row.gear.source, standing: named ? "named" : "closure-only" });
+    }
+    return out.sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  /**
+   * The proposal, as edits.
+   *
+   * **A plugin is attached, not selected**, and this used to be the one place
+   * that did not know it: the batch always began with `add_gear`, so choosing
+   * `oidc-authn-plugin` from the catalogue wrote
+   * `use_gear("oidc-authn-plugin", ...)` -- a form the corpus never uses, which
+   * makes the plugin a gear the product selected in its own right and leaves it
+   * filling nothing.
+   *
+   * Attaching also means the follow-ups do not apply. `set_config` and
+   * `set_features` are span surgery on a `use_gear` entry, and a plugin has
+   * none; per-plugin `config` and `profiles` live inside the `plugin(...)` entry,
+   * which no edit on this protocol can write yet. So the panel does not offer
+   * them for a plugin -- a choice that cannot be right is not offered, which is
+   * the rule ADR-0013 already states.
+   */
   protected stagedEdits(gearId: string, source: string): ProductEdit[] {
-    return [{ kind: "add_gear", gear: gearId, source }, ...this.followUps(gearId)];
+    const point = this.fillsPoint();
+    if (point === undefined) {
+      return [{ kind: "add_gear", gear: gearId, source }, ...this.followUps(gearId)];
+    }
+    const host = this.hostsForPlugin().find((entry) => entry.id === this.host);
+    if (host === undefined) return [];
+    const promote: ProductEdit[] =
+      host.standing === "closure-only"
+        ? [{ kind: "add_gear", gear: host.id, source: host.source }]
+        : [];
+    return [...promote, { kind: "add_plugin", gear: host.id, plugin: gearId }];
   }
 
   protected followUps(gearId: string): ProductEdit[] {
@@ -415,6 +551,16 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
   protected async apply(): Promise<void> {
     const gear = this.descriptor();
     if (gear === undefined || this.applying) return;
+    // Again here, and not only on the button: a keybinding, a stale render or a
+    // click landing in the same tick as a keystroke all reach this without the
+    // button having been re-evaluated. The rule is about what may be written,
+    // so it belongs where the write happens.
+    const problem = this.stagedProblem();
+    if (problem !== undefined) {
+      this.impactError = problem;
+      this.update();
+      return;
+    }
     this.applying = true;
     this.update();
     const ok = await this.edits.commitAddGear(
@@ -462,9 +608,23 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
                   "2. Compatibility",
                   this.renderCompatibility(gear.id),
                 )}
-                {this.renderSection("features", "3. Features", this.renderFeatures(gear))}
-                {this.renderSection("config", "4. Configuration", this.renderConfig())}
-                {this.renderSection("plugins", "5. Plugins", this.renderPlugins(gear))}
+                {/* **A plugin is attached, and the rest does not apply to it.**
+                    `set_config` and `set_features` are span surgery on a
+                    `use_gear` entry and a plugin has none; per-plugin `config`
+                    and `profiles` live inside the `plugin(...)` entry, which no
+                    edit on this protocol writes yet. Offering them would be
+                    offering a choice that cannot be right, which is the rule
+                    ADR-0013 states -- and the one the plugin filter already
+                    follows one section down. */}
+                {this.fillsPoint() !== undefined
+                  ? this.renderSection("host", "3. What it fills", this.renderHostChoice())
+                  : (
+                      <>
+                        {this.renderSection("features", "3. Features", this.renderFeatures(gear))}
+                        {this.renderSection("config", "4. Configuration", this.renderConfig())}
+                        {this.renderSection("plugins", "5. Plugins", this.renderPlugins(gear))}
+                      </>
+                    )}
                 {this.renderSection("changes", "6. What changes", this.renderChanges())}
                 {this.renderSection("closure", "7. What will be written", this.renderClosure())}
               </>
@@ -479,10 +639,20 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
                 // gear before binding it is a normal step, and blocking here would
                 // make that state unreachable. Disabled only when there is nothing
                 // to write, or a write is already going on.
+                // And on a field that already says it cannot be written. That
+                // check used to live only in the debounce, so for the 400 ms
+                // before the next preview the button was live over a value the
+                // panel had already refused -- a window in which Add wrote
+                // something the field was complaining about.
                 disabled={
                   gear === undefined ||
                   this.applying ||
                   this.previewing ||
+                  this.stagedProblem() !== undefined ||
+                  // A plugin with no host chosen produces no edits at all, so
+                  // there is nothing to add -- said by the control rather than
+                  // by a refusal after the click.
+                  (this.fillsPoint() !== undefined && this.host === "") ||
                   this.preview?.changed !== true
                 }
                 onClick={() => void this.apply()}

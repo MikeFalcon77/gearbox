@@ -29,12 +29,16 @@ export interface NewGearPlacement {
   /** Where that folder is, relative to the description. */
   readonly at: string;
   /**
-   * The host this gear plugs into, when it is a plugin and one was chosen.
+   * Whether the gear being created is a plugin.
    *
-   * Absent covers both "not a plugin" and "a plugin whose host is not decided
-   * yet" -- the second is a real state a person is in when they open the wizard,
-   * and the honest thing to do with it is add the gear and let the resolver say
-   * it fills nothing.
+   * **Separate from `host`, and conflating them was a hole.** `host === undefined`
+   * meant two different things -- "an ordinary gear" and "a plugin whose host is
+   * not decided yet" -- and both took the ordinary path, so a plugin with no host
+   * got the top-level `use_gear` this very file says a plugin must never have.
+   */
+  readonly isPlugin: boolean;
+  /**
+   * The host this plugin plugs into, when one was chosen.
    */
   readonly host?: {
     readonly id: string;
@@ -64,6 +68,19 @@ export function placeNewGear(placement: NewGearPlacement, productLabel: string):
 
   const host = placement.host;
   if (host === undefined) {
+    if (placement.isPlugin) {
+      // **A plugin with no host cannot be placed at all.** Not "added and left
+      // for the resolver to complain about": the only form a plugin takes in a
+      // description is an entry inside a host's `use_gear`, so there is no edit
+      // to make. The wizard is where this is decided, which is why it refuses
+      // here rather than writing something and apologising.
+      return {
+        ok: false,
+        reason:
+          `${placement.gearId} is a plugin, so it goes inside the gear it fills. Choose what it ` +
+          `fills, or create it on its own and add it to a product later.`,
+      };
+    }
     return { ok: true, edits: [declare, select(placement.gearId, placement.sourceId)] };
   }
 

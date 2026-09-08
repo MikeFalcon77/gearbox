@@ -619,7 +619,7 @@ const REF_A = { path: "/repo/products/a/product.gdl", label: "products/a" };
 // widget cannot be constructed outside one, and the write lands in `products/`,
 // which the conformance harness refuses to let a test dirty.
 
-const PLACE = { gearId: "ldap-authn-plugin", sourceId: "gears", at: "gears" };
+const PLACE = { gearId: "ldap-authn-plugin", sourceId: "gears", at: "gears", isPlugin: false };
 
 // -------------------------------- a plain gear is selected, as it always was
 {
@@ -632,10 +632,24 @@ const PLACE = { gearId: "ldap-authn-plugin", sourceId: "gears", at: "gears" };
   );
 }
 
+// -------------------------------- a plugin with no host cannot be placed
+{
+  // **`host === undefined` used to mean two things** -- an ordinary gear, and a
+  // plugin whose host is not decided -- and both took the ordinary path, so a
+  // plugin with no host got the top-level `use_gear` that `gear-edits.ts` itself
+  // says a plugin must never have.
+  const placed = placeNewGear({ ...PLACE, isPlugin: true }, "Payments Demo");
+  check(placed.ok === false, "a plugin with no host cannot be placed at all");
+  check(
+    placed.reason.includes("goes inside the gear it fills"),
+    "and the refusal says where a plugin goes",
+  );
+}
+
 // -------------------------------- a plugin goes inside its host
 {
   const placed = placeNewGear(
-    { ...PLACE, host: { id: "authn-resolver", source: "gears-rust", standing: "named" } },
+    { ...PLACE, isPlugin: true, host: { id: "authn-resolver", source: "gears-rust", standing: "named" } },
     "Payments Demo",
   );
   check(placed.ok === true, "a plugin whose host is named is added");
@@ -660,7 +674,11 @@ const PLACE = { gearId: "ldap-authn-plugin", sourceId: "gears", at: "gears" };
 // -------------------------------- a closure-only host is promoted first
 {
   const placed = placeNewGear(
-    { ...PLACE, host: { id: "authn-resolver", source: "gears-rust", standing: "closure-only" } },
+    {
+      ...PLACE,
+      isPlugin: true,
+      host: { id: "authn-resolver", source: "gears-rust", standing: "closure-only" },
+    },
     "Payments Demo",
   );
   check(placed.ok === true, "a plugin whose host is only in the closure is added");
@@ -680,7 +698,7 @@ const PLACE = { gearId: "ldap-authn-plugin", sourceId: "gears", at: "gears" };
 // -------------------------------- a host the product does not have at all
 {
   const placed = placeNewGear(
-    { ...PLACE, host: { id: "authn-resolver", source: "gears-rust", standing: "absent" } },
+    { ...PLACE, isPlugin: true, host: { id: "authn-resolver", source: "gears-rust", standing: "absent" } },
     "Payments Demo",
   );
   check(placed.ok === false, "a plugin whose host is not in the product is refused");

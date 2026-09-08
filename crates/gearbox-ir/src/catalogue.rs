@@ -569,7 +569,28 @@ pub struct ExtensionPointDecl {
 
     /// The SDK crate's library identifier, e.g. `authn_resolver_sdk`. Together
     /// with `trait_ident` this is the join key an implementation matches on.
+    ///
+    /// Kept alongside [`Self::sdk`], which carries the same value in
+    /// `lib_ident`, because *this* is the join key: `qualified()` spells it, the
+    /// plugin selector matches on it, and the Studio's `pointKey` mirrors it.
+    /// One field for one job beats a client reaching into a locator to rebuild a
+    /// key.
     pub sdk_lib: String,
+
+    /// The SDK crate itself, so a client can write a locator that points at it.
+    ///
+    /// **Added because `sdk_lib` alone is not enough to name the crate.** A
+    /// scaffolded plugin needs `sdk = cargo(crate_name, lib, path)`, and a client
+    /// given only the library identifier had to guess the other two -- which the
+    /// New Gear wizard duly did, from the *host's* package, producing a locator
+    /// naming the host crate at a path invented from a fixed `../../`. The
+    /// description the point was projected from has all three, so the fix is to
+    /// carry them rather than to reconstruct them.
+    ///
+    /// `path` keeps `CargoRef`'s own meaning: relative to the *source root* the
+    /// host was read from, which is what makes it resolvable by anyone who knows
+    /// where that root is.
+    pub sdk: CargoRef,
 }
 
 impl ExtensionPointDecl {
