@@ -799,6 +799,29 @@ export async function ensureSelection(page: Page): Promise<void> {
   await row.click();
 }
 
+/**
+ * Open the "Other keys" section, where free-form config keys live.
+ *
+ * They moved under a `<details>` because a gear with no schema still offered a
+ * bare `Add key`, so the obvious thing to do with it was type a key the gear does
+ * not read -- and the only answer was a refusal about the whole proposal. A
+ * control that is available invites use.
+ *
+ * Which means a test that types a free key now does what a person does: opens the
+ * section first. Idempotent, and cheap when it is already open -- it is open
+ * whenever it holds something, because a key somebody set is not advanced any
+ * more.
+ */
+export async function openAdvancedKeys(page: Page, within: string): Promise<void> {
+  const details = page.locator(`${within} details.gbx-advanced`).first();
+  await details.waitFor({ state: "attached", timeout: 30_000 });
+  if (await details.evaluate((e) => (e as HTMLDetailsElement).open)) return;
+  await details.locator("summary").click();
+  await expect
+    .poll(async () => details.evaluate((e) => (e as HTMLDetailsElement).open), { timeout: 15_000 })
+    .toBe(true);
+}
+
 export async function revealInspector(page: Page): Promise<void> {
   await refuseIfDialogOpen(page, "revealing the Inspector");
   // **A subject first, because the panel is gated on having one.** The Inspector

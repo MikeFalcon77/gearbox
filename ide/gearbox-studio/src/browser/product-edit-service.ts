@@ -49,6 +49,19 @@ import { ProductSessionService } from "./shell/product-session-service";
 import { identityOf, type ContextIdentity } from "./shell/screens";
 import { StudioContextService } from "./shell/studio-context-service";
 
+/**
+ * A resolution preview, or the engine's reason for not producing one.
+ *
+ * Two kinds of failure end up in a configurator, and they belong in different
+ * places: one is about a *field* -- an unknown key, a value that will not parse
+ * -- and one is about the whole proposal. Carrying the reason lets the panel put
+ * the second where the second belongs, instead of attaching a whole-proposal
+ * failure to whichever row was edited last.
+ */
+export type ResolutionPreview =
+  | { readonly ok: true; readonly resolution: ResolveResult }
+  | { readonly ok: false; readonly reason: string };
+
 @injectable()
 export class ProductEditService {
   @inject(GearboxService) protected readonly service!: GearboxService;
@@ -410,18 +423,26 @@ export class ProductEditService {
     gear: string,
     source: string,
     followUps: readonly ProductEdit[],
-  ): Promise<ResolveResult | undefined> {
+  ): Promise<ResolutionPreview> {
     const open = this.product.current.open;
-    if (open === undefined) return undefined;
+    if (open === undefined) {
+      return { ok: false, reason: "Open a product to see what adding this would change." };
+    }
     try {
-      return await this.service.resolvePreview({
+      return { ok: true, resolution: await this.service.resolvePreview({
         path: open.path,
         profile: this.product.current.profile,
         add: { gear, source },
         edits: followUps,
-      });
-    } catch {
-      return undefined;
+      }) };
+    } catch (error) {
+      // **The reason travels, and the toast still does not.** Returning
+      // `undefined` left the panel to invent "Could not resolve the product with
+      // this gear added", which says nothing a person can act on -- while the
+      // engine had said exactly what was wrong. The no-toast rule is unchanged:
+      // this runs on every keystroke's debounce, and a message per failed
+      // preview would be noise.
+      return { ok: false, reason: messageOf(error) };
     }
   }
 

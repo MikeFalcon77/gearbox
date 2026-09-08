@@ -310,10 +310,24 @@ export class InspectorWidget extends ReactWidget {
             onReset={(key) => this.queueConfig(gearId, key, undefined)}
           />
         )}
-        <div className="gbx-kv">
-          <span>config</span>
+        {/* **The free keys, under Advanced.** The typed controls above are what
+            this gear exposes; this is the escape hatch for a curated `exposes`
+            that is narrower than the struct it came from. Open when it already
+            holds something, because a key somebody set is not advanced any more
+            -- it is part of this product's description. */}
+        <details
+          className="gbx-advanced"
+          open={Object.keys(untyped).length > 0}
+          data-inspector-advanced
+        >
+          <summary>Other keys</summary>
           <span className="gbx-config-list" key={`cfg-${gearId}-${this.edits.epoch}`}>
-            {Object.keys(untyped).length === 0 && "—"}
+            {Object.keys(untyped).length === 0 && (
+              <span className="gbx-add-gear-note">
+                Nothing outside the schema. A key the gear does not read is written and reported
+                (GBX0115) rather than refused.
+              </span>
+            )}
             {Object.entries(untyped).map(([key, value]) => (
               <label key={key} className="gbx-config-row" data-config-key={key}>
                 <code>{key}</code>
@@ -383,7 +397,7 @@ export class InspectorWidget extends ReactWidget {
               />
             </label>
           </span>
-        </div>
+        </details>
         <div className="gbx-kv">
           <span>features</span>
           {/* The crate's own `[features]` table, as checkboxes. One renderer's

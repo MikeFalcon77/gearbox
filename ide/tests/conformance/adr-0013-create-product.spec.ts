@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import {
   expect,
+  openAdvancedKeys,
   openProduct,
   revealCatalogue,
   revealInspector,
@@ -336,6 +337,8 @@ test.describe("edit config and profiles in the open product", () => {
       await revealInspector(studio.page);
       await studio.page.locator('[data-gear-config="api-gateway"]').waitFor({ state: "visible" });
 
+      // Free keys live under "Other keys" now -- see `openAdvancedKeys`.
+      await openAdvancedKeys(studio.page, ".gbx-inspector");
       await studio.page.locator("[data-config-new-key]").fill("demo_mode");
       await studio.page.locator("[data-config-new-value]").fill("demo_value");
       await studio.page.locator('[data-add-config="api-gateway"]').click();
@@ -377,6 +380,8 @@ test.describe("edit config and profiles in the open product", () => {
       await revealInspector(studio.page);
       await studio.page.locator('[data-gear-config="api-gateway"]').waitFor({ state: "visible" });
 
+      // Free keys live under "Other keys" now -- see `openAdvancedKeys`.
+      await openAdvancedKeys(studio.page, ".gbx-inspector");
       await studio.page.locator("[data-config-new-key]").fill("draft_a");
       await studio.page.locator("[data-config-new-value]").fill("one");
       await studio.page.locator('[data-add-config="api-gateway"]').click();
@@ -400,6 +405,10 @@ test.describe("edit config and profiles in the open product", () => {
       await expect(draft.locator("[data-draft-apply]")).toHaveCount(0);
       expect(diffOf(DEMO_REL)).toBe("");
 
+      // Discard emptied the section, so it folded again -- it is open exactly
+      // when it holds something, because a key somebody set is not advanced any
+      // more. Reopening is what a person does to add the pair a second time.
+      await openAdvancedKeys(studio.page, ".gbx-inspector");
       await studio.page.locator("[data-config-new-key]").fill("draft_a");
       await studio.page.locator("[data-config-new-value]").fill("one");
       await studio.page.locator('[data-add-config="api-gateway"]').click();
@@ -445,6 +454,8 @@ test.describe("edit config and profiles in the open product", () => {
     await revealInspector(studio.page);
     await studio.page.locator('[data-gear-config="api-gateway"]').waitFor({ state: "visible" });
 
+    // Free keys live under "Other keys" now -- see `openAdvancedKeys`.
+    await openAdvancedKeys(studio.page, ".gbx-inspector");
     await studio.page.locator("[data-config-new-key]").fill("password");
     await studio.page.locator("[data-config-new-value]").fill("literal");
     await studio.page.locator('[data-add-config="api-gateway"]').click();

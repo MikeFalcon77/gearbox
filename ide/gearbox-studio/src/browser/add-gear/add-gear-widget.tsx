@@ -32,7 +32,7 @@ import { RevealService } from "../reveal-service";
 import { CatalogueStore } from "../catalogue-store";
 import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
-import { ConfigFields } from "./config-fields";
+import { ConfigFields, valueProblem } from "./config-fields";
 import { type Impact, impactOf, isEmpty } from "./impact";
 import type { ContextIdentity, OwnedWidget } from "../shell/screens";
 
@@ -208,6 +208,18 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
       this.update();
       return;
     }
+    // Same rule as the impact: a value that cannot be written is not sent to be
+    // written. The engine's refusal would arrive as a failure of the whole
+    // proposal, beside a field that already says what is wrong with it.
+    const problem = this.stagedProblem();
+    if (problem !== undefined) {
+      this.previewToken += 1;
+      this.preview = undefined;
+      this.previewError = problem;
+      this.previewing = false;
+      this.update();
+      return;
+    }
     const token = (this.previewToken += 1);
     const gearId = gear.id;
     this.previewing = true;
@@ -256,6 +268,24 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
    * exactly the changes the impact does. Two debounces would have let the two
    * sections disagree about which proposal they were describing.
    */
+  /**
+   * The staged value that will not do, before anything is sent.
+   *
+   * **A dry run is not sent while a field is locally invalid**, and the reason is
+   * not saving a round trip: the engine's answer to an invalid value is a refusal
+   * about the whole proposal, which lands in the impact pane and reads as "this
+   * gear cannot be added" -- next to a field that already says what is wrong with
+   * it. Two answers to one question, the less useful one louder.
+   */
+  protected stagedProblem(): string | undefined {
+    const fields = this.descriptor()?.config_schema?.fields ?? [];
+    for (const field of fields) {
+      const problem = valueProblem(field, this.typed.get(field.name));
+      if (problem !== undefined) return problem;
+    }
+    return undefined;
+  }
+
   protected scheduleImpact(): void {
     if (this.impactTimer !== undefined) clearTimeout(this.impactTimer);
     // The proposal changed: anything already in flight describes the previous
@@ -272,7 +302,28 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
     }, IMPACT_DEBOUNCE_MS);
   }
 
+  /**
+   * The impact, unless a field already says why it cannot be computed.
+   *
+   * The guard is here rather than in `scheduleImpact` so the *pane* still says
+   * something: a person who has just made a field invalid should see why the
+   * answer is missing, not an answer that quietly stopped updating.
+   */
   protected async refreshImpact(): Promise<void> {
+    const problem = this.stagedProblem();
+    if (problem !== undefined) {
+      this.impactToken += 1;
+      this.impactPending = false;
+      this.impact = undefined;
+      this.impactDiagnostics = [];
+      this.impactError = problem;
+      this.update();
+      return;
+    }
+    await this.refreshImpactGuarded();
+  }
+
+  protected async refreshImpactGuarded(): Promise<void> {
     const gear = this.descriptor();
     if (gear === undefined) {
       this.resetImpact();
@@ -291,17 +342,22 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
     if (token !== this.impactToken) return;
 
     this.impactPending = false;
-    if (result === undefined) {
+    if (!result.ok) {
+      // **The engine's own reason, not a sentence invented here.** This used to
+      // read "Could not resolve the product with this gear added", which is true
+      // of every failure and useful for none of them -- while the engine had
+      // said what was wrong. A whole-proposal failure belongs here, beside the
+      // proposal; a failure about one key is reported at that key.
       this.impact = undefined;
       this.impactDiagnostics = [];
-      this.impactError = "Could not resolve the product with this gear added.";
+      this.impactError = result.reason;
       this.update();
       return;
     }
     this.impactError = undefined;
-    this.impactDiagnostics = result.diagnostics ?? [];
+    this.impactDiagnostics = result.resolution.diagnostics ?? [];
     const current = this.products.current.resolution?.product ?? undefined;
-    const proposed = result.product ?? undefined;
+    const proposed = result.resolution.product ?? undefined;
     if (proposed === null || proposed === undefined) {
       // The description did not evaluate at all. There is no "after" to subtract
       // the "before" from, and the diagnostics are the whole answer.
@@ -731,14 +787,31 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
             }}
           />
         )}
-        {fields.length > 0 && (
+        {fields.length === 0 && (
+          <div className="gbx-empty" data-add-gear-config-none>
+            {schema === null || schema === undefined
+              ? "This gear exposes no configuration. Anything typed below is a key the description will carry and the resolver will report as unknown (GBX0115)."
+              : "This gear's schema exposes no fields yet."}
+          </div>
+        )}
+        {/* **Free keys under Advanced, and the reason is what a UX pass hit.**
+            A gear with no schema still offered a bare `Add key`, so the obvious
+            thing to do with it was type something -- and the only answer was
+            "could not resolve the product with this gear added". A control that
+            is available invites use; the ones the gear actually exposes are
+            above, and this is the escape hatch for a curated `exposes` that is
+            narrower than the struct.
+            *
+            `<details>`, open when it already holds something, because a key
+            somebody set is not advanced any more -- it is the state of this
+            proposal. The same idiom the undeclared-features row uses. */}
+        <details className="gbx-advanced" open={this.config.length > 0} data-add-gear-advanced>
+          <summary>Other keys</summary>
           <p className="gbx-add-gear-note">
-            Other keys, including anything nested, can be set as text below.
+            Anything the schema does not cover, including nested values, as text. A key the gear
+            does not read is written and reported rather than refused, because a curated
+            <code> exposes</code> is narrower than the struct it came from.
           </p>
-        )}
-        {this.config.length === 0 && fields.length === 0 && (
-          <div className="gbx-empty">No configuration keys yet.</div>
-        )}
         {this.config.map((entry, index) => (
           <label key={`${entry.key}-${index}`} className="gbx-config-row" data-config-key={entry.key}>
             <input
@@ -832,6 +905,7 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
             Add key
           </button>
         </label>
+        </details>
       </div>
     );
   }

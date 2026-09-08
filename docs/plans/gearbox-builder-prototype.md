@@ -2191,6 +2191,41 @@ there. (The shared row of §9.1 above removed four differing implementations of 
 row; it says nothing about how many places may show a list, and citing it here
 would be borrowing an argument that does not apply.)
 
+#### Free keys are behind Advanced, and the checks that are possible happen at the field
+
+Three findings from the third UX pass, and they share a shape: a control that was available invited
+use, and the only answer came from the other side of the screen.
+
+**A gear with no schema still offered a bare `Add key`.** So the obvious thing to do with it was
+type something, and the answer was `Could not resolve the product with this gear added`. Free-form
+keys now sit under an `Other keys` section -- open whenever it already holds something, because a
+key somebody set is not advanced any more -- and a gear that exposes no configuration says so
+instead of offering a box. The section stays, because a curated `exposes` is narrower than the
+struct it came from and a key outside it may still be one the gear reads.
+
+**The refusal said nothing.** `previewResolution` swallowed the engine's reason and the panel
+invented that sentence, which is true of every failure and useful for none. The reason travels now,
+and the no-toast rule is unchanged -- this runs on every keystroke's debounce, so the panel reports
+it in place. Two kinds of failure end up in a configurator and they belong in different places: one
+is about a field, one is about the whole proposal, and a whole-proposal failure must not be attached
+to whichever row was edited last.
+
+**And nothing was checked before the engine was asked.** What is checkable is narrower than it
+looks: `ConfigFieldDecl` carries `name`, `type`, `required`, `default`, `doc` and `secret` -- no
+pattern, no bounds, no format -- so only what the declaration states can be checked here. A rule
+this repository does not have, enforced against a gear that accepts the value, is worse than no
+check at all; that is the `prefix_path` finding, where the doc comment promised a leading slash and
+`normalize_prefix_path` prepends one. So: enum membership against the engine's own variant list, and
+an integer field given a fraction. Both refuse at the field, and both suppress the dry run -- the
+engine's answer to an invalid value is a refusal about the whole proposal, which would sit next to a
+field that already says what is wrong with it.
+
+**One thing that looked checkable and is not**: a `required` field with nothing set. That is the
+state every configurator opens in -- the panel has just been told which gear -- and the resolver may
+supply the value from a profile or a default the declaration does not carry. Treating it as invalid
+blocked the dry run on every proposal, which is a panel that previews nothing; it was caught by the
+suite hanging on five claims at once. It is a note beside the field now, not an error.
+
 ### 9.2 Writing to a description, and the four refusals
 
 The catalogue toggle is the only thing in Studio that writes a file a person owns, so the checks in

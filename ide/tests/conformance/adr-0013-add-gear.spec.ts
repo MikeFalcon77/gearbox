@@ -4,6 +4,7 @@ import type { Page } from "@playwright/test";
 
 import {
   expect,
+  openAdvancedKeys,
   openProduct,
   resetCatalogueView,
   revealCatalogue,
@@ -147,6 +148,8 @@ test.describe("Add Gear shows consequences before the write", () => {
     const preview = page.locator("[data-add-gear-flow] .gbx-edit-preview");
     await expect(preview).toContainText("tenant-resolver", { timeout: 60_000 });
 
+    // Free keys live under "Other keys" now -- see `openAdvancedKeys`.
+    await openAdvancedKeys(page, "[data-add-gear-config]");
     await page.locator("[data-add-gear-config-key]").fill("namespace");
     await page.locator("[data-add-gear-config-value]").fill("demo");
     await page.locator("[data-add-gear-config-add]").click();
@@ -158,6 +161,61 @@ test.describe("Add Gear shows consequences before the write", () => {
     await page.locator("[data-add-gear-cancel]").click();
   });
 
+  test(
+    "free keys are behind Advanced, and a bad value is refused at the field [plan §9.1: checked where the caret is]",
+    async ({ studio }) => {
+      // Two halves of the same complaint. A gear with no schema still offered a
+      // bare `Add key`, so the obvious thing to do with it was type a key the
+      // gear does not read -- and the only answer was a refusal about the whole
+      // proposal, from the other side of the screen. A control that is available
+      // invites use.
+      //
+      // And the checks that *are* possible now happen at the field. Narrow on
+      // purpose: `ConfigFieldDecl` carries no pattern and no bounds, so only what
+      // the declaration states is checkable -- a rule this repository does not
+      // have, enforced against a gear that accepts the value, is the
+      // `prefix_path` mistake.
+      const { page } = studio;
+      await openProduct(page, "dev");
+      await revealCatalogue(page);
+      await resetCatalogueView(page);
+      await page.locator('[data-toggle-gear="cluster"]').click();
+      await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+
+      // Folded, and the free-key input is not reachable until it is opened.
+      const advanced = page.locator("[data-add-gear-config] details.gbx-advanced");
+      await expect(advanced).toHaveCount(1);
+      expect(
+        await advanced.evaluate((e) => (e as HTMLDetailsElement).open),
+        "free-form keys should start folded",
+      ).toBe(false);
+      await expect(page.locator("[data-add-gear-config-key]")).toBeHidden();
+
+      await openAdvancedKeys(page, "[data-add-gear-config]");
+      await expect(page.locator("[data-add-gear-config-key]")).toBeVisible();
+
+      // An enum whose value is not one of its variants is refused where it was
+      // typed, and the variants come from the engine's own list rather than from
+      // a rule written here.
+      const enums = page.locator('[data-config-field-kind="enum"]');
+      const count = await enums.count();
+      test.skip(count === 0, "this gear exposes no enum field, so there is no closed set to leave");
+      const field = enums.first();
+      const name = await field.getAttribute("data-config-field");
+      const options = await field
+        .locator("option")
+        .evaluateAll((all) => all.map((o) => (o as HTMLOptionElement).value).filter((v) => v !== ""));
+      expect(options.length, "an enum with no variants is not a closed set").toBeGreaterThan(0);
+      // Selecting a real variant must *not* complain -- the check has to be about
+      // the value, not about the field having been touched.
+      await field.locator("select").selectOption(String(options[0]));
+      await expect(page.locator(`[data-config-field-error="${String(name)}"]`)).toHaveCount(0);
+
+      await page.locator("[data-add-gear-cancel]").click();
+      await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0);
+    },
+  );
+
   test("a config key that no field could be is refused at the row [plan §9.1: checked where the caret is]", async ({
     studio,
   }) => {
@@ -166,6 +224,7 @@ test.describe("Add Gear shows consequences before the write", () => {
     // three steps later at resolve, as GBX0115.
     const page = studio.page;
     await configure(page, "tenant-resolver");
+    await openAdvancedKeys(page, "[data-add-gear-config]");
     await page.locator("[data-add-gear-config-key]").fill("bad key");
     await expect(page.locator("[data-config-key-error]")).toContainText("spaces");
     await expect(page.locator("[data-add-gear-config-add]")).toBeDisabled();

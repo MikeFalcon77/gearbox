@@ -117,6 +117,8 @@ function ConfigField(
   const blocked = refusal(field);
   const provenance = provenanceOf?.(field.name);
   const drafted = isDrafted?.(field.name) === true;
+  const problem = blocked === undefined ? valueProblem(field, value) : undefined;
+  const missing = blocked === undefined && problem === undefined && valueMissing(field, value);
 
   return (
     <label
@@ -125,6 +127,8 @@ function ConfigField(
       data-config-field-kind={field.type.kind}
       data-config-provenance={provenance}
       data-field-modified={drafted ? "true" : undefined}
+      data-config-invalid={problem === undefined ? undefined : "true"}
+      aria-invalid={problem === undefined ? undefined : true}
     >
       <span className="gbx-config-field-name">
         {field.name}
@@ -164,10 +168,83 @@ function ConfigField(
         <span className="gbx-config-blocked">{blocked}</span>
       )}
 
+      {/* At the field, and before the engine is asked. The engine stays the
+          boundary -- it refuses the same things -- but its refusal arrived on the
+          other side of the screen 400 ms later, with no indication of which
+          field it was about. */}
+      {problem !== undefined && (
+        <span className="gbx-inline-error" role="alert" data-config-field-error={field.name}>
+          {problem}
+        </span>
+      )}
+      {/* A note, not an error: nothing is wrong yet, and the resolver may have a
+          value this declaration does not carry. */}
+      {missing && (
+        <span className="gbx-inline-note" data-config-field-missing={field.name}>
+          required, and the gear declares no default
+        </span>
+      )}
+
       {field.doc !== null && field.doc !== undefined && (
         <span className="gbx-config-field-doc">{field.doc}</span>
       )}
     </label>
+  );
+}
+
+/**
+ * What is wrong with a value *before* the engine is asked, or `undefined`.
+ *
+ * **Narrow on purpose, and the boundary is the point.** `ConfigFieldDecl` carries
+ * `name`, `type`, `required`, `default`, `doc` and `secret` -- no pattern, no
+ * bounds, no format -- so the only things checkable here are the ones the
+ * declaration actually states. A `pattern` this repository does not have,
+ * enforced against a gear that accepts the value, is worse than no check: that
+ * is the mistake the `prefix_path` finding records, where the doc comment
+ * promised a leading slash and `normalize_prefix_path` prepends one.
+ *
+ * **A value that is absent is not a problem here, and that distinction cost a
+ * suite run.** `required` with nothing set is the state every configurator opens
+ * in -- the panel has just been told which gear, and nothing has been typed --
+ * and the resolver may supply the value from a profile or a default the
+ * declaration does not carry. Reporting it as invalid blocked the dry run on
+ * every proposal, which is a panel that refuses to preview anything.
+ *
+ * So what this answers is narrower and honest: is the value *present and wrong*.
+ * A missing required value is worth *mentioning*, which [`valueMissing`] does,
+ * and is not worth blocking on.
+ */
+export function valueProblem(
+  field: ConfigFieldDecl,
+  value: ConfigValue | undefined,
+): string | undefined {
+  if (value === undefined) return undefined;
+  if (field.type.kind === "enum" && typeof value === "string") {
+    // The variants are the engine's own list, so this is reading the
+    // declaration rather than inventing a rule.
+    return field.type.variants.includes(value)
+      ? undefined
+      : `${value} is not one of ${field.type.variants.join(", ")}`;
+  }
+  if (field.type.kind === "int" && typeof value === "number" && !Number.isInteger(value)) {
+    return `${field.name} is an integer`;
+  }
+  return undefined;
+}
+
+/**
+ * Whether a required field has nothing to fall back on.
+ *
+ * Said, not enforced: the resolver can supply a value the declaration does not
+ * carry, and a configurator that refused to preview until every required field
+ * was typed would refuse on the first frame. What it buys is that "required" is
+ * visible before a GBX code explains it from the other side of the screen.
+ */
+export function valueMissing(field: ConfigFieldDecl, value: ConfigValue | undefined): boolean {
+  return (
+    value === undefined &&
+    field.required &&
+    (field.default === undefined || field.default === null)
   );
 }
 
