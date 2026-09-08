@@ -326,7 +326,11 @@ fn the_real_product_takes_one_line_and_keeps_every_comment() {
         "expected a heavily commented file; {comments_before} of {total} lines are comments"
     );
 
-    let edited = add_gear(URI, &source, "cluster", "gears-rust")
+    // `tenant-resolver` rather than `cluster`: the product selects `cluster`
+    // explicitly now, because its provider registry is what every cluster
+    // requirement resolves against, and a gear the file already names cannot
+    // demonstrate an insertion.
+    let edited = add_gear(URI, &source, "tenant-resolver", "gears-rust")
         .expect("the real product is editable")
         .changed()
         .expect("adding a gear it does not have should change it")
@@ -348,14 +352,14 @@ fn the_real_product_takes_one_line_and_keeps_every_comment() {
 
     // And it is idempotent on the file it just produced.
     assert_eq!(
-        add_gear(URI, &edited, "cluster", "gears-rust").expect("editable"),
+        add_gear(URI, &edited, "tenant-resolver", "gears-rust").expect("editable"),
         Edit::Unchanged
     );
 
     // Removing it again returns the file to what it was, byte for byte. That is
     // the strongest statement available about surgery: the inverse edit is exact.
     assert_eq!(
-        remove_gear(URI, &edited, "cluster")
+        remove_gear(URI, &edited, "tenant-resolver")
             .expect("editable")
             .changed()
             .expect("changed"),

@@ -82,7 +82,7 @@ test.describe("controls that can be operated can be named", () => {
     await openProduct(studio.page, "dev");
     await revealCatalogue(studio.page);
     await resetCatalogueView(studio.page);
-    const toggle = studio.page.locator('[data-toggle-gear="cluster"]');
+    const toggle = studio.page.locator('[data-toggle-gear="tenant-resolver"]');
     await expect(toggle).toBeVisible({ timeout: 60_000 });
     const label = await toggle.getAttribute("aria-label");
     expect(label).toMatch(/^(Add|Remove) .+ (to|from) .+$/);

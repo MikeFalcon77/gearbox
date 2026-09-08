@@ -16,14 +16,13 @@
 // design for the primitives that have no dedicated backend, and it is engaged by
 // leaving the key out of configuration."
 //
-// **Nothing in the demo corpus reaches this view yet.** A `ResolvedClusterBinding`
-// appears only when a gear requires a primitive -- `cluster.cache`,
-// `cluster.lock`, `cluster.leader_election` -- and no `gear.gdl` in the corpus
-// declares one, in any profile. The product does declare a provider for the
-// `event-broker` scope, so the empty state says precisely that: the provider is
-// waiting for a requester. The requester arrives with `payments-audit`, the new
-// gear in plan section 10, which reconciles through `LeaderElectionV1` and
-// `ClusterCacheV1`.
+// A `ResolvedClusterBinding` appears only when a gear requires a primitive --
+// `cluster.cache`, `cluster.lock`, `cluster.leader_election` -- so the empty
+// state is still reachable, and still says what is missing: a provider waiting
+// for a requester. In the demo corpus the requester is `api-contracts-consumer`,
+// whose crate carries the `impl ClusterProfile` marker for the `event-broker`
+// scope the product binds. It was to have been `payments-audit` (plan section
+// 10), a gear nobody wrote.
 
 import React from "@theia/core/shared/react";
 

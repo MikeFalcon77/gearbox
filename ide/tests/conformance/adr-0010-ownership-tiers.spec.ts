@@ -304,13 +304,13 @@ test.describe("tier 3: a description edited surgically", () => {
     await revealCatalogue(studio.page);
     await resetCatalogueView(studio.page);
 
-    const toggle = studio.page.locator('[data-toggle-gear="cluster"]');
+    const toggle = studio.page.locator('[data-toggle-gear="tenant-resolver"]');
     await expect(toggle).toHaveAttribute("data-in-product", "false");
     await toggle.click();
 
     await expect(studio.page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
     await expect(studio.page.locator("[data-add-gear-flow] .gbx-edit-preview")).toContainText(
-      'use_gear("cluster"',
+      'use_gear("tenant-resolver"',
       { timeout: 30_000 },
     );
     expect(diffOfProduct(), "the dry run must not have written anything").toBe("");
@@ -331,7 +331,7 @@ test.describe("tier 3: a description edited surgically", () => {
       await revealCatalogue(studio.page);
       await resetCatalogueView(studio.page);
 
-      const toggle = studio.page.locator('[data-toggle-gear="cluster"]');
+      const toggle = studio.page.locator('[data-toggle-gear="tenant-resolver"]');
       await toggle.click();
       await expect(studio.page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
       await expect(studio.page.locator("[data-add-gear-submit]")).toBeEnabled({ timeout: 30_000 });

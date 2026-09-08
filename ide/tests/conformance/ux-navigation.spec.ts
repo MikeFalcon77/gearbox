@@ -95,7 +95,7 @@ test.describe("a screen belongs to a subject", () => {
     await openProduct(page, "dev");
     await revealCatalogue(page);
     await resetCatalogueView(page);
-    await page.locator('[data-toggle-gear="cluster"]').click();
+    await page.locator('[data-toggle-gear="tenant-resolver"]').click();
     await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
 
     await page.locator('[data-command="gearbox.product.close"]').click();
@@ -148,7 +148,7 @@ test.describe("a screen that wants the room", () => {
     await resetCatalogueView(page);
     expect(await leftOpen(), "the catalogue must start open for this to mean anything").toBe(true);
 
-    await page.locator('[data-toggle-gear="cluster"]').click();
+    await page.locator('[data-toggle-gear="tenant-resolver"]').click();
     await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
     expect(await leftOpen(), "opening the configurator did not fold the catalogue").toBe(false);
 

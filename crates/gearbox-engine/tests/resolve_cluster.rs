@@ -55,9 +55,13 @@ fn single(cat: &Catalogue, intent: &ProductIntent) -> gearbox_engine::resolve::R
 }
 
 #[test]
-fn a_product_with_no_cluster_requirement_resolves_nothing() {
-    // The real slice: no gear requires a cluster primitive, so the step is inert.
-    // Asserting it keeps an accidental default from appearing later.
+fn the_real_slice_resolves_its_cluster_scope_in_every_profile() {
+    // `api-contracts-consumer` requires the `event-broker` scope, and its crate
+    // carries the `impl ClusterProfile` that makes the name a join key rather
+    // than a wish. What is asserted is the whole shape of the answer per
+    // profile, because each half is a different mechanism: the cache is an
+    // explicit operator choice, and leader election has no provider anywhere, so
+    // it can only be the SDK's compare-and-swap default layered over that cache.
     let Some(root) = gears_rust() else {
         eprintln!("skipping: ../gears-rust not present");
         return;
@@ -72,9 +76,46 @@ fn a_product_with_no_cluster_requirement_resolves_nothing() {
         .intent
         .unwrap();
 
-    for profile in ["dev", "local", "prod"] {
+    // dev is one process, so the process-local cache is legitimate there and
+    // only there; local and prod are spread, which is why they name postgres.
+    for (profile, cache) in [
+        ("dev", "standalone"),
+        ("local", "postgres"),
+        ("prod", "postgres"),
+    ] {
         let r = resolve(&cat, &intent, &pid(profile));
-        assert!(r.cluster.is_empty(), "{profile}: {:?}", r.cluster);
+        let errors: Vec<_> = r
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == gearbox_ir::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "{profile}: {errors:?}");
+
+        let by = |p: ClusterPrimitive| {
+            r.cluster
+                .iter()
+                .find(|b| b.scope == "event-broker" && b.primitive == p)
+                .unwrap_or_else(|| panic!("{profile}: no {p:?} binding in {:?}", r.cluster))
+        };
+        assert_eq!(
+            by(ClusterPrimitive::Cache).resolved,
+            gearbox_ir::ClusterResolution::Provider {
+                name: cache.to_owned()
+            },
+            "{profile}: cache"
+        );
+        assert_eq!(
+            by(ClusterPrimitive::LeaderElection).resolved,
+            gearbox_ir::ClusterResolution::SdkCasDefault {
+                over_cache: cache.to_owned()
+            },
+            "{profile}: leader election rides on the cache"
+        );
+        assert_eq!(
+            by(ClusterPrimitive::Cache).requesters,
+            vec![support::gid("api-contracts-consumer")],
+            "{profile}: requester"
+        );
     }
 }
 
@@ -277,6 +318,51 @@ fn a_provider_that_needs_credentials_must_be_told_where_they_are() {
     let mut ok = support::intent(&["app"]);
     support::bind_cluster(&mut ok, "main", "postgres", Some("secret/pg"));
     assert!(!codes(&single(&cat, &ok)).contains(&DiagnosticCode::ClusterNoCredentialSource));
+}
+
+/// The compare-and-swap default takes its credential from the cache it rides on.
+///
+/// No provider registers leader election, so there is no
+/// `leader_election = provider(...)` for a `secret_ref` to live on. Reading only
+/// the primitive's own binding therefore refused a product that was specified
+/// correctly and could not be specified any other way: the operator was being
+/// asked for something unspellable. Found by requiring the scope on the real
+/// slice, where every profile that uses postgres reported it.
+#[test]
+fn the_cas_default_inherits_the_caches_credential_source() {
+    let cat = support::cluster_catalogue(vec![
+        (
+            ClusterPrimitive::Cache,
+            "main",
+            &["cluster.cache.linearizable"] as &[&str],
+        ),
+        (ClusterPrimitive::LeaderElection, "main", &[]),
+    ]);
+    let mut intent = support::intent(&["app"]);
+    support::bind_cluster(&mut intent, "main", "postgres", Some("secret/pg"));
+
+    let r = single(&cat, &intent);
+    assert!(
+        !codes(&r).contains(&DiagnosticCode::ClusterNoCredentialSource),
+        "the cache names a source, and the default is that cache: {:?}",
+        r.diagnostics
+    );
+    let election = r
+        .cluster
+        .iter()
+        .find(|b| b.primitive == ClusterPrimitive::LeaderElection)
+        .expect("the election was required");
+    assert_eq!(
+        election.resolved,
+        gearbox_ir::ClusterResolution::SdkCasDefault {
+            over_cache: "postgres".to_owned()
+        }
+    );
+
+    // And the check still bites when the cache itself names nothing.
+    let mut bare = support::intent(&["app"]);
+    support::bind_cluster(&mut bare, "main", "postgres", None);
+    assert!(codes(&single(&cat, &bare)).contains(&DiagnosticCode::ClusterNoCredentialSource));
 }
 
 #[test]

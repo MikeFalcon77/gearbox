@@ -7,8 +7,12 @@
 //! requirement and an operator's binding, and getting it wrong is not a
 //! compile error -- it is a `ProfileNotBound` at startup.
 //!
-//! Two traps, both taken from the only production implementation in the
-//! platform (`event-broker/src/domain/cluster.rs`):
+//! Two traps, both taken from the shape the platform's own cluster crate uses
+//! for the `event-broker` scope (`cluster/src/domain/wiring_tests.rs`, and the
+//! doc example on `ClusterProfile` itself). No *production* impl existed when
+//! this was written -- `event-broker` imports the facades but its
+//! `EventBrokerCluster::resolve` is still a `todo!()` -- so the traps come from
+//! the code that does declare one:
 //!
 //! ```ignore
 //! struct EventBrokerProfile;                        // not `pub`

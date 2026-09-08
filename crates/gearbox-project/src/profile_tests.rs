@@ -1,9 +1,10 @@
 //! Tests for `ClusterProfile` projection.
 //!
-//! The first fixture is a transcription of `event-broker/src/domain/cluster.rs`
-//! -- the platform's only production `impl ClusterProfile` -- because it carries
-//! both traps at once: a private marker, and a `NAME` that is not the kebab-case
-//! of the identifier.
+//! The first fixture is the `event-broker` marker as the platform's cluster
+//! crate declares it, because it carries both traps at once: a private marker,
+//! and a `NAME` that is not the kebab-case of the identifier. It is not a
+//! transcription of a production impl -- there was none when this was written;
+//! the demo corpus's requester carries the first one.
 
 #![allow(
     clippy::unwrap_used,
@@ -59,7 +60,7 @@ fn name_is_read_not_derived_from_the_ident() {
 #[test]
 fn a_private_marker_still_projects() {
     // `struct EventBrokerProfile;` has no `pub`. Requiring visibility would miss
-    // the only production profile in the platform.
+    // the way the platform actually spells the `event-broker` marker.
     assert!(!EVENT_BROKER.contains("pub struct"));
     assert_eq!(project_cluster_profiles(&[file(EVENT_BROKER)]).len(), 1);
 }

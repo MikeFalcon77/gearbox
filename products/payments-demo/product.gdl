@@ -39,6 +39,16 @@ product(
         use_gear("api-contracts", source = "gears-rust"),
         use_gear("api-contracts-consumer", source = "gears-rust"),
 
+        # Selected explicitly, because nothing pulls it: the closure comment
+        # above is true of grpc-hub, authn-resolver and types-registry, but
+        # `cluster` arrives only through `deps = [cluster]`, and the one gear in
+        # the corpus that declares that edge has no description. Without it in
+        # the closure the provider registry is empty and every cluster
+        # requirement resolves to GBX0505 -- the providers are projected from
+        # `ClusterGear::provider_registry()`, so the gear has to be present for
+        # them to exist at all.
+        use_gear("cluster", source = "gears-rust"),
+
         # authn-resolver routes to whichever plugin implements its extension
         # point. The choice is per profile, which is the whole reason `plugins`
         # takes `profiles`: dev accepts any token, prod validates against a real
@@ -96,6 +106,12 @@ product(
             profiles = ["local", "prod"],
             cache = provider(
                 "postgres",
+                # The reference, not the credential: it reaches the generated
+                # configuration and never the lock. Without it the resolver
+                # refuses the provider outright (GBX0506), because a backend
+                # that needs credentials and is told nowhere to find them is a
+                # product that starts and then cannot connect.
+                secret_ref = "env:PG_PASSWORD",
                 connection_string = "postgres://payments@${PG_HOST}:5432/payments?password=${PG_PASSWORD}",
                 schema = "cluster",
                 pool_max_size = 10,

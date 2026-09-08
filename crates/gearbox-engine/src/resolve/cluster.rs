@@ -71,11 +71,9 @@ pub fn resolve(
             .filter_map(|b| b.resolved.effective_provider().map(str::to_owned))
             .collect();
 
-        let declared = scoped
-            .cluster_scopes
-            .iter()
-            .find(|s| s.scope == scope)
-            .and_then(|s| s.binding(primitive));
+        let declared_scope = scoped.cluster_scopes.iter().find(|s| s.scope == scope);
+        let declared = declared_scope.and_then(|s| s.binding(primitive));
+        let declared_cache = declared_scope.map(|s| &s.cache);
 
         let binding = decide(
             &Context {
@@ -84,6 +82,7 @@ pub fn resolve(
                 need: &need,
                 providers: &providers,
                 already: &already,
+                declared_cache,
                 spread,
                 prefer_existing,
                 uri,
@@ -106,6 +105,12 @@ struct Context<'a> {
     providers: &'a [ClusterProviderDecl],
     /// Providers already chosen elsewhere in this scope.
     already: &'a BTreeSet<String>,
+    /// This scope's cache binding, whatever primitive is being decided.
+    ///
+    /// The compare-and-swap default *is* the cache, so a credential the cache
+    /// binding names is the credential that default uses; see
+    /// [`check_credentials`].
+    declared_cache: Option<&'a ProviderBinding>,
     /// Whether the topology has more than one process or any replication.
     spread: bool,
     prefer_existing: bool,
@@ -290,6 +295,15 @@ fn automatic(
                  the cache's atomic operations; its guarantees are the cache's guarantees, \
                  which is a weaker promise than a purpose-built backend",
             )
+            // The code declares `requires_evidence`, and rightly: this is a claim
+            // about what the runtime ships. The citation is the backend itself,
+            // whose `features()` reads the cache's consistency rather than
+            // declaring its own -- which is the same sentence the help gives, in
+            // code.
+            .with_evidence(
+                "gears/system/cluster/cluster/src/defaults/leader.rs \
+                 (CasBasedLeaderElectionBackend::features)",
+            )
             .at(loc(ctx.uri)),
         );
         return (
@@ -452,7 +466,17 @@ fn check_credentials(
     let Some(provider) = ctx.providers.iter().find(|p| p.name == effective) else {
         return;
     };
-    if !provider.needs_credentials || declared.is_some_and(|d| d.secret_ref.is_some()) {
+    // For the compare-and-swap default the effective provider *is* this scope's
+    // cache, so the credential the cache binding names is the credential this
+    // primitive uses. Reading only this primitive's own binding refused a
+    // correctly specified product: no provider registers leader election, so
+    // there is no `leader_election = provider(...)` for a `secret_ref` to live
+    // on, and demanding one asked the operator for something unspellable.
+    let source = match resolved {
+        ClusterResolution::SdkCasDefault { .. } => declared.or(ctx.declared_cache),
+        ClusterResolution::Provider { .. } | ClusterResolution::Unsatisfied => declared,
+    };
+    if !provider.needs_credentials || source.is_some_and(|d| d.secret_ref.is_some()) {
         return;
     }
     diagnostics.push(

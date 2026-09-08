@@ -28,7 +28,7 @@ test.describe("product session and Add Gear", () => {
     await revealCatalogue(studio.page);
     await resetCatalogueView(studio.page);
 
-    const toggle = studio.page.locator('[data-toggle-gear="cluster"]');
+    const toggle = studio.page.locator('[data-toggle-gear="tenant-resolver"]');
     await expect(toggle).toHaveAttribute("data-in-product", "false");
     await toggle.click();
 
@@ -37,7 +37,7 @@ test.describe("product session and Add Gear", () => {
       studio.page.locator(".dialogBlock", { has: studio.page.locator(".gbx-edit-preview") }),
     ).toHaveCount(0);
     await expect(studio.page.locator("[data-add-gear-flow] .gbx-edit-preview")).toContainText(
-      "cluster",
+      "tenant-resolver",
       { timeout: 30_000 },
     );
     await studio.page.locator("[data-add-gear-cancel]").click();
@@ -179,7 +179,7 @@ test.describe("Add Gear shows consequences before the write", () => {
       await openProduct(page, "dev");
       await revealCatalogue(page);
       await resetCatalogueView(page);
-      await page.locator('[data-toggle-gear="cluster"]').click();
+      await page.locator('[data-toggle-gear="tenant-resolver"]').click();
       await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
 
       // Folded, and the free-key input is not reachable until it is opened.

@@ -100,7 +100,7 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
 
   // The three resolution graphs are checked on the **`prod`** profile, not the
   // default `dev`, and that is not incidental. On `dev` the demo product resolves
-  // to two local bindings, one process and no cluster at all, so each of these
+  // to two local bindings and one process, so each of these
   // views would render truthfully and show nothing that could have made it wrong.
   // On `prod` the same description resolves to a severed contract edge beside a
   // local one, and to two processes instead of one.
@@ -180,30 +180,13 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
     await openProduct(studio.page, "prod");
     await openGraphView(studio.page, "cluster");
 
-    // Reported as "not observed", not as a pass, for the same reason two other
-    // rows in this table are: nothing in the corpus can reach this view yet. A
-    // `ResolvedClusterBinding` exists only where a gear requires a primitive --
-    // `cluster.cache`, `cluster.lock`, `cluster.leader_election` -- and no
-    // `gear.gdl` in the corpus declares one, in any profile. The requester arrives
-    // with `payments-audit` (plan §10), which reconciles through `LeaderElectionV1`
-    // and `ClusterCacheV1`.
-    //
-    // Before skipping, this does assert the part that *is* observable: that the
-    // absence is explained rather than blank. A view rendering an empty frame here
-    // would be indistinguishable from a broken one, and that is the failure worth
-    // guarding against while the data is missing.
+    // Observed rather than skipped since `api-contracts-consumer` requires the
+    // `event-broker` scope: its crate carries the `impl ClusterProfile` marker
+    // that makes the profile name a join key, so a `ResolvedClusterBinding`
+    // reaches this view in every profile. The requester was to be
+    // `payments-audit` (plan §10), a gear nobody wrote; the requirement moved to
+    // a gear that exists rather than waiting for one that does not.
     const drawn = studio.page.locator("[data-graph='cluster']");
-    if ((await drawn.count()) === 0) {
-      const empty = studio.page.locator(".gearbox-graph .gbx-cluster-empty");
-      await expect(empty).toBeVisible();
-      await expect(empty).toContainText("no gear in the catalogue currently requires it");
-      test.skip(
-        true,
-        "no gear in the corpus requires a cluster primitive, so the resolution " +
-          "carries no cluster binding to draw; the view explains the absence",
-      );
-    }
-
     await expect(drawn).toBeVisible();
     await expect(drawn.locator("[data-cluster-requirement]").first()).toBeVisible();
     await expect(drawn.locator("[data-cluster-provider]").first()).toBeVisible();
