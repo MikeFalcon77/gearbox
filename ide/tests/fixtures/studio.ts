@@ -627,11 +627,39 @@ export async function problems(
  * catalogue row is *visible* has to say so first, and clicking the already
  * current tab would collapse the panel instead.
  */
+/**
+ * Bring a left-panel view forward, opening the panel if it is folded.
+ *
+ * **`lm-mod-current` cannot tell folded from open, and that cost a suite run.**
+ * `SidePanelHandler.collapse()` nulls the tab bar's `currentTitle`, but one tab
+ * keeps the DOM class -- so a helper that clicked only when the wanted tab was
+ * *not* current expanded the panel when asked for any other view and left it
+ * folded when asked for that one. With Home folding the left panel, the Explorer
+ * claim failed intermittently for that reason and the catalogue claims never
+ * did, which is exactly the shape of an ordering flake.
+ *
+ * A collapsed side panel is its tab bar and nothing else, so comparing the panel
+ * to the bar answers the real question and says nothing about how wide a person
+ * has dragged it.
+ */
 export async function revealLeft(page: Page, label: string | RegExp): Promise<void> {
-  const tab = page.locator("#theia-left-content-panel .lm-TabBar li", { hasText: label });
-  if (!(await tab.first().evaluate((e) => e.classList.contains("lm-mod-current")))) {
-    await tab.first().click();
+  const folded = (): Promise<boolean> =>
+    page.evaluate(() => {
+      const panel = document.querySelector("#theia-left-content-panel") as HTMLElement | null;
+      if (panel === null) return true;
+      const bar = panel.querySelector(".lm-TabBar") as HTMLElement | null;
+      return panel.offsetWidth <= (bar?.offsetWidth ?? 0) + 8;
+    });
+
+  const tab = page.locator("#theia-left-content-panel .lm-TabBar li", { hasText: label }).first();
+  await tab.waitFor({ state: "visible", timeout: 30_000 });
+  const current = await tab.evaluate((e) => e.classList.contains("lm-mod-current"));
+  if (!current || (await folded())) {
+    await tab.click();
   }
+  // Clicking the tab of a folded panel opens it, so the wait is for the panel to
+  // have content rather than for the click to have landed.
+  await expect.poll(folded, { timeout: 30_000 }).toBe(false);
 }
 
 export const revealCatalogue = (page: Page): Promise<void> =>

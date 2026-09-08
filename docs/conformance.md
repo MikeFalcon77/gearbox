@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **152** — 147 built, 1 not built, 0 broken, 4 not observed.
+Claims: **153** — 148 built, 1 not built, 0 broken, 4 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -242,5 +242,6 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the panels come back when the last such screen closes, not the first | `ADR-0011 §Amendment: the room is arranged before the screen appears` | ✅ built |  |
 | the Product view is four stages and a way out to Generate | `plan §9.1: Product navigation` | ✅ built |  |
 | Validation shows the diagnostics rather than a way to reach them | `plan §9.1: Validation is a screen` | ✅ built |  |
+| what a proposal would introduce is the same row, at a smaller weight | `plan §9.1: Validation is a screen` | ✅ built |  |
 | a reload with a product open comes back to Home | `plan §9.1: Home is a screen, not an empty area` | ✅ built |  |
 | opening a product leaves the Product workspace on screen | `plan §9.1: Open Product is atomic` | ✅ built |  |

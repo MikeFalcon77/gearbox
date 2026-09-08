@@ -224,6 +224,75 @@ test.describe("validation is a stage, not a doorway", () => {
     await expect(page.locator("[data-show-conflicts]")).toHaveCount(0);
     await productSection(page, "topology");
     await expect(page.locator("[data-show-conflicts]")).toHaveCount(1);
+    await productSection(page, "validation");
+
+    // **The demoted link still does what it says.** It survives because the
+    // bottom panel is where the list is read *beside* the tree, so the assertion
+    // is not that a panel appears but that it appears **there** -- a Conflicts
+    // screen in the main area would have replaced the thing it is about.
+    await stage.locator("[data-validation-open-conflicts]").click();
+    await expect(page.locator("#theia-bottom-content-panel .gbx-conflicts")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // And a row's location opens the description. Left until last because it puts
+    // an editor in the main area, which is the one action here that navigates.
+    //
+    // The expected file is read from the link rather than written in: what the
+    // claim is about is that the location resolves to the file it names. On this
+    // corpus both dev diagnostics point at `product.gdl:1`.
+    const where = stage.locator(".gbx-conflict-where").first();
+    const label = ((await where.textContent()) ?? "").trim();
+    const file = /([^/\s:]+\.gdl):\d+$/.exec(label)?.[1];
+    expect(file, `a location link should name a .gdl file, got "${label}"`).toBeDefined();
+    await where.click();
+    await expect(
+      page.locator("#theia-main-content-panel .lm-TabBar-tabLabel", { hasText: String(file) }),
+    ).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("what a proposal would introduce is the same row, at a smaller weight [plan §9.1: Validation is a screen]", async ({
+    studio,
+  }) => {
+    // The half of this that is easy to get wrong is not the list -- it is that a
+    // *compact* list stays a full diagnostic. Three of the four renderers this
+    // replaced showed code, message and help at most, so the location of the line
+    // causing a new problem was dropped exactly where a person is deciding
+    // whether to accept it.
+    //
+    // `rg-tr-plugin`, and the gear is not arbitrary: it is the only one in this
+    // corpus whose addition introduces a diagnostic. Found by trying all fourteen
+    // rather than by reading the resolver, and named here so the next person does
+    // not have to repeat that.
+    const { page } = studio;
+    await openProduct(page, "dev");
+    await revealCatalogue(page);
+    await resetCatalogueView(page);
+
+    const toggle = page.locator('[data-toggle-gear="rg-tr-plugin"]');
+    await expect(toggle).toHaveAttribute("data-in-product", "false");
+    await toggle.click();
+    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+
+    const group = page.locator("[data-add-gear-impact-diagnostics]");
+    await expect(group).toBeVisible({ timeout: 60_000 });
+    await expect(group.locator("ul.gbx-conflicts-compact")).toHaveCount(1);
+
+    const row = group.locator(".gbx-conflict").first();
+    await expect(row).toHaveAttribute("data-conflict-code", /GBX\d{4}/);
+    // The remedy and the place, which is what "the same row" has to mean.
+    await expect(row.locator(".gbx-conflict-help")).toBeVisible();
+    await expect(row.locator(".gbx-conflict-where")).toBeVisible();
+    // And no `explain`: the subject of one of these is a node in a resolution
+    // that does not exist yet, so the control is omitted rather than rendered
+    // dead. Asserting the absence, because a dead button is what the old
+    // key-value rows were being replaced to avoid.
+    await expect(group.locator("[data-conflict-explain]")).toHaveCount(0);
+
+    // Nothing was written and nothing is left open: the panel is a dry run, and a
+    // wizard left on screen holds a focus episode the next claim would inherit.
+    await page.locator("[data-add-gear-cancel]").click();
+    await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0);
   });
 });
 
