@@ -59,6 +59,48 @@ struct ServerSection {
     home_dir: String,
 }
 
+/// Serialize a `serde_json` tree the way a YAML backend can read it.
+///
+/// `serde_json::Number` serializes itself through a private newtype token that
+/// only `serde_json`'s own serializer understands. Any other backend writes the
+/// token out verbatim, which is how `pool_max_size = 10` reached a generated
+/// configuration as `{"$serde_json::private::Number": "10"}` and made the
+/// cluster gear fail to start with `invalid type: map, expected u32`. Every
+/// other value shape passes through unchanged; only numbers were ever wrong,
+/// and they were wrong everywhere a gear's configuration carries one.
+struct Json<'a>(&'a Value);
+
+impl Serialize for Json<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self.0 {
+            Value::Null => serializer.serialize_unit(),
+            Value::Bool(b) => serializer.serialize_bool(*b),
+            Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    serializer.serialize_i64(i)
+                } else if let Some(u) = n.as_u64() {
+                    serializer.serialize_u64(u)
+                } else if let Some(f) = n.as_f64() {
+                    serializer.serialize_f64(f)
+                } else {
+                    // `Number` is one of the three above by construction.
+                    serializer.serialize_str(&n.to_string())
+                }
+            }
+            Value::String(v) => serializer.serialize_str(v),
+            Value::Array(items) => serializer.collect_seq(items.iter().map(Json)),
+            Value::Object(map) => serializer.collect_map(map.iter().map(|(k, v)| (k, Json(v)))),
+        }
+    }
+}
+
+fn json_map<S: serde::Serializer>(
+    map: &Map<String, Value>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(map.iter().map(|(k, v)| (k, Json(v))))
+}
+
 #[derive(Serialize)]
 struct GearSection {
     /// Present only for a gear the host spawns out of process.
@@ -69,6 +111,7 @@ struct GearSection {
     /// nothing to configure still has to appear or the composed set and the
     /// configured set stop matching -- and that match is one of the two oracles
     /// this milestone is verified by.
+    #[serde(serialize_with = "json_map")]
     config: Map<String, Value>,
 }
 
@@ -274,7 +317,16 @@ fn write_cluster(
             backend.insert(key.clone(), value.clone());
         }
         if let Some(secret) = &binding.secret_ref {
-            backend.insert("secret_ref".to_owned(), Value::String(secret.clone()));
+            // `SecretRef { name }`, not a bare string. The cluster gear
+            // deserializes this section into its own config struct
+            // (`cluster/src/config.rs:135`), and a string there is
+            // `invalid type: string, expected struct SecretRef` -- an
+            // initialization failure that takes the whole host down before any
+            // gear starts. Found by running the generated product; the shape is
+            // a fact about the consumer, so it is written the consumer's way.
+            let mut reference = Map::new();
+            reference.insert("name".to_owned(), Value::String(secret.clone()));
+            backend.insert("secret_ref".to_owned(), Value::Object(reference));
         }
 
         let scope = profiles

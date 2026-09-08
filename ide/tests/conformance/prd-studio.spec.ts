@@ -170,7 +170,10 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
     // the split happens to be a partition, and the view says so in words rather
     // than letting the absence of a repeated chip imply that partitions are what
     // the model produces.
-    await expect(graph.locator("[data-binary='api-gateway'] [data-gear]")).toHaveCount(6);
+    // Seven, not six: the product selects `cluster` explicitly now, because the
+    // provider registry every cluster requirement resolves against is projected
+    // from that gear and nothing else pulls it in.
+    await expect(graph.locator("[data-binary='api-gateway'] [data-gear]")).toHaveCount(7);
     await expect(graph.locator("[data-shared='true']")).toHaveCount(0);
   });
 

@@ -86,7 +86,7 @@ test.describe("controls that can be operated can be named", () => {
     await expect(toggle).toBeVisible({ timeout: 60_000 });
     const label = await toggle.getAttribute("aria-label");
     expect(label).toMatch(/^(Add|Remove) .+ (to|from) .+$/);
-    expect(label).toContain("Cluster");
+    expect(label).toContain("Tenant Resolver");
     expect(await toggle.getAttribute("type")).toBe("button");
   });
 });
