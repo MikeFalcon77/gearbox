@@ -15,6 +15,7 @@
 
 import { CatalogueStore } from "../gearbox-studio/lib/browser/catalogue-store.js";
 import { ProductStore } from "../gearbox-studio/lib/browser/product-store.js";
+import { placeNewGear } from "../gearbox-studio/lib/browser/create/gear-edits.js";
 import {
   catalogueUsable,
   openedSuccessfully,
@@ -604,6 +605,89 @@ const REF_A = { path: "/repo/products/a/product.gdl", label: "products/a" };
     open: { path: "/repo/products/b/product.gdl", label: "products/b" },
   });
   check(other.ok === false, "a *different* product being ready is not this one opening");
+}
+
+// ================================================ putting a new gear in a product
+//
+// **A plugin is not a selected gear**, and adding it as one is wrong twice over:
+// in the corpus a plugin appears only as a `plugin("id")` entry inside its host's
+// `use_gear`, so a top-level `add_gear` leaves it attached to nothing -- which
+// the resolver reports as GBX0518 -- *and* makes it a gear the product selected
+// in its own right.
+//
+// Checked here rather than in a browser for two reasons that both hold: the
+// widget cannot be constructed outside one, and the write lands in `products/`,
+// which the conformance harness refuses to let a test dirty.
+
+const PLACE = { gearId: "ldap-authn-plugin", sourceId: "gears", at: "gears" };
+
+// -------------------------------- a plain gear is selected, as it always was
+{
+  const placed = placeNewGear(PLACE, "Payments Demo");
+  check(placed.ok === true, "a gear with no host is added to the product");
+  const kinds = placed.edits.map((e) => e.kind);
+  check(
+    JSON.stringify(kinds) === JSON.stringify(["add_source", "add_gear"]),
+    `the folder is declared and the gear selected (got ${JSON.stringify(kinds)})`,
+  );
+}
+
+// -------------------------------- a plugin goes inside its host
+{
+  const placed = placeNewGear(
+    { ...PLACE, host: { id: "authn-resolver", source: "gears-rust", standing: "named" } },
+    "Payments Demo",
+  );
+  check(placed.ok === true, "a plugin whose host is named is added");
+  const kinds = placed.edits.map((e) => e.kind);
+  check(
+    JSON.stringify(kinds) === JSON.stringify(["add_source", "add_plugin"]),
+    `it is attached, not selected (got ${JSON.stringify(kinds)})`,
+  );
+  // The invariant, stated as the thing that must be absent: no `use_gear` of its
+  // own, because a plugin is not something a product selects.
+  check(
+    !placed.edits.some((e) => e.kind === "add_gear" && e.gear === PLACE.gearId),
+    "a plugin is never given a top-level use_gear",
+  );
+  const attach = placed.edits.find((e) => e.kind === "add_plugin");
+  check(
+    attach.gear === "authn-resolver" && attach.plugin === PLACE.gearId,
+    "and it is attached to the host that was chosen",
+  );
+}
+
+// -------------------------------- a closure-only host is promoted first
+{
+  const placed = placeNewGear(
+    { ...PLACE, host: { id: "authn-resolver", source: "gears-rust", standing: "closure-only" } },
+    "Payments Demo",
+  );
+  check(placed.ok === true, "a plugin whose host is only in the closure is added");
+  const kinds = placed.edits.map((e) => e.kind);
+  // `add_gear_plugin` needs a `use_gear` to attach to, and a closure entry is
+  // not one -- so the host is promoted to an explicit selection first, in the
+  // same previewed batch rather than as a side effect.
+  check(
+    JSON.stringify(kinds) === JSON.stringify(["add_source", "add_gear", "add_plugin"]),
+    `the host is promoted, then the plugin attached (got ${JSON.stringify(kinds)})`,
+  );
+  const promote = placed.edits.find((e) => e.kind === "add_gear");
+  check(promote.gear === "authn-resolver", "the promotion is of the host, not of the plugin");
+  check(promote.source === "gears-rust", "and it is read from the host's own source");
+}
+
+// -------------------------------- a host the product does not have at all
+{
+  const placed = placeNewGear(
+    { ...PLACE, host: { id: "authn-resolver", source: "gears-rust", standing: "absent" } },
+    "Payments Demo",
+  );
+  check(placed.ok === false, "a plugin whose host is not in the product is refused");
+  check(
+    placed.reason.includes("authn-resolver") && placed.reason.includes("Add authn-resolver"),
+    "and the refusal names the host and what to do about it",
+  );
 }
 
 console.log(

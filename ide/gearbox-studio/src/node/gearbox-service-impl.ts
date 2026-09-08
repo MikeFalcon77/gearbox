@@ -24,6 +24,8 @@ import type { GenerateApplyResult } from "../common/generated/GenerateApplyResul
 import type { GenerateFileResult } from "../common/generated/GenerateFileResult";
 import type { GeneratePlanResult } from "../common/generated/GeneratePlanResult";
 import type { GearKind } from "../common/generated/GearKind";
+import type { PluginScaffold } from "../common/generated/PluginScaffold";
+import type { ScaffoldGearResult } from "../common/generated/ScaffoldGearResult";
 import type { InitializeResult } from "../common/generated/InitializeResult";
 import type { LockResult } from "../common/generated/LockResult";
 import type { LogParams } from "../common/generated/LogParams";
@@ -382,9 +384,10 @@ export class GearboxServiceImpl implements GearboxService {
     name: string;
     version: string;
     kind?: GearKind;
+    plugin?: PluginScaffold;
     destinationDir: string;
     dryRun: boolean;
-  }): Promise<GeneratePlanResult> {
+  }): Promise<ScaffoldGearResult> {
     return this.request(method.GEAR_SCAFFOLD, {
       id: params.id,
       name: params.name,
@@ -393,6 +396,10 @@ export class GearboxServiceImpl implements GearboxService {
       // serde default, so the engine decides what "unspecified" means and this
       // client does not hold a second copy of that answer.
       ...(params.kind === undefined ? {} : { kind: params.kind }),
+      // Same rule: absent means "no host was chosen", which the engine reads as
+      // "keep the locator commented". Sending `plugin: undefined` would serialise
+      // a null and make this client assert something it has no opinion about.
+      ...(params.plugin === undefined ? {} : { plugin: params.plugin }),
       destination_dir: params.destinationDir,
       dry_run: params.dryRun,
     });

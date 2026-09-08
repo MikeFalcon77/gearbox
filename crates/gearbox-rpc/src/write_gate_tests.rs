@@ -247,6 +247,34 @@ fn scaffold_refuses_a_dotdot_id() {
     );
 }
 
+/// The wire shape the Studio client actually sends, deserialised.
+///
+/// A round trip through the type is not the same as a round trip through the
+/// *wire*: `plugin` arriving under a name serde does not expect deserialises to
+/// `None` and the scaffold silently writes the commented shape -- which is a
+/// working feature and a broken one that look identical in a preview.
+#[test]
+fn the_clients_scaffold_request_carries_its_plugin() {
+    let json = r#"{
+        "id": "ldap-authn-plugin",
+        "name": "LDAP AuthN",
+        "version": "0.1.0",
+        "kind": "plugin",
+        "plugin": {
+            "crate_name": "cf-gears-authn-resolver",
+            "lib_ident": "authn_resolver_sdk",
+            "path": "../../authn-resolver"
+        },
+        "destination_dir": "/tmp/gears",
+        "dry_run": true
+    }"#;
+    let params: ScaffoldGearParams = serde_json::from_str(json).expect("the client's shape parses");
+    assert_eq!(params.kind, crate::protocol::GearKind::Plugin);
+    let plugin = params.plugin.expect("`plugin` survived the wire");
+    assert_eq!(plugin.lib_ident, "authn_resolver_sdk");
+    assert_eq!(plugin.plugin_interface, None, "absent means read the impl");
+}
+
 /// A plugin scaffold given a host writes the locator live, and it still evaluates.
 ///
 /// The commented shape exists because an `sdk` pointing nowhere makes the gear

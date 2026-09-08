@@ -29,4 +29,4 @@ path: string,
  * implements is read from the `impl`, so declaring it is an escape hatch for
  * a crate implementing two, never a statement of intent.
  */
-plugin_interface: string | null, };
+plugin_interface?: string | null, };

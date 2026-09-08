@@ -168,6 +168,64 @@ test.describe("what the tool may write", () => {
     },
   );
 
+  test(
+    "choosing a host writes the plugin's locator instead of commenting it [ADR-0010 tier 0]",
+    async ({ freshStudio }) => {
+      // **The claim the `Kind` control needed to earn.** `Plugin` chose a
+      // different `gear.gdl` all along, but every declaration in it was a
+      // comment -- an `sdk` pointing at a directory that does not exist makes the
+      // gear fail to load -- so a UX pass reported the choice as doing nothing,
+      // and it was right about what a person could see.
+      //
+      // A host picked out of the loaded catalogue is a locator the engine itself
+      // projected, so there is nothing left to protect against and it is written
+      // live. The preview shows the description's own text now, because the three
+      // file *paths* are identical for all three shapes.
+      const { page } = freshStudio;
+      await settled(page);
+      await expect(page.locator('[data-start-action="new-gear"]:not([disabled])')).toBeVisible({
+        timeout: 60_000,
+      });
+      await page.locator('[data-start-action="new-gear"]').click();
+      await expect(page.locator("[data-create-gear-kind]")).toBeVisible({ timeout: 30_000 });
+
+      await page.locator("[data-create-gear-kind]").selectOption("plugin");
+      const gdl = page.locator("[data-create-gear-gdl]");
+      await expect(gdl).toBeVisible({ timeout: 30_000 });
+
+      // With no host the locator is a comment -- and the panel says why rather
+      // than disabling Create over it, because "I know it is a plugin but not yet
+      // whose" is a real state to be in.
+      await expect
+        .poll(async () => (await gdl.textContent()) ?? "", { timeout: 30_000 })
+        .toContain("# sdk = cargo(");
+
+      // The picker is grouped by host and labelled by the trait, because the
+      // trait is the identity: the key is `sdk_lib::TraitIdent` and never a
+      // derived short name, which is the mistake GBX0206 exists to catch.
+      const picker = page.locator("[data-create-gear-point]");
+      const hosts = await picker
+        .locator("optgroup")
+        .evaluateAll((groups) => groups.map((g) => g.getAttribute("label") ?? ""));
+      expect(hosts.length, "no host in the catalogue declares an extension point").toBeGreaterThan(
+        0,
+      );
+      const first = await picker.locator("optgroup option").first().getAttribute("value");
+      expect(first).toContain("::");
+
+      await picker.selectOption(String(first));
+      // Live: the same line, no longer commented. Polled because the preview is
+      // debounced -- and the debounce is why it carries an epoch guard, without
+      // which the answer for `service` could arrive last and win.
+      await expect
+        .poll(async () => (await gdl.textContent()) ?? "", { timeout: 30_000 })
+        .toMatch(/^\s{4}sdk = cargo\(/m);
+      expect((await gdl.textContent()) ?? "", "a link line needs the library identifier").toMatch(
+        /lib = "[a-z0-9_]+"/,
+      );
+    },
+  );
+
   test("a generated composition crate carries a header naming its generator [ADR-0010 tier 2]", async ({
     studio,
   }) => {

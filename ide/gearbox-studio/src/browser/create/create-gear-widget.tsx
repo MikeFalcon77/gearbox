@@ -7,15 +7,23 @@ import { ReactWidget } from "@theia/core/lib/browser";
 import { MessageService } from "@theia/core/lib/common/message-service";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
+import { FileDialogService } from "@theia/filesystem/lib/browser";
 import { WorkspaceService } from "@theia/workspace/lib/browser/workspace-service";
 
-import type { GeneratePlanResult } from "../../common/generated/GeneratePlanResult";
 import { GearboxService } from "../../common/protocol";
 import { EngineConnectionService } from "../shell/engine-connection-service";
 import { gearIdProblem, gearVersionProblem } from "../../common/gear-identity";
 import { CommandRegistry } from "@theia/core/lib/common";
 
+import type { ExtensionPointDecl } from "../../common/generated/ExtensionPointDecl";
+import type { GearDescriptor } from "../../common/generated/GearDescriptor";
 import type { GearKind } from "../../common/generated/GearKind";
+import type { PluginScaffold } from "../../common/generated/PluginScaffold";
+import type { ProductEdit } from "../../common/generated/ProductEdit";
+import { placeNewGear, type HostStanding } from "./gear-edits";
+import type { ScaffoldGearResult } from "../../common/generated/ScaffoldGearResult";
+import { pointsOf } from "../../common/extension-points";
+import { type Row } from "../../common/protocol";
 
 import { SHOW_PRODUCT } from "../shell/session-command-ids";
 import { CatalogueStore } from "../catalogue-store";
@@ -68,6 +76,9 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
   @inject(ProductStore) protected readonly products!: ProductStore;
   @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
   @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
+  // The same picker New Product uses. A destination typed into a text field is a
+  // path nobody checked, and this wizard already knows the refusal it will get.
+  @inject(FileDialogService) protected readonly fileDialog!: FileDialogService;
 
   /**
    * Which shape to scaffold.
@@ -85,9 +96,31 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
   protected version = "0.1.0";
   protected destination = "";
   protected destinationTouched = false;
-  protected plan: GeneratePlanResult | undefined;
+  /**
+   * The host and point a `plugin` scaffold fills, as `hostId::traitIdent`.
+   *
+   * Empty means no host chosen, which the engine reads as "keep the locator
+   * commented" -- so the wizard has a state for "I know it is a plugin but not
+   * yet whose", which is the state a person is in when they open this.
+   */
+  protected point = "";
+
+  protected plan: ScaffoldGearResult | undefined;
   protected planError = "";
   protected previewTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * Which preview request the pane is allowed to show.
+   *
+   * **A debounce without one lets a superseded answer win**, and it did: choosing
+   * `plugin` and then a host fires three dry runs, and the pane showed whichever
+   * *replied* last rather than whichever was *asked* last -- so the live locator
+   * appeared and was then overwritten by the answer for `service`. The bug reads
+   * as "the host picker does nothing", which is what a UX pass would report.
+   *
+   * The same guard `AddGearWidget` documents, for the same reason.
+   */
+  protected previewToken = 0;
   protected product: { path: string; label: string } | undefined;
   protected applying = false;
 
@@ -144,6 +177,57 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
     return (trimmed === "" ? this.defaultDestination() : trimmed).replace(/\\/g, "/");
   }
 
+  /**
+   * Every extension point the catalogue declares, with the gear that declares it.
+   *
+   * Read from the catalogue rather than asked for: a host's `extension_points`
+   * are projected at S2, so by the time this panel is open they are a fact the
+   * engine has already sent. `pointKey` is the identity -- `sdk_lib::TraitIdent`,
+   * never a derived short name, for the reason `extension-points.ts` records.
+   */
+  protected hosts(): { host: GearDescriptor; point: ExtensionPointDecl; key: string }[] {
+    return this.catalogue.current.rows
+      .filter((row): row is Extract<Row, { kind: "projected" }> => row.kind === "projected")
+      .flatMap((row) =>
+        pointsOf(row.gear).map((point) => ({
+          host: row.gear,
+          point,
+          key: `${row.gear.id}::${point.trait_ident}`,
+        })),
+      );
+  }
+
+  /**
+   * The locator for the chosen point, or `undefined` when none is chosen.
+   *
+   * **Derived from the host's own `package`, not typed by anyone.** `crate_name`
+   * and `lib_ident` come off the descriptor the engine projected, and the path is
+   * expressed relative to where this gear is about to be written -- which is what
+   * `gear.gdl` means by `path`, and what makes the locator point somewhere real.
+   */
+  protected pluginScaffold(): PluginScaffold | undefined {
+    if (this.kind !== "plugin" || this.point === "") return undefined;
+    const chosen = this.hosts().find((entry) => entry.key === this.point);
+    if (chosen === undefined) return undefined;
+    // The SDK is the crate that declares the trait, which the descriptor names by
+    // its library identifier. The host's own package is where it lives.
+    const pkg = chosen.host.package;
+    return {
+      crate_name: pkg.crate_name,
+      lib_ident: chosen.point.sdk_lib,
+      // Relative to the gear being scaffolded, which lands in
+      // `<destination>/<id>/`. The host's crate path is relative to *its* source
+      // root, so this is two levels up and across -- the same shape the corpus
+      // writes by hand (`../../authn-resolver-sdk`).
+      path: `../../${pkg.path}`,
+      // Left to the `impl` unless the host declares more than one point: which
+      // trait a crate implements is read, and declaring it is an escape hatch.
+      ...(pointsOf(chosen.host).length > 1
+        ? { plugin_interface: chosen.point.trait_ident }
+        : {}),
+    };
+  }
+
   protected schedulePreview(): void {
     if (this.previewTimer !== undefined) clearTimeout(this.previewTimer);
     this.previewTimer = setTimeout(() => void this.refreshPreview(), 200);
@@ -156,20 +240,167 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
       this.update();
       return;
     }
+    const token = ++this.previewToken;
     try {
-      this.plan = await this.service.scaffoldGear({
+      const answer = await this.service.scaffoldGear({
         id: this.gearId,
         name: this.name,
         version: this.version,
         kind: this.kind,
+        ...(this.pluginScaffold() === undefined ? {} : { plugin: this.pluginScaffold() }),
         destinationDir: this.destinationDir(),
         dryRun: true,
       });
+      if (token !== this.previewToken) return;
+      this.plan = answer;
       this.planError = "";
     } catch (error) {
+      if (token !== this.previewToken) return;
       this.plan = undefined;
       this.planError = error instanceof Error ? error.message : String(error);
     }
+    this.update();
+  }
+
+  /**
+   * The batch that puts the new gear into the product.
+   *
+   * The decision itself is in `create/gear-edits.ts`, which is pure and is where
+   * the three host states are checked; this reads the two facts that decide it
+   * out of the store. `undefined` means refused, and the person has been told.
+   */
+  protected editsFor(gearId: string, sourceId: string, at: string): ProductEdit[] | undefined {
+    const chosen = this.hosts().find((entry) => entry.key === this.point);
+    const placed = placeNewGear(
+      {
+        gearId,
+        sourceId,
+        at,
+        ...(this.kind === "plugin" && chosen !== undefined
+          ? {
+              host: {
+                id: chosen.host.id,
+                source: chosen.host.source,
+                standing: this.standingOf(chosen.host.id),
+              },
+            }
+          : {}),
+      },
+      this.product?.label ?? "This product",
+    );
+    if (!placed.ok) {
+      this.messages.warn(placed.reason);
+      return undefined;
+    }
+    return [...placed.edits];
+  }
+
+  /**
+   * Whether the product names a gear directly, only pulled it in, or lacks it.
+   *
+   * `selected_gears` is the intent -- what the description says -- and the
+   * resolution's `gears` is the closure. The difference is the whole point:
+   * `add_gear_plugin` needs a `use_gear` to attach to, and a closure entry is
+   * not one.
+   */
+  protected standingOf(host: string): HostStanding {
+    const state = this.products.current;
+    if (state.intent?.selected_gears?.some((selected) => selected.gear === host) === true) {
+      return "named";
+    }
+    const resolved = state.resolution?.product;
+    if (resolved !== null && resolved !== undefined && host in resolved.gears) {
+      return "closure-only";
+    }
+    return "absent";
+  }
+
+  /**
+   * Which host and point this plugin fills.
+   *
+   * **The control that makes the kind mean something.** `Plugin` chose a
+   * different `gear.gdl` all along, but every declaration in it was a comment
+   * -- an `sdk` pointing nowhere makes a gear fail to load -- so choosing it
+   * changed nothing a person could see. A host picked from the catalogue is a
+   * locator the engine itself projected, so it can be written live, and the
+   * preview changes as soon as it is chosen.
+   *
+   * Grouped by host and labelled by the trait, because the trait is the identity:
+   * `pointKey` is `sdk_lib::TraitIdent` and never a derived short name, which is
+   * the mistake GBX0206 exists to catch.
+   */
+  protected renderHostPicker(connected: boolean): React.ReactNode {
+    const hosts = this.hosts();
+    if (hosts.length === 0) {
+      return (
+        <div className="gbx-empty" data-create-gear-no-hosts>
+          No gear in the catalogue declares an extension point, so there is nothing for a plugin
+          to fill yet. Creating it will leave the <code>sdk</code> locator commented, which is
+          what a scaffold writes when it has nothing real to point at.
+        </div>
+      );
+    }
+    const byHost = new Map<string, typeof hosts>();
+    for (const entry of hosts) {
+      const already = byHost.get(entry.host.id) ?? [];
+      already.push(entry);
+      byHost.set(entry.host.id, already);
+    }
+    return (
+      <label>
+        What it fills
+        <select
+          data-create-gear-point
+          value={this.point}
+          disabled={!connected}
+          onChange={(e) => {
+            this.point = e.target.value;
+            this.schedulePreview();
+            this.update();
+          }}
+        >
+          {/* An honest empty option: not choosing is a state, and it is the one
+              a person starts in. Its consequence is stated below rather than
+              hidden behind a disabled Create. */}
+          <option value="">— not decided yet —</option>
+          {[...byHost.entries()].map(([host, entries]) => (
+            <optgroup key={host} label={host}>
+              {entries.map((entry) => (
+                <option key={entry.key} value={entry.key}>
+                  {entry.point.trait_ident}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        <span className="gbx-create-note">
+          {this.point === ""
+            ? "Without a host the sdk locator is written as a comment, because a locator pointing nowhere makes the gear fail to load."
+            : "The locator is written from this host, and this plugin is attached to it in the product."}
+        </span>
+      </label>
+    );
+  }
+
+  /**
+   * Pick the destination folder, rather than typing a path.
+   *
+   * The same dialog New Product uses for the same reason: a path typed into a
+   * text field is a path nobody checked, and the wizard already knows the
+   * refusal it will get. The field stays editable beside it -- a person who
+   * knows the path should not have to click through a tree for it.
+   */
+  protected async browseDestination(): Promise<void> {
+    const uri = await this.fileDialog.showOpenDialog({
+      title: "Folder for the new gear",
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+    });
+    if (uri === undefined) return;
+    this.destination = uri.path.fsPath().replace(/\\/g, "/").replace(/\/+$/, "");
+    this.destinationTouched = true;
+    this.schedulePreview();
     this.update();
   }
 
@@ -225,6 +456,7 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
               <option value="minimal">Minimal — a crate and a name</option>
             </select>
           </label>
+          {this.kind === "plugin" && this.renderHostPicker(connected)}
           <label>
             Gear id
             <input
@@ -275,16 +507,27 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
           </label>
           <label>
             Destination folder
-            <input
-              data-create-gear-destination
-              value={this.destination}
-              disabled={!connected}
-              onChange={(e) => {
-                this.destinationTouched = true;
-                this.destination = e.target.value;
-                this.schedulePreview();
-              }}
-            />
+            <span className="gbx-create-path">
+              <input
+                data-create-gear-destination
+                value={this.destination}
+                disabled={!connected}
+                onChange={(e) => {
+                  this.destinationTouched = true;
+                  this.destination = e.target.value;
+                  this.schedulePreview();
+                }}
+              />
+              <button
+                type="button"
+                className="gbx-choice"
+                data-create-gear-destination-browse
+                disabled={!connected}
+                onClick={() => void this.browseDestination()}
+              >
+                Choose…
+              </button>
+            </span>
           </label>
           <p className="gbx-create-sources-note">
             Writes <code>{this.destinationDir()}/{this.gearId}/</code> (gear.gdl, Cargo.toml,
@@ -357,6 +600,18 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
               → {this.plan.out_root}
             </div>
           )}
+          {/* **The file the kind actually decides.** The three paths above are
+              the same for all three shapes, so a preview of paths alone showed
+              Service and Plugin as identical answers -- which a UX pass read as
+              the choice doing nothing. What differs is this text, and it comes
+              from the engine's own dry run rather than being reconstructed here:
+              the same rule the Add Gear panel's "what will be written" follows. */}
+          {connected && this.plan !== undefined && (
+            <div className="gbx-create-gdl">
+              <div className="gbx-impact-title">gear.gdl</div>
+              <pre data-create-gear-gdl>{this.plan.gear_gdl}</pre>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -394,14 +649,9 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
       return;
     }
     const sourceId = sourceIdFor(at);
-    const added = await this.edits.applyProductEdits(
-      product,
-      [
-        { kind: "add_source", id: sourceId, at },
-        { kind: "add_gear", gear: gearId, source: sourceId },
-      ],
-      this.ownerIdentity,
-    );
+    const edits = this.editsFor(gearId, sourceId, at);
+    if (edits === undefined) return;
+    const added = await this.edits.applyProductEdits(product, edits, this.ownerIdentity);
     if (!added) {
       // **Said, not swallowed.** The scaffold succeeded and the description edit
       // did not, and the two are not a transaction -- so the crate exists and
@@ -435,11 +685,16 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
     this.applying = true;
     this.update();
     try {
+      // The same request the preview made, `dry_run` apart. Sending a different
+      // one would make the preview a description of something else, which is the
+      // rule ADR-0010 states as "a preview is not optional".
+      const plugin = this.pluginScaffold();
       const result = await this.service.scaffoldGear({
         id: this.gearId,
         name: this.name,
         version: this.version,
         kind: this.kind,
+        ...(plugin === undefined ? {} : { plugin }),
         destinationDir: this.destinationDir(),
         dryRun: false,
       });

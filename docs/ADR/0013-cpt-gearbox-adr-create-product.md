@@ -436,3 +436,84 @@ is also the serde default, so an older client keeps its behaviour.
 * All three shapes evaluate through the scaffold's own gate, each carries its kind's hints, and the
   plugin shape writes `sdk` and `plugin_interface` only as comments -- asserted line by line in
   `write_gate_tests.rs`, and in the browser by `adr-0010-ownership-tiers.spec.ts`.
+
+## Amendment 2026-09-08: the kind decides something, and a plugin lands inside its host
+
+A UX pass reported `New Gear -> Kind` as "semantically important but the choice barely changes the
+form or the preview". It was right about what a person could see and wrong about the cause, and the
+difference matters: the three kinds always wrote *different* `gear.gdl` text, but for a plugin every
+declaration in it was a **comment** -- an `sdk` locator pointing at a directory that does not exist
+makes the gear fail to load, and `plugin_interface` naming a trait no `pub trait` backs is refused
+(GBX0516), so a scaffold with nothing real to point at must not produce a description that is
+already wrong. And the preview listed file *paths*, which are the same three for all three kinds.
+
+So two things changed. The preview carries the description's own text
+(`ScaffoldGearResult.gear_gdl`) -- one field, because `FilePlan` is a preview line and stays one,
+and the dry run has already built and evaluated that text. And the wizard offers the extension
+points the catalogue declares: a host picked out of a loaded catalogue is a locator the engine
+itself projected, so there is nothing left to protect against and it is written **live**. Absent
+keeps the commented form, which is asserted rather than promised, because "I know it is a plugin but
+not yet whose" is a real state to be in and disabling Create over it would be worse than saying what
+will happen.
+
+Grouped by host and labelled by the trait, because the trait is the identity: the key is
+`sdk_lib::TraitIdent` and never a derived short name, which is the mistake GBX0206 exists to catch.
+
+### A plugin is not a selected gear
+
+`addToProduct` wrote `[add_source, add_gear]` whatever the kind, and for a plugin that is wrong twice
+over. In the corpus a plugin appears only as a `plugin("id")` entry inside its host's `use_gear`,
+never as a top-level `use_gear` of its own -- so the batch left it attached to nothing, which the
+resolver reports as GBX0518, *and* made it a gear the product had selected in its own right.
+
+The host has three states, and the engine's own refusal is what names them, because attaching needs
+a `use_gear` naming the host in `gears`:
+
+* **named directly** -- attach, and nothing else;
+* **in the closure only** -- promote it to an explicit `use_gear` first, in the same previewed batch
+  rather than as a side effect, because it is a visible change to the description;
+* **absent** -- refused. Adding the host is a decision about the product, not about this gear, so
+  the refusal names the host and what to do about it.
+
+### Attaching appends, and that is a data-loss fix
+
+`set_gear_plugins` replaces the list with bare `plugin("id")` entries -- its own documentation says
+profiles and per-plugin config stay manual -- so using it to attach one plugin to `payments-demo`'s
+`authn-resolver` would silently drop `profiles = ["dev", "local"]` and `config = {"mode":
+"accept_all"}` from the two entries already there. A visual authoring tool cannot own an edit that
+destroys what it did not write, so `ProductEdit::AddPlugin` and `add_gear_plugin` append instead:
+every other entry stays byte-for-byte, comments included, and a plugin the list already names is
+`Edit::Unchanged` -- compared by the name an entry *names*, not by rendered text, so an existing
+`plugin("x", profiles = [...])` counts as present. A `plugins` that is not a literal list is refused
+rather than guessed at.
+
+### Confirmation
+
+* `edit_tests.rs` runs the append against the shape the corpus actually has -- a multiline list with
+  comments between entries, a trailing comma, and both `profiles` and `config` on existing plugins --
+  because every one of those is a thing an append can destroy and the corpus is where they occur
+  together.
+* `write_gate_tests.rs` asserts the live locator still *evaluates*, which is the scaffold's own gate,
+  and that the client's wire shape carries `plugin` -- a field arriving under a name serde does not
+  expect deserialises to `None` and the scaffold quietly writes the commented form, which is a
+  working feature and a broken one that look identical in a preview.
+* `adr-0010-ownership-tiers.spec.ts` asserts the commented locator with no host and the live one
+  after choosing, through the picker, in the browser.
+* `scripts/store-smoke.mjs` checks the batch: the three host states, and that a plugin is never given
+  a top-level `use_gear`. Not a browser claim, and for two reasons that both hold -- the widget
+  cannot be constructed outside one, and the write lands in `products/`, which the harness refuses to
+  let a test dirty.
+
+### One trap worth writing down
+
+The preview is debounced, and it had no epoch guard: choosing `plugin` and then a host fires three
+dry runs, and the pane showed whichever *replied* last rather than whichever was *asked* last. The
+live locator appeared and was overwritten by the answer for `service`, which reads exactly like a
+picker that does nothing.
+
+Separately, and it cost more time than the bug: `playwright.config.ts` sets `reuseExistingServer`,
+and the Theia **backend** is loaded into that process at startup. A reused server keeps running the
+backend it started with, so a node-side field that was being sent looked like an engine ignoring it,
+through three layers of correct code. The frontend has no such trap -- it is served from disk and
+`global-setup` refuses a stale bundle.
+

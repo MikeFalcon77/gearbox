@@ -53,6 +53,13 @@ export default defineConfig({
     // hand, which is why a failed run and an unstarted one looked the same.
     command: "npm run start:browser",
     url: URL,
+    // **Reused, and that costs one thing worth knowing: a backend change needs
+    // the server killed.** The frontend is served from disk, so `npm run build`
+    // plus a reload picks it up -- and `global-setup` refuses a bundle older than
+    // its sources. The *backend* JS is loaded into this process at startup, so a
+    // reused server keeps running the code it started with. Measured the hard
+    // way: a node-side field that was being sent looked like an engine that
+    // ignored it, through three layers of correct code.
     reuseExistingServer: true,
     timeout: 180_000,
     stdout: "ignore",

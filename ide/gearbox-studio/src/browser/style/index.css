@@ -968,6 +968,20 @@
 }
 .gbx-config-reset:hover { background: var(--theia-list-hoverBackground); }
 
+/* New Gear's preview: the file plan, then the description the kind decides. The
+   paths are identical for all three shapes, so this text is the part of the
+   preview that answers the question the Kind control asks. */
+.gbx-create-gdl { margin-top: 12px; border-top: 1px solid var(--theia-editorGroup-border); padding-top: 8px; }
+.gbx-create-gdl pre {
+  margin: 4px 0 0; white-space: pre-wrap; word-break: break-word;
+  font-family: var(--theia-code-font-family); font-size: 0.9em;
+  max-height: 22em; overflow: auto;
+}
+/* A path field and the button that fills it, on one line. */
+.gbx-create-path { display: flex; gap: 6px; align-items: center; }
+.gbx-create-path input { flex: 1 1 auto; }
+.gbx-create-note { display: block; opacity: 0.7; font-size: 0.9em; margin-top: 2px; }
+
 /* Overview's figures. Buttons, not decoration: a count with no way through to
    the stage that can act on it is trivia, and this stage is where every open
    lands. */

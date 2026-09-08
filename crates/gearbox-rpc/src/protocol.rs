@@ -617,7 +617,7 @@ pub struct PluginScaffold {
     /// Optional for the reason the commented form gives: which trait a crate
     /// implements is read from the `impl`, so declaring it is an escape hatch for
     /// a crate implementing two, never a statement of intent.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_interface: Option<String>,
 }
 
