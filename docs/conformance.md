@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **160** — 154 built, 1 not built, 0 broken, 5 not observed.
+Claims: **161** — 155 built, 1 not built, 0 broken, 5 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -225,6 +225,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | it renders the contract graph | `PRD cpt-gearbox-fr-studio: renders the contract graph` | ✅ built |  |
 | it renders the process graph | `PRD cpt-gearbox-fr-studio: renders the process graph` | ✅ built |  |
 | it renders the cluster graph | `PRD cpt-gearbox-fr-studio: renders the cluster graph` | ✅ built |  |
+| the cluster view explains an empty resolution | `PRD cpt-gearbox-fr-studio: renders the cluster graph` | ✅ built |  |
 | it answers why for a selected decision | `PRD cpt-gearbox-fr-studio: answers why` | ✅ built |  |
 | it previews and applies generation | `PRD cpt-gearbox-fr-generate-preview` | ✅ built |  |
 | the resolver notice is gone, and gone because the engine says so | `PRD cpt-gearbox-fr-rpc-api` | ✅ built |  |

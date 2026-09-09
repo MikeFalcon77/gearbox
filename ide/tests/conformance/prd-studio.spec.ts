@@ -13,6 +13,7 @@ import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  closeGraph,
   expect,
   openExplain,
   openGenerate,
@@ -22,6 +23,7 @@ import {
   productSection,
   resetCatalogueView,
   revealCatalogue,
+  settled,
   test,
 } from "../fixtures/studio";
 
@@ -260,8 +262,15 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
       await expect(empty).toBeVisible();
       await expect(empty).toContainText("no gear in the catalogue currently requires it");
     } finally {
+      // The Graph goes away *before* the reload, and `settled` runs after it.
+      // Restoring the description is what this reload is for; leaving a screen
+      // that takes the room in front of it made the restorer re-activate the
+      // Graph seconds into the next test, which then waited a full minute for a
+      // Product header that was behind it. `closeGraph` says why in full.
+      await closeGraph(page);
       execFileSync("git", ["checkout", "--", PRODUCT], { cwd: REPO });
       await page.reload();
+      await settled(page);
     }
   });
 

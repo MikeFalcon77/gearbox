@@ -529,6 +529,35 @@ export async function openGraph(page: Page): Promise<void> {
 }
 
 /**
+ * Put the Graph away.
+ *
+ * **A test that reloads with the Graph in front hands the next one a moving
+ * shell.** `ShellLayoutRestorer` restores whatever was active, and the Graph is
+ * `availableIn: all` with `lifetime: "context-kind"`, so the first reconcile
+ * after a boot -- where `prev` is `undefined` -- deliberately keeps it: it is
+ * valid on Home. The restorer then activates it, and that activation is bounded
+ * by `waitForRevealed`, which polls with no timeout. Measured at 4.3 seconds
+ * after `ready`, which is long after `settled()` returns and long after the next
+ * test has revealed the Product -- the shell logged
+ * `Widget was activated, but did not accept focus after 2000ms: gearbox.graph`
+ * and `[data-resolved-profile]` sat hidden behind it for the full minute.
+ *
+ * None of that is the application misbehaving: a person who reloads with the
+ * Graph on screen should get the Graph back. It is a test leaving a screen that
+ * takes the room in front of the reload it performs for an unrelated reason.
+ *
+ * By the tab's close icon rather than the toggle command, for the reason
+ * [`revealView`] gives about the palette being a second stateful thing to get
+ * wrong. Absent tab is not an error: the caller wants it gone, and it is.
+ */
+export async function closeGraph(page: Page): Promise<void> {
+  const tab = page.locator('[id="shell-tab-gearbox.graph"]');
+  if ((await tab.count()) === 0) return;
+  await tab.locator(".lm-TabBar-tabCloseIcon").click();
+  await page.locator(".gearbox-graph").waitFor({ state: "detached", timeout: 30_000 });
+}
+
+/**
  * Open the Graph panel and switch it to one of its four views.
  *
  * The switch is a button rather than a Theia tab, so this clicks it and then
