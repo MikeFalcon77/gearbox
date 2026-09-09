@@ -108,8 +108,19 @@ test.describe("Git, from the VS Code extension", () => {
     // root and waiting for the probe row is the same claim, and it is stable
     // across run order.
     await revealLeft(studio.page, /^Source Control/);
+    // The *row*, not the name inside it, and that is not a stylistic choice.
+    // `theia-scm-repository-name` is a span with `flex: 1 1 0%` and no floor
+    // beside a branch button that never shrinks, so on a branch whose name is
+    // long enough the span is squeezed to zero width -- present in the DOM with
+    // the right text, and unclickable. Measured at 0px on
+    // `fix/cluster-generation-and-self-hosted-target`, which is how this was
+    // found: the claim above passes throughout, because `allTextContents()`
+    // does not care about visibility, and this one timed out for two minutes.
+    // The row carries the repository as a `title`, is the thing a person clicks
+    // anyway, and is 257x22 whatever the branch is called. `index.css` fixes the
+    // squeeze itself; this makes the claim independent of it.
     await studio.page
-      .locator(".theia-scm-repository-name", { hasText: "gearbox-builder" })
+      .locator('.theia-scm-repository-item[title$="/gearbox-builder"]')
       .click();
 
     // The *count*, not the probe's row. The change list is virtualized, so a row

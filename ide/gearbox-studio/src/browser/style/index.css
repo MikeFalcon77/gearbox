@@ -1089,3 +1089,34 @@
   background: var(--theia-input-background, var(--theia-editor-background));
 }
 .gbx-kv-block .gbx-kv { padding: 2px 0; }
+
+/* The one place this stylesheet overrides Theia's own classes rather than its
+   variables, and the reason is that `@theia/scm` lets a branch name erase the
+   thing the panel exists to distinguish.
+
+   A repository row is a flex line: icon, then `-label` holding the repository
+   name at `flex: 1 1 0%; min-width: 0`, then `-actions` holding the branch
+   button at `flex: 0 0 auto`. The branch button therefore takes whatever its
+   text needs and never gives any back, and the label -- with a zero basis and
+   no floor -- absorbs the entire deficit. Measured on a 257px panel:
+   `fix/cluster-generation-and-self-hosted-target` renders the button at 271px,
+   which is wider than the row, so the name collapses to *zero* and the row
+   shows an icon and a branch and does not say which repository it is. In a
+   multi-root workspace, which is the whole reason this panel is here, that is
+   the one fact the row owes the reader.
+
+   So the name gets a floor and the branch gives way instead, truncated with an
+   ellipsis: a shortened branch is still recognisable, an absent repository name
+   is not. The floor is 8em because that is what fits the two names this
+   workspace actually holds -- `gearbox-builder` measures 97px -- and a floor
+   that truncates the name it exists to protect would be half a fix. `min-width: 0` is required on each nesting level because a flex item
+   defaults to `auto`, which refuses to shrink below its content. */
+.theia-scm-repository-label { min-width: 8em; }
+.theia-scm-repository-actions { flex-shrink: 1; min-width: 0; }
+.theia-scm-repository-status-commands { min-width: 0; }
+.theia-scm-repository-status-command { min-width: 0; overflow: hidden; }
+.theia-scm-repository-status-command > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
