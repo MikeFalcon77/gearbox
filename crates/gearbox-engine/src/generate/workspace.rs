@@ -165,7 +165,7 @@ pub fn target_dir(input: &GenerateInput<'_>) -> String {
 /// output root to it exists -- on which see [`cargo_config`], which then writes
 /// nothing rather than a path cargo would resolve elsewhere.
 fn shared_target_dir(input: &GenerateInput<'_>) -> Option<String> {
-    let declared = input.lock.host_workers.as_ref()?.target_dir.as_deref()?;
+    let declared = input.lock.self_hosted.as_ref()?.target_dir.as_deref()?;
     let absolute = paths::normalize(&input.product_dir?.join(declared));
     let relative = paths::relative(input.out_root, &absolute)?;
     Some(paths::to_slash(&relative))
@@ -194,7 +194,7 @@ pub fn cargo_config(input: &GenerateInput<'_>) -> Result<Option<FileEntry>, Gene
 
 /// Which Cargo profile directory the host should exec.
 ///
-/// Kubernetes images are release artefacts. A `host_workers` profile names the
+/// Kubernetes images are release artefacts. A `self_hosted` profile names the
 /// Cargo profile in the description so two generates of the same product do not
 /// drift with the operator's environment. Cargo's `dev` profile writes under
 /// `debug/`.
@@ -203,7 +203,7 @@ fn cargo_profile_dir(input: &GenerateInput<'_>) -> String {
         input.lock.kubernetes.is_some(),
         input
             .lock
-            .host_workers
+            .self_hosted
             .as_ref()
             .and_then(|h| h.cargo_profile.as_deref()),
     )

@@ -402,7 +402,10 @@ struct SubchartValues {
     name_override: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     fullname_override: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "super::json::option"
+    )]
     pod_annotations: Option<serde_json::Value>,
     /// Labels for this subchart's resources only.
     ///
@@ -423,19 +426,40 @@ struct SubchartValues {
     /// make the next `helm upgrade` fail rather than roll.
     #[serde(skip_serializing_if = "Option::is_none")]
     pod_labels: Option<BTreeMap<String, String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "super::json::option"
+    )]
     node_selector: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "super::json::option"
+    )]
     tolerations: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "super::json::option"
+    )]
     affinity: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "super::json::option"
+    )]
     resources: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "super::json::option"
+    )]
     extra_env: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "super::json::option"
+    )]
     extra_volumes: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "super::json::option"
+    )]
     extra_volume_mounts: Option<serde_json::Value>,
     /// The pod's security context, written out rather than hidden in a helper.
     ///
@@ -490,21 +514,33 @@ struct SubchartValues {
     automount_service_account_token: bool,
     /// Rollout strategy. Free-form: `RollingUpdate` percentages and `Recreate`
     /// have different shapes and Kubernetes owns both.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "super::json::option"
+    )]
     strategy: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     termination_grace_period_seconds: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     priority_class_name: Option<String>,
     /// Spread constraints, the standard way to survive a zone failure.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "super::json::option"
+    )]
     topology_spread_constraints: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     revision_history_limit: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "super::json::option"
+    )]
     init_containers: Option<serde_json::Value>,
     /// Sidecars the operator adds -- a log shipper, a proxy, a secrets agent.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "super::json::option"
+    )]
     extra_containers: Option<serde_json::Value>,
     /// Values this generator makes no promises about.
     ///
@@ -519,6 +555,7 @@ struct SubchartValues {
     /// Everything outside this key stays closed. Inside it nothing is checked,
     /// and that is the honest bargain: Gearbox does not know what a template it
     /// did not write is reading.
+    #[serde(serialize_with = "super::json::btree_map")]
     custom: BTreeMap<String, serde_json::Value>,
     /// Name of a Secret the operator already created. Never a credential.
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -59,48 +59,6 @@ struct ServerSection {
     home_dir: String,
 }
 
-/// Serialize a `serde_json` tree the way a YAML backend can read it.
-///
-/// `serde_json::Number` serializes itself through a private newtype token that
-/// only `serde_json`'s own serializer understands. Any other backend writes the
-/// token out verbatim, which is how `pool_max_size = 10` reached a generated
-/// configuration as `{"$serde_json::private::Number": "10"}` and made the
-/// cluster gear fail to start with `invalid type: map, expected u32`. Every
-/// other value shape passes through unchanged; only numbers were ever wrong,
-/// and they were wrong everywhere a gear's configuration carries one.
-struct Json<'a>(&'a Value);
-
-impl Serialize for Json<'_> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self.0 {
-            Value::Null => serializer.serialize_unit(),
-            Value::Bool(b) => serializer.serialize_bool(*b),
-            Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    serializer.serialize_i64(i)
-                } else if let Some(u) = n.as_u64() {
-                    serializer.serialize_u64(u)
-                } else if let Some(f) = n.as_f64() {
-                    serializer.serialize_f64(f)
-                } else {
-                    // `Number` is one of the three above by construction.
-                    serializer.serialize_str(&n.to_string())
-                }
-            }
-            Value::String(v) => serializer.serialize_str(v),
-            Value::Array(items) => serializer.collect_seq(items.iter().map(Json)),
-            Value::Object(map) => serializer.collect_map(map.iter().map(|(k, v)| (k, Json(v)))),
-        }
-    }
-}
-
-fn json_map<S: serde::Serializer>(
-    map: &Map<String, Value>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serializer.collect_map(map.iter().map(|(k, v)| (k, Json(v))))
-}
-
 #[derive(Serialize)]
 struct GearSection {
     /// Present only for a gear the host spawns out of process.
@@ -111,7 +69,7 @@ struct GearSection {
     /// nothing to configure still has to appear or the composed set and the
     /// configured set stop matching -- and that match is one of the two oracles
     /// this milestone is verified by.
-    #[serde(serialize_with = "json_map")]
+    #[serde(serialize_with = "super::json::map")]
     config: Map<String, Value>,
 }
 
@@ -176,7 +134,7 @@ pub fn app_config(
 
     write_endpoints(process, &mut gears)?;
     write_consumer_wiring(input, process, &mut gears);
-    write_cluster(input, process, &mut gears);
+    write_cluster(input, &mut gears);
     write_spawns(input, process, &mut gears);
 
     let home_dir = if input.lock.kubernetes.is_some() {
@@ -292,21 +250,31 @@ fn write_consumer_wiring(
 /// what engages that default. Writing `leader_election: { provider: cache }`
 /// would name a provider that is not registered and fail startup, so the
 /// omission is the instruction, not the absence of one.
-fn write_cluster(
-    input: &GenerateInput<'_>,
-    process: &ResolvedProcess,
-    gears: &mut BTreeMap<String, GearSection>,
-) {
+fn write_cluster(input: &GenerateInput<'_>, gears: &mut BTreeMap<String, GearSection>) {
     let Some(section) = gears.get_mut(CLUSTER_GEAR) else {
         return;
     };
 
+    // **Every binding in the lock, not only the ones a co-located gear asked
+    // for.** This used to filter on `binding.requesters.any(process.contains)`,
+    // which reads plausibly -- configure what this process needs -- and is
+    // wrong, because the section being written is not the requester's. It is the
+    // *cluster gear's*, and that gear serves every scope in the product to
+    // whoever asks, in-process or over its gRPC surface.
+    //
+    // The filter therefore produced its worst output exactly where the topology
+    // was most real. In the demo's `prod` profile a process pin puts the
+    // requester in `audit` while `cluster` stays in `api-gateway`: the two never
+    // meet, the intersection is empty, and the cluster gear was configured with
+    // `config: {}` -- no postgres, no credential, nothing to serve -- while the
+    // lock said the scope resolved. Green resolve, green generate, wrong file.
+    //
+    // Co-location is not the constraint it was taken for. The cluster gear
+    // declares `grpc` and `rest` among its `runtime_caps`, and [`super::helm`]
+    // already emits a dedicated `cluster` Service on its gRPC port for whatever
+    // process holds it, which is what a remote consumer resolves through.
     let mut profiles: Map<String, Value> = Map::new();
     for binding in &input.lock.cluster {
-        // Only the primitives this process's gears actually asked for.
-        if !binding.requesters.iter().any(|gear| process.contains(gear)) {
-            continue;
-        }
         let ClusterResolution::Provider { name } = &binding.resolved else {
             continue;
         };

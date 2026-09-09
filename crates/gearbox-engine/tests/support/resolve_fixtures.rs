@@ -269,12 +269,12 @@ pub fn catalogue_with_overlap() -> Catalogue {
 }
 
 /// `intent`, but for a profile that can hold several processes.
-pub fn host_workers_intent(gears: &[&str]) -> ProductIntent {
+pub fn self_hosted_intent(gears: &[&str]) -> ProductIntent {
     let mut intent = intent(gears);
     let local = ProfileId::new("local").unwrap();
     intent.profiles.insert(
         local.clone(),
-        gearbox_ir::DeploymentProfileDecl::HostWorkers {
+        gearbox_ir::DeploymentProfileDecl::SelfHosted {
             id: local,
             host: gearbox_ir::ProcessId::new("gateway").unwrap(),
             discovery: gearbox_ir::Discovery::Static,
@@ -307,8 +307,8 @@ pub fn catalogue_of(gears: Vec<GearDescriptor>) -> Catalogue {
     catalogue
 }
 
-/// An intent with one `host_workers` profile, tunable.
-pub fn host_workers(
+/// An intent with one `self_hosted` profile, tunable.
+pub fn self_hosted(
     gears: &[&str],
     discovery: gearbox_ir::Discovery,
     target_dir: Option<&str>,
@@ -317,7 +317,7 @@ pub fn host_workers(
     let local = ProfileId::new("local").unwrap();
     intent.profiles.insert(
         local.clone(),
-        gearbox_ir::DeploymentProfileDecl::HostWorkers {
+        gearbox_ir::DeploymentProfileDecl::SelfHosted {
             id: local,
             host: gearbox_ir::ProcessId::new("host").unwrap(),
             discovery,
@@ -391,6 +391,7 @@ pub fn postgres() -> ClusterProviderDecl {
         .collect(),
         process_local: false,
         needs_credentials: true,
+        runtime_determined: BTreeSet::new(),
     }
 }
 
@@ -412,6 +413,27 @@ pub fn standalone() -> ClusterProviderDecl {
         .collect(),
         process_local: true,
         needs_credentials: false,
+        runtime_determined: BTreeSet::new(),
+    }
+}
+
+/// A backend that decides its capabilities at run time, as `redis` does.
+///
+/// Copied from the real shape rather than invented: it answers cache and lock,
+/// is not process-local, needs credentials, and declares **no** capability
+/// because `consistency()` returns what its startup preflight computed.
+pub fn runtime_determined_provider() -> ClusterProviderDecl {
+    ClusterProviderDecl {
+        name: "redis".to_owned(),
+        primitives: [ClusterPrimitive::Cache, ClusterPrimitive::Lock]
+            .into_iter()
+            .collect(),
+        capabilities: BTreeMap::new(),
+        process_local: false,
+        needs_credentials: true,
+        runtime_determined: [ClusterPrimitive::Cache, ClusterPrimitive::Lock]
+            .into_iter()
+            .collect(),
     }
 }
 

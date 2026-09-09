@@ -421,7 +421,7 @@ diagnostic_codes! {
     /// API gateway, so a REST host there would never receive traffic.
     TopologyRestHostInWorker = "GBX0312", Topology, Error, true, "REST host in a worker process";
 
-    /// A `host_workers` profile produced workers but no host to spawn them.
+    /// A `self_hosted` profile produced workers but no host to spawn them.
     ///
     /// Spawn specs are attached to the host process. Without one they are
     /// dropped, and the workers the lock named never start.
@@ -609,6 +609,24 @@ diagnostic_codes! {
     /// client is not a boundary (`cpt-gearbox-fr-rpc-writes-opt-in`).
     PluginPointNotDeclared = "GBX0518", Cluster, Error, false, "plugin fills a point its host does not declare";
 
+    /// A cluster backend decides a capability at run time, so none is claimed
+    /// for it at composition time.
+    ///
+    /// Not a defect and not a gap in the projection: the backend genuinely has
+    /// no answer to give yet. The redis cache reads its consistency off the
+    /// server it connects to -- single node and cluster mode differ -- so
+    /// `consistency()` returns a field its startup preflight set, and
+    /// `features()` computes prefix-watch the same way. Nothing in Rust states
+    /// the value, so nothing can be projected as if it did.
+    ///
+    /// What follows is exactly right and worth saying out loud: such a provider
+    /// can be named and configured like any other, answers the primitives it
+    /// registers for, and satisfies **only a requirement that asks for no
+    /// capability**. A `requires = [cluster.cache(capabilities = [...])]` is
+    /// refused against it, because at composition time nobody can promise what
+    /// depends on the server the operator will point at.
+    ClusterCapabilityRuntimeDetermined = "GBX0520", Cluster, Info, true, "cluster backend decides a capability at run time";
+
     // ---------------------------------------------------------------- GBX06xx
     /// Roles were declared. The runtime has no role concept.
     ///
@@ -653,18 +671,24 @@ diagnostic_codes! {
     /// It is projected onto per-gear runtime kind and deployment topology.
     GapProfileNotRuntimeType = "GBX0606", RuntimeGap, Hint, true, "deployment profile is not a runtime type";
 
-    /// A cluster requirement was modelled as a co-location dependency because
-    /// the cluster gear has no remote surface.
+    /// A cluster consumer declares `deps = [cluster]`, which now only pins it.
     ///
-    /// Cluster is an in-process library today: it registers backends into the
-    /// process-local `ClientHub`, and a consumer resolves them by a synchronous
-    /// scoped lookup with no remote path and no fallback. A consumer must
-    /// therefore be in the same process, which is what `deps = [cluster]`
-    /// expresses. The decided direction is a separately deployable cluster gear,
-    /// at which point the edge becomes severable -- but that design is not
-    /// implemented, so this hint records the constraint rather than anticipating
-    /// its removal.
-    GapClusterNotDeployable = "GBX0607", RuntimeGap, Hint, true, "cluster has no remote surface, so its consumers must be co-located";
+    /// **The premise this code was written on has been withdrawn.** It read
+    /// "cluster has no remote surface, so its consumers must be co-located",
+    /// and that was true while cluster was an in-process library. It is not
+    /// now: the gear is deployable out of process, `RemoteClusterClient`
+    /// implements the backend traits over gRPC, and a consumer resolves through
+    /// the process's single `dyn ClusterClient` on either side of a boundary.
+    ///
+    /// So the dep buys nothing and still costs: `deps` is a hard topo-sort
+    /// edge, so declaring it pins the gear into cluster's process and makes an
+    /// out-of-process build fail outright with
+    /// `RegistryError::UnknownDependency`.
+    ///
+    /// Kept as a hint, not raised to a warning: staying co-located is a
+    /// legitimate choice, and a gear that will never be spawned loses nothing
+    /// by declaring the edge.
+    GapClusterNotDeployable = "GBX0607", RuntimeGap, Hint, true, "`deps = [cluster]` pins a consumer that no longer needs pinning";
 
     // ---------------------------------------------------------------- GBX07xx
     /// Generation would overwrite an operator-owned file whose edits cannot be

@@ -693,17 +693,29 @@ fn report_unknown_category(
     );
 }
 
-/// Record that a cluster requirement is a co-location constraint today.
+/// Record that `deps = [cluster]` now costs more than it buys.
 ///
-/// Not a complaint about the description -- `deps = [cluster]` is the correct and
-/// only way to express this right now. The hint exists because the constraint is
-/// invisible in the description: nothing in `cluster.cache(...)` hints that it
-/// pins the consumer into the cluster gear's process, and a reader planning a
-/// multi-process topology needs to know before the resolver refuses.
+/// **This hint used to say the opposite, and the reversal is the point.** It
+/// read "keep `deps = [cluster]`; it is what makes the requirement resolvable
+/// today", on the premise that the cluster gear had no remote surface and a
+/// consumer therefore had to share its process. That premise is gone: the gear
+/// is deployable out of process, `RemoteClusterClient` implements the same
+/// backend traits over gRPC, and a consumer resolves through the process's
+/// single `dyn ClusterClient` whichever side of a boundary it is on. The
+/// corpus proves it -- `api-contracts-consumer` declares no such dep and
+/// resolves its scope in all three profiles.
 ///
-/// The decided direction is a separately deployable cluster gear, which would
-/// make this edge severable. That design is unimplemented, so this states
-/// today's constraint and cites where the other one is written down.
+/// What is left is a real cost with no remaining benefit. `deps` is a hard
+/// topo-sort edge, so a gear that declares it pins itself into the cluster
+/// gear's process *and* cannot be spawned out of process at all: the registry
+/// build fails with `RegistryError::UnknownDependency` when the named gear is
+/// not linked in. So the advice inverts -- the edge can go, and the
+/// requirement still resolves.
+///
+/// Still a hint rather than a warning: a co-located consumer is a legitimate
+/// topology, and one that never intends to be spawned loses nothing by
+/// declaring the dep. It is the reader planning a multi-process topology who
+/// needs to know, before the registry refuses to build at startup.
 fn report_cluster_colocation(
     uri: &str,
     id: &GearId,
@@ -727,20 +739,25 @@ fn report_cluster_colocation(
         Diagnostic::new(
             DiagnosticCode::GapClusterNotDeployable,
             format!(
-                "gear `{id}` requires {} cluster primitive(s), which pins it into the same \
-                 process as `{CLUSTER_GEAR_NAME}`: the cluster gear registers backends in the \
-                 process-local `ClientHub` and exposes no remote surface, so a consumer in \
-                 another process resolves nothing",
+                "gear `{id}` requires {} cluster primitive(s) and also declares \
+                 `deps = [{CLUSTER_GEAR_NAME}]`, which pins it into that gear's process and \
+                 stops it being spawned out of process at all",
                 requires.len()
             ),
         )
         .at(Location::file(uri.to_owned()))
         .with_evidence(
-            "gears/system/cluster/cluster-sdk/src/cache/resolver.rs (scoped ClientHub lookup, \
-             no remote path); gears/system/cluster/docs/DESIGN-DEPLOYABLE-GEAR.md (deployable \
-             cluster is proposed, not implemented)",
+            "gears/system/cluster/cluster-sdk/src/cache/resolver.rs:64 (one `dyn ClusterClient` \
+             per process, which is what a remote consumer resolves through); \
+             gears/system/cluster/cluster/tests/consumer_wiring.rs:76 \
+             (`RegistryError::UnknownDependency` when the named gear is not linked in)",
         )
-        .with_help("keep `deps = [cluster]`; it is what makes the requirement resolvable today"),
+        .with_help(
+            "the dep is no longer needed for the requirement to resolve: the cluster gear is \
+             deployable out of process and serves its scopes over gRPC, so a consumer reaches it \
+             from another process. Drop `deps` unless this gear is meant to stay co-located -- \
+             keeping it is what makes an out-of-process build fail",
+        ),
     );
 }
 

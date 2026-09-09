@@ -704,7 +704,7 @@ fn deployment_profile(
             id: id.clone(),
             declared_at: record.declared_at.clone(),
         }),
-        "host-workers" => {
+        "self-hosted" => {
             let raw = record.host.clone().unwrap_or_default();
             let host = match ProcessId::new(raw.clone()) {
                 Ok(host) => host,
@@ -730,7 +730,7 @@ fn deployment_profile(
                     return None;
                 }
             };
-            Some(DeploymentProfileDecl::HostWorkers {
+            Some(DeploymentProfileDecl::SelfHosted {
                 id: id.clone(),
                 host,
                 discovery: discovery(uri, id, record.discovery.as_deref(), diagnostics)?,
@@ -750,7 +750,7 @@ fn deployment_profile(
             diagnostics.push(invalid(
                 uri,
                 format!("profile `{id}` has unknown kind `{other}`"),
-                "use `embedded(...)`, `host_workers(...)` or `kubernetes(...)`",
+                "use `embedded(...)`, `self_hosted(...)` or `kubernetes(...)`",
             ));
             None
         }

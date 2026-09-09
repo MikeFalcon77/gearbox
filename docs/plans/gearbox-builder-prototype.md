@@ -10,9 +10,16 @@ that do not exist.
 
 This plan builds a **working vertical slice** of that architecture, with one hard rule: **GDL may
 only express what `gears-rust` actually implements today.** Everything the vision assumes but the
-runtime lacks (roles, shards, per-instance addressability, Redis/K8s-Lease providers, a K8s
+runtime lacks (roles, shards, per-instance addressability, a K8s-Lease provider, a K8s
 EndpointResolver, deployment profiles as a runtime type) is either rejected or downgraded to an
 explicit diagnostic carrying a `file:line` citation — never silently faked.
+
+A redis provider has since landed in `gears-rust`, and it turned that rule over in an instructive
+way: the provider is real and configurable, but its capabilities are **not** things the runtime
+implements *today* in any readable sense — it decides consistency and prefix-watch from the server it
+connects to at startup. So GDL expresses what can be expressed (the provider, its primitives, that
+it needs credentials) and GBX0520 states the rest, which is the same rule applied to a case it did
+not anticipate: a fact that exists but not yet.
 
 The prototype proves the vision's central promise end to end: **one gear source, three deployment
 topologies, zero changes to business code** — and it produces the artefacts that make "gear = pod"
@@ -66,9 +73,9 @@ Verified against `gears-rust` (all claims spot-checked in source):
 | `EndpointResolver` impls: `Directory` (gRPC), `Static` (config), `Null`. **No K8s-DNS resolver** | `discovery.rs` | k8s profile must use `Static` and say so |
 | `ClientWiring::{Local, Rest{endpoint,tuning}, Grpc{endpoint,tuning}}`; key `gears.<gear>.config.client_wiring.<contract_snake>`; absent ⇒ Local | `toolkit-contract/src/wiring.rs` | transports are exactly `{local, rest, grpc}` |
 | Deployment profiles are **prose only** — `grep HostWorkers --include=*.rs` = 0 hits; `DESIGN.md:230` has an unchecked box. What exists is per-gear `RuntimeKind::{Local,Oop}` + `ExecutionConfig` | `bootstrap/config/mod.rs:86-93` | profile is a *Gearbox* concept projected onto per-gear runtime + topology |
-| Only `LocalProcessBackend` is implemented; `BackendKind::{K8s,Static,Mock}` are bare variants | `libs/toolkit/src/backends/mod.rs:12-19` | host-workers = one machine, full stop |
-| Cluster registry is **hardcoded Rust**: cache `{standalone, postgres}`, lock `{postgres}`, leader-election `{}` (always SDK CAS default) | `gears/system/cluster/cluster/src/gear.rs:47-53` | no Redis/etcd/NATS/K8s-Lease. Codegen must emit Rust, not just YAML |
-| Cache capability matrix is **asymmetric**: `standalone` → linearizable ✔ prefix_watch ✔ but process-local; `postgres` → linearizable ✔ prefix_watch ✘ | `CacheFeatures::new(true)` in standalone `cache.rs:281`; `new(false)` in postgres `cache/mod.rs:174` | `cache(linearizable + prefix_watch)` is **unsatisfiable multi-process** — the best real capability demo in the repo |
+| Only `LocalProcessBackend` is implemented; `BackendKind::{K8s,Static,Mock}` are bare variants | `libs/toolkit/src/backends/mod.rs:12-19` | self-hosted = one machine, full stop |
+| Cluster registry is **hardcoded Rust**: cache `{standalone, postgres, redis}`, lock `{postgres, redis}`, leader-election `{}` (always SDK CAS default) | `gears/system/cluster/cluster/src/gear.rs:120-127` | redis landed after this row was first written; still no etcd/NATS/K8s-Lease. Codegen must emit Rust, not just YAML |
+| Cache capability matrix is **asymmetric**: `standalone` → linearizable ✔ prefix_watch ✔ but process-local; `postgres` → linearizable ✔ prefix_watch ✘; `redis` → declares neither | `CacheFeatures::new(true)` in standalone `cache.rs:281`; `new(false)` in postgres `cache/mod.rs:174`; computed from the connected server in redis `cache/mod.rs:347-358` | `cache(linearizable + prefix_watch)` is **unsatisfiable multi-process** — the best real capability demo in the repo. redis is a third shape: its capabilities are not composition-time facts at all, which is GBX0520 |
 | **No `role` concept.** OoP directory identity is `OopServeOptions.gear_name`, hardcoded per binary, no config override. Labels exist for OoP only, equality-AND only | `bootstrap/oop.rs`, `system-sdks/.../labels.rs` | roles/shards ⇒ diagnostic, excluded from resolution |
 | `gears.<c>.config.consumer_wiring.<dep>` **cannot** be set via `APP__` env — `remap_gear_env_key` remaps `_`→`-` only in the segment right after `gears` | `config/mod.rs:429` | Helm must put consumer wiring in the **ConfigMap**, never env |
 | `registered_gears.rs` is real and load-bearing; its own header asks for a generator | `apps/cf-gears-example-server/src/registered_gears.rs` | exactly what we generate |
@@ -176,7 +183,7 @@ re-parses shared crates cannot be cheap however it is scheduled. Before the cach
 
 Functions: `gear`, `product`, `cargo`, `provide`, `consume`, `rest`, `grpc`, `lifecycle`,
 `endpoint`, `provider`, `cluster_profile`, `use_gear`, `source`/`path`/`git`/`registry`,
-`embedded`/`host_workers`/`kubernetes`, `bind`, `process`, `fail`.
+`embedded`/`self_hosted`/`kubernetes`, `bind`, `process`, `fail`.
 
 Frozen namespaces (a typo is an `AttributeError` at eval time, not a silently-null string):
 - `cap.{db,rest,rest_host,stateful,system,grpc_hub,grpc}` — the closed 7
@@ -366,7 +373,7 @@ product(
     sources = [source(id = "gears-rust", at = path("../../../gears-rust"))],
     profiles = [
         embedded(id = "dev"),
-        host_workers(id = "local", host = "gateway", worker_discovery = "directory",
+        self_hosted(id = "local", host = "gateway", worker_discovery = "directory",
                      target_dir = "../../../gears-rust/target"),
         kubernetes(id = "prod", discovery = "static", namespace = "payments",
                    image_registry = "registry.example.com/payments"),
@@ -524,20 +531,20 @@ its ID tuple; ties break lexicographically.
    **Never cut** (direct `hub.get::<dyn X>()` is common and splitting breaks at runtime). GBX0401.
    *This report is a deliverable, not a limitation.*
 4. **Process partition.** `Embedded` → exactly one process (anchor = the unique `rest_host` gear);
-   any split request or `replicas > 1` → GBX0307 + downgrade. `HostWorkers`/`Kubernetes` → anchors
+   any split request or `replicas > 1` → GBX0307 + downgrade. `SelfHosted`/`Kubernetes` → anchors
    = host ∪ chosen-cut providers ∪ pins; **one deterministic pass** over cut candidates (no scoring,
    no search — vision §41); `P(a).gears = topo_sort(closure(a))`, so processes **overlap**.
 5. **Structural checks.** >1 `rest_host`/`grpc_hub` per process → GBX0303/0304 (mirrors
    `registry.rs`); `rest_host` inside a Worker → GBX0312 (workers serve via `oop_serve`'s own
    router); Directory discovery without `gear-orchestrator` → GBX0308 and without `grpc-hub` →
    GBX0309 (`run_oop_spawn_phase` blocks on `wait_for_grpc_hub_endpoint()`); missing `target_dir` →
-   GBX0310; orphan gear → GBX0311. `HostWorkers` always emits GBX0604 (local OS processes only).
+   GBX0310; orphan gear → GBX0311. `SelfHosted` always emits GBX0604 (local OS processes only).
 6. **Binding derivation.** Same process ⇒ `Local` / `ColocatedLocal` / no endpoint. Different ⇒
    `Remote`; transport priority: explicit-and-supported → gRPC requested (GBX0402, downgrade to
    REST) → provider ∩ `{Rest}` → else GBX0406 and revert to Local by merging the processes.
    Mechanism `ConsumesStatic` or `ConsumesDirectory` per profile discovery. Env-only wiring request
    → GBX0409 (`remap_gear_env_key` cannot express it).
-7. **Cluster matching** over exactly `{standalone, postgres}` + SDK CAS defaults. Table-driven from
+7. **Cluster matching** over `{standalone, postgres, redis}` + SDK CAS defaults. Table-driven from
    `ClusterProviderDecl.capabilities`, which is itself projected from the `with_*_provider` calls by
    `gearbox-verify` rather than declared and diffed (ADR 0002), so a provider added in Rust cannot
    go missing from the table. Auto ranking:
@@ -593,7 +600,7 @@ schema_version = 1
 
 [product]
 id = "payments-demo"; version = "0.1.0"; profile = "local"
-profile_kind = "host-workers"; gearbox_version = "0.1.0"; lock_hash = "blake3:…"
+profile_kind = "self-hosted"; gearbox_version = "0.1.0"; lock_hash = "blake3:…"
 
 [sources.gears-rust]
 kind = "path"; location = "../../../gears-rust"; digest = "git:8f3c1a9b…"
@@ -701,7 +708,7 @@ dependency set *is* the feature switch. Validation is therefore semantic (the or
 **Generated `Cargo.toml`** path-deps into `gears-rust` with relative paths. Those crates use
 `edition.workspace = true`, resolved from their own workspace root because they physically live
 there, so external path deps work unchanged. Set `CARGO_TARGET_DIR` to `gears-rust/target` — that
-is what `host_workers(target_dir = …)` is for.
+is what `self_hosted(target_dir = …)` is for.
 
 **Generated AppConfig** writes `runtime: { type: oop, execution: {...} }` for worker anchors (the
 key must exist — `build_oop_spawn_options` iterates `config.gears.keys()`), and deliberately writes
@@ -2322,7 +2329,7 @@ workspace-member entries. Nothing else in that repo changes.
 | **M3** — **done** | `gearbox validate` | `gearbox validate --root ../gears-rust` → 0 errors, and with `--product` → 0 errors on the real product; GBX0208 and GBX0301 each proved against the real tree (`bss-ledger` is undescribed, `api-gatewey` is a typo); GBX0209 proved on temporary trees because the repository has no wrong declaration to point at; GBX0207 retired with a differential test in its place | M2, M8a |
 | **M4** — **done** | Resolver + explain + lock | all three profiles diff clean against `fixtures/*/product.lock`; every GBX03xx–06xx code reachable; determinism loop | M8a |
 | **M5** — **done** | Crate + config generators; **embedded runs** | acceptance §12 step 2 in full | — |
-| **M6** — **done** | Host-workers | `make oop-run`: the generated host starts the generated worker, the worker serves its own probes, and the `PaymentApi@v1` binding resolves **remote through the directory**. `payments-audit` was never needed -- the corpus supplied a severable pair. The run now also starts
+| **M6** — **done** | Self-hosted | `make oop-run`: the generated host starts the generated worker, the worker serves its own probes, and the `PaymentApi@v1` binding resolves **remote through the directory**. `payments-audit` was never needed -- the corpus supplied a severable pair. The run now also starts
 the cluster gear against a real postgres, because `api-contracts-consumer` requires the
 `event-broker` scope and `local` binds it to that backend: the backend runs its migrations and
 creates `cluster.cluster_cache` and `cluster.cluster_lock`. Two generator defects had to be fixed
@@ -2462,7 +2469,7 @@ set of names. Verified stable over three consecutive runs.
 Run it; assert both REST surfaces answer and `WireOutcome::Local` appears for all three bindings
 with no readiness gate.
 
-**Step 3 — host-workers.** `make oop-run`. **Done**, and the step as first written could not have
+**Step 3 — self-hosted.** `make oop-run`. **Done**, and the step as first written could not have
 been: it named `gbx-payments-audit`, a gear nobody wrote. It was also right about Postgres for the wrong
 reason: at the time no gear demanded a cluster primitive, so the declared postgres profile resolved
 to nothing. `api-contracts-consumer` now requires the `event-broker` scope, `local` binds it to
@@ -2540,8 +2547,10 @@ narrative; Generate shows 0 conflicts, and after hand-editing `values.yaml` a re
    client only; GBX0402 downgrades rather than emitting config that silently does nothing.
 4. **Roles, shards, per-instance addressing.** GBX0601/0602 refuse to pretend; `declared_roles` is
    stored for forward-compat and contributes nothing to the lock.
-5. **Cluster coordination beyond `standalone` + `postgres`.** Leader election has *zero* registered
-   providers and always resolves to the SDK CAS default.
+5. **Cluster coordination beyond `standalone` + `postgres`.** `redis` registers a cache and a lock
+   now, but declares no capability: it reads its consistency off the server it connects to, so
+   GBX0520 says so and it satisfies only a requirement asking for none. Leader election still has
+   *zero* registered providers and always resolves to the SDK CAS default.
 6. **`prefix_watch` in any distributed setting.** GBX0502 is the correct answer, not a workaround.
 7. **The cluster gear in a running product** — ~~it is wired into no runnable app today~~. Done, and
    the friction was where this predicted it: `ClusterProfile` scope naming (the marker is the join

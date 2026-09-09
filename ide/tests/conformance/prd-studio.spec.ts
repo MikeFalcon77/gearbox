@@ -20,6 +20,8 @@ import {
   openGraphView,
   openProduct,
   productSection,
+  resetCatalogueView,
+  revealCatalogue,
   test,
 } from "../fixtures/studio";
 
@@ -35,6 +37,30 @@ const REPO = join(__dirname, "../../..");
  */
 const GENERATE_OUT = join(REPO, ".gearbox/payments-demo/dev");
 const GENERATE_OUT_SUFFIX = ".gearbox/payments-demo/dev";
+
+const PRODUCT = "products/payments-demo/product.gdl";
+
+/** `git diff --stat` for the demo description, or "" when it matches HEAD. */
+function diffOfProduct(): string {
+  return execFileSync("git", ["diff", "--stat", "--", PRODUCT], {
+    cwd: REPO,
+    encoding: "utf8",
+  }).trim();
+}
+
+/**
+ * Accept the edit dialog, and only the edit dialog.
+ *
+ * `.theia-button.main` is every Theia dialog's default button, so an unscoped
+ * click accepts whatever happens to be open -- and the dialog this accepts
+ * *writes to a description*.
+ */
+async function acceptEdit(page: import("@playwright/test").Page): Promise<void> {
+  const dialog = page.locator(".dialogBlock", { has: page.locator(".gbx-edit-preview") });
+  await expect(dialog, "the edit dialog is not open, so there is nothing to accept").toBeVisible();
+  await dialog.locator(".theia-button.main").click();
+}
+
 
 /**
  * One generated file this test may delete and have regenerated.
@@ -193,6 +219,50 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
     await expect(drawn).toBeVisible();
     await expect(drawn.locator("[data-cluster-requirement]").first()).toBeVisible();
     await expect(drawn.locator("[data-cluster-provider]").first()).toBeVisible();
+  });
+
+  /**
+   * The empty state still explains itself.
+   *
+   * It used to be the only thing this file asserted about the cluster view, in
+   * the branch that skipped when nothing required a primitive. Requiring one
+   * made the graph observable and took that assertion with it -- so the view's
+   * own comment claimed the empty state "still says what is missing" with
+   * nothing left checking it. A view that renders a blank frame here is
+   * indistinguishable from a broken one, which is exactly what the skipped
+   * branch existed to guard against.
+   *
+   * Reaching it now costs an edit: `api-contracts-consumer` is the only
+   * requester in the corpus, so the state appears only with it removed. The
+   * write goes through the same previewed path everything else uses, and the
+   * `finally` restores the description whether or not the assertions held.
+   */
+  test("the cluster view explains an empty resolution [PRD cpt-gearbox-fr-studio: renders the cluster graph]", async ({
+    studio,
+  }) => {
+    const page = studio.page;
+    expect(diffOfProduct(), "the description must start clean").toBe("");
+
+    try {
+      await openProduct(page, "dev");
+      await revealCatalogue(page);
+      await resetCatalogueView(page);
+
+      const toggle = page.locator('[data-toggle-gear="api-contracts-consumer"]');
+      await expect(toggle).toHaveAttribute("data-in-product", "true", { timeout: 60_000 });
+      await toggle.click();
+      await acceptEdit(page);
+      await expect(toggle).toHaveAttribute("data-in-product", "false", { timeout: 60_000 });
+
+      await openGraphView(page, "cluster");
+      await expect(page.locator("[data-graph='cluster']")).toHaveCount(0);
+      const empty = page.locator(".gearbox-graph .gbx-cluster-empty");
+      await expect(empty).toBeVisible();
+      await expect(empty).toContainText("no gear in the catalogue currently requires it");
+    } finally {
+      execFileSync("git", ["checkout", "--", PRODUCT], { cwd: REPO });
+      await page.reload();
+    }
   });
 
   test("it answers why for a selected decision [PRD cpt-gearbox-fr-studio: answers why]", async ({

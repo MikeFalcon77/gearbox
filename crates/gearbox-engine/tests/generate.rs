@@ -23,8 +23,8 @@ use gearbox_engine::generate::{
 use gearbox_engine::{SourceRoot, load_catalogue, load_product};
 use gearbox_ir::{
     ClusterPrimitive, ClusterResolution, ConfigFieldDecl, ConfigFieldType, DiagnosticCode,
-    FileAction, FileEntry, FileKind, FileSet, GearId, InclusionReason, Ownership, ProcessKind,
-    ProfileId, RelPath, ResolvedClusterBinding, ResolvedGear, ResolvedProduct, Selected, SourceId,
+    FileAction, FileEntry, FileKind, FileSet, GearId, Ownership, ProcessKind, ProfileId, RelPath,
+    ResolvedClusterBinding, ResolvedProduct, Selected, SourceId,
 };
 
 fn gears_rust() -> Option<PathBuf> {
@@ -643,13 +643,13 @@ fn a_products_config_reaches_the_generated_configuration() {
     assert!(yaml.contains("bind_addr:"), "{yaml}");
 }
 
-/// M6: a `host_workers` profile generates a crate for the worker too.
+/// M6: a `self_hosted` profile generates a crate for the worker too.
 ///
 /// The `local` profile splits `api-contracts` out of the gateway because its
 /// contract edge is severable — no pin required — so this exercises the shape
 /// the resolver reaches on its own.
 #[test]
-fn a_host_workers_profile_generates_both_processes() {
+fn a_self_hosted_profile_generates_both_processes() {
     let Some((lock, files)) = generated("local") else {
         return;
     };
@@ -1174,14 +1174,17 @@ fn values_schema_rejects_unknown_keys_and_wrong_types() {
     }
 }
 
-/// The demo product cannot prove `cpt-gearbox-fr-no-secrets-in-values`.
+/// A resolved cluster credential is named in the values and never spelled there.
 ///
-/// `ResolvedProduct::cluster` for payments-demo/prod is empty: the product
-/// declares a postgres profile with `${PG_PASSWORD}`, but no gear in the
-/// corpus requires a cluster primitive, so the binding never reaches the
-/// lock. Acceptance greps on the demo values files pass because there is
-/// nothing to write. This test uses a lock fixture with a cluster binding
-/// so the generator is actually exercised.
+/// The credential belongs to the process running the **cluster gear**, not to
+/// the requester: that gear is what opens the postgres connection and serves the
+/// scope to consumers, in-process or over its gRPC surface. So the placeholder
+/// is asserted against the cluster gear's own configuration, which in `prod` is
+/// `api-gateway`, while the requester sits in `audit` and needs no credential of
+/// its own.
+///
+/// A lock fixture rather than the demo's own, only because the demo's scope name
+/// and options are not the point here; see `generated_with_cluster_secret`.
 #[test]
 fn generated_values_name_a_secret_and_never_contain_one() {
     let Some((lock, files)) = generated_with_cluster_secret() else {
@@ -1208,12 +1211,23 @@ fn generated_values_name_a_secret_and_never_contain_one() {
         );
     }
 
-    let config = text(&files.files, "config/audit.yaml");
+    // The cluster gear's process, not the requester's. Before the generator
+    // stopped keying this section on co-location, `prod` wrote `cluster: {}`
+    // here and the placeholder reached nothing.
+    let config = text(&files.files, "config/api-gateway.yaml");
     assert!(
         config.contains("${PG_PASSWORD}"),
         "the placeholder has to reach the ConfigMap so secretKeyRef can fill it:\n{config}"
     );
     assert!(!config.contains("supersecret"), "{config}");
+
+    // And the requester's process carries no cluster section at all: it holds no
+    // cluster gear, so there is nothing there to configure.
+    let requester = text(&files.files, "config/audit.yaml");
+    assert!(
+        !requester.contains("profiles:"),
+        "the requester's process must not be handed the cluster gear's config:\n{requester}"
+    );
 }
 
 /// A catalogue `secret` field must not reach the generated YAML as plaintext.
@@ -1348,39 +1362,27 @@ fn a_helm_mustache_in_prefix_path_is_refused() {
     assert!(matches!(err, GenerateError::UnsafeHelm { .. }), "{err}");
 }
 
+/// A lock with a cluster binding the generator will actually write.
+///
+/// The demo's `prod` topology is used as it is. It separates the requester
+/// (`audit`) from the cluster gear (`api-gateway`), which is the case that used
+/// to need patching around: the generator keyed the backend section on the two
+/// being co-located, so this fixture pushed `cluster` into `audit` to make it
+/// write anything. That filter is gone -- the gear serves the scope over gRPC --
+/// so the topology is left alone and the section lands where the gear is.
 fn generated_with_cluster_secret() -> Option<(ResolvedProduct, Generated)> {
     let (mut lock, source_roots) = resolve("prod")?;
-    let root = gears_rust()?;
-    let opened = vec![SourceRoot::open(SourceId::new("gears-rust").unwrap(), &root).unwrap()];
-    let scan = load_catalogue(&opened);
-    let cluster_id = GearId::new("cluster").unwrap();
-    let descriptor = scan.catalogue.gears.get(&cluster_id).cloned()?;
 
-    let crate_dir = descriptor.crate_dir();
-    lock.gears.insert(
-        cluster_id.clone(),
-        ResolvedGear {
-            id: cluster_id.clone(),
-            source: descriptor.source,
-            gdl_path: descriptor.gdl_path,
-            package: descriptor.package,
-            crate_dir,
-            runtime_caps: descriptor.runtime_caps,
-            colocated_deps: descriptor.colocated_deps,
-            selected_by: vec![InclusionReason::Selected],
-            config: BTreeMap::new(),
-        },
-    );
-
-    let process = lock
+    // No need to inject the cluster gear either: the demo product selects it
+    // explicitly, so `prod` already resolves it into `api-gateway`. All this
+    // fixture still adds is a binding with a scope name and options of its own.
+    let requester = lock
         .processes
-        .iter_mut()
+        .iter()
         .find(|p| p.name.as_str() == "audit")
-        .expect("the demo's audit worker");
-    if !process.gears.iter().any(|g| g == &cluster_id) {
-        process.gears.push(cluster_id);
-    }
-    let requester = process.anchor.clone();
+        .expect("the demo's audit worker")
+        .anchor
+        .clone();
     lock.cluster.push(ResolvedClusterBinding {
         scope: "main".to_owned(),
         primitive: ClusterPrimitive::Cache,
@@ -1545,21 +1547,83 @@ fn the_image_registry_is_a_value_of_its_own() {
 /// understand the private newtype `serde_json` wraps numbers in. A field typed
 /// as `serde_json::Value` therefore serializes `65532` as
 /// `{"$serde_json::private::Number": "65532"}` -- valid YAML, silently wrong,
-/// and only visible if someone reads the file. Several values fields still have
-/// that type and are simply never populated today; this fails the moment one is.
+/// and only visible if someone reads the file.
+///
+/// **`config/` is checked too, and that is where it actually bit.** This test
+/// watched only the two values files, so when `pool_max_size = 10` reached a
+/// gear's configuration through the same hole the suite stayed green and a
+/// running host found it instead. Every gear's config bag is a
+/// `Map<String, Value>`, so that boundary carries the risk continuously, where
+/// the values fields carry it only latently.
 #[test]
 fn generated_yaml_carries_no_serde_json_internals() {
     let Some((lock, files)) = generated("prod") else {
         return;
     };
     let product = lock.product.id.as_str();
-    for name in ["values.yaml", "values.generated.yaml"] {
-        let body = text(&files.files, &format!("helm/{product}/{name}"));
+    // YAML only. `values.schema.json` is excluded on purpose and not by
+    // accident: schemars copies Rust doc comments into `description`, and the
+    // comment on `PodSecurityContext` quotes the very token this looks for.
+    let watched = |path: &str| {
+        std::path::Path::new(path)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml"))
+            && (path.starts_with("config/") || path.starts_with(&format!("helm/{product}/values")))
+    };
+    let mut checked = 0_usize;
+    for file in &files.files {
+        let path = file.path.to_string();
+        if !watched(&path) {
+            continue;
+        }
+        let body = text(&files.files, &path);
         assert!(
             !body.contains("$serde_json"),
-            "{name} leaked serde_json's private number encoding:\n{body}"
+            "{path} leaked serde_json's private number encoding:\n{body}"
         );
+        checked += 1;
     }
+    assert!(
+        checked >= 3,
+        "expected the config files and both values files, watched {checked}"
+    );
+}
+
+/// A number in a gear's configuration is written as a number.
+///
+/// The positive half of the test above: greping for the leaked token cannot
+/// tell "written correctly" from "never written". The demo's own cluster scope
+/// carries `pool_max_size = 10`, and the cluster gear reads that field as a
+/// `u32` -- a quoted scalar or a map there is an initialization failure that
+/// takes the whole host down before any gear starts.
+#[test]
+fn a_numeric_config_value_reaches_the_file_as_a_number() {
+    let Some((_, files)) = generated("local") else {
+        return;
+    };
+    let config = text(&files.files, "config/gateway.yaml");
+    assert!(
+        config.contains("pool_max_size: 10"),
+        "the option must be an integer scalar:\n{config}"
+    );
+}
+
+/// `secret_ref` is written as the struct the cluster gear deserializes.
+///
+/// Its config type reads `Option<SecretRef>`, a struct with a `name`. A bare
+/// string there is `invalid type: string, expected struct SecretRef` -- again an
+/// initialization failure before any gear starts, and again invisible to a test
+/// that only asserts the reference appears somewhere in the file.
+#[test]
+fn a_cluster_secret_reference_is_written_as_a_struct() {
+    let Some((_, files)) = generated("local") else {
+        return;
+    };
+    let config = text(&files.files, "config/gateway.yaml");
+    assert!(
+        config.contains("secret_ref:\n              name: env:PG_PASSWORD"),
+        "expected a mapping with a `name`, not a bare string:\n{config}"
+    );
 }
 
 /// `drop: [ALL]`, in capitals, or Pod Security Admission refuses the pod.

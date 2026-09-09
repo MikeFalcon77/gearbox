@@ -47,7 +47,7 @@ is a code-generation problem, and it is the one this system removes.
 
 ### 1.3 Goals (Business Outcomes)
 
-- A product's deployment topology can be changed between `embedded`, `host-workers`, and
+- A product's deployment topology can be changed between `embedded`, `self-hosted`, and
   `kubernetes` with **zero changes to any gear's business source**, verified by a byte-level diff.
 - Every composition decision that is currently made by a human reading ADRs is either derived
   automatically or rejected with an actionable diagnostic.
@@ -66,7 +66,7 @@ is a code-generation problem, and it is the one this system removes.
 | Catalogue | Developer-owned facts: what gears exist, what they provide, consume, and require. |
 | Intent | Operator choices: which gears are enabled, deployment profile, replicas, overrides, preferences. |
 | ResolvedProduct | The derived implementation: actual topology, bindings, transports, providers. Serialized as `product.lock`. |
-| DeploymentProfile | One of exactly `embedded`, `host-workers`, `kubernetes`. A Gearbox concept, not a runtime type. |
+| DeploymentProfile | One of exactly `embedded`, `self-hosted`, `kubernetes`. A Gearbox concept, not a runtime type. |
 | Preset | A preference overlay such as `dev` or `production`. Orthogonal to DeploymentProfile. Out of scope for this release. |
 | ClusterScope | A named cluster coordination scope (`ClusterProfile` in the runtime API). Neither a DeploymentProfile nor a preset. A join key, not free text: it must name a profile the requiring gear's own crate implements, because the runtime resolves it as `ClientScope::new("cluster:{name}")` and a name nothing registered fails only at startup. |
 | Projected fact | A catalogue fact read out of Rust rather than declared: gear id, runtime capabilities, co-location dependencies, lifecycle, client trait, contract identity/version/kind, provided and consumed contracts, registered cluster providers (their primitives, names and capabilities), cluster profile names, the transports a contract can be bound over, plugin extension points with their implementations and vendor defaults, and the GTS types a gear's SDK declares. A `gear.gdl` restating one is rejected. Read out of *Rust*, not only out of an *attribute*: a provider's name comes from a `PROVIDER_NAME` const and its capabilities from a backend trait impl. |
@@ -1006,7 +1006,7 @@ concrete remedy.
 1. The integrator resolves the product for `embedded` and generates artifacts.
 2. The generated single-process binary builds and serves every composed gear's interface, with all
    contract bindings local.
-3. The integrator changes only the profile selection and resolves again for `host-workers`.
+3. The integrator changes only the profile selection and resolves again for `self-hosted`.
 4. The resolver partitions the product, derives the severed edge as remote, and selects a transport.
 5. Generation emits one crate per process plus the spawn and endpoint configuration; the host starts
    and the worker registers and becomes ready.
@@ -1117,7 +1117,7 @@ Each criterion corresponds to a step of the acceptance procedure in
 - [ ] Every gear in the slice validates clean against its own Rust source (§12 step 1).
 - [ ] The `embedded` profile builds, runs, serves both interfaces, and its running binary's own
       registry output matches the lock (§12 step 2).
-- [ ] The `host-workers` profile produces two processes; the host spawns the worker, the worker
+- [ ] The `self-hosted` profile produces two processes; the host spawns the worker, the worker
       becomes ready, and the severed edge resolves remotely (§12 step 3).
 - [ ] The `kubernetes` profile renders offline, uses no cluster-dependent construct, contains no
       secret in any values file, carries endpoint wiring in configuration rather than environment,

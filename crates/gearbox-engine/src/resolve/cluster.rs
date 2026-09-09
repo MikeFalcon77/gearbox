@@ -3,15 +3,19 @@
 //! The provider table is **projected** from the `with_*_provider` calls in the
 //! cluster gear's registry, not declared anywhere, so a provider added in Rust
 //! cannot go missing here and one removed cannot linger. Today that table holds
-//! exactly two entries, and the shape of what they offer decides most of this
-//! step:
+//! three entries, and the shape of what they offer decides most of this step:
 //!
 //! * `postgres` answers cache and lock, is linearizable for both, is not
 //!   process-local, and needs credentials;
 //! * `standalone` answers cache only, adds prefix-watch, is process-local, and
-//!   needs none.
+//!   needs none;
+//! * `redis` answers cache and lock, is not process-local, needs credentials,
+//!   and **declares no capability at all** -- it reads its consistency off the
+//!   server it connects to, so there is no composition-time fact to project
+//!   (GBX0520). It therefore satisfies only a requirement that asks for none,
+//!   which is the honest answer rather than a limitation of this step.
 //!
-//! **Neither registers leader election.** That is not an omission in this code:
+//! **None of them registers leader election.** That is not an omission in this code:
 //! zero leader-election providers exist in the runtime, so the primitive always
 //! resolves to the SDK's compare-and-swap default layered over whatever cache is
 //! bound. Reported rather than hidden, because "leader election works" and
@@ -27,7 +31,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use gearbox_ir::{
     CapabilityId, Catalogue, Choice, ClusterPrimitive, ClusterProviderDecl, ClusterResolution,
     Diagnostic, DiagnosticCode, Diagnostics, GearId, Location, Preference, ProviderBinding,
-    RequirementKind, ResolvedClusterBinding, Selected,
+    RequirementKind, ResolvedClusterBinding, ResolvedProcess, Selected,
 };
 
 use super::closure::Closure;
@@ -75,6 +79,18 @@ pub fn resolve(
         let declared = declared_scope.and_then(|s| s.binding(primitive));
         let declared_cache = declared_scope.map(|s| &s.cache);
 
+        // The cache this scope actually resolved to, read back by name rather
+        // than taken from `already`. `already` is a set, so `iter().next()` is
+        // whichever provider sorts first among *all* of them -- which is the
+        // cache only because `ClusterPrimitive` happens to order `Cache` before
+        // the two primitives that fall back to it. Add a third provider that
+        // answers leader election and a scope that binds it, and the lock's
+        // "compare-and-swap over the cache" would name that one instead.
+        let resolved_cache: Option<String> = out
+            .iter()
+            .find(|b| b.scope == scope && b.primitive == ClusterPrimitive::Cache)
+            .and_then(|b| b.resolved.effective_provider().map(str::to_owned));
+
         let binding = decide(
             &Context {
                 scope: &scope,
@@ -83,6 +99,7 @@ pub fn resolve(
                 providers: &providers,
                 already: &already,
                 declared_cache,
+                resolved_cache: resolved_cache.as_deref(),
                 spread,
                 prefer_existing,
                 uri,
@@ -108,9 +125,14 @@ struct Context<'a> {
     /// This scope's cache binding, whatever primitive is being decided.
     ///
     /// The compare-and-swap default *is* the cache, so a credential the cache
-    /// binding names is the credential that default uses; see
-    /// [`check_credentials`].
+    /// binding names is the credential that default uses -- but only when it
+    /// names the same backend. See [`credential_source`].
     declared_cache: Option<&'a ProviderBinding>,
+    /// The provider this scope's cache resolved to, if it resolved to one.
+    ///
+    /// What the compare-and-swap default is layered over. Read from the cache
+    /// binding by name, not inferred from [`Context::already`].
+    resolved_cache: Option<&'a str>,
     /// Whether the topology has more than one process or any replication.
     spread: bool,
     prefer_existing: bool,
@@ -182,7 +204,20 @@ fn decide(
     };
 
     guard_process_local(ctx, &resolved, diagnostics);
+    report_runtime_capabilities(ctx, &resolved, diagnostics);
     check_credentials(ctx, &resolved, declared, diagnostics);
+
+    // The credential the check just accepted, so the generator writes the one
+    // the resolver reasoned about rather than re-deriving it. Only for a
+    // `Provider`: the compare-and-swap default is engaged by *omitting* the
+    // key, so there is no section for a reference to appear in and recording
+    // one on that binding would describe a line nothing writes.
+    let secret_ref = declared.and_then(|d| d.secret_ref.clone()).or_else(|| {
+        let ClusterResolution::Provider { name } = &resolved else {
+            return None;
+        };
+        credential_source(ctx, name, None).and_then(|d| d.secret_ref.clone())
+    });
 
     ResolvedClusterBinding {
         scope: ctx.scope.to_owned(),
@@ -192,8 +227,37 @@ fn decide(
         selected,
         resolved,
         options: declared.map(|d| d.options.clone()).unwrap_or_default(),
-        secret_ref: declared.and_then(|d| d.secret_ref.clone()),
+        secret_ref,
     }
+}
+
+/// Where the credential for `provider` in this scope is named, if anywhere.
+///
+/// The primitive's own binding first. Failing that, the scope's cache binding
+/// -- but **only when it names the same backend**. A `secret_ref` is a
+/// credential for one provider, not a credential in general, and the scope's
+/// cache is the only other binding that can be talking about the same one:
+/// leader election and lock both fall back to a default layered over it.
+///
+/// Reading only the primitive's own binding is what refused a correctly
+/// specified product. No provider registers leader election, so there is no
+/// `leader_election = provider(...)` for a `secret_ref` to live on, and
+/// demanding one asked the operator for something unspellable.
+fn credential_source<'a>(
+    ctx: &Context<'a>,
+    provider: &str,
+    declared: Option<&'a ProviderBinding>,
+) -> Option<&'a ProviderBinding> {
+    if let Some(own) = declared.filter(|d| d.secret_ref.is_some()) {
+        return Some(own);
+    }
+    ctx.declared_cache
+        .filter(|c| c.provider == provider && c.secret_ref.is_some())
+}
+
+/// Whether this scope could hand `provider` a credential if it chose it.
+fn can_credential(ctx: &Context<'_>, provider: &ClusterProviderDecl) -> bool {
+    !provider.needs_credentials || credential_source(ctx, &provider.name, None).is_some()
 }
 
 /// The description named a provider.
@@ -247,7 +311,32 @@ fn automatic(
     candidates: &[&ClusterProviderDecl],
     diagnostics: &mut Diagnostics,
 ) -> (ClusterResolution, Selected<String>) {
-    if let Some(chosen) = rank(ctx, candidates) {
+    let ranked = rank(ctx, candidates);
+
+    // A backend this scope cannot hand a credential to is not a usable answer:
+    // choosing it resolves the primitive and then refuses the product with
+    // GBX0506. This is the whole of why the demo's requester declares no
+    // `cluster.lock`. `postgres` is the only lock provider, so a lock
+    // requirement auto-selected it into the single-process `dev` profile, where
+    // the operator declared no provider for it and therefore no credentials --
+    // an error on a product that was specified correctly and could not be
+    // specified any other way, since `standalone` does not answer locks
+    // (GBX0505) and naming postgres in `dev` would drag a real database into the
+    // profile designed to need none.
+    //
+    // Which is worth refusing *for*, and that is the second half of the rule.
+    // Where the SDK can build the primitive out of the cache there is a working
+    // answer sitting right there, so take it. Where it cannot -- the cache
+    // itself, since nothing is layered over a cache that does not exist -- take
+    // the uncredentialled provider anyway and let [`check_credentials`] name
+    // what is missing: "add a `secret_ref`" is an instruction the operator can
+    // follow, and "no provider answers this" would simply be false.
+    let has_cas_fallback = ctx.primitive != ClusterPrimitive::Cache && ctx.resolved_cache.is_some();
+    let chosen = ranked
+        .filter(|p| can_credential(ctx, p))
+        .or(if has_cas_fallback { None } else { ranked });
+
+    if let Some(chosen) = chosen {
         diagnostics.push(
             Diagnostic::new(
                 DiagnosticCode::ClusterAutoSelected,
@@ -274,12 +363,21 @@ fn automatic(
         );
     }
 
-    // Nothing satisfies the primitive directly. For leader election and lock the
-    // SDK layers a compare-and-swap implementation over the bound cache -- which
-    // for leader election is always the answer, since no provider registers it.
+    // Nothing usable satisfies the primitive directly. For leader election and
+    // lock the SDK layers a compare-and-swap implementation over the bound cache
+    // -- which for leader election is always the answer, since no provider
+    // registers it.
     if ctx.primitive != ClusterPrimitive::Cache
-        && let Some(cache) = ctx.already.iter().next()
+        && let Some(cache) = ctx.resolved_cache
     {
+        let why_not = if ranked.is_some() {
+            "a registered provider implements this primitive, but this scope names no credential \
+             source it could use, so choosing it would resolve the primitive and then refuse the \
+             product. The SDK builds the primitive from the cache's atomic operations instead"
+        } else {
+            "no registered provider implements this primitive, so the SDK builds it from the \
+             cache's atomic operations"
+        };
         diagnostics.push(
             Diagnostic::new(
                 DiagnosticCode::ClusterSdkDefault,
@@ -290,11 +388,10 @@ fn automatic(
                     ctx.scope
                 ),
             )
-            .with_help(
-                "no registered provider implements this primitive, so the SDK builds it from \
-                 the cache's atomic operations; its guarantees are the cache's guarantees, \
-                 which is a weaker promise than a purpose-built backend",
-            )
+            .with_help(format!(
+                "{why_not}; its guarantees are the cache's guarantees, which is a weaker promise \
+                 than a purpose-built backend",
+            ))
             // The code declares `requires_evidence`, and rightly: this is a claim
             // about what the runtime ships. The citation is the backend itself,
             // whose `features()` reads the cache's consistency rather than
@@ -308,7 +405,7 @@ fn automatic(
         );
         return (
             ClusterResolution::SdkCasDefault {
-                over_cache: cache.clone(),
+                over_cache: cache.to_owned(),
             },
             Selected::auto(),
         );
@@ -390,6 +487,16 @@ fn unsatisfiable(ctx: &Context<'_>, named: Option<&str>) -> Diagnostic {
             .collect();
         rows.push(if missing.is_empty() {
             format!("  {}: satisfies all of them", provider.name)
+        } else if provider.runtime_determined.contains(&ctx.primitive) {
+            // "missing" would be a half-truth here: the backend may well have
+            // the capability, and decides on connecting. Saying so is the
+            // difference between "cannot" and "cannot be known yet".
+            format!(
+                "  {}: declares none -- it decides them at run time, from the infrastructure it \
+                 connects to, so it cannot promise {} in advance",
+                provider.name,
+                missing.join(", ")
+            )
         } else {
             format!("  {}: missing {}", provider.name, missing.join(", "))
         });
@@ -453,6 +560,49 @@ fn guard_process_local(
     );
 }
 
+/// Say when the chosen backend will not know its own capabilities until it runs.
+///
+/// Reported here rather than at projection time, and only for a backend a scope
+/// actually resolved onto. The fact belongs to a decision, not to the
+/// catalogue: emitting it while projecting would put a permanent `info` on
+/// every catalogue load about a provider no product need ever name.
+fn report_runtime_capabilities(
+    ctx: &Context<'_>,
+    resolved: &ClusterResolution,
+    diagnostics: &mut Diagnostics,
+) {
+    let Some(effective) = resolved.effective_provider() else {
+        return;
+    };
+    let Some(provider) = ctx.providers.iter().find(|p| p.name == effective) else {
+        return;
+    };
+    if !provider.runtime_determined.contains(&ctx.primitive) {
+        return;
+    }
+    diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::ClusterCapabilityRuntimeDetermined,
+            format!(
+                "`{effective}` answers `{}` in scope `{}` and decides its capabilities at run time",
+                ctx.primitive.config_key(),
+                ctx.scope
+            ),
+        )
+        .with_help(
+            "the backend reads them off the infrastructure it connects to, so nothing in Rust \
+             states them and nothing here can. It answers the primitive and satisfies only a \
+             requirement that asks for no capability -- if this scope needs a guarantee, name a \
+             backend that declares it",
+        )
+        .with_evidence(
+            "gears/system/cluster/plugins/redis-cluster-plugin/src/cache/mod.rs:347 \
+             (consistency() returns what the startup preflight computed)",
+        )
+        .at(loc(ctx.uri)),
+    );
+}
+
 /// A provider that needs credentials must be told where they are.
 fn check_credentials(
     ctx: &Context<'_>,
@@ -466,24 +616,29 @@ fn check_credentials(
     let Some(provider) = ctx.providers.iter().find(|p| p.name == effective) else {
         return;
     };
-    // For the compare-and-swap default the effective provider *is* this scope's
-    // cache, so the credential the cache binding names is the credential this
-    // primitive uses. Reading only this primitive's own binding refused a
-    // correctly specified product: no provider registers leader election, so
-    // there is no `leader_election = provider(...)` for a `secret_ref` to live
-    // on, and demanding one asked the operator for something unspellable.
-    let source = match resolved {
-        ClusterResolution::SdkCasDefault { .. } => declared.or(ctx.declared_cache),
-        ClusterResolution::Provider { .. } | ClusterResolution::Unsatisfied => declared,
-    };
-    if !provider.needs_credentials || source.is_some_and(|d| d.secret_ref.is_some()) {
+    // The scope's cache binding counts as a source for the primitive being
+    // checked, but only when it names this same backend -- which is exactly the
+    // compare-and-swap case, whose effective provider *is* the cache. Matching
+    // on the resolution instead would accept the cache's credential for a
+    // backend it is not a credential for: `over_cache` is whatever the cache
+    // resolved to, and a scope may bind a different provider for another
+    // primitive. [`credential_source`] compares the names rather than trusting
+    // the shape.
+    if !provider.needs_credentials || credential_source(ctx, effective, declared).is_some() {
         return;
     }
     diagnostics.push(
         Diagnostic::error(
             DiagnosticCode::ClusterNoCredentialSource,
+            // The primitive is named, and it has to be. `Diagnostics::finish`
+            // drops exact duplicates, so a scope whose cache and whose lock both
+            // lack a source used to collapse into one complaint naming neither
+            // -- the operator adds one `secret_ref`, resolves again, and meets
+            // the same sentence.
             format!(
-                "`{effective}` needs credentials, and scope `{}` names no source for them",
+                "`{effective}` answers `{}` in scope `{}` and needs credentials, which the scope \
+                 names no source for",
+                ctx.primitive.config_key(),
                 ctx.scope
             ),
             "add `secret_ref = \"...\"` to the provider; the reference is written into the \
@@ -520,13 +675,28 @@ pub fn report_stateful_replicas(
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) {
-    let elected: bool = bindings
+    // Whether *this process* is covered by an election, not whether one exists
+    // somewhere in the lock. A binding whose requesters all sit in other
+    // processes elects nothing here, and silencing this warning on the strength
+    // of it would hide the second copy of the work.
+    //
+    // Deliberately not conditioned on the cluster gear being in this process.
+    // It serves its scopes over gRPC as well as in-process, so a replicated
+    // process reaches an election that lives elsewhere; requiring co-location
+    // here would warn about topologies that coordinate perfectly well.
+    let elected = |process: &ResolvedProcess| {
+        bindings.iter().any(|b| {
+            b.primitive == ClusterPrimitive::LeaderElection
+                && !matches!(b.resolved, ClusterResolution::Unsatisfied)
+                && b.requesters.iter().any(|g| process.contains(g))
+        })
+    };
+
+    for process in partition
+        .processes
         .iter()
-        .any(|b| b.primitive == ClusterPrimitive::LeaderElection);
-    if elected {
-        return;
-    }
-    for process in partition.processes.iter().filter(|p| p.is_replicated()) {
+        .filter(|p| p.is_replicated() && !elected(p))
+    {
         let stateful: Vec<&GearId> = process
             .gears
             .iter()

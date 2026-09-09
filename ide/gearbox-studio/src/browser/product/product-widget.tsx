@@ -105,7 +105,7 @@ export class ProductWidget extends ReactWidget {
   protected section: ProductSection = "overview";
   protected addingProfile = false;
   protected newProfileId = "";
-  protected newProfileKind: "embedded" | "host_workers" | "kubernetes" = "embedded";
+  protected newProfileKind: "embedded" | "self_hosted" | "kubernetes" = "embedded";
 
   @postConstruct()
   protected init(): void {
@@ -439,7 +439,7 @@ export class ProductWidget extends ReactWidget {
             }}
           >
             <option value="embedded">embedded</option>
-            <option value="host_workers">host_workers</option>
+            <option value="self_hosted">self_hosted</option>
             <option value="kubernetes">kubernetes</option>
           </select>
         </label>
@@ -1215,7 +1215,7 @@ function profileFields(
   switch (profile.profile) {
     case "embedded":
       return [];
-    case "host_workers":
+    case "self_hosted":
       return [
         { wire: "host", label: "host", value: profile.host },
         {

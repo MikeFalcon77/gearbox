@@ -76,7 +76,7 @@ fn the_real_product_satisfies_every_structural_constraint() {
 }
 
 #[test]
-fn host_workers_says_it_is_one_machine() {
+fn self_hosted_says_it_is_one_machine() {
     // Not a defect in the product: the runtime implements exactly one spawn
     // backend and it starts local processes. Said out loud so a multi-process
     // topology is not mistaken for a distributed one.
@@ -171,7 +171,7 @@ fn a_rest_host_in_a_worker_is_refused() {
         support::gear_with_caps("host", &[], &[]),
         support::gear_with_caps("moved", &[RuntimeCap::RestHost], &[]),
     ]);
-    let mut intent = support::host_workers(&["host", "moved"], Discovery::Static, Some("target"));
+    let mut intent = support::self_hosted(&["host", "moved"], Discovery::Static, Some("target"));
     support::pin(&mut intent, "worker", "moved", 1);
 
     let r = resolve(&cat, &intent, &pid("local"));
@@ -206,7 +206,7 @@ fn directory_discovery_without_the_directory_server_is_refused() {
         support::gear_with_caps("grpc-hub", &[RuntimeCap::GrpcHub], &[]),
         support::gear_with_caps("moved", &[], &[]),
     ]);
-    let mut intent = support::host_workers(
+    let mut intent = support::self_hosted(
         &["host", "grpc-hub", "moved"],
         Discovery::Directory,
         Some("target"),
@@ -231,7 +231,7 @@ fn directory_discovery_without_the_grpc_hub_is_refused() {
         support::gear_with_caps("gear-orchestrator", &[], &[]),
         support::gear_with_caps("moved", &[], &[]),
     ]);
-    let mut intent = support::host_workers(
+    let mut intent = support::self_hosted(
         &["host", "gear-orchestrator", "moved"],
         Discovery::Directory,
         Some("target"),
@@ -289,7 +289,7 @@ fn a_single_process_never_needs_discovery() {
     // Nothing moved out, so nothing is discovered, so the prerequisites do not
     // apply. Reporting them here would be noise on a product that works.
     let cat = support::catalogue_of(vec![support::gear_with_caps("only", &[], &[])]);
-    let intent = support::host_workers(&["only"], Discovery::Directory, Some("target"));
+    let intent = support::self_hosted(&["only"], Discovery::Directory, Some("target"));
 
     let r = resolve(&cat, &intent, &pid("local"));
     assert!(!codes(&r).contains(&DiagnosticCode::TopologyNoOrchestrator));
@@ -303,7 +303,7 @@ fn a_worker_with_no_target_dir_has_no_path() {
         support::gear_with_caps("host", &[], &[]),
         support::gear_with_caps("moved", &[], &[]),
     ]);
-    let mut intent = support::host_workers(&["host", "moved"], Discovery::Static, None);
+    let mut intent = support::self_hosted(&["host", "moved"], Discovery::Static, None);
     support::pin(&mut intent, "worker", "moved", 1);
 
     let r = resolve(&cat, &intent, &pid("local"));
@@ -318,7 +318,7 @@ fn a_worker_with_no_target_dir_has_no_path() {
 #[test]
 fn target_dir_is_only_needed_when_something_moved() {
     let cat = support::catalogue_of(vec![support::gear_with_caps("only", &[], &[])]);
-    let intent = support::host_workers(&["only"], Discovery::Static, None);
+    let intent = support::self_hosted(&["only"], Discovery::Static, None);
     let r = resolve(&cat, &intent, &pid("local"));
     assert!(!codes(&r).contains(&DiagnosticCode::TopologyNoTargetDir));
 }

@@ -2,12 +2,12 @@
 import type { Discovery } from "./Discovery";
 
 /**
- * What a `host_workers` profile decided, beyond the processes themselves.
+ * What a `self_hosted` profile decided, beyond the processes themselves.
  *
  * Mirrors [`KubernetesSettings`]: a place for the facts the profile declared
  * that every generator needs and no process carries.
  */
-export type HostWorkersSettings = { 
+export type SelfHostedSettings = { 
 /**
  * The Cargo target directory the operator wants shared, **as the
  * description spelled it** -- relative to the description, not to anything

@@ -29,7 +29,6 @@ export const PRODUCT_FUNCTIONS: readonly string[] = [
   "cluster_profile",
   "embedded",
   "git",
-  "host_workers",
   "kubernetes",
   "path",
   "plugin",
@@ -37,6 +36,7 @@ export const PRODUCT_FUNCTIONS: readonly string[] = [
   "product",
   "provider",
   "registry",
+  "self_hosted",
   "source",
   "use_gear",
 ];

@@ -1,6 +1,6 @@
 //! Per-process Dockerfiles, a context-root `.dockerignore`, and `build.sh`.
 //!
-//! Emitted only for a Kubernetes profile. A `host_workers` tree really does
+//! Emitted only for a Kubernetes profile. A `self_hosted` tree really does
 //! run on one machine; putting a Dockerfile next to it would describe a
 //! deployment the lock did not decide.
 //!

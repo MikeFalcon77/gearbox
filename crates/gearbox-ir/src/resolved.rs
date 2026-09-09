@@ -699,7 +699,7 @@ pub struct ResolvedProductHeader {
 
     pub profile: ProfileId,
 
-    /// The profile family: `embedded`, `host-workers`, or `kubernetes`.
+    /// The profile family: `embedded`, `self-hosted`, or `kubernetes`.
     pub profile_kind: String,
 
     /// Which build produced this, so a stale lock is recognizable.
@@ -724,12 +724,12 @@ pub struct KubernetesSettings {
     pub discovery: Discovery,
 }
 
-/// What a `host_workers` profile decided, beyond the processes themselves.
+/// What a `self_hosted` profile decided, beyond the processes themselves.
 ///
 /// Mirrors [`KubernetesSettings`]: a place for the facts the profile declared
 /// that every generator needs and no process carries.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct HostWorkersSettings {
+pub struct SelfHostedSettings {
     /// The Cargo target directory the operator wants shared, **as the
     /// description spelled it** -- relative to the description, not to anything
     /// generated.
@@ -763,9 +763,9 @@ pub struct ResolvedProduct {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kubernetes: Option<KubernetesSettings>,
 
-    /// Present only for a `host_workers` profile.
+    /// Present only for a `self_hosted` profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host_workers: Option<HostWorkersSettings>,
+    pub self_hosted: Option<SelfHostedSettings>,
 
     pub sources: BTreeMap<SourceId, ResolvedSource>,
 

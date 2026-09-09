@@ -111,7 +111,7 @@ pub fn partition(
                 ));
             }
         }
-        DeploymentProfileDecl::HostWorkers { host, .. } => {
+        DeploymentProfileDecl::SelfHosted { host, .. } => {
             processes = split(input, Some(host), &mut used_names);
         }
         DeploymentProfileDecl::Kubernetes { .. } => {
@@ -224,7 +224,7 @@ fn assign_spawns(
         Diagnostic::error(
             DiagnosticCode::TopologyNoHost,
             "workers have no host process to spawn them",
-            "keep a `ProcessKind::Host` in this profile, or name the host on `host_workers`",
+            "keep a `ProcessKind::Host` in this profile, or name the host on `self_hosted`",
         )
         .at(Location::file(uri.to_owned())),
     );
@@ -687,7 +687,7 @@ fn embedded_violation(what: &str, uri: &str) -> Diagnostic {
     )
     .with_help(
         "resolved as a single process anyway, so the product is still buildable; resolve for a \
-         `host_workers` or `kubernetes` profile to get the topology this asks for",
+         `self_hosted` or `kubernetes` profile to get the topology this asks for",
     )
     .at(Location::file(uri.to_owned()))
 }

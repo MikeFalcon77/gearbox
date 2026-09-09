@@ -285,14 +285,14 @@ fn diagnostics() -> Diagnostics {
     d.push(
         Diagnostic::new(
             DiagnosticCode::GapNoK8sDnsResolver,
-            "not applicable to host-workers, included for fixture coverage",
+            "not applicable to self-hosted, included for fixture coverage",
         )
         .with_evidence("libs/toolkit/src/discovery.rs:117-134"),
     );
     d
 }
 
-/// A resolved product for the `local` (host-workers) profile: a gateway host
+/// A resolved product for the `local` (self-hosted) profile: a gateway host
 /// process and a `payments-audit` worker, one severed binding between them,
 /// two cluster primitives, one severable-if-declared report, a handful of
 /// provenance edges (including a duplicate, to exercise dedup), and two
@@ -300,10 +300,10 @@ fn diagnostics() -> Diagnostics {
 #[must_use]
 pub fn fixture() -> ResolvedProduct {
     ResolvedProduct {
-        // The fixture models a `host_workers` product -- it has a spawn -- so it
+        // The fixture models a `self_hosted` product -- it has a spawn -- so it
         // carries the settings block too. `None` here would leave the golden
         // lock silent about a section every such product now writes.
-        host_workers: Some(gearbox_ir::HostWorkersSettings {
+        self_hosted: Some(gearbox_ir::SelfHostedSettings {
             target_dir: Some("../../../gears-rust/target".to_owned()),
             cargo_profile: None,
             discovery: gearbox_ir::Discovery::Directory,
@@ -313,7 +313,7 @@ pub fn fixture() -> ResolvedProduct {
             id: "payments-demo".to_owned(),
             version: "0.1.0".to_owned(),
             profile: ProfileId::new("local").unwrap(),
-            profile_kind: "host-workers".to_owned(),
+            profile_kind: "self-hosted".to_owned(),
             gearbox_version: "0.1.0".to_owned(),
             lock_hash: String::new(),
         },

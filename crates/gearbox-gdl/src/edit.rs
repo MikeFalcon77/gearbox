@@ -31,9 +31,10 @@
 mod edit_call;
 
 pub use edit_call::{
-    CreateProductParams, add_gear_plugin, add_profile, add_source, clone_product_text,
-    is_secret_config_key, quote_string, remove_profile, render_product_template, set_gear_config,
-    set_gear_features, set_gear_plugins, set_profile_field,
+    CreateProductParams, PROFILE_KINDS, add_gear_plugin, add_profile, add_source,
+    clone_product_text, is_secret_config_key, quote_string, remove_profile,
+    render_product_template, set_gear_config, set_gear_features, set_gear_plugins,
+    set_profile_field,
 };
 
 use std::collections::BTreeSet;

@@ -65,9 +65,9 @@ fn provider_names_are_projected_not_declared() {
         .collect();
     assert_eq!(
         names,
-        vec!["postgres", "standalone"],
+        vec!["postgres", "redis", "standalone"],
         "names come from each plugin's `PROVIDER_NAME`; the description names \
-         neither"
+         none of them -- it only says where each crate is"
     );
 }
 

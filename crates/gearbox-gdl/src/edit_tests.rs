@@ -665,7 +665,7 @@ fn profile_add_remove_is_byte_exact_inverse() {
         "kubernetes",
         "prod",
         &[
-            ("discovery".into(), "dns".into()),
+            ("discovery".into(), "static".into()),
             ("namespace".into(), "pay".into()),
         ],
     )
@@ -674,7 +674,7 @@ fn profile_add_remove_is_byte_exact_inverse() {
     .expect("changed")
     .to_owned();
     assert!(
-        added.contains("kubernetes(id = \"prod\", discovery = \"dns\", namespace = \"pay\")"),
+        added.contains("kubernetes(id = \"prod\", discovery = \"static\", namespace = \"pay\")"),
         "{added}"
     );
     assert_eq!(

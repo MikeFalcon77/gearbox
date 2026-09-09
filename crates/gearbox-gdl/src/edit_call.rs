@@ -491,10 +491,21 @@ product(
 }
 
 fn render_profile_entry(kind: &str, id: &str) -> String {
+    // `static`, and it is the only value that works here. The lowering accepts
+    // exactly `static` and `directory` -- this rendered `dns`, which is not a
+    // discovery kind at all, so a profile scaffolded for either non-embedded
+    // kind evaluated straight to a diagnostic.
+    //
+    // `directory` would parse and still be the wrong scaffold: it makes the
+    // resolver demand `gear-orchestrator` and `grpc-hub` in the host process
+    // (`TopologyNoOrchestrator`, `TopologyNoGrpcHub`), which a product that has
+    // just been created has not selected. A scaffold has to evaluate clean on
+    // its own; `profile_scaffolds_evaluate` in `tests/product.rs` holds it to
+    // that, which is the link that was missing when `dns` went in.
     match kind {
-        "kubernetes" => format!("{kind}(id = {id}, discovery = \"dns\")"),
-        "host_workers" => {
-            format!("{kind}(id = {id}, host = \"localhost\", worker_discovery = \"dns\")")
+        "kubernetes" => format!("{kind}(id = {id}, discovery = \"static\")"),
+        "self_hosted" => {
+            format!("{kind}(id = {id}, host = \"localhost\", worker_discovery = \"static\")")
         }
         _ => format!("{kind}(id = {id})"),
     }
@@ -539,7 +550,12 @@ pub fn clone_product_text(
     Ok(replace_span(source, call_expr_span, &updated))
 }
 
-const PROFILE_KINDS: &[&str] = &["embedded", "host_workers", "kubernetes"];
+/// The deployment profile kinds the editor can scaffold and validate.
+///
+/// Public so a caller checks against this rather than restating the three
+/// names: a fourth kind must reach every consumer, not just the ones somebody
+/// remembered.
+pub const PROFILE_KINDS: &[&str] = &["embedded", "self_hosted", "kubernetes"];
 
 fn is_gdl_identifier(name: &str) -> bool {
     let mut chars = name.chars();
@@ -582,7 +598,7 @@ fn require_profile_fields(
 ) -> Result<(), Diagnostics> {
     let required: &[&str] = match kind {
         "kubernetes" => &["discovery"],
-        "host_workers" => &["host", "worker_discovery"],
+        "self_hosted" => &["host", "worker_discovery"],
         _ => &[],
     };
     for name in required {
@@ -604,7 +620,7 @@ fn require_profile_kind(uri: &str, kind: &str) -> Result<(), Diagnostics> {
         Err(refuse(
             uri,
             &format!("`{kind}` is not a deployment profile constructor"),
-            "use `embedded`, `host_workers`, or `kubernetes`",
+            "use `embedded`, `self_hosted`, or `kubernetes`",
         ))
     }
 }

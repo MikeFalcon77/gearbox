@@ -14,7 +14,7 @@ export type DeploymentProfileDecl = { "profile": "embedded", id: ProfileId,
 /**
  * Where `embedded(...)` was written in the product description.
  */
-declared_at?: Location | null, } | { "profile": "host_workers", id: ProfileId, 
+declared_at?: Location | null, } | { "profile": "self_hosted", id: ProfileId, 
 /**
  * Which process is the host.
  */
@@ -32,7 +32,7 @@ target_dir?: string | null,
  */
 cargo_profile?: string | null, 
 /**
- * Where `host_workers(...)` was written in the product description.
+ * Where `self_hosted(...)` was written in the product description.
  */
 declared_at?: Location | null, } | { "profile": "kubernetes", id: ProfileId, discovery: Discovery, namespace?: string | null, image_registry?: string | null, 
 /**

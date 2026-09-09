@@ -6,7 +6,7 @@ import type { ProfileId } from "./ProfileId";
  */
 export type ResolvedProductHeader = { id: string, version: string, profile: ProfileId, 
 /**
- * The profile family: `embedded`, `host-workers`, or `kubernetes`.
+ * The profile family: `embedded`, `self-hosted`, or `kubernetes`.
  */
 profile_kind: string, 
 /**

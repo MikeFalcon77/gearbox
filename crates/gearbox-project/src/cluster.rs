@@ -313,7 +313,7 @@ pub fn project_provider_name(
 /// The feature structs are `#[non_exhaustive]` with a positional constructor, so
 /// a new flag changes the arity. That must be an error rather than a defaulted
 /// `false`: silently reading the wrong flag is worse than refusing to read.
-fn features_flag(expr: &syn::Expr, ty: &str) -> Result<bool, ClusterProjectionError> {
+fn features_flag(expr: &syn::Expr, ty: &str) -> Result<Option<bool>, ClusterProjectionError> {
     let fail = |reason: String| ClusterProjectionError::Capability {
         method: "features",
         ty: ty.to_owned(),
@@ -334,13 +334,48 @@ fn features_flag(expr: &syn::Expr, ty: &str) -> Result<bool, ClusterProjectionEr
         Some(syn::Expr::Lit(syn::ExprLit {
             lit: syn::Lit::Bool(b),
             ..
-        })) => Ok(b.value),
-        _ => Err(fail(
+        })) => Ok(Some(b.value)),
+        // The SDK-default derivation, pointed at by the wrong projector. Still an
+        // error: this shape *has* a readable meaning, and reading it here would
+        // attribute the default's capability to a plugin backend.
+        Some(arg) if is_cache_consistency_check(arg) => Err(fail(
             "argument is not a `bool` literal (a computed flag belongs to \
              `project_sdk_defaults`, not a plugin backend)"
                 .to_owned(),
         )),
+        // Anything else computed: the backend decides the flag at run time, from
+        // what it connected to. `None`, not an error -- see
+        // [`BackendCapabilities`] for why those are different failures.
+        _ => Ok(None),
     }
+}
+
+/// What a backend's capability methods yielded.
+///
+/// **Two failures live here that used to be one.** A capability method the
+/// parser cannot make sense of is an error -- the feature structs are
+/// `#[non_exhaustive]` with positional constructors, so a flag added upstream
+/// changes the arity, and reading the wrong flag would claim a capability the
+/// backend does not have. That stays [`ClusterProjectionError::Capability`].
+///
+/// A method whose value the backend *computes* is a different thing. The redis
+/// cache decides its consistency from the topology it finds at connect time
+/// (`redis_cluster_plugin`'s `consistency()` returns a field its preflight set),
+/// so there is no composition-time fact to read -- and refusing the whole
+/// provider over it made a configurable backend unusable. Those methods are
+/// named in [`Self::runtime_determined`] and simply contribute no capability,
+/// which `ClusterProviderDecl::satisfies` already reads correctly: the provider
+/// answers its primitives and satisfies only an empty requirement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendCapabilities {
+    /// The capabilities the backend states in Rust.
+    pub declared: BTreeSet<CapabilityId>,
+
+    /// The backend type the capabilities were read from, for diagnostics.
+    pub ty: String,
+
+    /// Capability methods whose value is decided at run time, by method name.
+    pub runtime_determined: Vec<&'static str>,
 }
 
 /// Project the capabilities `primitive`'s backend declares, from the unique
@@ -359,7 +394,7 @@ pub fn project_backend_capabilities(
     primitive: ClusterPrimitive,
     scanned: &str,
     narrow: Option<&str>,
-) -> Result<BTreeSet<CapabilityId>, ClusterProjectionError> {
+) -> Result<BackendCapabilities, ClusterProjectionError> {
     let trait_name = backend_trait(primitive);
 
     // `backend = "src/cache.rs"` narrows to one file, exactly as `attr` narrows
@@ -413,6 +448,7 @@ pub fn project_backend_capabilities(
     };
 
     let mut caps = BTreeSet::new();
+    let mut runtime_determined: Vec<&'static str> = Vec::new();
 
     // The cache carries two axes: an enum for consistency, a bool for watch.
     // The other two carry only `linearizable`, and via `features()`.
@@ -428,15 +464,15 @@ pub fn project_backend_capabilities(
             ty: ty.clone(),
             reason: "no trailing expression".to_owned(),
         })?;
-        let syn::Expr::Path(p) = expr else {
-            return Err(ClusterProjectionError::Capability {
-                method: "consistency",
-                ty,
-                reason: "body is not a `CacheConsistency::*` variant".to_owned(),
-            });
-        };
-        if last_segment(&p.path) == "Linearizable" {
-            caps.insert(CapabilityId::new(capabilities::CACHE_LINEARIZABLE)?);
+        // A path is a declaration and can be read. Anything else -- a field, a
+        // call -- is the backend computing its consistency from the server it
+        // connected to, which is not a fact this projection can carry.
+        if let syn::Expr::Path(p) = expr {
+            if last_segment(&p.path) == "Linearizable" {
+                caps.insert(CapabilityId::new(capabilities::CACHE_LINEARIZABLE)?);
+            }
+        } else {
+            runtime_determined.push("consistency");
         }
     }
 
@@ -450,15 +486,23 @@ pub fn project_backend_capabilities(
         ty: ty.clone(),
         reason: "no trailing expression".to_owned(),
     })?;
-    if features_flag(expr, &ty)? {
-        caps.insert(CapabilityId::new(match primitive {
-            ClusterPrimitive::Cache => capabilities::CACHE_PREFIX_WATCH,
-            ClusterPrimitive::LeaderElection => capabilities::LEADER_ELECTION_LINEARIZABLE,
-            ClusterPrimitive::Lock => capabilities::LOCK_LINEARIZABLE,
-        })?);
+    match features_flag(expr, &ty)? {
+        Some(true) => {
+            caps.insert(CapabilityId::new(match primitive {
+                ClusterPrimitive::Cache => capabilities::CACHE_PREFIX_WATCH,
+                ClusterPrimitive::LeaderElection => capabilities::LEADER_ELECTION_LINEARIZABLE,
+                ClusterPrimitive::Lock => capabilities::LOCK_LINEARIZABLE,
+            })?);
+        }
+        Some(false) => {}
+        None => runtime_determined.push("features"),
     }
 
-    Ok(caps)
+    Ok(BackendCapabilities {
+        declared: caps,
+        ty,
+        runtime_determined,
+    })
 }
 
 /// Whether an expression is the `self.cache.consistency() == ..::Linearizable`

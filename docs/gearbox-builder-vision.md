@@ -122,7 +122,7 @@ Gearbox Builder should make the following scenario routine:
 3. Describe the product.
 4. Select a deployment profile:
        embedded
-       host-workers
+       self-hosted
        kubernetes
 5. Resolve the product.
 6. Inspect why every important decision was made.
@@ -848,7 +848,7 @@ product(
     sources = [source(id = "gears-rust", at = path("../../../gears-rust"))],
     profiles = [                                   # every profile, as DATA
         embedded(id = "dev"),
-        host_workers(id = "local", host = "gateway", worker_discovery = "directory"),
+        self_hosted(id = "local", host = "gateway", worker_discovery = "directory"),
         kubernetes(id = "prod", discovery = "static", namespace = "payments"),
     ],
     default_profile = "dev",
@@ -1098,7 +1098,7 @@ Gears intentionally defines three main deployment topologies:
 
 ```text
 embedded
-host-workers
+self-hosted
 kubernetes
 ```
 
@@ -1210,6 +1210,27 @@ which would make the edge severable and move capability matching to runtime. It 
 interchangeable replicas rather than as a singleton, and it leaves the "one cluster process per
 deployment" question undecided. Gearbox therefore models today's constraint and emits `GBX0607` as a
 hint pointing at that document, rather than anticipating a topology the runtime cannot yet serve.
+
+**The passage above has been overtaken, and is kept because the correction is instructive.** The
+deployable cluster gear is built: `gears-rust` commit `de3551f9` introduced `RemoteClusterClient`
+over gRPC, one `dyn ClusterClient` per process with local winning over remote, and an endpoint
+derived by DNS rather than configured. Gearbox already sees it — the cluster gear projects
+`runtime_caps = [rest, stateful, system, grpc]`, and the Helm generator emits a dedicated `cluster`
+Service on port 50051 for whichever process holds the gear
+(`crates/gearbox-engine/src/generate/helm.rs`, `templates/helm/service.yaml.jinja`).
+
+So a cluster consumer is **not** pinned to the gear's process, and two things followed from believing
+otherwise. A diagnostic was added to report the "split" as a defect and then withdrawn, because the
+constraint it reported does not exist. And more consequentially, the configuration generator keyed a
+scope's backend section on the requester being co-located, which meant the demo's `prod` profile —
+where a process pin separates them — configured the cluster gear with nothing at all while the lock
+said the scope had resolved. That filter is gone: the section is written wherever the gear is, and
+the gear serves it to consumers in either direction.
+
+What remains true of `GBX0607` is narrower than it reads: `deps = [cluster]` really is a hard
+topo-sort edge, and a gear that declares it cannot be spawned out of process
+(`RegistryError::UnknownDependency`). That is a fact about `deps`, not about cluster's reachability,
+and the code's own evidence citation still asserts the latter.
 
 ---
 
@@ -1500,7 +1521,7 @@ instance-addressable role-separated deployment.
 Embedded cannot represent this topology.
 
 Supported alternatives:
-    host-workers
+    self-hosted
     kubernetes
 ```
 
@@ -2511,7 +2532,7 @@ Source:
     Claude Code
 
 Deployment:
-    Host+Workers -> Kubernetes
+    Self-Hosted -> Kubernetes
 
 Event Broker:
     ingest replicas 1 -> 3
@@ -2815,7 +2836,7 @@ diagnostics/explanation graph are populated
 
 ---
 
-# 83. Acceptance Test: Host + Workers
+# 83. Acceptance Test: Self-Hosted
 
 Verify:
 
@@ -2905,12 +2926,12 @@ generate a product that behaves equivalently to a known current Embedded deploym
 
 ---
 
-# 89. Spike A3: Host + Workers
+# 89. Spike A3: Self-Hosted
 
 Use the same Gear source and product intent with:
 
 ```text
-deployment = host-workers
+deployment = self-hosted
 ```
 
 and prove generated process composition works.
@@ -3011,7 +3032,7 @@ Switch:
 ```text
 embedded
     ->
-host-workers
+self-hosted
     ->
 kubernetes
 ```
@@ -3122,7 +3143,7 @@ Reason:
     ingest role is configured as sharded with 3 replicas.
 
 Supported fixes:
-    switch to host-workers
+    switch to self-hosted
     switch to kubernetes
     disable sharding
 ```
@@ -3226,7 +3247,7 @@ binaries
 Dockerfiles
 ```
 
-Prove Embedded and Host+Workers first.
+Prove Embedded and Self-Hosted first.
 
 ---
 
@@ -3492,7 +3513,7 @@ custom gears:
     local or private source
 
 deployment:
-    embedded | host-workers | kubernetes
+    embedded | self-hosted | kubernetes
 
 output:
     reproducible build

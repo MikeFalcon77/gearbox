@@ -257,7 +257,7 @@ fn check_worker_paths(
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) {
-    let DeploymentProfileDecl::HostWorkers { target_dir, .. } = declaration else {
+    let DeploymentProfileDecl::SelfHosted { target_dir, .. } = declaration else {
         return;
     };
     if target_dir.is_some() {
@@ -287,7 +287,7 @@ fn check_worker_paths(
     );
 }
 
-/// Say plainly that host-workers means one machine.
+/// Say plainly that self-hosted means one machine.
 ///
 /// Not a defect in the product: the runtime implements exactly one spawn
 /// backend, which starts local operating-system processes. Recorded so nobody
@@ -298,7 +298,7 @@ fn report_spawn_gap(
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) {
-    if !matches!(declaration, DeploymentProfileDecl::HostWorkers { .. }) {
+    if !matches!(declaration, DeploymentProfileDecl::SelfHosted { .. }) {
         return;
     }
     if !partition.processes.iter().any(ResolvedProcess::is_worker) {

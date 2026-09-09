@@ -56,6 +56,8 @@ impl ClusterGear {
             .with_cache_provider(Arc::new(standalone_cluster_plugin::StandaloneCacheProvider))
             .with_cache_provider(Arc::new(postgres_cluster_plugin::PostgresCacheProvider))
             .with_lock_provider(Arc::new(postgres_cluster_plugin::PostgresLockProvider))
+            .with_cache_provider(Arc::new(redis_cluster_plugin::RedisCacheProvider))
+            .with_lock_provider(Arc::new(redis_cluster_plugin::RedisLockProvider))
     }
 }
 ";
@@ -85,6 +87,16 @@ fn registry_projects_in_source_order() {
                 ClusterPrimitive::Lock,
                 "postgres_cluster_plugin",
                 "PostgresLockProvider"
+            ),
+            (
+                ClusterPrimitive::Cache,
+                "redis_cluster_plugin",
+                "RedisCacheProvider"
+            ),
+            (
+                ClusterPrimitive::Lock,
+                "redis_cluster_plugin",
+                "RedisLockProvider"
             ),
         ],
         "the chain must project in source order, since operator config resolves \
@@ -185,6 +197,7 @@ fn provider_names_come_from_the_real_plugins() {
 fn caps(files: &[RustFile], primitive: ClusterPrimitive) -> Vec<String> {
     let mut v: Vec<String> = project_backend_capabilities(files, primitive, "fixture", None)
         .unwrap()
+        .declared
         .into_iter()
         .map(|c| c.as_str().to_owned())
         .collect();
@@ -378,6 +391,7 @@ fn backend_narrowing_resolves_an_ambiguity() {
         Some("src/cache.rs"),
     )
     .unwrap()
+    .declared
     .into_iter()
     .map(|c| c.as_str().to_owned())
     .collect();

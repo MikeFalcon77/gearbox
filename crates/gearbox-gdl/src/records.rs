@@ -316,9 +316,9 @@ gdl_record! {
 }
 
 gdl_record! {
-    /// `embedded(...)`, `host_workers(...)` or `kubernetes(...)`.
+    /// `embedded(...)`, `self_hosted(...)` or `kubernetes(...)`.
     ProfileRecord as "gdl_profile" {
-        /// `embedded`, `host-workers` or `kubernetes`.
+        /// `embedded`, `self-hosted` or `kubernetes`.
         pub kind: String,
         pub id: String,
         pub host: Option<String>,

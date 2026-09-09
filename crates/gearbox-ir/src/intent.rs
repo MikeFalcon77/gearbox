@@ -129,7 +129,7 @@ pub enum DeploymentProfileDecl {
     ///
     /// Workers are local operating-system processes; no other spawn backend is
     /// implemented, so this profile is one machine.
-    HostWorkers {
+    SelfHosted {
         id: ProfileId,
         /// Which process is the host.
         host: ProcessId,
@@ -144,7 +144,7 @@ pub enum DeploymentProfileDecl {
         /// product cannot drift with the operator's environment.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cargo_profile: Option<String>,
-        /// Where `host_workers(...)` was written in the product description.
+        /// Where `self_hosted(...)` was written in the product description.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         declared_at: Option<Location>,
     },
@@ -168,7 +168,7 @@ impl DeploymentProfileDecl {
     pub const fn id(&self) -> &ProfileId {
         match self {
             Self::Embedded { id, .. }
-            | Self::HostWorkers { id, .. }
+            | Self::SelfHosted { id, .. }
             | Self::Kubernetes { id, .. } => id,
         }
     }
@@ -178,7 +178,7 @@ impl DeploymentProfileDecl {
     pub const fn declared_at(&self) -> Option<&Location> {
         match self {
             Self::Embedded { declared_at, .. }
-            | Self::HostWorkers { declared_at, .. }
+            | Self::SelfHosted { declared_at, .. }
             | Self::Kubernetes { declared_at, .. } => declared_at.as_ref(),
         }
     }
@@ -188,7 +188,7 @@ impl DeploymentProfileDecl {
     pub const fn kind(&self) -> &'static str {
         match self {
             Self::Embedded { .. } => "embedded",
-            Self::HostWorkers { .. } => "host-workers",
+            Self::SelfHosted { .. } => "self-hosted",
             Self::Kubernetes { .. } => "kubernetes",
         }
     }
@@ -204,7 +204,7 @@ impl DeploymentProfileDecl {
     pub const fn discovery(&self) -> Option<Discovery> {
         match self {
             Self::Embedded { .. } => None,
-            Self::HostWorkers { discovery, .. } | Self::Kubernetes { discovery, .. } => {
+            Self::SelfHosted { discovery, .. } | Self::Kubernetes { discovery, .. } => {
                 Some(*discovery)
             }
         }
@@ -212,13 +212,13 @@ impl DeploymentProfileDecl {
 
     /// Where worker binaries are built, when this profile spawns any.
     ///
-    /// Only `host_workers` has one: it is the directory the host builds an
+    /// Only `self_hosted` has one: it is the directory the host builds an
     /// absolute executable path from. Kubernetes runs images an operator
     /// deploys, so there is nothing local to point at.
     #[must_use]
     pub fn target_dir(&self) -> Option<&str> {
         match self {
-            Self::HostWorkers { target_dir, .. } => target_dir.as_deref(),
+            Self::SelfHosted { target_dir, .. } => target_dir.as_deref(),
             Self::Embedded { .. } | Self::Kubernetes { .. } => None,
         }
     }

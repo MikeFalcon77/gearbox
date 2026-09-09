@@ -202,18 +202,25 @@ fn providers(
             }
         };
 
-        let capabilities = match gearbox_project::project_backend_capabilities(
+        let read = match gearbox_project::project_backend_capabilities(
             &plugin.files,
             reg.primitive,
             &scanned,
             plugin.backend.as_deref(),
         ) {
-            Ok(caps) => caps,
+            Ok(read) => read,
             Err(e) => {
                 diagnostics.push(unprojectable(uri, &e));
                 continue;
             }
         };
+
+        // A capability the backend computes is recorded on the provider rather
+        // than reported here. Reporting at projection time would put three
+        // permanent `info`s on every catalogue load, about a provider no product
+        // need ever name -- and the corpus is held to loading with no
+        // diagnostics at all. The resolver says it where it bites instead.
+        let capabilities = read.declared;
 
         let entry = by_name
             .entry(name.clone())
@@ -223,9 +230,13 @@ fn providers(
                 capabilities: BTreeMap::new(),
                 process_local: plugin.process_local,
                 needs_credentials: plugin.needs_credentials,
+                runtime_determined: std::collections::BTreeSet::new(),
             });
         entry.primitives.insert(reg.primitive);
         entry.capabilities.insert(reg.primitive, capabilities);
+        if !read.runtime_determined.is_empty() {
+            entry.runtime_determined.insert(reg.primitive);
+        }
     }
 
     by_name.into_values().collect()

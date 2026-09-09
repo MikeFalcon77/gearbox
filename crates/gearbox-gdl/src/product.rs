@@ -261,8 +261,8 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         })
     }
 
-    /// `host_workers(id = ..., host = ..., worker_discovery = ..., target_dir = ..., cargo_profile = ...)`
-    fn host_workers<'v>(
+    /// `self_hosted(id = ..., host = ..., worker_discovery = ..., target_dir = ..., cargo_profile = ...)`
+    fn self_hosted<'v>(
         #[starlark(require = named)] id: &str,
         #[starlark(require = named)] host: &str,
         #[starlark(require = named)] worker_discovery: &str,
@@ -271,7 +271,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ProfileRecord> {
         Ok(ProfileRecord {
-            kind: "host-workers".to_owned(),
+            kind: "self-hosted".to_owned(),
             id: id.to_owned(),
             host: Some(host.to_owned()),
             discovery: Some(worker_discovery.to_owned()),

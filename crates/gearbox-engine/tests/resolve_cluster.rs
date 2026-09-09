@@ -116,6 +116,18 @@ fn the_real_slice_resolves_its_cluster_scope_in_every_profile() {
             vec![support::gid("api-contracts-consumer")],
             "{profile}: requester"
         );
+
+        // And nothing else. `by` finds, so without this a third binding -- a
+        // lock nobody asked for, a second scope, a duplicate -- would be
+        // invisible. The assertion this test replaced was `cluster.is_empty()`,
+        // whose whole value was that it was a complete statement about the
+        // vector; saying "these two are right" is not the same claim.
+        assert_eq!(
+            r.cluster.len(),
+            2,
+            "{profile}: exactly the cache and the election: {:?}",
+            r.cluster
+        );
     }
 }
 
@@ -158,7 +170,7 @@ fn a_process_local_backend_across_processes_is_an_error() {
         "main",
         &["cluster.cache.linearizable"],
     )]);
-    let mut intent = support::host_workers(&["app"], Discovery::Static, Some("t"));
+    let mut intent = support::self_hosted(&["app"], Discovery::Static, Some("t"));
     support::bind_cluster(&mut intent, "main", "standalone", None);
     support::pin(&mut intent, "worker", "cluster", 1);
 
@@ -359,10 +371,144 @@ fn the_cas_default_inherits_the_caches_credential_source() {
         }
     );
 
-    // And the check still bites when the cache itself names nothing.
+    // And the check still bites when the cache itself names nothing -- on the
+    // election, which is the half this fallback added. Asserting only that the
+    // code appears somewhere would not say that: the cache binding names no
+    // source either, so `postgres` reports itself and the assertion passes
+    // whether or not the election was ever checked.
     let mut bare = support::intent(&["app"]);
     support::bind_cluster(&mut bare, "main", "postgres", None);
-    assert!(codes(&single(&cat, &bare)).contains(&DiagnosticCode::ClusterNoCredentialSource));
+    let bare = single(&cat, &bare);
+    let complaints = bare
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::ClusterNoCredentialSource)
+        .count();
+    assert_eq!(
+        complaints, 2,
+        "the cache and the default that rides on it: {:?}",
+        bare.diagnostics
+    );
+}
+
+/// The cache's credential is inherited only by the backend it is a credential for.
+///
+/// `over_cache` is whatever the cache *resolved* to, so matching on the shape of
+/// the resolution rather than on the provider's name would hand one backend's
+/// `secret_ref` to another. Here the scope's cache is `standalone`, which needs
+/// none, and the lock's only candidate is `postgres`, which does -- so there is
+/// nothing to inherit and the resolver must not pretend otherwise.
+#[test]
+fn a_credential_is_not_inherited_across_providers() {
+    let cat = support::cluster_catalogue(vec![
+        (
+            ClusterPrimitive::Cache,
+            "main",
+            &["cluster.cache.linearizable"] as &[&str],
+        ),
+        (ClusterPrimitive::Lock, "main", &[]),
+    ]);
+    let mut intent = support::intent(&["app"]);
+    support::bind_cluster(&mut intent, "main", "standalone", Some("secret/not-pg"));
+
+    let r = single(&cat, &intent);
+    let lock = r
+        .cluster
+        .iter()
+        .find(|b| b.primitive == ClusterPrimitive::Lock)
+        .expect("a lock binding");
+    assert_ne!(
+        lock.resolved,
+        ClusterResolution::Provider {
+            name: "postgres".to_owned()
+        },
+        "postgres was chosen on a credential that belongs to standalone"
+    );
+    assert_eq!(lock.secret_ref, None, "and nothing was copied onto it");
+}
+
+/// The resolver does not choose a backend it will then refuse.
+///
+/// `postgres` is the only lock provider, so a lock requirement used to
+/// auto-select it into a profile that declared no provider for it and therefore
+/// no credentials: GBX0506 on a product that was specified correctly and could
+/// not be specified any other way, since `standalone` does not answer locks and
+/// naming postgres would drag a real database into a profile designed to need
+/// none. The SDK's compare-and-swap default over the cache is a working answer
+/// and is taken instead.
+#[test]
+fn an_uncredentialled_provider_loses_to_the_sdk_default() {
+    let cat = support::cluster_catalogue(vec![
+        (
+            ClusterPrimitive::Cache,
+            "main",
+            &["cluster.cache.linearizable"] as &[&str],
+        ),
+        (ClusterPrimitive::Lock, "main", &[]),
+    ]);
+    let mut intent = support::intent(&["app"]);
+    support::bind_cluster(&mut intent, "main", "standalone", None);
+
+    let r = single(&cat, &intent);
+    assert!(
+        !codes(&r).contains(&DiagnosticCode::ClusterNoCredentialSource),
+        "nothing should be refused here: {:?}",
+        r.diagnostics
+    );
+    let lock = r
+        .cluster
+        .iter()
+        .find(|b| b.primitive == ClusterPrimitive::Lock)
+        .expect("a lock binding");
+    assert_eq!(
+        lock.resolved,
+        ClusterResolution::SdkCasDefault {
+            over_cache: "standalone".to_owned()
+        }
+    );
+
+    // The diagnostic says which of the two reasons it was, because "no provider
+    // implements this" would be false: one does, and cannot be paid.
+    let help = r
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::ClusterSdkDefault)
+        .and_then(|d| d.help.clone())
+        .expect("GBX0504 explains itself");
+    assert!(help.contains("names no credential source"), "{help}");
+}
+
+/// A cache has nothing to fall back to, so it is chosen and then reported.
+///
+/// The other half of the rule above. There is no compare-and-swap default for a
+/// cache -- nothing is layered over a cache that does not exist -- so refusing
+/// to select would produce "no provider answers `cache`", which is false.
+/// Selecting and asking for a `secret_ref` is an instruction the operator can
+/// act on.
+#[test]
+fn a_cache_with_no_credential_is_still_selected_and_reported() {
+    let cat = support::cluster_catalogue(vec![(
+        ClusterPrimitive::Cache,
+        "main",
+        &["cluster.cache.linearizable"],
+    )]);
+    let mut intent = support::intent(&["app"]);
+    support::bind_cluster(&mut intent, "main", "postgres", None);
+
+    let r = single(&cat, &intent);
+    let cache = r
+        .cluster
+        .iter()
+        .find(|b| b.primitive == ClusterPrimitive::Cache)
+        .expect("a cache binding");
+    assert_eq!(
+        cache.resolved,
+        ClusterResolution::Provider {
+            name: "postgres".to_owned()
+        }
+    );
+    assert!(codes(&r).contains(&DiagnosticCode::ClusterNoCredentialSource));
+    assert!(!codes(&r).contains(&DiagnosticCode::ClusterUnsatisfiable));
 }
 
 #[test]
@@ -391,6 +537,65 @@ fn existing_infrastructure_is_preferred_within_a_scope() {
     assert_eq!(lock.resolved.effective_provider(), Some("postgres"));
 }
 
+/// A backend that decides its capabilities at run time says so, and only then.
+///
+/// Two halves, and the second is the one worth the test. Such a backend can be
+/// named and configured like any other and answers its primitives -- what it
+/// cannot do is honour a `capabilities = [...]` requirement, because the answer
+/// depends on the infrastructure the operator points it at.
+///
+/// And the refusal has to *say* that. "redis: missing cluster.cache.linearizable"
+/// reads as *cannot be*, when the truth is *cannot be known until it connects*;
+/// the two lead an operator to different decisions.
+#[test]
+fn a_runtime_determined_backend_is_usable_but_promises_nothing() {
+    let mut cat = support::cluster_catalogue(vec![(ClusterPrimitive::Cache, "main", &[])]);
+    cat.gears
+        .get_mut(&support::gid("cluster"))
+        .expect("the fixture's cluster gear")
+        .cluster_providers = vec![support::runtime_determined_provider()];
+
+    // Asked for nothing, so it resolves -- and reports what it cannot promise.
+    let mut intent = support::intent(&["app"]);
+    support::bind_cluster(&mut intent, "main", "redis", Some("secret/redis"));
+    let r = single(&cat, &intent);
+    assert_eq!(
+        r.cluster
+            .first()
+            .expect("a cache binding")
+            .resolved
+            .effective_provider(),
+        Some("redis")
+    );
+    assert!(codes(&r).contains(&DiagnosticCode::ClusterCapabilityRuntimeDetermined));
+    assert!(!codes(&r).contains(&DiagnosticCode::ClusterUnsatisfiable));
+
+    // Asked for a guarantee, so it is refused -- and the row says why, not just
+    // that something is missing.
+    let mut demanding = support::cluster_catalogue(vec![(
+        ClusterPrimitive::Cache,
+        "main",
+        &["cluster.cache.linearizable"],
+    )]);
+    demanding
+        .gears
+        .get_mut(&support::gid("cluster"))
+        .expect("the fixture's cluster gear")
+        .cluster_providers = vec![support::runtime_determined_provider()];
+    let r = single(&demanding, &intent);
+    let d = r
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::ClusterUnsatisfiable)
+        .expect("GBX0502");
+    let help = d.help.as_deref().unwrap_or_default();
+    assert!(help.contains("decides them at run time"), "{help}");
+    assert!(
+        !help.contains("redis: missing"),
+        "`missing` reads as `cannot be`, which is not what is known: {help}"
+    );
+}
+
 #[test]
 fn a_replicated_stateful_gear_without_election_is_reported() {
     // Step 8. Two copies both reconciling is not something the runtime notices.
@@ -399,7 +604,7 @@ fn a_replicated_stateful_gear_without_election_is_reported() {
     app.id = gearbox_ir::GearId::new("app").unwrap();
     cat.gears.insert(app.id.clone(), app);
 
-    let mut intent = support::host_workers(&["app", "cluster"], Discovery::Static, Some("t"));
+    let mut intent = support::self_hosted(&["app", "cluster"], Discovery::Static, Some("t"));
     support::pin(&mut intent, "app", "app", 3);
 
     let r = resolve(&cat, &intent, &pid("local"));

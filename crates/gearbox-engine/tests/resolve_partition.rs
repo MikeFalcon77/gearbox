@@ -202,7 +202,7 @@ fn processes_overlap_and_that_is_correct() {
     // `host` and `provider`, and `provider` moves into its own process — so
     // `shared` is linked into both binaries. A partition could not express this.
     let cat = support::catalogue_with_overlap();
-    let intent = support::host_workers_intent(&["host", "provider"]);
+    let intent = support::self_hosted_intent(&["host", "provider"]);
     let r = resolve(&cat, &intent, &pid("local"));
 
     assert_eq!(r.partition.processes.len(), 2, "{:#?}", r.partition);

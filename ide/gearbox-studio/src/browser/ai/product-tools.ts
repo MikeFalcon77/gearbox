@@ -13,18 +13,18 @@
 // would be guessing at which verbs matter.
 
 import { inject, injectable } from "@theia/core/shared/inversify";
-import type { ToolProvider, ToolRequest } from "@theia/ai-core";
+import { createToolCallError } from "@theia/ai-core";
+import type { ToolCallResult, ToolProvider, ToolRequest } from "@theia/ai-core";
 
+import { CatalogueStore } from "../catalogue-store";
 import { ProductEditService } from "../product-edit-service";
-
-/** The source every gear in the demo corpus is drawn from. */
-const SOURCE = "gears-rust";
 
 @injectable()
 export class ProductGearTool implements ToolProvider {
   static ID = "gearbox_toggle_gear";
 
   @inject(ProductEditService) protected readonly edits!: ProductEditService;
+  @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
 
   getTool(): ToolRequest {
     return {
@@ -45,30 +45,54 @@ export class ProductGearTool implements ToolProvider {
         },
         required: ["gear"],
       },
-      handler: async (argString: string) => {
+      handler: async (argString: string): Promise<ToolCallResult> => {
         let gear: unknown;
         try {
           gear = (JSON.parse(argString || "{}") as { gear?: unknown }).gear;
         } catch {
-          return "The arguments were not valid JSON.";
+          // `createToolCallError`, not prose. A bare string is a legal
+          // `ToolCallResult` and `hasToolCallError` classifies it as a success,
+          // so a malformed call would be reported to the model, and rendered in
+          // the chat, as a tool that worked.
+          return createToolCallError("The arguments were not valid JSON.");
         }
         if (typeof gear !== "string" || gear.trim() === "") {
-          return "`gear` must be the gear's kebab-case id.";
+          return createToolCallError("`gear` must be the gear's kebab-case id.");
         }
 
-        const was = this.edits.inProduct(gear);
-        const changed = await this.edits.toggle(gear, SOURCE);
+        // The source is read, never assumed. `use_gear` names both halves, and
+        // the id alone does not fix the source -- so a constant here would write
+        // a line naming a source the product may not declare. This is also the
+        // argument the catalogue's own control passes, which is what makes "the
+        // same entry point" true of the arguments and not only of the method.
+        const source = this.catalogue.sourceOf(gear);
+        if (source === undefined) {
+          return createToolCallError(
+            `The catalogue has no gear called \`${gear}\`, so there is no source to write ` +
+              `for it. Check the id against the catalogue.`,
+          );
+        }
+
+        const changed = await this.edits.toggle(gear, source);
+
+        // Read after the await, not before. `toggle` re-establishes every fact
+        // once the operator has answered and refuses an answer about a state
+        // that has gone -- so on the refusal path the product may have changed
+        // underneath, and a reading taken before the dialog would report the
+        // gear as "still selected" just after someone removed it. The model's
+        // next move would be to put it back.
+        const selected = this.edits.inProduct(gear);
         if (!changed) {
           // Refused, cancelled, or impossible -- `toggle` has already told the
           // operator which, through the message service. Saying "no change" here
           // without inventing a reason is the honest report.
           return `The product was not changed. \`${gear}\` is ${
-            was ? "still selected" : "still not selected"
+            selected ? "still selected" : "still not selected"
           }.`;
         }
-        return was
-          ? `Removed \`${gear}\` from the product.`
-          : `Added \`${gear}\` to the product.`;
+        return selected
+          ? `Added \`${gear}\` to the product.`
+          : `Removed \`${gear}\` from the product.`;
       },
     };
   }

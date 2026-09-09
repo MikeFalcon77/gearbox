@@ -15,7 +15,7 @@ product(
 
     profiles = [
         embedded(id = "dev"),
-        host_workers(
+        self_hosted(
             id = "local",
             host = "gateway",
             worker_discovery = "directory",
@@ -106,11 +106,13 @@ product(
             profiles = ["local", "prod"],
             cache = provider(
                 "postgres",
-                # The reference, not the credential: it reaches the generated
-                # configuration and never the lock. Without it the resolver
-                # refuses the provider outright (GBX0506), because a backend
-                # that needs credentials and is told nowhere to find them is a
-                # product that starts and then cannot connect.
+                # The reference, not the credential. The reference itself is a
+                # resolved fact and does reach the lock; what never reaches it,
+                # or any values file, is the secret the reference points at.
+                # Without this the resolver refuses the provider outright
+                # (GBX0506), because a backend that needs credentials and is
+                # told nowhere to find them is a product that starts and then
+                # cannot connect.
                 secret_ref = "env:PG_PASSWORD",
                 connection_string = "postgres://payments@${PG_HOST}:5432/payments?password=${PG_PASSWORD}",
                 schema = "cluster",

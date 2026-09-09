@@ -165,6 +165,26 @@ export class CatalogueStore implements GearboxClient {
   }
 
   /**
+   * The source a gear was projected from, for a caller that has only its id.
+   *
+   * A `use_gear` line names both, and the id alone does not determine the
+   * source: rows are keyed by `(source, gdl_path)`, so two roots may offer the
+   * same gear. Writing a constant there produces a description naming a source
+   * the product does not declare -- which nothing refuses at edit time and
+   * everything refuses at the next resolve.
+   *
+   * A scan for the same reason [`selected`] is a scan: the catalogue is
+   * fourteen rows, and a second index would be another thing to keep correct
+   * across the pending-to-projected replacement.
+   */
+  sourceOf(gear: string): string | undefined {
+    for (const row of this.rowsByKey.values()) {
+      if (row.kind === "projected" && row.gear.id === gear) return row.gear.source;
+    }
+    return undefined;
+  }
+
+  /**
    * The source roots the engine currently has open.
    *
    * For `ProductSessionService`, which has to re-initialize with a new workspace

@@ -376,7 +376,7 @@ The 2026-08-29 amendment limited tier-3 surgery to **list membership** in `gears
 now also changes **named arguments** inside calls that appear in literal lists on `product(...)`:
 
 * `config = {...}` and `features = [...]` on a `use_gear(...)` entry;
-* fields on `embedded(...)`, `host_workers(...)` and `kubernetes(...)` in `profiles = [...]`;
+* fields on `embedded(...)`, `self_hosted(...)` and `kubernetes(...)` in `profiles = [...]`;
 * `id` and `name` on `product(...)` when cloning.
 
 The same three limits apply: span-surgical edits only; refuse when the list is not a literal; refuse

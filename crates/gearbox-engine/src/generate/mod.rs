@@ -41,6 +41,7 @@ mod apply;
 mod config;
 mod docker;
 mod helm;
+mod json;
 mod manifest;
 mod merge3;
 mod paths;

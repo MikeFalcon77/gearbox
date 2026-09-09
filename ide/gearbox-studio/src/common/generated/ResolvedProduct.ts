@@ -2,7 +2,6 @@
 import type { CutCandidate } from "./CutCandidate";
 import type { Diagnostics } from "./Diagnostics";
 import type { GearId } from "./GearId";
-import type { HostWorkersSettings } from "./HostWorkersSettings";
 import type { KubernetesSettings } from "./KubernetesSettings";
 import type { ProvenanceEdge } from "./ProvenanceEdge";
 import type { ResolvedBinding } from "./ResolvedBinding";
@@ -11,6 +10,7 @@ import type { ResolvedGear } from "./ResolvedGear";
 import type { ResolvedProcess } from "./ResolvedProcess";
 import type { ResolvedProductHeader } from "./ResolvedProductHeader";
 import type { ResolvedSource } from "./ResolvedSource";
+import type { SelfHostedSettings } from "./SelfHostedSettings";
 import type { SourceId } from "./SourceId";
 
 /**
@@ -21,9 +21,9 @@ import type { SourceId } from "./SourceId";
  */
 export type ResolvedProduct = { schema_version: number, product: ResolvedProductHeader, kubernetes?: KubernetesSettings | null, 
 /**
- * Present only for a `host_workers` profile.
+ * Present only for a `self_hosted` profile.
  */
-host_workers?: HostWorkersSettings | null, sources: { [key in SourceId]: ResolvedSource }, gears: { [key in GearId]: ResolvedGear }, 
+self_hosted?: SelfHostedSettings | null, sources: { [key in SourceId]: ResolvedSource }, gears: { [key in GearId]: ResolvedGear }, 
 /**
  * Ordered by name.
  */

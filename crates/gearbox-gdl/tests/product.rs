@@ -524,14 +524,14 @@ fn a_fetched_template_set_is_refused_with_its_reason() {
 }
 
 #[test]
-fn cargo_profile_is_recorded_on_host_workers() {
+fn cargo_profile_is_recorded_on_self_hosted() {
     let src = r#"
 product(
     id = "demo",
     name = "Demo",
     version = "0.1.0",
     sources = [source(id = "s", at = path("."))],
-    profiles = [host_workers(
+    profiles = [self_hosted(
         id = "local",
         host = "gateway",
         worker_discovery = "static",
@@ -545,10 +545,10 @@ product(
     assert!(codes.is_empty(), "{codes:?} {messages}");
     let intent = intent.expect("evaluates");
     match intent.profiles.get(&ProfileId::new("local").unwrap()) {
-        Some(DeploymentProfileDecl::HostWorkers { cargo_profile, .. }) => {
+        Some(DeploymentProfileDecl::SelfHosted { cargo_profile, .. }) => {
             assert_eq!(cargo_profile.as_deref(), Some("release"));
         }
-        other => panic!("expected host_workers, got {other:?}"),
+        other => panic!("expected self_hosted, got {other:?}"),
     }
 }
 
@@ -560,7 +560,7 @@ product(
     name = "Demo",
     version = "0.1.0",
     sources = [source(id = "s", at = path("."))],
-    profiles = [host_workers(
+    profiles = [self_hosted(
         id = "local",
         host = "gateway",
         worker_discovery = "static",
@@ -573,4 +573,44 @@ product(
     let (intent, _codes, messages) = eval(src);
     assert!(messages.contains("cargo profile"), "{messages}");
     assert!(intent.is_none());
+}
+
+/// Every product the create wizard renders must evaluate, for every kind.
+///
+/// This is the check that was missing, and the gap it left was reachable.
+/// `render_profile_entry` emitted `discovery = "dns"` for the two non-embedded
+/// kinds -- not a discovery kind the lowering accepts -- so a product created
+/// with a `kubernetes` or `self_hosted` profile evaluated straight to a
+/// diagnostic. Nothing noticed because the renderer's output had never been fed
+/// back through the evaluator that has to read it.
+///
+/// Driven off `PROFILE_KINDS` rather than a list of three, so a fourth kind is
+/// covered the day it is added rather than the day someone remembers this test.
+#[test]
+fn rendered_product_templates_evaluate() {
+    for kind in gearbox_gdl::edit::PROFILE_KINDS {
+        let rendered =
+            gearbox_gdl::edit::render_product_template(&gearbox_gdl::edit::CreateProductParams {
+                id: "demo".to_owned(),
+                name: "Demo".to_owned(),
+                version: "0.1.0".to_owned(),
+                sources: vec![("gears-rust".to_owned(), "../gears-rust".to_owned())],
+                profile_kind: (*kind).to_owned(),
+                profile_id: "first".to_owned(),
+            });
+
+        let (intent, codes, messages) = eval(&rendered);
+        assert!(
+            codes.is_empty(),
+            "{kind}: a freshly created product must evaluate clean, got {codes:?}: \
+             {messages}\n{rendered}"
+        );
+        let intent = intent.unwrap_or_else(|| panic!("{kind}: an intent"));
+        assert!(
+            intent
+                .profiles
+                .contains_key(&ProfileId::new("first").unwrap()),
+            "{kind}: the profile the wizard was asked for must be declared"
+        );
+    }
 }

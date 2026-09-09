@@ -268,6 +268,21 @@ pub struct ClusterProviderDecl {
     /// Whether the provider needs credentials before it can connect.
     #[serde(default)]
     pub needs_credentials: bool,
+
+    /// Primitives whose capabilities this backend decides at run time.
+    ///
+    /// Empty for a backend that states its capabilities in Rust. Non-empty
+    /// means there was nothing to project: the redis cache reads its
+    /// consistency off the server it connects to, so `capabilities` for that
+    /// primitive is empty **because nothing is promised**, not because the
+    /// backend is poor.
+    ///
+    /// The distinction has to survive into the resolver, or its explanation
+    /// degrades into a half-truth. "redis: missing cluster.cache.linearizable"
+    /// reads as *cannot be*, when the honest statement is *cannot be known
+    /// until it connects*.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub runtime_determined: BTreeSet<ClusterPrimitive>,
 }
 
 impl ClusterProviderDecl {

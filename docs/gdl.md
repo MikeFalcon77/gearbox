@@ -252,7 +252,7 @@ A `registry` source is the registry itself rather than one package, so a product
 
 ```
 embedded(id)
-host_workers(id, host, worker_discovery, target_dir?, cargo_profile?)
+self_hosted(id, host, worker_discovery, target_dir?, cargo_profile?)
 kubernetes(id, discovery, namespace?, image_registry?)
 ```
 
@@ -303,7 +303,7 @@ Only the process name is positional: `process("audit", anchor = "api-contracts-c
 product(
   id, version,
   sources,                          # source(...), at least the ones use_gear names
-  profiles,                         # embedded / host_workers / kubernetes; at least one
+  profiles,                         # embedded / self_hosted / kubernetes; at least one
   default_profile,                  # must name a declared profile
   gears,                            # use_gear(...)
   name?,                            # display name; omit → id
@@ -438,7 +438,7 @@ product(
     sources = [source(id = "gears-rust", at = path("../../../gears-rust"))],
     profiles = [
         embedded(id = "dev"),
-        host_workers(id = "local", host = "gateway", worker_discovery = "directory"),
+        self_hosted(id = "local", host = "gateway", worker_discovery = "directory"),
         kubernetes(id = "prod", discovery = "static", namespace = "payments"),
     ],
     default_profile = "dev",

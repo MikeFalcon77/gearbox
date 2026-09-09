@@ -273,7 +273,7 @@ fn asking_for_grpc_across_a_boundary_is_downgraded_to_rest() {
     // gRPC in the runtime is hand-written wiring the generator does not produce,
     // so a severed edge has no gRPC path at all.
     let cat = support::catalogue_with_declared_edge();
-    let mut intent = support::host_workers(&["host", "provider"], Discovery::Static, Some("t"));
+    let mut intent = support::self_hosted(&["host", "provider"], Discovery::Static, Some("t"));
     support::pin(&mut intent, "worker", "provider", 1);
     intent.bindings.push(gearbox_ir::BindingIntent {
         consumer: gid("host"),
@@ -336,7 +336,7 @@ fn a_single_segment_provider_is_expressible_as_an_environment_variable() {
     // `provider` has no hyphen, so the nested key is one segment and the
     // remapping is not the problem. GBX0409 would be a lie on this shape.
     let cat = support::catalogue_with_declared_edge();
-    let mut intent = support::host_workers(&["host", "provider"], Discovery::Static, Some("t"));
+    let mut intent = support::self_hosted(&["host", "provider"], Discovery::Static, Some("t"));
     support::pin(&mut intent, "worker", "provider", 1);
     let r = resolve(&cat, &intent, &pid("local"));
     assert!(
@@ -372,7 +372,7 @@ fn readiness_gating_follows_criticality_and_placement_together() {
     // A critical remote binding does gate; a critical *local* one does not,
     // because there is nothing to wait for.
     let cat = support::catalogue_with_declared_edge();
-    let mut intent = support::host_workers(&["host", "provider"], Discovery::Static, Some("t"));
+    let mut intent = support::self_hosted(&["host", "provider"], Discovery::Static, Some("t"));
     support::pin(&mut intent, "worker", "provider", 1);
     let remote = resolve(&cat, &intent, &pid("local"));
     assert!(

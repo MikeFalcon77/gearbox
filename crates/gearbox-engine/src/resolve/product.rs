@@ -51,7 +51,7 @@ pub fn assemble(
             lock_hash: String::new(),
         },
         kubernetes: kubernetes(declaration),
-        host_workers: host_workers(declaration),
+        self_hosted: self_hosted(declaration),
         sources,
         gears: gears(catalogue, intent, resolution),
         processes: resolution.partition.processes.clone(),
@@ -87,21 +87,21 @@ fn kubernetes(
     }
 }
 
-/// The `host_workers` half of the same, and for the same reason.
+/// The `self_hosted` half of the same, and for the same reason.
 ///
 /// `target_dir` travels as the description spelled it. Resolving it here would
 /// bake a machine-specific path into a committed file; the generator converts it
 /// once, against the output root only it knows.
-fn host_workers(
+fn self_hosted(
     declaration: Option<&gearbox_ir::DeploymentProfileDecl>,
-) -> Option<gearbox_ir::HostWorkersSettings> {
+) -> Option<gearbox_ir::SelfHostedSettings> {
     match declaration {
-        Some(gearbox_ir::DeploymentProfileDecl::HostWorkers {
+        Some(gearbox_ir::DeploymentProfileDecl::SelfHosted {
             discovery,
             target_dir,
             cargo_profile,
             ..
-        }) => Some(gearbox_ir::HostWorkersSettings {
+        }) => Some(gearbox_ir::SelfHostedSettings {
             target_dir: target_dir.clone(),
             cargo_profile: cargo_profile.clone(),
             discovery: *discovery,
