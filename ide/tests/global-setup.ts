@@ -1,6 +1,12 @@
-// Three preconditions the suite cannot discover for itself, checked before any
+// The four things the suite cannot discover for itself, settled before any
 // browser opens so that a stale tree fails as a setup error rather than as a
 // puzzling conformance failure.
+//
+// Two are prepared and two are checked, and the split is not arbitrary: what
+// the tool owns is brought up to date, what a person owns is only reported on.
+// The engine binary and the generated tree are the tool's; the frontend bundle
+// and the product descriptions are built and edited by people, so a stale one
+// is said out loud and left alone.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
@@ -85,6 +91,61 @@ export default function globalSetup(): void {
         `on the resolution it produces, so a modified description fails claims that have nothing ` +
         `to do with the change.\n` +
         `Commit the edit, or run \`git checkout -- products\` if it is a leftover.`,
+    );
+  }
+
+  // The generated tree is brought up to date rather than reported on.
+  //
+  // `.gearbox/` is gitignored, machine-local output, so how old it is says
+  // something about whoever last ran `generate` on this checkout and nothing
+  // about the code under test. Two claims read it from disk: one asserts the
+  // badge reads `current`, and the other skips itself with "regenerate it to
+  // observe the matching case". So a commit that changes `product.gdl` -- which
+  // is an ordinary commit -- turns the first red and the second unobserved in a
+  // run where the application is behaving perfectly. That is not hypothetical:
+  // it cost an investigation that began in the wrong file, and the suite's own
+  // table was what eventually said so.
+  //
+  // Prepared rather than checked for the same reason the engine above is built
+  // rather than checked. It is the tool's own output -- tier 2 in ADR-0010's
+  // terms -- and never anybody's work in progress, which is exactly the
+  // argument that stops the guard above from restoring `products/` for you.
+  //
+  // **After that guard, never before it.** Generating from a modified
+  // description would write a lock for a resolution no claim is about to
+  // assert on, and the disk comparison would then be current and wrong.
+  //
+  // `dev` alone: it is the profile both disk-reading claims name. Every other
+  // lock assertion reads the widget, which resolves for itself.
+  //
+  // The output is captured rather than inherited, because a successful prime
+  // has nothing to say and a failed one has to say all of it -- so the message
+  // carries the engine's own stderr instead of leaving it above a stack trace.
+  try {
+    execFileSync(
+      join(IDE, "../target/debug/gearbox"),
+      [
+        "generate",
+        "--root",
+        "../gears-rust",
+        "--product",
+        "products/payments-demo/product.gdl",
+        "--profile",
+        "dev",
+      ],
+      { cwd: join(IDE, ".."), encoding: "utf8", stdio: "pipe" },
+    );
+  } catch (error) {
+    const detail = error instanceof Error && "stderr" in error ? String(error.stderr) : "";
+    throw new Error(
+      `Could not generate \`payments-demo\` for \`dev\`, so the lock on disk cannot be ` +
+        `trusted to describe the current description.\n\n` +
+        `If the errors below are \`names a gear that is not in the catalogue\`, the source root ` +
+        `is the thing to look at rather than the description: the gears live in the ` +
+        `\`gears-rust\` checkout beside this one, on its \`feature/gearbox\` branch, and a ` +
+        `checkout sitting on another branch has no \`gear.gdl\` in it at all. The whole suite ` +
+        `reads that catalogue, so this fails here rather than as a hundred and sixty ` +
+        `unexplained claims.\n${detail}`,
     );
   }
 
