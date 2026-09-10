@@ -200,6 +200,46 @@ fn rest_gears_with_no_host_are_refused() {
 }
 
 #[test]
+fn grpc_gears_with_no_hub_are_refused() {
+    // The counterpart of GBX0305, and the one that was missing. The runtime
+    // refuses this outright -- `RegistryError::GrpcRequiresHub` -- so without
+    // the check a product resolves clean and dies building its registry.
+    let cat = support::catalogue_of(vec![support::gear_with_caps(
+        "coordinator",
+        &[RuntimeCap::Grpc],
+        &[],
+    )]);
+    let r = resolve(&cat, &support::intent(&["coordinator"]), &pid("dev"));
+    let d = r
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::TopologyGrpcWithoutHub)
+        .expect("GBX0314");
+    assert!(d.message.contains("coordinator"), "{}", d.message);
+    // It asserts something about the runtime, so it owes the source that proves
+    // it -- the same rule GBX0312 and GBX0309 answer to.
+    assert!(d.evidence.is_some(), "GBX0314 carries no evidence");
+}
+
+#[test]
+fn a_grpc_gear_beside_a_hub_is_clean() {
+    // The negative half, because a check that never stays quiet is a check that
+    // will be switched off.
+    let cat = support::catalogue_of(vec![
+        support::gear_with_caps("coordinator", &[RuntimeCap::Grpc], &[]),
+        support::gear_with_caps("hub", &[RuntimeCap::GrpcHub], &["coordinator"]),
+    ]);
+    let r = resolve(&cat, &support::intent(&["coordinator", "hub"]), &pid("dev"));
+    assert!(
+        !r.diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::TopologyGrpcWithoutHub),
+        "{:#?}",
+        r.diagnostics
+    );
+}
+
+#[test]
 fn directory_discovery_without_the_directory_server_is_refused() {
     let cat = support::catalogue_of(vec![
         support::gear_with_caps("host", &[], &[]),

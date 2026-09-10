@@ -68,8 +68,42 @@ pub fn derive(
         bindings.push(binding);
     }
 
+    report_unhonoured_endpoints(scoped, uri, diagnostics);
+
     bindings.sort_by(|a, b| (&a.consumer, &a.contract).cmp(&(&b.consumer, &b.contract)));
     bindings
+}
+
+/// Refuse a `bind(endpoint = ...)`, because nothing here reads it.
+///
+/// Over every declaration rather than only the ones that matched an edge: the
+/// complaint is that the *address* does nothing, and that is true whether or
+/// not the edge resolved. A person who wrote one is owed the news either way.
+fn report_unhonoured_endpoints(
+    scoped: &ProfileScoped<'_>,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    for binding in &scoped.bindings {
+        let Some(endpoint) = &binding.endpoint else {
+            continue;
+        };
+        diagnostics.push(
+            Diagnostic::error(
+                DiagnosticCode::BindingEndpointNotHonoured,
+                format!(
+                    "`{}` binds `{}` with endpoint `{endpoint}`, which this build does not \
+                     honour",
+                    binding.consumer, binding.contract
+                ),
+                "remove the `endpoint` argument: the address a consumer reaches a provider at \
+                 is derived from where the resolver placed them, and an address written here \
+                 is read by nothing. Pointing at a provider outside the product is not \
+                 expressible yet",
+            )
+            .at(Location::file(uri.to_owned())),
+        );
+    }
 }
 
 /// The process a gear runs in, preferring the one it was placed in first.

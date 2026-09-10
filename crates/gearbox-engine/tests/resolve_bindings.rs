@@ -228,6 +228,53 @@ fn a_request_scoped_away_from_a_profile_is_not_a_downgrade() {
 }
 
 #[test]
+fn a_declared_endpoint_is_refused_rather_than_dropped() {
+    // `bind(endpoint = ...)` parses, reaches the IR, and is read by nothing:
+    // `requested()` takes `mode` and `transport` and leaves the address behind.
+    // Writing an address and being told nothing is the worst of the three
+    // available behaviours, so it is refused until there is a model in which an
+    // address outside the product means something.
+    let cat = support::catalogue_with_declared_edge();
+    let mut intent = support::intent(&["host", "provider"]);
+    intent.bindings.push(gearbox_ir::BindingIntent {
+        consumer: gid("host"),
+        contract: gearbox_ir::ContractId::new("provider/Thing@v1").unwrap(),
+        mode: BindingMode::Auto,
+        transport: None,
+        endpoint: Some("http://payments.internal:8080".to_owned()),
+        profiles: std::collections::BTreeSet::new(),
+        declared_at: None,
+    });
+
+    let r = resolve(&cat, &intent, &pid("dev"));
+    let d = r
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::BindingEndpointNotHonoured)
+        .expect("GBX0411");
+    assert!(
+        d.message.contains("payments.internal"),
+        "the refusal should quote the address it is refusing: {}",
+        d.message
+    );
+}
+
+#[test]
+fn a_binding_without_an_endpoint_is_not_refused() {
+    // The negative half: the refusal must fire on the address, not on binding.
+    let cat = support::catalogue_with_declared_edge();
+    let intent = support::intent(&["host", "provider"]);
+    let r = resolve(&cat, &intent, &pid("dev"));
+    assert!(
+        !r.diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::BindingEndpointNotHonoured),
+        "{:#?}",
+        r.diagnostics
+    );
+}
+
+#[test]
 fn asking_for_remote_in_a_single_process_profile_is_recorded_as_a_downgrade() {
     // The mechanism the real product deliberately avoids by scoping its request.
     // Without the record, the lock would show a local binding with no sign that

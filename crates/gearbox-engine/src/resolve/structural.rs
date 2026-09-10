@@ -37,6 +37,7 @@ pub fn check(
         check_singletons(catalogue, process, uri, diagnostics);
         check_worker_shape(process, uri, diagnostics);
         check_rest_without_host(catalogue, process, uri, diagnostics);
+        check_grpc_without_hub(catalogue, process, uri, diagnostics);
     }
     check_discovery(partition, declaration, uri, diagnostics);
     check_worker_paths(partition, declaration, uri, diagnostics);
@@ -118,6 +119,50 @@ fn check_worker_shape(process: &ResolvedProcess, uri: &str, diagnostics: &mut Di
             .at(Location(uri)),
         );
     }
+}
+
+/// A process that registers gRPC services and has no hub to mount them in.
+///
+/// Every process, not only the host, and the asymmetry with its REST
+/// counterpart below is the runtime's: `run_grpc_phase` is reached from the
+/// host path *and* from `run_oop_serving`, while a worker's REST routes go
+/// through its own out-of-process router and need no `rest_host`.
+fn check_grpc_without_hub(
+    catalogue: &Catalogue,
+    process: &ResolvedProcess,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    if process.grpc_hub.is_some() {
+        return;
+    }
+    let grpc_gears: Vec<&GearId> = process
+        .gears
+        .iter()
+        .filter(|g| has_cap(catalogue, g, RuntimeCap::Grpc))
+        .collect();
+    if grpc_gears.is_empty() {
+        return;
+    }
+    let named = grpc_gears
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    diagnostics.push(
+        Diagnostic::error(
+            DiagnosticCode::TopologyGrpcWithoutHub,
+            format!(
+                "process `{}` registers gRPC services with no gRPC hub to mount them: {named}",
+                process.name
+            ),
+            "a `grpc` gear hands its service registrations to the process's hub, and the \
+             registration is a Rust closure, so the hub has to be in the same binary; select a \
+             gear with the `grpc_hub` capability into this process",
+        )
+        .with_evidence("libs/toolkit/src/runtime/host_runtime.rs:800")
+        .at(Location(uri)),
+    );
 }
 
 /// A process with REST gears and no REST host has nowhere to publish them.

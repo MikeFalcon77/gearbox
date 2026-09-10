@@ -586,6 +586,27 @@ diagnostic_codes! {
     /// dropped, and the workers the lock named never start.
     TopologyNoHost = "GBX0313", Topology, Error, false, "workers have no host process to spawn them";
 
+    /// A process registers gRPC services and contains no gRPC hub to mount them.
+    ///
+    /// The counterpart of [`TopologyRestWithoutHost`], and the one that was
+    /// missing: the runtime refuses this outright with
+    /// `RegistryError::GrpcRequiresHub`, so a product that resolves clean here
+    /// dies while building its registry.
+    ///
+    /// **Unlike its REST neighbour this applies to every process, not only the
+    /// host.** `run_grpc_phase` is reached from `run_phases_internal` *and*
+    /// from `run_oop_serving`, so a worker that links a service-registering
+    /// gear needs a hub of its own. The asymmetry is the runtime's, not an
+    /// oversight here: a worker publishes REST through its own out-of-process
+    /// router and needs no `rest_host`, while it has no such second path for
+    /// gRPC.
+    ///
+    /// The corpus makes this reachable rather than theoretical: `cluster` and
+    /// `gear-orchestrator` both declare `grpc` and neither declares `deps`, so
+    /// nothing drags a hub in beside them.
+    TopologyGrpcWithoutHub = "GBX0314", Topology, Error, true, "gRPC gears with no gRPC hub",
+        prevents = Prevents::error("cf-gears-toolkit", "RegistryError", "GrpcRequiresHub");
+
     // ---------------------------------------------------------------- GBX04xx
     /// This consumer and provider could be placed in separate processes, but the
     /// dependency between them is not declared as a contract consumption.
@@ -646,6 +667,22 @@ diagnostic_codes! {
     /// yet honour it. Silent ignore would let an operator believe the topology
     /// changed when it did not.
     PreferenceNotHonoured = "GBX0410", Binding, Warning, false, "preference is recorded but not honoured";
+
+    /// A binding declares an `endpoint`, and nothing reads it.
+    ///
+    /// The field is in the language and in the IR, with a doc comment promising
+    /// "a pinned address, overriding whatever discovery would produce" -- and
+    /// the resolver takes only `mode` and `transport` from the declaration, so
+    /// the address is dropped in silence. Somebody reached for the escape hatch
+    /// and the hand did not close.
+    ///
+    /// Refused rather than honoured, and that is a holding position rather than
+    /// a verdict. Honouring it means deciding what an address outside the
+    /// product *means* -- a provider this product does not build, does not
+    /// place in a process and cannot see the topology of -- which is a model
+    /// question and not a resolver patch. Until that is answered, a refusal is
+    /// the honest reading of a value that changes nothing.
+    BindingEndpointNotHonoured = "GBX0411", Binding, Error, false, "declared endpoint is not honoured";
 
     // ---------------------------------------------------------------- GBX05xx
     /// A cluster provider was selected automatically.

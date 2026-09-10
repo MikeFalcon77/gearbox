@@ -145,6 +145,7 @@ fn gears(
                     // `config: {}` and the plugin failed at startup on a field
                     // the description had supplied. Found by running the thing.
                     config: declared_config(intent, id),
+                    selected_features: declared_features(intent, id),
                 },
             ))
         })
@@ -166,6 +167,20 @@ fn declared_config(intent: &ProductIntent, id: &GearId) -> BTreeMap<String, serd
         .flat_map(|selection| &selection.plugins)
         .find(|plugin| &plugin.gear == id)
         .map(|plugin| plugin.config.clone())
+        .unwrap_or_default()
+}
+
+/// The Cargo features the description asked for, for one gear.
+///
+/// One place to look, unlike [`declared_config`]: `PluginSelection` carries a
+/// `config` but no `features`, so only a `use_gear` can ask for one. A plugin
+/// and a gear the closure merely pulled in both ask for nothing.
+fn declared_features(intent: &ProductIntent, id: &GearId) -> std::collections::BTreeSet<String> {
+    intent
+        .selected_gears
+        .iter()
+        .find(|selection| &selection.gear == id)
+        .map(|selection| selection.features.iter().cloned().collect())
         .unwrap_or_default()
 }
 
@@ -306,7 +321,7 @@ pub fn explain(
             consumer_process,
             ProvenanceKind::DerivedFrom,
             format!(
-                "{:?} because the consumer is in `{}` and the provider in `{}`",
+                "the binding is {} because the consumer is in `{}` and the provider in `{}`",
                 binding.mode, binding.consumer_process, binding.provider_process
             ),
         ));
@@ -387,7 +402,7 @@ pub fn explain(
             from,
             to,
             ProvenanceKind::ConstrainedBy,
-            format!("cannot be separated: {:?}", candidate.blocked_by),
+            format!("cannot be separated: {}", candidate.blocked_by),
         ));
     }
 

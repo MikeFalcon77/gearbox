@@ -253,9 +253,60 @@ fn the_graph_is_byte_stable() {
 }
 
 #[test]
+fn features_asked_for_in_the_description_reach_the_resolution() {
+    // The link that was missing. `GearSelection.features` was filled from the
+    // description and read by nobody, so the Add Gear feature checkboxes wrote
+    // into `product.gdl` and changed nothing that was built.
+    let cat = support::catalogue_of(vec![support::gear_with_caps("api", &[], &[])]);
+    let mut intent = support::intent(&["api"]);
+    intent.selected_gears[0].features = vec!["k8s-auth".to_owned(), "otel".to_owned()];
+
+    let product = lock(&cat, &intent, "dev");
+    let gear = product
+        .gears
+        .get(&support::gid("api"))
+        .expect("the gear resolved");
+    assert!(
+        gear.selected_features.contains("k8s-auth") && gear.selected_features.contains("otel"),
+        "{:?}",
+        gear.selected_features
+    );
+    // Kept apart from what the gear's own description declares: two
+    // provenances, and the lock is owed the difference.
+    assert!(
+        !gear.package.features.contains(&"k8s-auth".to_owned()),
+        "the product's choice was merged into the projected list"
+    );
+}
+
+#[test]
+fn a_gear_nobody_asked_for_carries_no_features() {
+    // A gear the closure pulled in asked for nothing, and inheriting the
+    // asker's features would build it differently for a reason nobody wrote.
+    let cat = support::catalogue_of(vec![
+        support::gear_with_caps("api", &[], &["helper"]),
+        support::gear_with_caps("helper", &[], &[]),
+    ]);
+    let mut intent = support::intent(&["api"]);
+    intent.selected_gears[0].features = vec!["k8s-auth".to_owned()];
+
+    let product = lock(&cat, &intent, "dev");
+    let helper = product
+        .gears
+        .get(&support::gid("helper"))
+        .expect("pulled in");
+    assert!(helper.selected_features.is_empty(), "{helper:?}");
+}
+
+#[test]
 fn a_blocked_cut_appears_in_the_graph_as_well_as_the_diagnostics() {
     // "Why is this one process" is answered by what could not be separated, so
     // the constraint belongs in the graph and not only in a warning list.
+    //
+    // Asserted on the *reason*, not on the variant name. This used to read
+    // `contains("ColocationClosure")`, which passed because the string was
+    // built with `{:?}` -- so the test was pinning a Rust enum spelling that
+    // had leaked in front of a person, and would have gone on defending it.
     let cat = support::catalogue_with_declared_edge_and_dep();
     let intent = support::intent(&["host", "provider"]);
     let r = resolve(&cat, &intent, &ProfileId::new("dev").unwrap());
@@ -265,8 +316,13 @@ fn a_blocked_cut_appears_in_the_graph_as_well_as_the_diagnostics() {
             .edges
             .iter()
             .any(|e| e.kind == ProvenanceKind::ConstrainedBy
-                && e.because.contains("ColocationClosure")),
+                && e.because.contains("co-location closure")),
         "{:#?}",
+        graph.edges
+    );
+    assert!(
+        !graph.edges.iter().any(|e| e.because.contains("Colocation")),
+        "a Rust variant name reached the explanation graph: {:#?}",
         graph.edges
     );
 }

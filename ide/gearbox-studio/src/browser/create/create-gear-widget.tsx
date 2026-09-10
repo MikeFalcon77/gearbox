@@ -218,7 +218,24 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
     });
   }
 
+  /**
+   * Schedule the preview, and **repaint now**.
+   *
+   * The repaint is not a nicety, it is what makes typing work. These inputs are
+   * controlled -- `value={this.field}` -- and React restores the last committed
+   * props into the DOM node after every change event. A handler that mutated
+   * the field and returned without repainting therefore had its character
+   * erased on the spot, and it reappeared only when the debounced round trip
+   * below finally repainted, one engine call later. Measured as letter-by-letter
+   * typing, and the tell was that every `<select>` here repainted and every
+   * `<input type="text">` did not.
+   *
+   * It lives here rather than in eleven handlers because every one of them
+   * wants the same thing: the state changed enough to be worth a new preview,
+   * so it is certainly worth showing.
+   */
   protected schedulePreview(): void {
+    this.update();
     if (this.previewTimer !== undefined) clearTimeout(this.previewTimer);
     this.previewTimer = setTimeout(() => void this.refreshPreview(), 200);
   }
@@ -384,7 +401,6 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
           onChange={(e) => {
             this.point = e.target.value;
             this.schedulePreview();
-            this.update();
           }}
         >
           {/* An honest empty option: not choosing is a state, and it is the one
@@ -463,7 +479,6 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
     this.destination = uri.path.fsPath().replace(/\\/g, "/").replace(/\/+$/, "");
     this.destinationTouched = true;
     this.schedulePreview();
-    this.update();
   }
 
   protected render(): React.ReactNode {
@@ -520,7 +535,6 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
               onChange={(e) => {
                 this.kind = e.target.value as GearKind;
                 this.schedulePreview();
-                this.update();
               }}
             >
               <option value="service">Service — a gear that does something</option>

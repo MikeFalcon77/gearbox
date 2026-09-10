@@ -177,7 +177,10 @@ fn dependencies(
             package: Some(gear.package.crate_name.clone()),
             version: None,
             path: Some(dep_path(crate_dir, &root.join(gear.package.path.as_str()))),
-            features: gear.package.features.clone(),
+            // The union of what the gear declares and what the product asked
+            // for. Kept separate in the lock and joined here, which is the one
+            // place the distinction stops mattering: cargo takes a set.
+            features: union_features(gear),
             // Written only when false. `true` is Cargo's default, and a manifest
             // restating every default is a manifest nobody reads.
             default_features: (!gear.package.default_features).then_some(false),
@@ -237,8 +240,80 @@ fn source_root<'a>(
 /// checkout moves -- but a source root on another Windows volume has no
 /// relative form, and an absolute path that works beats a relative one that
 /// does not.
+/// Every Cargo feature this gear is built with.
+///
+/// Two provenances, one list, and the join happens here rather than in the
+/// resolver because cargo takes a set and the lock is owed the difference:
+/// `package.features` is projected from the gear's own `cargo(...)`, while
+/// `selected_features` is what the product asked for on the `use_gear` line.
+///
+/// Sorted and de-duplicated, because a manifest that reorders between two runs
+/// of the same resolution would break `cpt-gearbox-nfr-determinism` for no
+/// reason anyone could see.
+fn union_features(gear: &gearbox_ir::ResolvedGear) -> Vec<String> {
+    let mut all: std::collections::BTreeSet<&str> =
+        gear.package.features.iter().map(String::as_str).collect();
+    all.extend(gear.selected_features.iter().map(String::as_str));
+    all.into_iter().map(ToOwned::to_owned).collect()
+}
+
 fn dep_path(from: &Path, target: &Path) -> String {
     paths::relative(from, target)
         .as_deref()
         .map_or_else(|| paths::to_slash(target), paths::to_slash)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gear(declared: &[&str], selected: &[&str]) -> gearbox_ir::ResolvedGear {
+        let mut package = gearbox_ir::CargoRef::new(
+            "cf-gears-api",
+            "api",
+            gearbox_ir::RelPath::new("gears/api").unwrap(),
+        );
+        package.features = declared.iter().map(ToString::to_string).collect();
+        gearbox_ir::ResolvedGear {
+            id: gearbox_ir::GearId::new("api").unwrap(),
+            source: gearbox_ir::SourceId::new("gears-rust").unwrap(),
+            gdl_path: gearbox_ir::RelPath::new("gears/api/gear.gdl").unwrap(),
+            package,
+            crate_dir: gearbox_ir::RelPath::new("gears/api").unwrap(),
+            runtime_caps: std::collections::BTreeSet::new(),
+            colocated_deps: std::collections::BTreeSet::new(),
+            selected_by: Vec::new(),
+            config: std::collections::BTreeMap::new(),
+            selected_features: selected.iter().map(ToString::to_string).collect(),
+        }
+    }
+
+    #[test]
+    fn the_two_provenances_are_joined_for_cargo() {
+        // Cargo takes one set, so this is the place the distinction the lock
+        // keeps stops mattering.
+        assert_eq!(
+            union_features(&gear(&["otel"], &["k8s-auth"])),
+            vec!["k8s-auth".to_owned(), "otel".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_feature_declared_and_also_asked_for_appears_once() {
+        assert_eq!(
+            union_features(&gear(&["otel"], &["otel"])),
+            vec!["otel".to_owned()]
+        );
+    }
+
+    #[test]
+    fn the_order_does_not_depend_on_which_side_supplied_it() {
+        // `cpt-gearbox-nfr-determinism` reaches the generated manifest too: a
+        // list that reordered between two runs of one resolution would be a
+        // diff nobody could explain.
+        assert_eq!(
+            union_features(&gear(&["b", "a"], &["c"])),
+            union_features(&gear(&["c"], &["a", "b"]))
+        );
+    }
 }

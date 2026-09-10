@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **75**.
+Codes: **77**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -289,6 +289,7 @@ ignores.
 | [GBX0311](#gbx0311) | error | gear placed in no process |
 | [GBX0312](#gbx0312) | error | REST host in a worker process |
 | [GBX0313](#gbx0313) | error | workers have no host process to spawn them |
+| [GBX0314](#gbx0314) | error | gRPC gears with no gRPC hub |
 
 ### GBX0301
 
@@ -406,6 +407,33 @@ A `self_hosted` profile produced workers but no host to spawn them.
 Spawn specs are attached to the host process. Without one they are
 dropped, and the workers the lock named never start.
 
+### GBX0314
+
+**gRPC gears with no gRPC hub**
+
+A process registers gRPC services and contains no gRPC hub to mount them.
+
+The counterpart of [`TopologyRestWithoutHost`], and the one that was
+missing: the runtime refuses this outright with
+`RegistryError::GrpcRequiresHub`, so a product that resolves clean here
+dies while building its registry.
+
+**Unlike its REST neighbour this applies to every process, not only the
+host.** `run_grpc_phase` is reached from `run_phases_internal` *and*
+from `run_oop_serving`, so a worker that links a service-registering
+gear needs a hub of its own. The asymmetry is the runtime's, not an
+oversight here: a worker publishes REST through its own out-of-process
+router and needs no `rest_host`, while it has no such second path for
+gRPC.
+
+The corpus makes this reachable rather than theoretical: `cluster` and
+`gear-orchestrator` both declare `grpc` and neither declares `deps`, so
+nothing drags a hub in beside them.
+
+*Asserts a limitation of the runtime, so every occurrence cites the source that proves it.*
+
+*Prevents `RegistryError::GrpcRequiresHub` in `cf-gears-toolkit`. The reference is resolved against the `gears-rust` checkout by `gearbox-project`'s corpus test.*
+
 ## `GBX04xx` — Contract bindings and severability
 
 | Code | Severity | Summary |
@@ -420,6 +448,7 @@ dropped, and the workers the lock named never start.
 | [GBX0408](#gbx0408) | error | directory unreachable for a remote binding |
 | [GBX0409](#gbx0409) | warning | endpoint override cannot come from the environment |
 | [GBX0410](#gbx0410) | warning | preference is recorded but not honoured |
+| [GBX0411](#gbx0411) | error | declared endpoint is not honoured |
 
 ### GBX0401
 
@@ -518,6 +547,25 @@ hyphenated dependency name nested deeper can never be matched.
 A product preference was parsed and recorded, but the resolver does not
 yet honour it. Silent ignore would let an operator believe the topology
 changed when it did not.
+
+### GBX0411
+
+**declared endpoint is not honoured**
+
+A binding declares an `endpoint`, and nothing reads it.
+
+The field is in the language and in the IR, with a doc comment promising
+"a pinned address, overriding whatever discovery would produce" -- and
+the resolver takes only `mode` and `transport` from the declaration, so
+the address is dropped in silence. Somebody reached for the escape hatch
+and the hand did not close.
+
+Refused rather than honoured, and that is a holding position rather than
+a verdict. Honouring it means deciding what an address outside the
+product *means* -- a provider this product does not build, does not
+place in a process and cannot see the topology of -- which is a model
+question and not a resolver patch. Until that is answered, a refusal is
+the honest reading of a value that changes nothing.
 
 ## `GBX05xx` — Cluster capabilities, providers and plugins
 

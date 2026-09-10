@@ -231,10 +231,26 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
       this.cloneFrom = undefined;
     }
     this.schedulePreview();
-    this.update();
   }
 
+  /**
+   * Schedule the preview, and **repaint now**.
+   *
+   * The repaint is not a nicety, it is what makes typing work. These inputs are
+   * controlled -- `value={this.field}` -- and React restores the last committed
+   * props into the DOM node after every change event. A handler that mutated
+   * the field and returned without repainting therefore had its character
+   * erased on the spot, and it reappeared only when the debounced round trip
+   * below finally repainted, one engine call later. Measured as letter-by-letter
+   * typing, and the tell was that every `<select>` here repainted and every
+   * `<input type="text">` did not.
+   *
+   * It lives here rather than in eleven handlers because every one of them
+   * wants the same thing: the state changed enough to be worth a new preview,
+   * so it is certainly worth showing.
+   */
   protected schedulePreview(): void {
+    this.update();
     if (this.previewTimer !== undefined) clearTimeout(this.previewTimer);
     this.previewTimer = setTimeout(() => void this.refreshPreview(), 200);
   }
@@ -497,7 +513,6 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
     if (uri === undefined) return;
     this.cloneFrom = uri.path.fsPath().replace(/\\/g, "/");
     this.schedulePreview();
-    this.update();
   }
 
   /**
@@ -523,7 +538,6 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
     this.destinationTouched = true;
     this.destination = `${folder}/product.gdl`;
     this.schedulePreview();
-    this.update();
   }
 
   protected render(): React.ReactNode {

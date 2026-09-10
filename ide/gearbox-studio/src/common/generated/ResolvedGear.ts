@@ -28,6 +28,22 @@ crate_dir: RelPath, runtime_caps?: Array<RuntimeCap>, colocated_deps?: Array<Gea
  */
 selected_by: Array<InclusionReason>, 
 /**
+ * Cargo features the *product* asked for, on top of what `gear.gdl`
+ * declares in its `cargo(...)`.
+ *
+ * Kept apart from [`Self::package`]`.features` rather than merged into it,
+ * because the two have different provenance and this repository keeps
+ * paying for conflations of exactly that shape: the package's list is
+ * projected from the gear's own description, this one is a decision the
+ * integrator made. The generator unions them; the lock records which was
+ * which.
+ *
+ * It exists because it was missing. `GearSelection.features` was filled
+ * from the description and read by nobody, so the feature checkboxes in
+ * Add Gear wrote into `product.gdl` and changed nothing that was built.
+ */
+selected_features?: Array<string>, 
+/**
  * The configuration the description set on this gear.
  *
  * In the lock because it is part of what was *decided*: two products whose

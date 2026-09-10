@@ -56,6 +56,11 @@ fn resolved_gear(
         colocated_deps: deps.iter().map(|d| gid(d)).collect(),
         config: std::collections::BTreeMap::new(),
         selected_by: vec![selected_by],
+        // Empty, deliberately: the golden snapshot is the shape of a lock for a
+        // product that asked for no features, and `skip_serializing_if` keeps
+        // that lock byte-identical to the one this fixture produced before the
+        // field existed.
+        selected_features: std::collections::BTreeSet::new(),
     }
 }
 

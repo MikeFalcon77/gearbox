@@ -247,6 +247,22 @@ pub struct ResolvedGear {
     /// common questions about a resolved product.
     pub selected_by: Vec<InclusionReason>,
 
+    /// Cargo features the *product* asked for, on top of what `gear.gdl`
+    /// declares in its `cargo(...)`.
+    ///
+    /// Kept apart from [`Self::package`]`.features` rather than merged into it,
+    /// because the two have different provenance and this repository keeps
+    /// paying for conflations of exactly that shape: the package's list is
+    /// projected from the gear's own description, this one is a decision the
+    /// integrator made. The generator unions them; the lock records which was
+    /// which.
+    ///
+    /// It exists because it was missing. `GearSelection.features` was filled
+    /// from the description and read by nobody, so the feature checkboxes in
+    /// Add Gear wrote into `product.gdl` and changed nothing that was built.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub selected_features: BTreeSet<String>,
+
     /// The configuration the description set on this gear.
     ///
     /// In the lock because it is part of what was *decided*: two products whose
@@ -650,6 +666,37 @@ impl CutBlocker {
     #[must_use]
     pub const fn fixable_by_declaring(self) -> bool {
         matches!(self, Self::UndeclaredHubEdge)
+    }
+
+    /// Why the edge cannot be cut, as a clause a sentence can be built around.
+    ///
+    /// A phrase rather than a label, because the one caller is the explanation
+    /// graph and a reader there is owed a reason, not a term. It exists at all
+    /// because that caller used to interpolate `{:?}` and put
+    /// `cannot be separated: [ColocationClosure]` in front of a person.
+    #[must_use]
+    pub const fn because(self) -> &'static str {
+        match self {
+            Self::ColocationClosure => {
+                "the provider is in the consumer's co-location closure, so the local instance \
+                 wins whatever the configuration says"
+            }
+            Self::UndeclaredHubEdge => {
+                "the dependency is a direct type-keyed lookup rather than a declared contract, \
+                 so a boundary would fail at run time"
+            }
+            Self::InProcessOnlyContract => "the contract's kind is in-process only",
+            Self::NoRemoteTransport => {
+                "the provider declares no transport a severed edge could carry"
+            }
+            Self::ProfileForbidsSplit => "the profile is a single process",
+        }
+    }
+}
+
+impl std::fmt::Display for CutBlocker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.because())
     }
 }
 
