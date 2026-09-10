@@ -5,4 +5,4 @@ import type { ProfileId } from "./ProfileId";
 /**
  * How a gear came to be in the product.
  */
-export type InclusionReason = { "reason": "selected" } | { "reason": "colocated_by", gear: GearId, } | { "reason": "required_by_profile", profile: ProfileId, why: string, } | { "reason": "plugin_of", host: GearId, profile: ProfileId, };
+export type InclusionReason = { "reason": "selected" } | { "reason": "colocated_by", gear: GearId, } | { "reason": "plugin_of", host: GearId, profile: ProfileId, };

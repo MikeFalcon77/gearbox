@@ -36,6 +36,15 @@ pub enum NodeKind {
     Diagnostic,
     Source,
     Profile,
+    /// The product description itself.
+    ///
+    /// The graph had no node for the document everything is declared in, and
+    /// the omission was not harmless: the one arm whose honest answer is "you
+    /// wrote it there" -- a gear named in `gears = [...]` -- had to point at
+    /// the nearest available node instead, which was the profile. That made
+    /// the panel say `selected-by dev` about a list that is not profile-scoped
+    /// at all, and the same edge was emitted for every profile.
+    Product,
 }
 
 impl NodeKind {
@@ -56,6 +65,7 @@ impl NodeKind {
             Self::Diagnostic => "diagnostic",
             Self::Source => "source",
             Self::Profile => "profile",
+            Self::Product => "product",
         }
     }
 

@@ -180,6 +180,35 @@ fn every_gear_records_why_it_is_in_the_product() {
 }
 
 #[test]
+fn a_named_gear_is_explained_by_the_description_and_not_by_the_profile() {
+    // The gap that let a false sentence reach a person. Nothing asserted what
+    // a `Selected` edge points *at*, so it pointed at the profile and the
+    // panel read "gear-orchestrator -- selected-by -- dev" about a
+    // `gears = [...]` list that is not profile-scoped: the identical edge was
+    // emitted for `local` and `prod` too.
+    let cat = support::catalogue_of(vec![support::gear_with_caps("api", &[], &[])]);
+    let intent = support::intent(&["api"]);
+    let r = resolve(&cat, &intent, &ProfileId::new("dev").unwrap());
+    let graph = product::explain(&cat, &intent, &r);
+
+    let from_gear: Vec<&gearbox_ir::ProvenanceEdge> = graph
+        .edges
+        .iter()
+        .filter(|e| e.from.as_str() == "gear:api")
+        .collect();
+    assert!(
+        from_gear.iter().all(|e| e.to.as_str() != "profile:dev"),
+        "a gear named in the description is not selected by a profile: {from_gear:#?}"
+    );
+    assert!(
+        from_gear
+            .iter()
+            .any(|e| e.to.as_str().starts_with("product:")),
+        "it is selected by the description, which needs a node: {from_gear:#?}"
+    );
+}
+
+#[test]
 fn the_explanation_names_the_gear_that_pulled_each_one_in() {
     // The question this graph exists to answer. `grpc-hub` is in the product
     // only because `api-gateway` reaches it, and the edge says so.
@@ -196,12 +225,25 @@ fn the_explanation_names_the_gear_that_pulled_each_one_in() {
     assert!(
         colocated
             .iter()
-            .any(|why| why.contains("`api-gateway` declares `grpc-hub`")),
+            .any(|why| why.contains("`api-gateway` names `grpc-hub`")),
         "{colocated:#?}"
     );
     assert!(
-        colocated.iter().all(|why| why.contains("cannot be cut")),
+        colocated
+            .iter()
+            .all(|why| why.contains("no profile can separate them")),
         "each one must say why the edge is not severable"
+    );
+    // And it must not overreach. The sentence read "link-time and cannot be
+    // cut", which a reader took as a claim about the *gear* -- most of which
+    // are perfectly deployable on their own; it is the declared edge that pins
+    // them. It says what can be done about it now, which is what GBX0607
+    // records and what this used to leave out.
+    assert!(
+        colocated
+            .iter()
+            .all(|why| why.contains("Removing that entry")),
+        "each one must name the remedy: {colocated:#?}"
     );
 }
 

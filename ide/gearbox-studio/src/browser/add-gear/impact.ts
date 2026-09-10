@@ -82,8 +82,6 @@ function whyPresent(gear: { selected_by: readonly InclusionReason[] }): string {
       return "asked for";
     case "colocated_by":
       return `co-located with ${String(first.gear)}`;
-    case "required_by_profile":
-      return `required by profile ${String(first.profile)}: ${first.why}`;
     case "plugin_of":
       return `plugin of ${String(first.host)}`;
     default:

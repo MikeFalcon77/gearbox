@@ -1274,8 +1274,6 @@ function describeInclusion(reason: InclusionReason): string {
       return "asked for by the product";
     case "colocated_by":
       return `co-located with ${reason.gear}`;
-    case "required_by_profile":
-      return `required by profile ${reason.profile} (${reason.why})`;
     case "plugin_of":
       return `plugin of ${reason.host} for ${reason.profile}`;
   }

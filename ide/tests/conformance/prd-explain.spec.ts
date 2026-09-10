@@ -79,7 +79,11 @@ test.describe("why the resolution is the way it is", () => {
     // something that is, or "why is this here" has no answer.
     expect(steps.map((s) => s.kind)).toContain("colocated-by");
     expect(steps.some((s) => /named in the product description/.test(s.because))).toBe(true);
-    expect(steps.some((s) => /link-time and cannot be cut/.test(s.because))).toBe(true);
+    // Not "cannot be cut": that read as a claim about the *gear*, and most of
+    // them are perfectly deployable alone -- it is the declared `deps` entry
+    // that pins them, and removing it is the remedy the sentence now names.
+    expect(steps.some((s) => /no profile can separate them/.test(s.because))).toBe(true);
+    expect(steps.some((s) => /Removing that entry/.test(s.because))).toBe(true);
   });
 
   test("a plugin's inclusion names the host and the profile [PRD cpt-gearbox-fr-plugin-selection]", async ({

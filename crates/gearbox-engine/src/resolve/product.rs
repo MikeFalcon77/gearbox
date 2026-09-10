@@ -214,6 +214,41 @@ pub fn explain(
     }
     graph.add_node(profile_node);
 
+    // The description itself, so the arm whose answer is "you wrote it there"
+    // has somewhere true to point. Its origin is the file: a gear's own
+    // `use_gear` line rides on the gear node, and repeating it here would make
+    // two rows in the panel claim the same location for different facts.
+    let product = node_id(NodeKind::Product, intent.id.as_str());
+    if let Some(id) = &product {
+        graph.add_node(ExplanationNode::new(
+            id.clone(),
+            NodeKind::Product,
+            intent.id.clone(),
+        ));
+    }
+
+    explain_gears(catalogue, intent, resolution, product.as_ref(), &mut graph);
+    explain_processes(resolution, &mut graph);
+    explain_bindings(intent, resolution, &mut graph);
+    explain_cluster(resolution, &profile, &mut graph);
+    explain_blocked_cuts(resolution, &mut graph);
+
+    graph.finish();
+    graph
+}
+
+/// The gears, and why each of them is in the product.
+///
+/// Split out of [`explain`] with its four siblings when the function outgrew
+/// clippy's line limit. The seam is by *family of edge*, which is also how a
+/// reader looks for one.
+fn explain_gears(
+    catalogue: &Catalogue,
+    intent: &ProductIntent,
+    resolution: &Resolution,
+    product: Option<&NodeId>,
+    graph: &mut ExplanationGraph,
+) {
     for (gear, reasons) in &resolution.closure.members {
         let Some(id) = node_id(NodeKind::Gear, gear.as_str()) else {
             continue;
@@ -225,29 +260,41 @@ pub fn explain(
         graph.add_node(node);
         for reason in reasons {
             let edge = match reason {
-                InclusionReason::Selected => Some(ProvenanceEdge::new(
-                    id.clone(),
-                    profile.clone(),
-                    ProvenanceKind::SelectedBy,
-                    format!("`{gear}` is named in the product description"),
-                )),
+                // **Not at the profile.** `gears = [...]` is not profile-scoped,
+                // so the identical edge is emitted for every profile and
+                // "selected-by dev" was false of all of them. A person who
+                // named a gear is owed the file they named it in, which is
+                // what the node's own origin already carries -- so the edge
+                // says who did the naming and stops implying a decision the
+                // resolver never made.
+                InclusionReason::Selected => product.cloned().map(|to| {
+                    ProvenanceEdge::new(
+                        id.clone(),
+                        to,
+                        ProvenanceKind::Declared,
+                        format!("`{gear}` is named in the product description"),
+                    )
+                }),
                 InclusionReason::ColocatedBy { gear: by } => node_id(NodeKind::Gear, by.as_str())
                     .map(|to| {
                         ProvenanceEdge::new(
                             id.clone(),
                             to,
                             ProvenanceKind::ColocatedBy,
+                            // Scoped to *this edge*, which is what the reason
+                            // is about. It read "link-time and cannot be cut",
+                            // which a reader took as "this gear can never run
+                            // out of process" -- and that is usually false;
+                            // the dep pins it, the gear itself may be perfectly
+                            // deployable. The remedy is named because there is
+                            // one, and GBX0607 already records it.
                             format!(
-                                "`{by}` declares `{gear}` in `deps`, which is link-time and \
-                                 cannot be cut"
+                                "`{by}` names `{gear}` in its `deps`, so the two are linked \
+                             into one binary and no profile can separate them. Removing \
+                             that entry is the only thing that can."
                             ),
                         )
                     }),
-                InclusionReason::RequiredByProfile { profile: p, why } => {
-                    node_id(NodeKind::Profile, p.as_str()).map(|to| {
-                        ProvenanceEdge::new(id.clone(), to, ProvenanceKind::ConstrainedBy, why)
-                    })
-                }
                 // The edge points at the host, not at the profile: "why is this
                 // crate in my binary" is answered by the gear that selected it,
                 // and the profile is a qualifier on that answer rather than the
@@ -270,7 +317,10 @@ pub fn explain(
             }
         }
     }
+}
 
+/// One node per process, pointing at the gear whose placement created it.
+fn explain_processes(resolution: &Resolution, graph: &mut ExplanationGraph) {
     for process in &resolution.partition.processes {
         let (Some(id), Some(anchor)) = (
             node_id(NodeKind::Process, process.name.as_str()),
@@ -288,12 +338,18 @@ pub fn explain(
             anchor,
             ProvenanceKind::DerivedFrom,
             format!(
-                "process `{}` is the co-location closure of `{}`",
-                process.name, process.anchor
+                "process `{}` is the co-location closure of `{}`: the {} gears that \
+                 `deps` links to it, in one binary",
+                process.name,
+                process.anchor,
+                process.gears.len()
             ),
         ));
     }
+}
 
+/// Each binding, its mode, and the diagnostic when the request was not honoured.
+fn explain_bindings(intent: &ProductIntent, resolution: &Resolution, graph: &mut ExplanationGraph) {
     for binding in &resolution.bindings {
         let key = binding_key(binding.consumer.as_str(), binding.contract.as_str());
         let (Some(id), Some(consumer_process)) = (
@@ -333,11 +389,17 @@ pub fn explain(
                 id,
                 to,
                 ProvenanceKind::DowngradedBy,
-                format!("requested, and not honoured: {code}"),
+                format!(
+                    "the request was not honoured, and {code} says why; the outcome above is \
+                 what the topology allowed"
+                ),
             ));
         }
     }
+}
 
+/// Each cluster scope: who requires it, and how its provider was chosen.
+fn explain_cluster(resolution: &Resolution, profile: &NodeId, graph: &mut ExplanationGraph) {
     for binding in &resolution.cluster {
         let key = format!("{}|{}", binding.scope, binding.primitive.slug());
         let Some(id) = node_id(NodeKind::ClusterProvider, &key) else {
@@ -363,26 +425,54 @@ pub fn explain(
                     to,
                     ProvenanceKind::DerivedFrom,
                     format!(
-                        "`{requester}` requires `{}` in scope `{}`",
+                        "`{requester}` is why this scope is resolved at all: it requires \
+                     `{}` in `{}`",
                         binding.primitive.slug(),
                         binding.scope
                     ),
                 ));
             }
         }
+        // All three of these used to name nothing -- not the provider that was
+        // asked for, not the one in use, not the alternative that lost. A
+        // sentence about a choice that mentions neither side of it is a label.
+        let asked_for = match &binding.selected.selected {
+            Choice::Explicit { value } => Some(value.as_str()),
+            Choice::Auto => None,
+        };
+        let in_use = binding.resolved.effective_provider();
         let (kind, because) = if binding.selected.was_downgraded() {
             (
                 ProvenanceKind::DowngradedBy,
-                "named provider is unregistered or does not satisfy the primitive",
+                match (asked_for, in_use) {
+                    (Some(named), Some(actual)) => format!(
+                        "`{named}` was named and could not be used here, so `{actual}` \
+                     answers this scope instead"
+                    ),
+                    (Some(named), None) => format!(
+                        "`{named}` was named and could not be used here, and nothing else \
+                     satisfies the requirement"
+                    ),
+                    (None, _) => "the resolver's choice could not be used here".to_owned(),
+                },
             )
         } else {
-            match binding.selected.selected {
-                Choice::Explicit { .. } => {
-                    (ProvenanceKind::Declared, "named in the product description")
-                }
-                Choice::Auto => (
+            match asked_for {
+                Some(named) => (
+                    ProvenanceKind::Declared,
+                    format!("the description names `{named}` for this scope"),
+                ),
+                None => (
                     ProvenanceKind::PreferredOver,
-                    "ranked by the resolver; nothing named a provider",
+                    match in_use {
+                        Some(actual) => format!(
+                            "nothing named a provider, so the resolver ranked the registered \
+                         ones and took `{actual}`"
+                        ),
+                        None => "nothing named a provider and none is registered for this \
+                             primitive"
+                            .to_owned(),
+                    },
                 ),
             }
         };
@@ -391,6 +481,11 @@ pub fn explain(
 
     // Blocked cuts are part of the answer to "why is this one process", so they
     // belong in the graph rather than only in the diagnostics.
+}
+
+/// Blocked cuts, because "why is this one process" is answered by what could
+/// not be separated.
+fn explain_blocked_cuts(resolution: &Resolution, graph: &mut ExplanationGraph) {
     for candidate in &resolution.cuts.blocked {
         let (Some(from), Some(to)) = (
             node_id(NodeKind::Gear, candidate.consumer.as_str()),
@@ -405,9 +500,6 @@ pub fn explain(
             format!("cannot be separated: {}", candidate.blocked_by),
         ));
     }
-
-    graph.finish();
-    graph
 }
 
 /// Origin of a gear node: the product's `use_gear` when named, else `gear(...)`.

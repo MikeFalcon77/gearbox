@@ -287,8 +287,6 @@ pub enum InclusionReason {
     Selected,
     /// Pulled in by another gear's co-location dependency.
     ColocatedBy { gear: GearId },
-    /// Required to satisfy a structural constraint of the profile.
-    RequiredByProfile { profile: ProfileId, why: String },
     /// Chosen as a plugin of a host gear, for this deployment profile.
     ///
     /// A reason of its own rather than `Selected`, because the product did not

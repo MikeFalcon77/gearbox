@@ -3,4 +3,4 @@
 /**
  * What a node stands for.
  */
-export type NodeKind = "gear" | "contract" | "requirement" | "capability" | "cluster-provider" | "process" | "binding" | "decision" | "preference" | "constraint" | "diagnostic" | "source" | "profile";
+export type NodeKind = "gear" | "contract" | "requirement" | "capability" | "cluster-provider" | "process" | "binding" | "decision" | "preference" | "constraint" | "diagnostic" | "source" | "profile" | "product";
