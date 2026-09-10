@@ -112,6 +112,98 @@ fn every_code_has_a_title() {
 }
 
 #[test]
+fn prevented_error_references_are_well_formed() {
+    // Shape only. Whether the named enum and variant still exist in `gears-rust`
+    // is the corpus test's question, in `gearbox-project`, because answering it
+    // needs a checkout this crate must not require. What is checkable with no
+    // checkout at all is that a reference is spelled like one -- and a
+    // misspelling caught here is caught on every machine rather than only on the
+    // ones with the corpus.
+    for code in DiagnosticCode::ALL {
+        let Some(reference) = code.prevents().as_ref() else {
+            continue;
+        };
+        assert!(
+            reference.krate.starts_with("cf-gears-"),
+            "`{code}` names crate {:?}, which is not a `gears-rust` package name",
+            reference.krate
+        );
+        for (label, ident) in [("enum", reference.ty), ("variant", reference.variant)] {
+            assert!(
+                ident
+                    .chars()
+                    .next()
+                    .is_some_and(|first| first.is_ascii_uppercase()),
+                "`{code}` names {label} {ident:?}, which is not an UpperCamelCase identifier"
+            );
+            assert!(
+                ident.chars().all(|c| c.is_ascii_alphanumeric()),
+                "`{code}` names {label} {ident:?}, which is not a bare identifier"
+            );
+        }
+        let Some(canonical) = reference.canonical else {
+            continue;
+        };
+        // `#[error_domain("cluster.v1")]` -- the version suffix is what makes it
+        // a contract rather than a label, so a domain without one is a typo.
+        assert!(
+            canonical.domain.contains('.'),
+            "`{code}` names error domain {:?}, which carries no version segment",
+            canonical.domain
+        );
+        assert!(
+            canonical
+                .code
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+            "`{code}` names error code {:?}, which is not snake_case",
+            canonical.code
+        );
+    }
+}
+
+#[test]
+fn prose_naming_a_referenced_error_enum_declares_it() {
+    // The loop back from prose to column, and the reason `docs()` exists.
+    //
+    // Once any code references an error enum, that enum's name becomes watched:
+    // a *new* doc comment mentioning `RegistryError::Something` while declaring
+    // no `prevents` is exactly the unchecked claim this mechanism was added to
+    // stop, and it would otherwise be caught only by a reviewer who happened to
+    // remember the mechanism exists.
+    //
+    // `PROSE_ONLY` is empty on purpose. An entry here is a decision that a
+    // mention should stay prose, and it should have to be written down and
+    // defended rather than accumulated silently.
+    const PROSE_ONLY: &[&str] = &[];
+
+    let watched: BTreeSet<&str> = DiagnosticCode::ALL
+        .iter()
+        .filter_map(|code| code.prevents().as_ref())
+        .map(|reference| reference.ty)
+        .collect();
+
+    for code in DiagnosticCode::ALL {
+        if code.prevents().as_ref().is_some() || PROSE_ONLY.contains(&code.as_str()) {
+            continue;
+        }
+        let prose = code.docs().join(" ");
+        for enum_name in &watched {
+            // `Enum::Variant`, the form the prose actually uses. A bare enum
+            // name appears in sentences about the type rather than about a
+            // failure, and demanding a reference for those would make the
+            // allow-list the normal case.
+            let mention = format!("{enum_name}::");
+            assert!(
+                !prose.contains(&mention),
+                "`{code}` names `{mention}...` in its doc comment but declares no `prevents`. \
+                 Add the column, or add the code to PROSE_ONLY with a reason."
+            );
+        }
+    }
+}
+
+#[test]
 fn every_runtime_gap_code_requires_evidence() {
     // The whole point of the runtime-gap range is that it makes claims about
     // another repository. Those claims must be checkable.

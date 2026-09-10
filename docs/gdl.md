@@ -358,6 +358,8 @@ import is nonlocal raise try while with yield
 
 The right-hand column is the stage that reports it. Only the first group needs nothing but the file; the rest need the projected catalogue, which is why a bad `config` key evaluates clean and is refused later, where the gear's schema is in scope.
 
+This table is the authoring subset, curated and hand-written, because the stage that reports a code is not something the catalogue knows. Every code the engine can emit is in [the generated reference](diagnostics.md), which cannot fall behind the declaration it is generated from.
+
 | Code | When | Reported by |
 |---|---|---|
 | GBX0101 | syntax error | evaluating the file |

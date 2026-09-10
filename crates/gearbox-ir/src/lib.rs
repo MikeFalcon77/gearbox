@@ -26,8 +26,9 @@ pub use contract::{
     version_marker,
 };
 pub use diagnostics::{
-    Diagnostic, DiagnosticCode, DiagnosticDomain, Diagnostics, Location, Position, Range,
-    RelatedLocation, Severity, UnknownDiagnosticCode, file_uri,
+    CanonicalErrorId, Diagnostic, DiagnosticCode, DiagnosticDomain, Diagnostics, Location,
+    Position, Prevents, Range, RelatedLocation, RuntimeErrorRef, Severity, UnknownDiagnosticCode,
+    file_uri,
 };
 pub use explain::{
     ExplanationGraph, ExplanationNode, NodeKind, ProvenanceEdge, ProvenanceKind, binding_key,

@@ -19,6 +19,7 @@ pub mod attribute;
 pub mod cluster;
 pub mod config;
 pub mod contract;
+pub mod error_enum;
 pub mod gear;
 pub mod gts;
 pub mod manifest;
@@ -38,6 +39,7 @@ pub use cluster::{
 };
 pub use config::{ConfigField, ConfigRootError, project_config_fields, project_config_root};
 pub use contract::{ProjectedContract, ProjectedProvide, project_contracts, project_provides};
+pub use error_enum::{ProjectedErrorEnum, ProjectedErrorVariant, project_error_enums};
 pub use gear::{ProjectedGear, ProjectedLifecycle, project_gear};
 pub use gts::{GtsError, GtsType, gts_type_from_schema, project_gts_types};
 pub use manifest::{CrateManifest, ManifestError, project_manifest};

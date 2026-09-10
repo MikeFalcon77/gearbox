@@ -842,9 +842,17 @@ after resolution completes.
 Every diagnostic asserting that the runtime does not support something **MUST** carry a file and
 line reference in `gears-rust` that substantiates the claim.
 
-- **Threshold**: 100% of unsupported-capability diagnostics.
+Where the failure being prevented is a *named* error rather than a line of code, the citation
+**SHOULD** additionally be a typed reference -- the declaring package, the enum and the variant,
+plus the frozen `(error_domain, error_code)` pair where the failure travels on the wire -- and a
+test **MUST** resolve it against the checkout.
+
+- **Threshold**: 100% of unsupported-capability diagnostics carry a file and line; every typed
+  reference resolves, checked by `gearbox-project`'s corpus test.
 - **Rationale**: A tool that says "not supported" without proof is indistinguishable from a tool
-  with a bug, and gets worked around instead of trusted.
+  with a bug, and gets worked around instead of trusted. A `path:line` proves the claim on the day
+  it is written and rots quietly afterwards: the file moves and the citation is wrong while every
+  identifier in it is still correct. A named reference rots loudly, because a rename fails a test.
 
 #### Cluster-independent rendering
 

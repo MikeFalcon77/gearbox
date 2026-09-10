@@ -99,16 +99,134 @@ impl DiagnosticDomain {
     }
 }
 
+/// An AIP-193 `(domain, code)` pair, spelled the way `#[derive(ContractError)]`
+/// spells it in `gears-rust`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CanonicalErrorId {
+    /// `#[error_domain("...")]`, e.g. `"cluster.v1"`.
+    pub domain: &'static str,
+    /// `#[error_code("...")]`, e.g. `"profile_not_bound"`.
+    pub code: &'static str,
+}
+
+/// A `gears-rust` runtime error that a composition-time diagnostic exists to
+/// prevent.
+///
+/// **Deliberately not a `path:line`.** That is what [`Diagnostic::evidence`]
+/// already is, and a line number is the part that rots first: a file moves and
+/// the citation is wrong while every identifier in it is still correct. A
+/// package name, an enum identifier and a variant identifier are the three
+/// strings a *rename* has to touch, and a file move touches none of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RuntimeErrorRef {
+    /// The declaring crate's `[package] name`, e.g. `"cf-gears-toolkit"`.
+    ///
+    /// A package name rather than a directory, for the reason `sdk = cargo(...)`
+    /// names a crate: the name is declared, the directory is a layout choice.
+    /// It is also what disambiguates -- `gears-rust` declares two enums called
+    /// `RegistryError`, in `cf-gears-toolkit` and `cf-gears-bss-fixtures`.
+    pub krate: &'static str,
+    /// The enum's identifier, e.g. `"RegistryError"`.
+    pub ty: &'static str,
+    /// The variant's identifier, e.g. `"UnknownDependency"`.
+    pub variant: &'static str,
+    /// The identity this failure travels under on the wire, where it has one.
+    ///
+    /// Only the `#[derive(ContractError)]` enums do, and in `cluster-sdk` that
+    /// derive sits on a *wire twin* (`ClusterWireError`) paired by hand with the
+    /// local enum. Naming both therefore pins three things at once: the local
+    /// variant exists, the frozen code exists, and the two still agree.
+    pub canonical: Option<CanonicalErrorId>,
+}
+
+/// What a diagnostic prevents on the runtime side, if anything nameable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Prevents {
+    /// No single named runtime error corresponds to this code.
+    ///
+    /// **An answer, not a gap.** `GBX0503`'s failure is a *silence* -- a
+    /// process-local backend starts cleanly in every replica and elects one
+    /// leader per replica -- and inventing a variant for a failure the runtime
+    /// never raises would be worse than saying nothing. `GBX0409`'s is a
+    /// function, `remap_gear_env_key`, not an error: this type references
+    /// runtime *errors*, and widening it to arbitrary Rust items is a separate
+    /// decision nobody has needed yet.
+    Nothing,
+    /// A named variant of a `gears-rust` error enum.
+    RuntimeError(RuntimeErrorRef),
+}
+
+impl Prevents {
+    /// A plain `thiserror` variant, with no wire identity.
+    #[must_use]
+    pub const fn error(krate: &'static str, ty: &'static str, variant: &'static str) -> Self {
+        Self::RuntimeError(RuntimeErrorRef {
+            krate,
+            ty,
+            variant,
+            canonical: None,
+        })
+    }
+
+    /// A variant that also travels under a frozen `(domain, code)` pair.
+    #[must_use]
+    pub const fn canonical_error(
+        krate: &'static str,
+        ty: &'static str,
+        variant: &'static str,
+        domain: &'static str,
+        code: &'static str,
+    ) -> Self {
+        Self::RuntimeError(RuntimeErrorRef {
+            krate,
+            ty,
+            variant,
+            canonical: Some(CanonicalErrorId { domain, code }),
+        })
+    }
+
+    /// The reference, when there is one.
+    #[must_use]
+    pub const fn as_ref(self) -> Option<RuntimeErrorRef> {
+        match self {
+            Self::Nothing => None,
+            Self::RuntimeError(reference) => Some(reference),
+        }
+    }
+}
+
+/// The default for the optional `prevents` column.
+///
+/// A helper macro rather than a conditional inside the arm, because the arm has
+/// to stay a `const` expression and the generated `match` has to have one shape
+/// whether or not the column was written.
+macro_rules! prevents_or_nothing {
+    () => {
+        Prevents::Nothing
+    };
+    ($prevents:expr) => {
+        $prevents
+    };
+}
+
 /// Declares the diagnostic catalogue.
 ///
 /// Each entry is `Variant = "CODE", domain, default severity, evidence
-/// requirement, title`. The doc comment on a variant is the canonical
-/// explanation of the condition, and is what a generated reference page shows.
+/// requirement, title`, optionally followed by `, prevents = ...`. The doc
+/// comment on a variant is the canonical explanation of the condition, and is
+/// what the generated reference page shows.
+///
+/// The `prevents` column is optional where `evidence` is a mandatory bool, and
+/// the asymmetry is deliberate. "Does this assert a runtime limitation?" is a
+/// policy question every code must answer. "Which runtime error does this
+/// prevent?" is not: most codes prevent no single named error, and a mandatory
+/// column would assert that somebody considered and cleared all of them.
 macro_rules! diagnostic_codes {
     (
         $(
             $(#[doc = $doc:literal])+
-            $variant:ident = $code:literal, $domain:ident, $severity:ident, $evidence:literal, $title:literal;
+            $variant:ident = $code:literal, $domain:ident, $severity:ident, $evidence:literal, $title:literal
+                $(, prevents = $prevents:expr)? ;
         )+
     ) => {
         /// A stable diagnostic code.
@@ -169,6 +287,34 @@ macro_rules! diagnostic_codes {
             pub const fn title(self) -> &'static str {
                 match self {
                     $(Self::$variant => $title,)+
+                }
+            }
+
+            /// The `gears-rust` runtime error this code exists to prevent.
+            ///
+            /// Metadata a check *can* verify rather than a promise every build
+            /// verifies: `gearbox-project`'s corpus test resolves each reference
+            /// against the real tree and skips when no checkout is reachable.
+            /// Nothing resolves it at load time, so a missing source root is
+            /// not a degradation case here -- it cannot arise.
+            #[must_use]
+            pub const fn prevents(self) -> Prevents {
+                match self {
+                    $(Self::$variant => prevents_or_nothing!($($prevents)?),)+
+                }
+            }
+
+            /// The variant's doc comment, line by line, exactly as written.
+            ///
+            /// Emitted as data for two readers. The generated reference page
+            /// needs the prose; and a test needs it in order to hold the prose
+            /// to the same standard as the columns, because a doc comment
+            /// naming an error enum that no [`Self::prevents`] points at is
+            /// precisely the unchecked claim that column exists to replace.
+            #[must_use]
+            pub const fn docs(self) -> &'static [&'static str] {
+                match self {
+                    $(Self::$variant => &[$($doc),+],)+
                 }
             }
 
@@ -263,7 +409,8 @@ diagnostic_codes! {
     ///
     /// Only fields in the projected schema are type-checked. A key the schema
     /// does not name is [`GdlUnknownConfigKey`], not this code.
-    GdlConfigTypeMismatch = "GBX0113", Gdl, Error, false, "config value does not match the declared field type";
+    GdlConfigTypeMismatch = "GBX0113", Gdl, Error, false, "config value does not match the declared field type",
+        prevents = Prevents::error("cf-gears-toolkit", "ConfigError", "InvalidConfig");
 
     /// A config key a gear declares as an endpoint's `config_key` was also set
     /// in the description, where it has no effect.
@@ -281,7 +428,8 @@ diagnostic_codes! {
     /// An error because generated YAML is deserialized with `deny_unknown_fields`:
     /// writing the key produces a file the runtime refuses at startup. A field
     /// the gear reads must appear in the schema; a typo must not reach the file.
-    GdlUnknownConfigKey = "GBX0115", Gdl, Error, false, "config key is not declared by the gear";
+    GdlUnknownConfigKey = "GBX0115", Gdl, Error, false, "config key is not declared by the gear",
+        prevents = Prevents::error("cf-gears-toolkit", "ConfigError", "InvalidConfig");
 
     /// A credential written into the description, where it would be committed.
     ///
@@ -375,21 +523,32 @@ diagnostic_codes! {
 
     // ---------------------------------------------------------------- GBX03xx
     /// A selected or depended-upon gear is not in the catalogue.
-    TopologyUnknownGear = "GBX0301", Topology, Error, false, "unknown gear";
+    TopologyUnknownGear = "GBX0301", Topology, Error, false, "unknown gear",
+        prevents = Prevents::error("cf-gears-toolkit", "RegistryError", "UnknownGear");
 
     /// Co-location dependencies form a cycle.
-    TopologyDepsCycle = "GBX0302", Topology, Error, false, "co-location dependency cycle";
+    TopologyDepsCycle = "GBX0302", Topology, Error, false, "co-location dependency cycle",
+        prevents = Prevents::error("cf-gears-toolkit", "RegistryError", "CycleDetected");
 
     /// A process contains more than one REST host gear.
     ///
-    /// The runtime registry permits exactly one.
-    TopologyMultipleRestHost = "GBX0303", Topology, Error, true, "more than one REST host in a process";
+    /// The runtime registry permits exactly one, and says so before any gear
+    /// starts: the build phase stops with `RegistryError::MultipleRestHosts`.
+    TopologyMultipleRestHost = "GBX0303", Topology, Error, true, "more than one REST host in a process",
+        prevents = Prevents::error("cf-gears-toolkit", "RegistryError", "MultipleRestHosts");
 
     /// A process contains more than one gRPC hub gear.
-    TopologyMultipleGrpcHub = "GBX0304", Topology, Error, true, "more than one gRPC hub in a process";
+    ///
+    /// The same rule as [`TopologyMultipleRestHost`] and the same enforcement:
+    /// the registry refuses the build with `RegistryError::MultipleGrpcHubs`.
+    /// Written down here for the first time, because until the reference
+    /// existed there was nothing to write it against.
+    TopologyMultipleGrpcHub = "GBX0304", Topology, Error, true, "more than one gRPC hub in a process",
+        prevents = Prevents::error("cf-gears-toolkit", "RegistryError", "MultipleGrpcHubs");
 
     /// A process exposes REST interfaces but contains no REST host to mount them.
-    TopologyRestWithoutHost = "GBX0305", Topology, Error, false, "REST gears with no REST host";
+    TopologyRestWithoutHost = "GBX0305", Topology, Error, false, "REST gears with no REST host",
+        prevents = Prevents::error("cf-gears-toolkit", "RegistryError", "RestRequiresHost");
 
     /// A process contains a database-backed gear but no database is configured.
     TopologyDbWithoutDatabase = "GBX0306", Topology, Error, false, "database gear with no database configured";
@@ -493,7 +652,11 @@ diagnostic_codes! {
     ClusterAutoSelected = "GBX0501", Cluster, Info, false, "cluster provider selected automatically";
 
     /// No registered provider satisfies the required capabilities.
-    ClusterUnsatisfiable = "GBX0502", Cluster, Error, true, "no cluster provider satisfies the required capabilities";
+    ClusterUnsatisfiable = "GBX0502", Cluster, Error, true, "no cluster provider satisfies the required capabilities",
+        prevents = Prevents::canonical_error(
+            "cf-gears-cluster-sdk", "ClusterError", "CapabilityNotMet",
+            "cluster.v1", "capability_not_met",
+        );
 
     /// A process-local coordination backend was selected for a topology with
     /// more than one process or replica.
@@ -529,7 +692,11 @@ diagnostic_codes! {
     /// requirement fails at startup with `ProfileNotBound` -- which is why this
     /// is caught here instead. Filed as a user error rather than a runtime gap:
     /// the runtime behaves correctly, the description is wrong.
-    ClusterProfileNotImplemented = "GBX0508", Cluster, Error, false, "cluster profile is not implemented by the gear";
+    ClusterProfileNotImplemented = "GBX0508", Cluster, Error, false, "cluster profile is not implemented by the gear",
+        prevents = Prevents::canonical_error(
+            "cf-gears-cluster-sdk", "ClusterError", "ProfileNotBound",
+            "cluster.v1", "profile_not_bound",
+        );
 
     /// A registered cluster provider's name or capabilities could not be read
     /// out of Rust.
@@ -556,7 +723,8 @@ diagnostic_codes! {
     /// has nothing to route to. Whether a product tolerates that is a product
     /// decision, not a property of the gear's code, which is why there is no
     /// `optional` field on the gear side.
-    PluginPointUnfilled = "GBX0511", Cluster, Error, false, "plugin extension point has no implementation";
+    PluginPointUnfilled = "GBX0511", Cluster, Error, false, "plugin extension point has no implementation",
+        prevents = Prevents::error("cf-gears-toolkit", "ChoosePluginError", "PluginNotFound");
 
     /// The host's effective vendor matches no selected plugin's.
     ///
@@ -564,7 +732,8 @@ diagnostic_codes! {
     /// default, so a product that overrides one and not the other produces a
     /// host that resolves nothing -- silently, at runtime. `gears-rust` keeps
     /// this correct today with a hand-written comment in its E2E config.
-    PluginVendorMismatch = "GBX0512", Cluster, Error, false, "no selected plugin matches the host's vendor";
+    PluginVendorMismatch = "GBX0512", Cluster, Error, false, "no selected plugin matches the host's vendor",
+        prevents = Prevents::error("cf-gears-toolkit", "ChoosePluginError", "PluginNotFound");
 
     /// A plugin is selected but no selected gear expects its extension point.
     PluginHostNotSelected = "GBX0513", Cluster, Error, false, "plugin selected without its host";
@@ -575,7 +744,8 @@ diagnostic_codes! {
     /// `ClientHub`, and `get_scoped` has no remote path, so the host can only
     /// find a plugin that shares its process. Neither side declares this in
     /// `deps`, which is why it has to be checked here.
-    PluginNotColocated = "GBX0514", Cluster, Error, true, "plugin and host are in different processes";
+    PluginNotColocated = "GBX0514", Cluster, Error, true, "plugin and host are in different processes",
+        prevents = Prevents::error("cf-gears-toolkit", "ClientHubError", "ScopedNotFound");
 
     /// A gear other than the host consumes a plugin gear's contract.
     ///
@@ -688,7 +858,8 @@ diagnostic_codes! {
     /// Kept as a hint, not raised to a warning: staying co-located is a
     /// legitimate choice, and a gear that will never be spawned loses nothing
     /// by declaring the edge.
-    GapClusterNotDeployable = "GBX0607", RuntimeGap, Hint, true, "`deps = [cluster]` pins a consumer that no longer needs pinning";
+    GapClusterNotDeployable = "GBX0607", RuntimeGap, Hint, true, "`deps = [cluster]` pins a consumer that no longer needs pinning",
+        prevents = Prevents::error("cf-gears-toolkit", "RegistryError", "UnknownDependency");
 
     // ---------------------------------------------------------------- GBX07xx
     /// Generation would overwrite an operator-owned file whose edits cannot be
