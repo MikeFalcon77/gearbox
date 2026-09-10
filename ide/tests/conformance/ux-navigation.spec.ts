@@ -16,8 +16,11 @@
 // These two tests therefore drive the shell the way a person does and assert
 // visibility with no reveal anywhere.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+/** The repository root, for the one claim that edits a description on disk. */
+const REPO = join(__dirname, "../../..");
 
 import {
   expect,
@@ -33,21 +36,6 @@ import {
 } from "../fixtures/studio";
 
 const IDE = join(__dirname, "../..");
-
-/**
- * Kill every `gearbox rpc`, so the next request has no engine.
- *
- * A copy of `adr-0011-session-trust.spec.ts`'s helper rather than a shared one,
- * and deliberately: a fixture that can kill the engine is a fixture every test
- * can reach for, and there are exactly two claims that should.
- */
-function killEngines(): void {
-  try {
-    execFileSync("pkill", ["-f", "gearbox rpc"]);
-  } catch {
-    // `pkill` exits 1 when nothing matched, which is not a failure here.
-  }
-}
 
 test.describe("Home is the start screen and nothing else", () => {
   test("nothing opens itself into the bottom panel on Home [plan §9.1: an empty domain panel is worse than an absent one]", async ({
@@ -521,5 +509,39 @@ test.describe("opening a product is one act", () => {
     // in the main area, and `StartViewContribution` records why closing it is
     // the wrong instrument. The complaint was about what is on screen.
     await expect(page.locator(".gbx-start")).toBeHidden();
+  });
+
+  test("saving the description on disk re-resolves it without a click [plan §9.1: the panel shows what the file says]", async ({
+    freshStudio,
+  }) => {
+    // Nothing subscribed to the filesystem before `DescriptionWatchService`, so
+    // every Gearbox surface went on rendering the resolution from before the
+    // save -- twelve of them, all reading the same two stores. The complaint
+    // arrives as "the Inspector does not update"; the Inspector is not special.
+    //
+    // A fresh app because the claim is about a *product this session opened*
+    // and the watch is scoped to it, and on the real description rather than a
+    // fixture because Theia's watcher is what delivers the event and it only
+    // watches the workspace.
+    const { page } = freshStudio;
+    await settled(page);
+    await openProduct(page, "dev");
+
+    const gdl = join(REPO, "products/payments-demo/product.gdl");
+    const original = readFileSync(gdl, "utf8");
+    const hash = page.locator("[data-resolved-profile]");
+    const before = await hash.getAttribute("data-lock-hash");
+
+    try {
+      // A real edit, and one every resolution reads, so the lock hash has to
+      // move if the file was read again at all.
+      writeFileSync(gdl, original.replace('version = "0.1.0"', 'version = "0.1.1"'));
+      // No click, no command, no reveal between here and the assertion.
+      await expect(hash).not.toHaveAttribute("data-lock-hash", before ?? "", {
+        timeout: 30_000,
+      });
+    } finally {
+      writeFileSync(gdl, original);
+    }
   });
 });

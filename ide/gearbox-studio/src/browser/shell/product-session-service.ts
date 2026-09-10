@@ -30,7 +30,8 @@
 // from a product whose gears do not exist.
 
 import { StorageService } from "@theia/core/lib/browser/storage-service";
-import { URI } from "@theia/core/lib/common/uri";
+
+import { hasUnsavedEdits } from "./unsaved";
 import { Emitter, Event } from "@theia/core/lib/common/event";
 import { MessageService } from "@theia/core/lib/common/message-service";
 import { MonacoTextModelService } from "@theia/monaco/lib/browser/monaco-text-model-service";
@@ -297,15 +298,9 @@ export class ProductSessionService {
     return true;
   }
 
-  /**
-   * Whether the description is open in an editor with unsaved changes.
-   *
-   * By URI rather than by path string, because a model's URI is normalised and a
-   * path is not: `/a/./b` and `/a/b` are the same file and different strings.
-   */
+  /** Whether the description is open in an editor with unsaved changes. */
   protected isDirty(path: string): boolean {
-    const wanted = URI.fromFilePath(path).toString();
-    return this.models.models.some((model) => model.uri === wanted && model.dirty);
+    return hasUnsavedEdits(this.models, path);
   }
 
   // `ensureOpen()` used to live here: "one product is a question with one answer,

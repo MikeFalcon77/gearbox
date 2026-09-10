@@ -35,7 +35,8 @@ import { ConfirmDialog, ConfirmDialogProps } from "@theia/core/lib/browser";
 import { Emitter, Event } from "@theia/core/lib/common/event";
 import type { Message } from "@theia/core/shared/@lumino/messaging";
 import { MessageService } from "@theia/core/lib/common/message-service";
-import { URI } from "@theia/core/lib/common/uri";
+
+import { hasUnsavedEdits } from "./shell/unsaved";
 import { MonacoTextModelService } from "@theia/monaco/lib/browser/monaco-text-model-service";
 import { inject, injectable } from "@theia/core/shared/inversify";
 
@@ -888,16 +889,9 @@ export class ProductEditService {
     return true;
   }
 
-  /**
-   * Whether the file is open in an editor with unsaved changes.
-   *
-   * Compared by URI rather than by path string, because a model's URI is
-   * normalised and a path is not -- `/a/./b` and `/a/b` are the same file and
-   * different strings.
-   */
+  /** Whether the file is open in an editor with unsaved changes. */
   protected isDirty(path: string): boolean {
-    const wanted = URI.fromFilePath(path).toString();
-    return this.models.models.some((model) => model.uri === wanted && model.dirty);
+    return hasUnsavedEdits(this.models, path);
   }
 
   /**

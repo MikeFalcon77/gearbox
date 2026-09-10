@@ -80,6 +80,7 @@ import { EngineConnectionService } from "./shell/engine-connection-service";
 import { SelectionService } from "./shell/selection-service";
 import { SessionCommands } from "./shell/session-commands";
 import { FocusModeService } from "./shell/focus-mode-service";
+import { DescriptionWatchService } from "./shell/description-watch-service";
 import { ScreenScopeService } from "./shell/screen-scope-service";
 import { StudioContextService } from "./shell/studio-context-service";
 import { ToolbarContribution } from "./shell/toolbar-contribution";
@@ -224,6 +225,12 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
 
   bind(StudioContextService).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(StudioContextService);
+
+  // Nothing listened to the filesystem before this, so every panel showed the
+  // resolution from before the person's last save. See the service for why the
+  // catalogue's own descriptions are deliberately left out.
+  bind(DescriptionWatchService).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(DescriptionWatchService);
 
   bind(GearboxPerspectives).toSelf().inSingletonScope();
   bind(PerspectiveContribution).toService(GearboxPerspectives);

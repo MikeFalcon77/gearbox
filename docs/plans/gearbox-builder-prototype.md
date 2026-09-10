@@ -1341,6 +1341,21 @@ write event, and showing one without a detector would claim that Studio notices 
 does not. When a *Studio* operation is the writer -- scaffolding, generation -- the indicator becomes
 possible and honest, and that is where it belongs.
 
+**Amended 2026-09-10: that argument covers the catalogue's source roots and `.gearbox/**`, and it was
+being read as covering the product description too.** It does not. A `product.gdl` lives inside the
+workspace and Theia watches it -- `files.watcherExclude` names only `.git`, `node_modules`, `target`
+and `.gearbox` -- so for that one file the detector this paragraph says is missing has been there all
+along, delivering events nobody had subscribed to. The consequence was not a missing indicator but a
+wrong panel: every Gearbox surface renders from `ProductStore` or `CatalogueStore`, so saving an edit
+in the editor left all twelve of them showing the previous resolution, and the complaint arrived as
+"the Inspector does not update".
+
+`DescriptionWatchService` now subscribes, debounced, and skips while a buffer holds unsaved edits --
+the same reason the write gates refuse there. The paragraph above stands unchanged for the two cases
+it was actually written about: `.gearbox/**` is excluded from the watcher deliberately, and the source
+roots are not watched at all, so a `gear.gdl` edit still needs `Reload Catalogue` and still costs an
+engine restart. The asymmetry is the engine's catalogue cache, not an inconsistency.
+
 #### No test may leave a product description changed
 
 Two claims edit `products/payments-demo/product.gdl` on purpose and put it back. Twice, something else

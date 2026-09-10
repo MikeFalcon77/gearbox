@@ -8,7 +8,8 @@
 
 import { MessageService } from "@theia/core/lib/common/message-service";
 import { Emitter, Event } from "@theia/core/lib/common/event";
-import { URI } from "@theia/core/lib/common/uri";
+
+import { hasUnsavedEdits } from "./unsaved";
 import { MonacoTextModelService } from "@theia/monaco/lib/browser/monaco-text-model-service";
 import { inject, injectable } from "@theia/core/shared/inversify";
 import { WorkspaceService } from "@theia/workspace/lib/browser/workspace-service";
@@ -82,8 +83,7 @@ export class GearSessionService {
   }
 
   protected isDirty(path: string): boolean {
-    const wanted = URI.fromFilePath(path).toString();
-    return this.models.models.some((model) => model.uri === wanted && model.dirty);
+    return hasUnsavedEdits(this.models, path);
   }
 
   protected workspaceFor(gearRoot: string): string {
