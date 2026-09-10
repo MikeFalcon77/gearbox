@@ -56,7 +56,11 @@ test.describe("why the resolution is the way it is", () => {
     // at the moment it made the choice, which is what makes this an account
     // rather than a reconstruction.
     const because = steps.map((s) => s.because).join(" | ");
-    expect(because).toMatch(/Remote because the consumer is in/);
+    // Lower case and spelled out: this read `/Remote because/` while the
+    // sentence was built with `{:?}`, so the claim was pinning a Rust variant
+    // name that had leaked into prose. `ResolvedBindingMode` has had a
+    // `Display` all along and now gets used.
+    expect(because).toMatch(/the binding is remote because the consumer is in/);
     expect(because).toMatch(/co-location closure/);
     expect(because).toMatch(/named in the product description/);
     expect(steps.map((s) => s.kind)).toContain("derived-from");

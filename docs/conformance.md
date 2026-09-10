@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **161** — 155 built, 1 not built, 0 broken, 5 not observed.
+Claims: **162** — 156 built, 1 not built, 0 broken, 5 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -253,3 +253,4 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Overview reports the shape, the tree and the sources without asking for any of it | `plan §9.1: Overview is the product at a glance` | ✅ built |  |
 | a reload with a product open comes back to Home | `plan §9.1: Home is a screen, not an empty area` | ✅ built |  |
 | opening a product leaves the Product workspace on screen | `plan §9.1: Open Product is atomic` | ✅ built |  |
+| saving the description on disk re-resolves it without a click | `plan §9.1: the panel shows what the file says` | ✅ built |  |
