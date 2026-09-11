@@ -183,6 +183,21 @@ The criterion for deciding, stated so it is not re-argued: **the first real
 request for two environments on one target.** Until then the first shape is
 cheaper and more honest.
 
+**Amended 2026-09-12: the second shape is chosen, and profiles are deferred.**
+Two profiles selecting one target are held to be legitimate -- "staging and
+prod, both on Kubernetes" is a thing a product will want to say -- so the first
+shape's reduction in expressiveness is refused. That settles the question
+without waiting for the request the criterion named.
+
+It settles it and then parks it. No profile work is planned in the near term,
+and new design should assume **one profile per product**: the three the demo
+declares stay, nothing is removed, but nothing should be built that depends on
+several either. The value of deciding now is not that profiles are about to
+grow -- it is that anything keyed on a profile must not assume the kind
+identifies it, which was the assumption available while this was open. See
+ADR-0016, whose cross-product reference rule was written against that
+assumption and is corrected there.
+
 ### The middle target is named `self_hosted`
 
 If the target is what an operator picks, its name is part of the decision.

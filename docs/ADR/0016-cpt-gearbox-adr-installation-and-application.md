@@ -114,10 +114,20 @@ each resolution, and drift is simply the new answer. If a stronger guarantee is
 wanted later, it needs a semantic hash that excludes `gearbox_version` — which
 does not exist and should not be invented speculatively.
 
-`profile_kind` has a known weakness, inherited rather than introduced:
-ADR-0014's own open question is whether two profiles may share a kind
-("staging and prod, both on k8s"), and today uniqueness is by id. When that
-question is answered this matching rule inherits the answer.
+**Amended 2026-09-12, before any of this was built: that question is now
+answered, and the answer demotes `profile_kind` from a key to a check.**
+ADR-0014 has chosen the shape in which two profiles may select one target, so a
+kind identifies a *family* and never a resolution. The reference is therefore
+keyed by **path** -- `.gearbox/<product>/<profile>/product.lock` already names
+one resolution exactly, because the profile is the directory -- and
+`profile_kind` is compared as a guard: a product resolving for Kubernetes and
+pointing at an installation resolved as `embedded` is refused, while matching
+kinds prove nothing beyond not being obviously wrong.
+
+That is a weaker claim than the original paragraph made and the right one. It
+also costs nothing today: profile work is deferred and new design assumes one
+profile per product, so the ambiguity this guards against cannot yet arise. The
+guard is here so that it is not forgotten when it can.
 
 #### What a referenced gear contributes, and what it does not
 
@@ -297,8 +307,9 @@ an enumeration of ids, with the same weakness the reference matching inherits.
   refuses a declared endpoint until this decision exists.
 * Extends ADR-0002: a referenced lock is a locator, and what is read out of it
   is projected rather than restated.
-* Inherits ADR-0014's open question about two profiles of one kind, and is
-  blocked by it in exactly one place: the reference matching rule.
+* Was blocked by ADR-0014's open question about two profiles of one kind in
+  exactly one place, the reference matching rule; that question is answered in
+  ADR-0014's 2026-09-12 amendment and the rule is corrected above.
 * Respects ADR-0010: `gears-rust` is read, never written, except for the
   `exposes_features` field which is called out above as a cross-repo agreement.
 * Answers the scenario that `docs/PRD.md` §4.2 and
