@@ -607,6 +607,28 @@ diagnostic_codes! {
     TopologyGrpcWithoutHub = "GBX0314", Topology, Error, true, "gRPC gears with no gRPC hub",
         prevents = Prevents::error("cf-gears-toolkit", "RegistryError", "GrpcRequiresHub");
 
+    /// A process contains a registration host and nothing for it to host.
+    ///
+    /// The mirror of [`TopologyRestWithoutHost`] and
+    /// [`TopologyGrpcWithoutHub`], which ask whether the gears have a host;
+    /// this asks whether the host has any gears. A `grpc-hub` alone binds its
+    /// port, mounts zero routes and registers an empty service list -- a
+    /// process that starts cleanly and does nothing, which is the shape a
+    /// person least expects to be told about.
+    ///
+    /// **Derived from `runtime_caps`, not declared.** The two capabilities that
+    /// [`RuntimeCap::is_process_singleton`] names are exactly the two
+    /// in-process registration hosts: a gear hands its routes or its service
+    /// registrations to them through a Rust closure in one address space, so a
+    /// host is only meaningful as a co-tenant. Nothing new has to be stated in
+    /// a `gear.gdl` for this to be knowable.
+    ///
+    /// A warning rather than an error: the process is pointless, not wrong, and
+    /// where isolating a host actually breaks something the breakage is
+    /// reported on the other side -- the gears it left behind raise GBX0305 or
+    /// GBX0314, which are errors.
+    TopologyHostWithNothingToHost = "GBX0315", Topology, Warning, true, "registration host with nothing to host";
+
     // ---------------------------------------------------------------- GBX04xx
     /// This consumer and provider could be placed in separate processes, but the
     /// dependency between them is not declared as a contract consumption.

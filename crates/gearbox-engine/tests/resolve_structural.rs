@@ -240,6 +240,56 @@ fn a_grpc_gear_beside_a_hub_is_clean() {
 }
 
 #[test]
+fn a_hub_separated_from_the_gears_it_hosts_is_reported_on_both_sides() {
+    // The complaint this answers: isolating `grpc-hub` was accepted in silence
+    // and produced a running, empty server. Measured before the check existed --
+    // the host's loss was already reported (GBX0314, an error), and the worker
+    // holding the lone hub was reported not at all.
+    let cat = support::catalogue_of(vec![
+        support::gear_with_caps("coordinator", &[RuntimeCap::Grpc], &[]),
+        support::gear_with_caps("hub", &[RuntimeCap::GrpcHub], &[]),
+    ]);
+    let mut intent =
+        support::self_hosted(&["coordinator", "hub"], Discovery::Static, Some("target"));
+    support::pin(&mut intent, "hubby", "hub", 1);
+
+    let r = resolve(&cat, &intent, &pid("local"));
+    let orphaned = r
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::TopologyHostWithNothingToHost)
+        .expect("GBX0315");
+    assert!(orphaned.message.contains("hubby"), "{}", orphaned.message);
+    assert!(orphaned.message.contains("hub"), "{}", orphaned.message);
+    // The other side keeps saying what it said: the gears left behind are the
+    // half that actually breaks, and they are an error while this is a warning.
+    assert!(
+        r.diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::TopologyGrpcWithoutHub),
+        "{:#?}",
+        r.diagnostics
+    );
+}
+
+#[test]
+fn a_hub_beside_the_gears_it_hosts_is_quiet() {
+    // The negative half. A check that never stays quiet gets switched off.
+    let cat = support::catalogue_of(vec![
+        support::gear_with_caps("coordinator", &[RuntimeCap::Grpc], &[]),
+        support::gear_with_caps("hub", &[RuntimeCap::GrpcHub], &["coordinator"]),
+    ]);
+    let r = resolve(&cat, &support::intent(&["coordinator", "hub"]), &pid("dev"));
+    assert!(
+        !r.diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::TopologyHostWithNothingToHost),
+        "{:#?}",
+        r.diagnostics
+    );
+}
+
+#[test]
 fn directory_discovery_without_the_directory_server_is_refused() {
     let cat = support::catalogue_of(vec![
         support::gear_with_caps("host", &[], &[]),

@@ -38,6 +38,7 @@ pub fn check(
         check_worker_shape(process, uri, diagnostics);
         check_rest_without_host(catalogue, process, uri, diagnostics);
         check_grpc_without_hub(catalogue, process, uri, diagnostics);
+        check_host_with_nothing_to_host(catalogue, process, uri, diagnostics);
     }
     check_discovery(partition, declaration, uri, diagnostics);
     check_worker_paths(partition, declaration, uri, diagnostics);
@@ -116,6 +117,71 @@ fn check_worker_shape(process: &ResolvedProcess, uri: &str, diagnostics: &mut Di
                  with the composed gateway are never reached; keep the REST host in the host \
                  process, or pin this gear there with `process(...)`",
             )
+            .at(Location(uri)),
+        );
+    }
+}
+
+/// A registration host with nothing in its process to register with it.
+///
+/// The derivation ADR-0016 chose instead of a new field: the two capabilities
+/// `is_process_singleton` names are exactly the two in-process registration
+/// hosts, so "this gear is only meaningful as a co-tenant" follows from facts
+/// already projected out of Rust.
+///
+/// Each host is paired with the capability it serves. The pairing is a table
+/// rather than a convention on the names, because a convention would silently
+/// admit an eighth capability that has no host at all.
+const REGISTRATION_HOSTS: [(RuntimeCap, RuntimeCap, &str); 2] = [
+    (RuntimeCap::GrpcHub, RuntimeCap::Grpc, "gRPC services"),
+    (RuntimeCap::RestHost, RuntimeCap::Rest, "REST routes"),
+];
+
+fn check_host_with_nothing_to_host(
+    catalogue: &Catalogue,
+    process: &ResolvedProcess,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    for (host_cap, served_cap, what) in REGISTRATION_HOSTS {
+        debug_assert!(
+            host_cap.is_process_singleton(),
+            "the pairing above must stay the singleton caps, or the derivation is a coincidence"
+        );
+        let hosts: Vec<&GearId> = process
+            .gears
+            .iter()
+            .filter(|g| has_cap(catalogue, g, host_cap))
+            .collect();
+        if hosts.is_empty() {
+            continue;
+        }
+        if process
+            .gears
+            .iter()
+            .any(|g| has_cap(catalogue, g, served_cap))
+        {
+            continue;
+        }
+        let named = hosts
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TopologyHostWithNothingToHost,
+                format!(
+                    "process `{}` contains {named} and no gear that registers {what} with it",
+                    process.name
+                ),
+            )
+            .with_help(format!(
+                "a gear hands its registrations to the host through a Rust closure, so the two \
+                 have to share a binary; either place a gear with that capability here, or stop \
+                 separating `{named}` from the gears that were using it"
+            ))
+            .with_evidence("libs/toolkit/src/runtime/host_runtime.rs:795")
             .at(Location(uri)),
         );
     }
