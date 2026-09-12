@@ -83,7 +83,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Discard on a profile field restores the saved value | `ADR-0013 §Amendment: Discard restores` | ✅ built |  |
 | Add profile uses an in-panel form, not window.prompt | `ADR-0013 §Amendment: no window.prompt` | ✅ built |  |
 | Home has no Product menu while Start is showing | `ADR-0011 §Amendment: no Product menu on Home` | ✅ built |  |
-| Inspector opens when a process is selected | `ADR-0011 §Amendment: Inspector from selection` | ✅ built |  |
+| Inspector opens when an application is selected | `ADR-0011 §Amendment: Inspector from selection` | ✅ built |  |
 
 ## `conformance/adr-0011-workspace-and-scm.spec.ts`
 
@@ -199,8 +199,8 @@ Rust, and the ADRs' own Confirmation sections say which.
 | a binding's mode is derived from placement, never declared | `PRD cpt-gearbox-fr-derive-binding-from-placement` | ✅ built |  |
 | the plugin linked for a profile is the one that profile selected | `PRD cpt-gearbox-fr-plugin-selection` | ✅ built |  |
 | a gear pulled in by co-location names the gear that pulled it | `PRD cpt-gearbox-fr-never-cut-colocation` | ✅ built |  |
-| every gear in the closure ends up in some process | `plan §9: no orphans` | ✅ built |  |
-| processes overlap rather than partition the gears | `plan §9: closure not partition` | ⚪ not observed | no anchor in this product shares a co-location closure with another, so no overlap exists to see |
+| every gear in the closure ends up in some application | `plan §9: no orphans` | ✅ built |  |
+| applications overlap rather than partition the gears | `plan §9: closure not partition` | ⚪ not observed | no anchor in this product shares a co-location closure with another, so no overlap exists to see |
 
 ## `conformance/prd-projection.spec.ts`
 
@@ -223,7 +223,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | it renders the dependency graph | `PRD cpt-gearbox-fr-studio: renders the dependency graph` | ✅ built |  |
 | it resolves a product across profiles | `PRD cpt-gearbox-fr-studio: edits and resolves a product` | ✅ built |  |
 | it renders the contract graph | `PRD cpt-gearbox-fr-studio: renders the contract graph` | ✅ built |  |
-| it renders the process graph | `PRD cpt-gearbox-fr-studio: renders the process graph` | ✅ built |  |
+| it renders the application graph | `PRD cpt-gearbox-fr-studio: renders the application graph` | ✅ built |  |
 | it renders the cluster graph | `PRD cpt-gearbox-fr-studio: renders the cluster graph` | ✅ built |  |
 | the cluster view explains an empty resolution | `PRD cpt-gearbox-fr-studio: renders the cluster graph` | ✅ built |  |
 | it answers why for a selected decision | `PRD cpt-gearbox-fr-studio: answers why` | ✅ built |  |
