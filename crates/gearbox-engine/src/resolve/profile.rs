@@ -13,8 +13,8 @@
 use std::collections::BTreeSet;
 
 use gearbox_ir::{
-    BindingIntent, ClusterScopeIntent, Diagnostic, DiagnosticCode, Diagnostics, Location,
-    ProcessPin, ProductIntent, ProfileId,
+    ApplicationPin, BindingIntent, ClusterScopeIntent, Diagnostic, DiagnosticCode, Diagnostics,
+    Location, ProductIntent, ProfileId,
 };
 
 /// The intent with everything that does not apply to this profile removed.
@@ -25,7 +25,7 @@ use gearbox_ir::{
 pub struct ProfileScoped<'a> {
     pub bindings: Vec<&'a BindingIntent>,
     pub cluster_scopes: Vec<&'a ClusterScopeIntent>,
-    pub process_pins: Vec<&'a ProcessPin>,
+    pub application_pins: Vec<&'a ApplicationPin>,
 }
 
 /// Whether a `profiles = [...]` list admits this profile.
@@ -75,14 +75,14 @@ pub fn scope<'a>(
         diagnostics,
     );
 
-    let process_pins: Vec<&ProcessPin> = intent
-        .process_pins
+    let application_pins: Vec<&ApplicationPin> = intent
+        .application_pins
         .iter()
         .filter(|p| applies(&p.profiles, profile))
         .collect();
     report_duplicates(
-        process_pins.iter().map(|p| p.name.to_string()),
-        "process",
+        application_pins.iter().map(|p| p.name.to_string()),
+        "application",
         profile,
         &uri,
         diagnostics,
@@ -91,7 +91,7 @@ pub fn scope<'a>(
     ProfileScoped {
         bindings,
         cluster_scopes,
-        process_pins,
+        application_pins,
     }
 }
 

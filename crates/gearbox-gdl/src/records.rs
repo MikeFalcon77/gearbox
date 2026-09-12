@@ -404,7 +404,7 @@ gdl_record! {
 
 gdl_record! {
     /// `process("name", anchor = ..., replicas = ..., profiles = [...])`
-    ProcessRecord as "gdl_process" {
+    ApplicationRecord as "gdl_application" {
         pub name: String,
         pub anchor: String,
         pub replicas: u32,

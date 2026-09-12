@@ -16,8 +16,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use gearbox_ir::{
-    Catalogue, ClusterResolution, FileEntry, FileKind, GearId, Ownership, ProcessKind,
-    ResolvedProcess, SpawnSpec,
+    ApplicationKind, Catalogue, ClusterResolution, FileEntry, FileKind, GearId, Ownership,
+    ResolvedApplication, SpawnSpec,
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -97,7 +97,7 @@ struct ExecutionSection {
 /// Returns [`GenerateError::Yaml`] if the configuration cannot be serialized.
 pub fn app_config(
     input: &GenerateInput<'_>,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
 ) -> Result<FileEntry, GenerateError> {
     // The description's own values first, then the projected facts on top.
     //
@@ -105,7 +105,7 @@ pub fn app_config(
     // *derived* from the topology the resolver decided, so a hand-written value
     // for one of them would be describing a product that was not resolved. The
     // operator's keys go in underneath, where they belong.
-    let mut gears: BTreeMap<String, GearSection> = process
+    let mut gears: BTreeMap<String, GearSection> = application
         .gears
         .iter()
         .map(|id| {
@@ -132,10 +132,10 @@ pub fn app_config(
         })
         .collect();
 
-    write_endpoints(process, &mut gears)?;
-    write_consumer_wiring(input, process, &mut gears);
+    write_endpoints(application, &mut gears)?;
+    write_consumer_wiring(input, application, &mut gears);
     write_cluster(input, &mut gears);
-    write_spawns(input, process, &mut gears);
+    write_spawns(input, application, &mut gears);
 
     let home_dir = if input.lock.kubernetes.is_some() {
         // `readOnlyRootFilesystem` makes `~` unwritable; the chart mounts an
@@ -150,7 +150,7 @@ pub fn app_config(
     };
     let config = AppConfig {
         server: ServerSection { home_dir },
-        oop_http: process.serve.as_ref().map(|serve| OopHttpSection {
+        oop_http: application.serve.as_ref().map(|serve| OopHttpSection {
             listen_addr: serve.listen_addr.clone(),
             advertise_uri: serve.advertise_uri.clone(),
             allow_loopback_advertise: serve.allow_loopback_advertise,
@@ -164,7 +164,7 @@ pub fn app_config(
     })?;
 
     Ok(FileEntry::text(
-        paths::rel(&["config", &format!("{}.yaml", process.name)])?,
+        paths::rel(&["config", &format!("{}.yaml", application.name)])?,
         format!("{}\n{body}", header("#")),
         FileKind::Yaml,
         Ownership::Generated,
@@ -189,10 +189,10 @@ fn drop_unknown_keys(catalogue: &Catalogue, id: &GearId, config: &mut Map<String
 /// the REST host calls it `bind_addr` and the gRPC hub calls it `listen_addr`,
 /// and the generator has to write whichever one the gear actually reads.
 fn write_endpoints(
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
     gears: &mut BTreeMap<String, GearSection>,
 ) -> Result<(), GenerateError> {
-    for endpoint in &process.listens {
+    for endpoint in &application.listens {
         let Some(section) = gears.get_mut(endpoint.gear.as_str()) else {
             // A `listens` entry for a gear not in the process is a resolver
             // bug. Skipping it writes no wrong key; `report_orphans` is what
@@ -217,11 +217,11 @@ fn write_endpoints(
 /// decision the lock says was made at link time.
 fn write_consumer_wiring(
     input: &GenerateInput<'_>,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
     gears: &mut BTreeMap<String, GearSection>,
 ) {
     for binding in &input.lock.bindings {
-        if binding.consumer_process != process.name || !binding.is_remote() {
+        if binding.consumer_application != application.name || !binding.is_remote() {
             continue;
         }
         let Some(endpoint) = binding.endpoint.as_ref() else {
@@ -329,13 +329,13 @@ fn write_cluster(input: &GenerateInput<'_>, gears: &mut BTreeMap<String, GearSec
 /// did, silently produced a host that started nothing.
 fn write_spawns(
     input: &GenerateInput<'_>,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
     gears: &mut BTreeMap<String, GearSection>,
 ) {
-    if !matches!(process.kind, ProcessKind::Host) {
+    if !matches!(application.kind, ApplicationKind::Host) {
         return;
     }
-    for spawn in &process.spawns {
+    for spawn in &application.spawns {
         let section = gears
             .entry(spawn.gear.to_string())
             .or_insert_with(|| GearSection {

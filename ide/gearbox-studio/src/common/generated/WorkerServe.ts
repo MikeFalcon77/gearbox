@@ -7,7 +7,7 @@
  * host; a worker has none -- `GBX0312` refuses one -- and serves through the
  * out-of-process runtime's own listener instead. That listener is configured
  * by a **top-level** `oop_http` section rather than by any gear's key, which is
- * why this cannot ride [`ResolvedProcess::listens`].
+ * why this cannot ride [`ResolvedApplication::listens`].
  *
  * It is also what makes the worker findable at all: the advertised URI is what
  * the runtime registers with the directory, and a severed binding resolved

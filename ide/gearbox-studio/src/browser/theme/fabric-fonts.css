@@ -49,7 +49,7 @@
    derived from the `editor.fontFamily` preference -- so setting that preference
    restyled the editor and left every widget reading the variable in Menlo.
    Overriding the variable fixes all of them at once, including the three the
-   selector list below does not name (`.gbx-process-gears`, `.gbx-step-origin`,
+   selector list below does not name (`.gbx-application-gears`, `.gbx-step-origin`,
    `.gbx-lock-text`), and any future one. */
 :root {
   --theia-code-font-family: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas,

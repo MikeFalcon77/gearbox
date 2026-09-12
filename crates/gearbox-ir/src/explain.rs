@@ -26,7 +26,7 @@ pub enum NodeKind {
     Requirement,
     Capability,
     ClusterProvider,
-    Process,
+    Application,
     Binding,
     /// A choice the resolver made. The nodes worth asking "why" about.
     Decision,
@@ -57,7 +57,7 @@ impl NodeKind {
             Self::Requirement => "requirement",
             Self::Capability => "capability",
             Self::ClusterProvider => "cluster-provider",
-            Self::Process => "process",
+            Self::Application => "application",
             Self::Binding => "binding",
             Self::Decision => "decision",
             Self::Preference => "preference",

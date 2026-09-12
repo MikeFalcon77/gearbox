@@ -22,7 +22,7 @@ pub enum SourceRootError {
 /// The rule is the directory's own name, lowercased -- what a reader would guess
 /// and what both the CLI and the RPC server have always used. What is added here
 /// is that the *set* is made distinct: a repeat is suffixed `-2`, `-3`, matching
-/// the convention [`gearbox_ir::ProcessId`] already documents for the same
+/// the convention [`gearbox_ir::ApplicationId`] already documents for the same
 /// problem.
 ///
 /// Distinctness is not cosmetic. `~/a/gears` and `~/b/gears` are both `gears`,

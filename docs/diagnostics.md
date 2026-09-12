@@ -278,17 +278,17 @@ ignores.
 |---|---|---|
 | [GBX0301](#gbx0301) | error | unknown gear |
 | [GBX0302](#gbx0302) | error | co-location dependency cycle |
-| [GBX0303](#gbx0303) | error | more than one REST host in a process |
-| [GBX0304](#gbx0304) | error | more than one gRPC hub in a process |
+| [GBX0303](#gbx0303) | error | more than one REST host in an application |
+| [GBX0304](#gbx0304) | error | more than one gRPC hub in an application |
 | [GBX0305](#gbx0305) | error | REST gears with no REST host |
 | [GBX0306](#gbx0306) | error | database gear with no database configured |
 | [GBX0307](#gbx0307) | warning | request is incompatible with the embedded profile |
 | [GBX0308](#gbx0308) | error | directory discovery without a directory server |
 | [GBX0309](#gbx0309) | error | directory discovery without a gRPC hub |
 | [GBX0310](#gbx0310) | error | worker has no resolvable executable path |
-| [GBX0311](#gbx0311) | error | gear placed in no process |
-| [GBX0312](#gbx0312) | error | REST host in a worker process |
-| [GBX0313](#gbx0313) | error | workers have no host process to spawn them |
+| [GBX0311](#gbx0311) | error | gear placed in no application |
+| [GBX0312](#gbx0312) | error | REST host in a worker application |
+| [GBX0313](#gbx0313) | error | workers have no host application to spawn them |
 | [GBX0314](#gbx0314) | error | gRPC gears with no gRPC hub |
 | [GBX0315](#gbx0315) | warning | registration host with nothing to host |
 
@@ -310,7 +310,7 @@ Co-location dependencies form a cycle.
 
 ### GBX0303
 
-**more than one REST host in a process**
+**more than one REST host in an application**
 
 A process contains more than one REST host gear.
 
@@ -323,7 +323,7 @@ starts: the build phase stops with `RegistryError::MultipleRestHosts`.
 
 ### GBX0304
 
-**more than one gRPC hub in a process**
+**more than one gRPC hub in an application**
 
 A process contains more than one gRPC hub gear.
 
@@ -384,13 +384,13 @@ A worker process has no resolvable executable path.
 
 ### GBX0311
 
-**gear placed in no process**
+**gear placed in no application**
 
 A gear in the closure was not placed in any process.
 
 ### GBX0312
 
-**REST host in a worker process**
+**REST host in a worker application**
 
 A worker process contains a REST host gear.
 
@@ -401,7 +401,7 @@ API gateway, so a REST host there would never receive traffic.
 
 ### GBX0313
 
-**workers have no host process to spawn them**
+**workers have no host application to spawn them**
 
 A `self_hosted` profile produced workers but no host to spawn them.
 
@@ -612,7 +612,7 @@ the honest reading of a value that changes nothing.
 | [GBX0511](#gbx0511) | error | plugin extension point has no implementation |
 | [GBX0512](#gbx0512) | error | no selected plugin matches the host's vendor |
 | [GBX0513](#gbx0513) | error | plugin selected without its host |
-| [GBX0514](#gbx0514) | error | plugin and host are in different processes |
+| [GBX0514](#gbx0514) | error | plugin and host are in different applications |
 | [GBX0515](#gbx0515) | error | plugin consumed directly instead of through its host |
 | [GBX0516](#gbx0516) | error | plugin extension point could not be determined |
 | [GBX0517](#gbx0517) | info | several plugins share a vendor for one extension point |
@@ -756,7 +756,7 @@ A plugin is selected but no selected gear expects its extension point.
 
 ### GBX0514
 
-**plugin and host are in different processes**
+**plugin and host are in different applications**
 
 A plugin and its host were placed in different processes.
 

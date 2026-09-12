@@ -19,7 +19,7 @@ use crate::catalogue::{ResolvedSource, RuntimeCap};
 use crate::contract::{CargoRef, Transport};
 use crate::diagnostics::{DiagnosticCode, Diagnostics};
 use crate::explain::ProvenanceEdge;
-use crate::ids::{CapabilityId, ContractId, GearId, ProcessId, ProfileId, RelPath, SourceId};
+use crate::ids::{ApplicationId, CapabilityId, ContractId, GearId, ProfileId, RelPath, SourceId};
 use crate::intent::{BindingMode, Discovery};
 use crate::requirement::ClusterPrimitive;
 
@@ -106,7 +106,7 @@ impl<T> Selected<T> {
 /// Whether a process hosts others or is hosted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
-pub enum ProcessKind {
+pub enum ApplicationKind {
     /// Runs the full host runtime, and spawns workers when there are any.
     Host,
     /// Runs the out-of-process runtime: its own HTTP router, probes,
@@ -126,10 +126,10 @@ pub enum Entrypoint {
 
 impl Entrypoint {
     #[must_use]
-    pub const fn for_kind(kind: ProcessKind) -> Self {
+    pub const fn for_kind(kind: ApplicationKind) -> Self {
         match kind {
-            ProcessKind::Host => Self::RunServer,
-            ProcessKind::Worker => Self::RunOopWithOptions,
+            ApplicationKind::Host => Self::RunServer,
+            ApplicationKind::Worker => Self::RunOopWithOptions,
         }
     }
 }
@@ -166,7 +166,7 @@ pub struct ResolvedEndpoint {
 /// host; a worker has none -- `GBX0312` refuses one -- and serves through the
 /// out-of-process runtime's own listener instead. That listener is configured
 /// by a **top-level** `oop_http` section rather than by any gear's key, which is
-/// why this cannot ride [`ResolvedProcess::listens`].
+/// why this cannot ride [`ResolvedApplication::listens`].
 ///
 /// It is also what makes the worker findable at all: the advertised URI is what
 /// the runtime registers with the directory, and a severed binding resolved
@@ -300,9 +300,9 @@ pub enum InclusionReason {
 
 /// One process in the resolved topology.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct ResolvedProcess {
-    pub name: ProcessId,
-    pub kind: ProcessKind,
+pub struct ResolvedApplication {
+    pub name: ApplicationId,
+    pub kind: ApplicationKind,
 
     /// The gear whose co-location closure defines this process.
     ///
@@ -377,7 +377,7 @@ pub struct ResolvedProcess {
     pub service_port: Option<u16>,
 }
 
-impl ResolvedProcess {
+impl ResolvedApplication {
     #[must_use]
     pub fn contains(&self, gear: &GearId) -> bool {
         self.gears.contains(gear)
@@ -385,7 +385,7 @@ impl ResolvedProcess {
 
     #[must_use]
     pub const fn is_worker(&self) -> bool {
-        matches!(self.kind, ProcessKind::Worker)
+        matches!(self.kind, ApplicationKind::Worker)
     }
 
     /// Whether this process runs more than one copy of itself.
@@ -530,10 +530,10 @@ impl std::fmt::Display for ResolvedBindingMode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ResolvedBinding {
     pub consumer: GearId,
-    pub consumer_process: ProcessId,
+    pub consumer_application: ApplicationId,
     pub contract: ContractId,
     pub provider: GearId,
-    pub provider_process: ProcessId,
+    pub provider_application: ApplicationId,
 
     /// What the runtime will actually produce. Derived from placement, never
     /// configured (`cpt-gearbox-fr-derive-binding-from-placement`).
@@ -687,7 +687,7 @@ impl CutBlocker {
             Self::NoRemoteTransport => {
                 "the provider declares no transport a severed edge could carry"
             }
-            Self::ProfileForbidsSplit => "the profile is a single process",
+            Self::ProfileForbidsSplit => "the profile is a single application",
         }
     }
 }
@@ -817,7 +817,7 @@ pub struct ResolvedProduct {
     pub gears: BTreeMap<GearId, ResolvedGear>,
 
     /// Ordered by name.
-    pub processes: Vec<ResolvedProcess>,
+    pub applications: Vec<ResolvedApplication>,
 
     /// Ordered by consumer then contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -841,8 +841,8 @@ pub struct ResolvedProduct {
 
 impl ResolvedProduct {
     #[must_use]
-    pub fn process(&self, name: &ProcessId) -> Option<&ResolvedProcess> {
-        self.processes.iter().find(|p| &p.name == name)
+    pub fn application(&self, name: &ApplicationId) -> Option<&ResolvedApplication> {
+        self.applications.iter().find(|p| &p.name == name)
     }
 
     /// The processes a gear is linked into.
@@ -850,16 +850,19 @@ impl ResolvedProduct {
     /// Plural on purpose: a gear reached by two co-location closures is in both
     /// binaries.
     #[must_use]
-    pub fn processes_containing(&self, gear: &GearId) -> Vec<&ResolvedProcess> {
-        self.processes.iter().filter(|p| p.contains(gear)).collect()
+    pub fn applications_containing(&self, gear: &GearId) -> Vec<&ResolvedApplication> {
+        self.applications
+            .iter()
+            .filter(|p| p.contains(gear))
+            .collect()
     }
 
     /// The single host process, if the topology has one.
     #[must_use]
-    pub fn host_process(&self) -> Option<&ResolvedProcess> {
-        self.processes
+    pub fn host_application(&self) -> Option<&ResolvedApplication> {
+        self.applications
             .iter()
-            .find(|p| matches!(p.kind, ProcessKind::Host))
+            .find(|p| matches!(p.kind, ApplicationKind::Host))
     }
 
     /// Bindings that cross a process boundary.
@@ -870,14 +873,16 @@ impl ResolvedProduct {
 
     /// Whether the topology has more than one process.
     #[must_use]
-    pub fn is_multi_process(&self) -> bool {
-        self.processes.len() > 1
+    pub fn is_multi_application(&self) -> bool {
+        self.applications.len() > 1
     }
 
     /// Whether any process runs more than one copy of itself.
     #[must_use]
     pub fn has_replicas(&self) -> bool {
-        self.processes.iter().any(ResolvedProcess::is_replicated)
+        self.applications
+            .iter()
+            .any(ResolvedApplication::is_replicated)
     }
 
     /// Whether this topology needs cross-process coordination.
@@ -887,7 +892,7 @@ impl ResolvedProduct {
     /// otherwise.
     #[must_use]
     pub fn needs_cross_process_coordination(&self) -> bool {
-        self.is_multi_process() || self.has_replicas()
+        self.is_multi_application() || self.has_replicas()
     }
 
     /// Whether writing this lock and generating from it is permitted.

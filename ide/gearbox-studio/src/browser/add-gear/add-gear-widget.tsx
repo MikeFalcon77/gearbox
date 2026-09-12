@@ -1292,7 +1292,7 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
         {this.impactPending && <div className="gbx-progress">recomputing…</div>}
         {isEmpty(impact) ? (
           <div className="gbx-empty" data-add-gear-impact-none>
-            Nothing else changes: no new gears, processes or bindings.
+            Nothing else changes: no new gears, applications or bindings.
           </div>
         ) : (
           <>
@@ -1312,19 +1312,19 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
               </div>
             )}
 
-            {(impact.processesAdded.length > 0 ||
-              impact.processesRemoved.length > 0 ||
+            {(impact.applicationsAdded.length > 0 ||
+              impact.applicationsRemoved.length > 0 ||
               impact.moved.length > 0) && (
-              <div className="gbx-impact-group" data-add-gear-impact-processes>
+              <div className="gbx-impact-group" data-add-gear-impact-applications>
                 <div className="gbx-impact-title">Processes</div>
-                {impact.processesAdded.map((name) => (
-                  <div className="gbx-kv" key={`+${name}`} data-impact-process-added={name}>
+                {impact.applicationsAdded.map((name) => (
+                  <div className="gbx-kv" key={`+${name}`} data-impact-application-added={name}>
                     <span>new</span>
                     <span className="gbx-id">{name}</span>
                   </div>
                 ))}
-                {impact.processesRemoved.map((name) => (
-                  <div className="gbx-kv" key={`-${name}`} data-impact-process-removed={name}>
+                {impact.applicationsRemoved.map((name) => (
+                  <div className="gbx-kv" key={`-${name}`} data-impact-application-removed={name}>
                     <span>gone</span>
                     <span className="gbx-id">{name}</span>
                   </div>

@@ -64,8 +64,8 @@ function nodeIdOf(focus: Focus): string {
   switch (focus.kind) {
     case "gear":
       return `gear:${focus.id}`;
-    case "process":
-      return `process:${focus.id}`;
+    case "application":
+      return `application:`;
     case "binding":
       return `binding:${focus.consumer}|${focus.contract}`;
   }
@@ -75,8 +75,8 @@ function describeFocus(focus: Focus): string {
   switch (focus.kind) {
     case "gear":
       return `gear ${focus.id}`;
-    case "process":
-      return `process ${focus.id}`;
+    case "application":
+      return `application `;
     case "binding":
       return `binding ${focus.consumer} → ${focus.contract}`;
   }
@@ -126,8 +126,8 @@ function isInResolution(product: ResolvedProduct, focus: Focus): boolean {
   switch (focus.kind) {
     case "gear":
       return Object.prototype.hasOwnProperty.call(product.gears, focus.id);
-    case "process":
-      return product.processes.some((process) => process.name === focus.id);
+    case "application":
+      return product.applications.some((application) => application.name === focus.id);
     case "binding":
       return (product.bindings ?? []).some(
         (binding) => binding.consumer === focus.consumer && binding.contract === focus.contract,
@@ -184,7 +184,7 @@ export class InspectorWidget extends ReactWidget {
     if (selection === undefined) {
       return (
         <div className="gbx-inspector gbx-empty">
-          Select a gear in the catalogue, or a gear, process or binding in the Product view.
+          Select a gear in the catalogue, or a gear, application or binding in the Product view.
         </div>
       );
     }
@@ -209,7 +209,7 @@ export class InspectorWidget extends ReactWidget {
   protected renderWhat(selection: Selection): React.ReactNode {
     const row = this.rowFor(selection);
     if (row === undefined) {
-      // A process and a binding are not catalogue entries -- they are things the
+      // An application and a binding are not catalogue entries -- they are things the
       // resolver *made*, out of gears. So there is no descriptor to show, and
       // saying that is better than an empty box which reads as a load that
       // failed. What such a selection has instead is the section below.
@@ -702,7 +702,7 @@ export class InspectorWidget extends ReactWidget {
           // Honest about the gap rather than showing an empty panel that reads as
           // a bug: the engine says it cannot resolve yet, so the UI says so too.
           <div className="gbx-gap">
-            Bindings, processes and the lock need the resolver (M4). The engine reports{" "}
+            Bindings, applications and the lock need the resolver (M4). The engine reports{" "}
             <code>resolve: false</code>, so those panels are disabled rather than empty.
           </div>
         )}
@@ -869,7 +869,7 @@ export class InspectorWidget extends ReactWidget {
 function keyOf(selection: Selection): string {
   switch (selection.kind) {
     case "gear":
-    case "process":
+    case "application":
       return `${selection.kind}:${selection.id}`;
     case "binding":
       return `binding:${selection.consumer}|${selection.contract}`;

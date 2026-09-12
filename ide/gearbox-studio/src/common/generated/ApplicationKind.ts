@@ -3,4 +3,4 @@
 /**
  * Whether a process hosts others or is hosted.
  */
-export type ProcessKind = "host" | "worker";
+export type ApplicationKind = "host" | "worker";

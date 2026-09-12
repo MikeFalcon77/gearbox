@@ -25,6 +25,7 @@ export const GEAR_FUNCTIONS: readonly string[] = [
 
 /** The callable vocabulary of a `product.gdl`. */
 export const PRODUCT_FUNCTIONS: readonly string[] = [
+  "application",
   "bind",
   "cluster_profile",
   "embedded",
@@ -32,7 +33,6 @@ export const PRODUCT_FUNCTIONS: readonly string[] = [
   "kubernetes",
   "path",
   "plugin",
-  "process",
   "product",
   "provider",
   "registry",
@@ -87,7 +87,7 @@ export const VALUE_NAMESPACES: Readonly<Record<string, readonly string[]>> = {
 /** Namespaces of functions: `cluster.cache(...)`, `prefer.isolate(...)`. */
 export const FUNCTION_NAMESPACES: Readonly<Record<string, readonly string[]>> = {
   cluster: ["cache", "leader_election", "lock"],
-  prefer: ["existing_infrastructure", "fewer_processes", "isolate"],
+  prefer: ["existing_infrastructure", "fewer_applications", "isolate"],
 };
 
 /** Keywords the token scan refuses outright: GBX0103. */

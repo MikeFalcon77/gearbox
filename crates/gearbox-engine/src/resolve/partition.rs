@@ -17,9 +17,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use gearbox_ir::{
-    Catalogue, DeploymentProfileDecl, Diagnostic, DiagnosticCode, Diagnostics, Entrypoint, GearId,
-    ImageRef, Location, ProcessId, ProcessKind, ResolvedEndpoint, ResolvedProcess, RuntimeCap,
-    SpawnSpec, WorkerServe,
+    ApplicationId, ApplicationKind, Catalogue, DeploymentProfileDecl, Diagnostic, DiagnosticCode,
+    Diagnostics, Entrypoint, GearId, ImageRef, Location, ResolvedApplication, ResolvedEndpoint,
+    RuntimeCap, SpawnSpec, WorkerServe,
 };
 
 use super::closure::Closure;
@@ -29,7 +29,7 @@ use super::profile::ProfileScoped;
 /// The processes, in a stable order.
 #[derive(Debug, Default)]
 pub struct Partition {
-    pub processes: Vec<ResolvedProcess>,
+    pub applications: Vec<ResolvedApplication>,
 }
 
 impl Partition {
@@ -38,8 +38,8 @@ impl Partition {
     /// `None` when a gear is in several, which is the overlap case and must be
     /// answered by asking about a specific pair rather than about a gear.
     #[must_use]
-    pub fn sole_process(&self, gear: &GearId) -> Option<&ResolvedProcess> {
-        let mut found = self.processes.iter().filter(|p| p.contains(gear));
+    pub fn sole_application(&self, gear: &GearId) -> Option<&ResolvedApplication> {
+        let mut found = self.applications.iter().filter(|p| p.contains(gear));
         let first = found.next()?;
         found.next().is_none().then_some(first)
     }
@@ -49,8 +49,8 @@ impl Partition {
     /// The question a binding actually needs: not "where does this gear live"
     /// but "will these two be in the same binary".
     #[must_use]
-    pub fn share_a_process(&self, a: &GearId, b: &GearId) -> bool {
-        self.processes
+    pub fn share_an_application(&self, a: &GearId, b: &GearId) -> bool {
+        self.applications
             .iter()
             .any(|p| p.contains(a) && p.contains(b))
     }
@@ -87,7 +87,7 @@ pub fn partition(
         ..
     } = *input;
     let mut used_names: BTreeSet<String> = BTreeSet::new();
-    let mut processes = Vec::new();
+    let mut applications = Vec::new();
 
     match declaration {
         DeploymentProfileDecl::Embedded { .. } => {
@@ -100,11 +100,11 @@ pub fn partition(
             if let Some(anchor) = pick_anchor(catalogue, &gears)
                 && let Some(name) = derive_name(&anchor, &used_names)
             {
-                processes.push(build(
+                applications.push(build(
                     catalogue,
                     anchor,
                     gears,
-                    ProcessKind::Host,
+                    ApplicationKind::Host,
                     name,
                     None,
                     &mut used_names,
@@ -112,18 +112,18 @@ pub fn partition(
             }
         }
         DeploymentProfileDecl::SelfHosted { host, .. } => {
-            processes = split(input, Some(host), &mut used_names);
+            applications = split(input, Some(host), &mut used_names);
         }
         DeploymentProfileDecl::Kubernetes { .. } => {
-            processes = split(input, None, &mut used_names);
+            applications = split(input, None, &mut used_names);
         }
     }
 
-    assign_endpoints(catalogue, declaration, &mut processes);
-    assign_spawns(declaration, &mut processes, uri, diagnostics);
-    assign_chart_fields(declaration, product_version, &mut processes);
-    report_orphans(closure, &processes, uri, diagnostics);
-    Partition { processes }
+    assign_endpoints(catalogue, declaration, &mut applications);
+    assign_spawns(declaration, &mut applications, uri, diagnostics);
+    assign_chart_fields(declaration, product_version, &mut applications);
+    report_orphans(closure, &applications, uri, diagnostics);
+    Partition { applications }
 }
 
 /// The base port a worker's own REST listener is allocated from.
@@ -147,11 +147,11 @@ const WORKER_SERVE_BASE_PORT: u16 = 8090;
 /// splitting them would let a refactor change one without the other.
 fn assign_spawns(
     declaration: &DeploymentProfileDecl,
-    processes: &mut [ResolvedProcess],
+    applications: &mut [ResolvedApplication],
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) {
-    let mut taken: BTreeSet<u16> = processes
+    let mut taken: BTreeSet<u16> = applications
         .iter()
         .flat_map(|p| p.listens.iter())
         .filter_map(|e| e.address.rsplit_once(':').and_then(|(_, p)| p.parse().ok()))
@@ -160,12 +160,12 @@ fn assign_spawns(
     // In name order, for the same reason `assign_endpoints` is: the lock is
     // written in name order, so any other order would let a refactor that
     // changes no topology still change every port.
-    let mut order: Vec<usize> = (0..processes.len()).collect();
-    order.sort_by(|a, b| processes[*a].name.cmp(&processes[*b].name));
+    let mut order: Vec<usize> = (0..applications.len()).collect();
+    order.sort_by(|a, b| applications[*a].name.cmp(&applications[*b].name));
 
     let mut spawns: Vec<SpawnSpec> = Vec::new();
     for index in order {
-        if !processes[index].is_worker() {
+        if !applications[index].is_worker() {
             continue;
         }
         let Some(port) = next_free_port(WORKER_SERVE_BASE_PORT, &taken) else {
@@ -175,7 +175,7 @@ fn assign_spawns(
         let host = bind_host(declaration);
         let address = format!("{host}:{port}");
         let loopback = allows_loopback(declaration);
-        processes[index].serve = Some(WorkerServe {
+        applications[index].serve = Some(WorkerServe {
             advertise_uri: format!("http://{address}"),
             listen_addr: address,
             // Kubernetes advertises a Service DNS name (rewritten in
@@ -192,13 +192,13 @@ fn assign_spawns(
         // reports a missing one, because without it there is nowhere to build.
         if declaration.target_dir().is_some() {
             spawns.push(SpawnSpec {
-                gear: processes[index].anchor.clone(),
-                bin_name: processes[index].bin_name.clone(),
+                gear: applications[index].anchor.clone(),
+                bin_name: applications[index].bin_name.clone(),
                 // `--config` is the only channel that works: the runtime reads
                 // `TOOLKIT_CONFIG_PATH` but nothing ever sets it.
                 args: vec![
                     "--config".to_owned(),
-                    format!("config/{}.yaml", processes[index].name),
+                    format!("config/{}.yaml", applications[index].name),
                 ],
                 working_directory: None,
                 // Deliberately empty. The host injects `TOOLKIT_DIRECTORY_ENDPOINT`
@@ -213,9 +213,9 @@ fn assign_spawns(
     if spawns.is_empty() {
         return;
     }
-    if let Some(host) = processes
+    if let Some(host) = applications
         .iter_mut()
-        .find(|p| matches!(p.kind, ProcessKind::Host))
+        .find(|p| matches!(p.kind, ApplicationKind::Host))
     {
         host.spawns = spawns;
         return;
@@ -223,8 +223,8 @@ fn assign_spawns(
     diagnostics.push(
         Diagnostic::error(
             DiagnosticCode::TopologyNoHost,
-            "workers have no host process to spawn them",
-            "keep a `ProcessKind::Host` in this profile, or name the host on `self_hosted`",
+            "workers have no host application to spawn them",
+            "keep a `ApplicationKind::Host` in this profile, or name the host on `self_hosted`",
         )
         .at(Location::file(uri.to_owned())),
     );
@@ -265,7 +265,7 @@ fn allows_loopback(declaration: &DeploymentProfileDecl) -> bool {
 fn assign_endpoints(
     catalogue: &Catalogue,
     declaration: &DeploymentProfileDecl,
-    processes: &mut [ResolvedProcess],
+    applications: &mut [ResolvedApplication],
 ) {
     let mut taken: BTreeSet<u16> = BTreeSet::new();
     let host = bind_host(declaration);
@@ -274,11 +274,11 @@ fn assign_endpoints(
     // By process name, not by construction order: the lock is written in name
     // order, so assigning in any other order would let a resolver refactor that
     // does not change the topology still change every port.
-    let mut order: Vec<usize> = (0..processes.len()).collect();
-    order.sort_by(|a, b| processes[*a].name.cmp(&processes[*b].name));
+    let mut order: Vec<usize> = (0..applications.len()).collect();
+    order.sort_by(|a, b| applications[*a].name.cmp(&applications[*b].name));
 
     for index in order {
-        let gears = processes[index].gears.clone();
+        let gears = applications[index].gears.clone();
         let mut listens = Vec::new();
         for gear in gears {
             let Some(descriptor) = catalogue.gears.get(&gear) else {
@@ -307,7 +307,7 @@ fn assign_endpoints(
                 });
             }
         }
-        processes[index].listens = listens;
+        applications[index].listens = listens;
     }
 }
 
@@ -320,7 +320,7 @@ fn assign_endpoints(
 fn assign_chart_fields(
     declaration: &DeploymentProfileDecl,
     product_version: &str,
-    processes: &mut [ResolvedProcess],
+    applications: &mut [ResolvedApplication],
 ) {
     let DeploymentProfileDecl::Kubernetes {
         namespace,
@@ -331,16 +331,16 @@ fn assign_chart_fields(
         return;
     };
     let namespace = namespace.as_deref().unwrap_or("default");
-    for process in processes.iter_mut() {
-        process.subchart = Some(process.name.to_string());
-        process.image = Some(image_ref(
+    for application in applications.iter_mut() {
+        application.subchart = Some(application.name.to_string());
+        application.image = Some(image_ref(
             image_registry.as_deref(),
-            &process.bin_name,
+            &application.bin_name,
             product_version,
         ));
-        process.service_port = contract_port(process);
-        if let Some(uri) = cluster_dns(process, namespace)
-            && let Some(serve) = process.serve.as_mut()
+        application.service_port = contract_port(application);
+        if let Some(uri) = cluster_dns(application, namespace)
+            && let Some(serve) = application.serve.as_mut()
         {
             serve.advertise_uri = uri;
             serve.allow_loopback_advertise = false;
@@ -360,21 +360,21 @@ fn image_ref(registry: Option<&str>, bin_name: &str, version: &str) -> ImageRef 
 
 /// The port neighbours dial for contract traffic: a worker's own listener, or
 /// the host's REST socket rather than its gRPC one.
-fn contract_port(process: &ResolvedProcess) -> Option<u16> {
-    if let Some(serve) = &process.serve {
+fn contract_port(application: &ResolvedApplication) -> Option<u16> {
+    if let Some(serve) = &application.serve {
         return parse_port(&serve.listen_addr);
     }
-    process
+    application
         .listens
         .iter()
         .find(|endpoint| endpoint.name == "rest")
-        .or_else(|| process.listens.first())
+        .or_else(|| application.listens.first())
         .and_then(|endpoint| parse_port(&endpoint.address))
 }
 
-pub(crate) fn cluster_dns(process: &ResolvedProcess, namespace: &str) -> Option<String> {
-    let name = process.subchart.as_deref()?;
-    let port = process.service_port?;
+pub(crate) fn cluster_dns(application: &ResolvedApplication, namespace: &str) -> Option<String> {
+    let name = application.subchart.as_deref()?;
+    let port = application.service_port?;
     Some(format!(
         "http://{name}.{namespace}.svc.cluster.local:{port}"
     ))
@@ -401,9 +401,9 @@ fn next_free_port(preferred: u16, taken: &BTreeSet<u16>) -> Option<u16> {
 /// this whole design exists to represent rather than to prevent.
 fn split(
     input: &Inputs<'_>,
-    host_name: Option<&ProcessId>,
+    host_name: Option<&ApplicationId>,
     used_names: &mut BTreeSet<String>,
-) -> Vec<ResolvedProcess> {
+) -> Vec<ResolvedApplication> {
     let Inputs {
         catalogue,
         closure,
@@ -418,7 +418,7 @@ fn split(
         .cuttable
         .iter()
         .map(|e| e.provider.clone())
-        .chain(scoped.process_pins.iter().map(|p| p.anchor.clone()))
+        .chain(scoped.application_pins.iter().map(|p| p.anchor.clone()))
         .chain(isolates.iter().cloned())
         .filter(|g| closure.contains(g))
         .collect();
@@ -433,17 +433,17 @@ fn split(
     let host_gears = topo_sort(catalogue, closure, &host_seeds);
     worker_anchors.retain(|a| !host_gears.contains(a) || is_forced_out(scoped, isolates, a));
 
-    let mut processes = Vec::new();
+    let mut applications = Vec::new();
     if let Some(anchor) = pick_anchor(catalogue, &host_gears) {
         let name = host_name
             .cloned()
             .or_else(|| derive_name(&anchor, used_names));
         if let Some(name) = name {
-            processes.push(build(
+            applications.push(build(
                 catalogue,
                 anchor,
                 host_gears,
-                ProcessKind::Host,
+                ApplicationKind::Host,
                 name,
                 None,
                 used_names,
@@ -452,27 +452,27 @@ fn split(
     }
     for anchor in &worker_anchors {
         let gears = topo_sort(catalogue, closure, std::slice::from_ref(anchor));
-        let pin = scoped.process_pins.iter().find(|p| p.anchor == *anchor);
+        let pin = scoped.application_pins.iter().find(|p| p.anchor == *anchor);
         let name = pin
             .map(|p| p.name.clone())
             .or_else(|| derive_name(anchor, used_names));
         if let Some(name) = name {
-            processes.push(build(
+            applications.push(build(
                 catalogue,
                 anchor.clone(),
                 gears,
-                ProcessKind::Worker,
+                ApplicationKind::Worker,
                 name,
                 pin.map(|p| p.replicas),
                 used_names,
             ));
         }
     }
-    processes
+    applications
 }
 
 fn is_forced_out(scoped: &ProfileScoped<'_>, isolates: &BTreeSet<GearId>, gear: &GearId) -> bool {
-    isolates.contains(gear) || scoped.process_pins.iter().any(|p| p.anchor == *gear)
+    isolates.contains(gear) || scoped.application_pins.iter().any(|p| p.anchor == *gear)
 }
 
 /// The gear a process is named and identified by.
@@ -498,15 +498,18 @@ fn report_embedded_violations(
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) {
-    for pin in &scoped.process_pins {
+    for pin in &scoped.application_pins {
         diagnostics.push(embedded_violation(
-            &format!("`process(\"{}\")` asks for a second process", pin.name),
+            &format!(
+                "`application(\"{}\")` asks for a second application",
+                pin.name
+            ),
             uri,
         ));
         if pin.replicas > 1 {
             diagnostics.push(embedded_violation(
                 &format!(
-                    "`process(\"{}\", replicas = {})` asks for more than one copy",
+                    "`application(\"{}\", replicas = {})` asks for more than one copy",
                     pin.name, pin.replicas
                 ),
                 uri,
@@ -519,7 +522,7 @@ fn report_embedded_violations(
         // separable", which is a different and more discouraging fact.
         diagnostics.push(embedded_violation(
             &format!(
-                "{} severable edge(s) stay local because the profile is single-process",
+                "{} severable edge(s) stay local because the profile is single-application",
                 cuts.cuttable.len()
             ),
             uri,
@@ -532,14 +535,14 @@ fn build(
     catalogue: &Catalogue,
     anchor: GearId,
     gears: Vec<GearId>,
-    kind: ProcessKind,
-    name: ProcessId,
+    kind: ApplicationKind,
+    name: ApplicationId,
     replicas: Option<u32>,
     used_names: &mut BTreeSet<String>,
-) -> ResolvedProcess {
+) -> ResolvedApplication {
     used_names.insert(name.to_string());
 
-    ResolvedProcess {
+    ResolvedApplication {
         rest_host: gears
             .iter()
             .find(|g| has_cap(catalogue, g, RuntimeCap::RestHost))
@@ -569,14 +572,14 @@ fn build(
 
 /// A process name derived from its anchor, or `None` if none can be.
 ///
-/// `GearId` and `ProcessId` share `validate_kebab` (`gearbox-ir/src/ids.rs`), so
+/// `GearId` and `ApplicationId` share `validate_kebab` (`gearbox-ir/src/ids.rs`), so
 /// in practice this always succeeds. It returns an `Option` rather than asserting
 /// that, because the honest consequence of an unnameable process is that the
 /// process is not built -- and then its gears are unplaced, which the orphan
 /// check already reports. An impossible case degrades into a diagnosed one
 /// instead of a panic.
-fn derive_name(anchor: &GearId, used: &BTreeSet<String>) -> Option<ProcessId> {
-    ProcessId::new(unique(anchor.as_str(), used)).ok()
+fn derive_name(anchor: &GearId, used: &BTreeSet<String>) -> Option<ApplicationId> {
+    ApplicationId::new(unique(anchor.as_str(), used)).ok()
 }
 
 /// A name not already taken, suffixed `-2`, `-3`, ... on collision.
@@ -660,19 +663,19 @@ fn features(catalogue: &Catalogue, gears: &[GearId]) -> BTreeSet<String> {
 /// rather than tolerated: the operator asked for it.
 fn report_orphans(
     closure: &Closure,
-    processes: &[ResolvedProcess],
+    applications: &[ResolvedApplication],
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) {
-    let placed: BTreeSet<&GearId> = processes.iter().flat_map(|p| p.gears.iter()).collect();
+    let placed: BTreeSet<&GearId> = applications.iter().flat_map(|p| p.gears.iter()).collect();
     for gear in closure.members.keys() {
         if !placed.contains(gear) {
             diagnostics.push(
                 Diagnostic::error(
                     DiagnosticCode::TopologyOrphanGear,
-                    format!("`{gear}` is in the product but was placed in no process"),
+                    format!("`{gear}` is in the product but was placed in no application"),
                     "nothing anchors a co-location closure that reaches it; either something \
-                     must depend on it, or it needs its own process via `process(...)`",
+                     must depend on it, or it needs its own application via `application(...)`",
                 )
                 .at(Location::file(uri.to_owned())),
             );
@@ -683,10 +686,10 @@ fn report_orphans(
 fn embedded_violation(what: &str, uri: &str) -> Diagnostic {
     Diagnostic::new(
         DiagnosticCode::TopologyEmbeddedViolation,
-        format!("{what}, and the embedded profile is one process by definition"),
+        format!("{what}, and the embedded profile is one application by definition"),
     )
     .with_help(
-        "resolved as a single process anyway, so the product is still buildable; resolve for a \
+        "resolved as a single application anyway, so the product is still buildable; resolve for a \
          `self_hosted` or `kubernetes` profile to get the topology this asks for",
     )
     .at(Location::file(uri.to_owned()))

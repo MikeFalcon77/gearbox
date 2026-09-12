@@ -122,14 +122,14 @@ pub fn resolve_at(
     for preference in &intent.preferences {
         match preference {
             Preference::ExistingInfrastructure | Preference::Isolate { .. } => {}
-            Preference::FewerProcesses => {
+            Preference::FewerApplications => {
                 diagnostics.push(
                     Diagnostic::new(
                         DiagnosticCode::PreferenceNotHonoured,
                         "`prefer.fewer_processes` is recorded but the resolver does not honour it",
                     )
                     .with_help(
-                        "remove it, or wait until process packing is implemented; it does not \
+                        "remove it, or wait until application packing is implemented; it does not \
                          change the topology today",
                     )
                     .at(Location::file(&uri)),
@@ -144,7 +144,7 @@ pub fn resolve_at(
         .iter()
         .filter_map(|preference| match preference {
             Preference::Isolate { gear } => Some(gear.clone()),
-            Preference::ExistingInfrastructure | Preference::FewerProcesses => None,
+            Preference::ExistingInfrastructure | Preference::FewerApplications => None,
         })
         .collect();
     let input = partition::Inputs {

@@ -209,7 +209,7 @@ id_newtype! {
     /// A resolved process.
     ///
     /// Derived from the anchor gear's id, suffixed `-2`, `-3`, ... on collision.
-    ProcessId, kind = "process id", validate = validate_kebab
+    ApplicationId, kind = "application id", validate = validate_kebab
 }
 
 id_newtype! {

@@ -37,8 +37,8 @@ use starlark::values::{UnpackValue, Value};
 
 use crate::declarative::call_location;
 use crate::records::{
-    BindRecord, ClusterProfileRecord, PluginRecord, PreferenceRecord, ProcessRecord, ProfileRecord,
-    ProviderBindingRecord, SourceAtRecord, SourceRecord, UseGearRecord,
+    ApplicationRecord, BindRecord, ClusterProfileRecord, PluginRecord, PreferenceRecord,
+    ProfileRecord, ProviderBindingRecord, SourceAtRecord, SourceRecord, UseGearRecord,
 };
 use crate::sink::{GdlSink, ProductDecl};
 use crate::vocabulary;
@@ -413,18 +413,18 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     }
 
     /// `process("name", anchor = ..., replicas = ..., profiles = [...])`
-    fn process(
+    fn application(
         #[starlark(require = pos)] name: &str,
         #[starlark(require = named)] anchor: &str,
         #[starlark(require = named, default = 1)] replicas: u32,
         #[starlark(require = named)] profiles: Option<UnpackList<String>>,
-    ) -> anyhow::Result<ProcessRecord> {
+    ) -> anyhow::Result<ApplicationRecord> {
         if replicas == 0 {
             return Err(anyhow::anyhow!(
-                "process(\"{name}\", replicas = 0) asks for a process that does not run"
+                "application(\"{name}\", replicas = 0) asks for an application that does not run"
             ));
         }
-        Ok(ProcessRecord {
+        Ok(ApplicationRecord {
             name: name.to_owned(),
             anchor: anchor.to_owned(),
             replicas,
@@ -444,7 +444,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] gears: UnpackList<&'v UseGearRecord>,
         #[starlark(require = named)] bindings: Option<UnpackList<&'v BindRecord>>,
         #[starlark(require = named)] cluster_profiles: Option<UnpackList<&'v ClusterProfileRecord>>,
-        #[starlark(require = named)] processes: Option<UnpackList<&'v ProcessRecord>>,
+        #[starlark(require = named)] applications: Option<UnpackList<&'v ApplicationRecord>>,
         #[starlark(require = named)] preferences: Option<UnpackList<&'v PreferenceRecord>>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<NoneType> {
@@ -463,7 +463,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             cluster_profiles: cluster_profiles
                 .map(|l| l.items.into_iter().cloned().collect())
                 .unwrap_or_default(),
-            processes: processes
+            applications: applications
                 .map(|l| l.items.into_iter().cloned().collect())
                 .unwrap_or_default(),
             preferences: preferences
@@ -489,9 +489,9 @@ fn prefer_namespace(builder: &mut GlobalsBuilder) {
         })
     }
 
-    fn fewer_processes() -> anyhow::Result<PreferenceRecord> {
+    fn fewer_applications() -> anyhow::Result<PreferenceRecord> {
         Ok(PreferenceRecord {
-            kind: "fewer-processes".to_owned(),
+            kind: "fewer-applications".to_owned(),
             gear: None,
         })
     }

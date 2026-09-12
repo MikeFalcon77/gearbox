@@ -191,13 +191,13 @@ export class LockWidget extends ReactWidget {
     }
     const gears = Object.keys(product.gears ?? {}).length;
     const sources = Object.keys(product.sources ?? {}).length;
-    const processes = (product.processes ?? []).length;
+    const applications = (product.applications ?? []).length;
     const bindings = (product.bindings ?? []).length;
     const cluster = (product.cluster ?? []).length;
     const rows: { label: string; value: string }[] = [
       { label: "sources", value: String(sources) },
       { label: "gears", value: String(gears) },
-      { label: "processes", value: String(processes) },
+      { label: "applications", value: String(applications) },
       { label: "bindings", value: String(bindings) },
       { label: "cluster bindings", value: String(cluster) },
     ];
@@ -210,13 +210,13 @@ export class LockWidget extends ReactWidget {
           </div>
         ))}
         <div className="gbx-kv">
-          <span>processes</span>
+          <span>applications</span>
           <span>
-            {(product.processes ?? []).map((process) => (
+            {(product.applications ?? []).map((process) => (
               <span
                 className="gbx-badge"
                 key={process.name}
-                data-lock-summary-process={process.name}
+                data-lock-summary-application={process.name}
                 title={`${process.kind}, ${process.gears.length} gear${
                   process.gears.length === 1 ? "" : "s"
                 }`}
@@ -224,7 +224,7 @@ export class LockWidget extends ReactWidget {
                 {process.name}
               </span>
             ))}
-            {processes === 0 && "—"}
+            {applications === 0 && "—"}
           </span>
         </div>
       </div>

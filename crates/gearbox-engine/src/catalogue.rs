@@ -148,7 +148,7 @@ pub fn load_catalogue_staged(
                 Diagnostic::error(
                     DiagnosticCode::GdlEval,
                     format!("cannot search `{}` for descriptions: {failure}", root.id),
-                    "a directory the process cannot read is indistinguishable from one with no \
+                    "a directory the application cannot read is indistinguishable from one with no \
                      gears in it; check its permissions",
                 )
                 .at(Location::file(gearbox_ir::file_uri(&root.root))),

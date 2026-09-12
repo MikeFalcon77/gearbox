@@ -31,9 +31,9 @@ export interface ChangedBinding {
 
 export interface Impact {
   readonly arriving: readonly ArrivingGear[];
-  readonly processesAdded: readonly string[];
-  readonly processesRemoved: readonly string[];
-  /** Gears that end up in a different process than they are in now. */
+  readonly applicationsAdded: readonly string[];
+  readonly applicationsRemoved: readonly string[];
+  /** Gears that end up in a different application than they are in now. */
   readonly moved: readonly { readonly gear: string; readonly from: string; readonly to: string }[];
   readonly bindingsAdded: readonly ChangedBinding[];
   readonly bindingsChanged: readonly ChangedBinding[];
@@ -89,12 +89,12 @@ function whyPresent(gear: { selected_by: readonly InclusionReason[] }): string {
   }
 }
 
-/** Which process each gear ends up in. A gear can appear in several; first wins. */
+/** Which application each gear ends up in. A gear can appear in several; first wins. */
 function placement(product: ResolvedProduct): Map<string, string> {
   const at = new Map<string, string>();
-  for (const process of product.processes) {
-    for (const gear of process.gears ?? []) {
-      if (!at.has(String(gear))) at.set(String(gear), String(process.name));
+  for (const application of product.applications) {
+    for (const gear of application.gears ?? []) {
+      if (!at.has(String(gear))) at.set(String(gear), String(application.name));
     }
   }
   return at;
@@ -118,10 +118,10 @@ export function impactOf(
     .map(([id, gear]) => ({ id, why: whyPresent(gear) }))
     .sort((a, b) => a.id.localeCompare(b.id));
 
-  const hadProcesses = new Set((before?.processes ?? []).map((p) => String(p.name)));
-  const hasProcesses = new Set(after.processes.map((p) => String(p.name)));
-  const processesAdded = [...hasProcesses].filter((n) => !hadProcesses.has(n)).sort();
-  const processesRemoved = [...hadProcesses].filter((n) => !hasProcesses.has(n)).sort();
+  const hadProcesses = new Set((before?.applications ?? []).map((p) => String(p.name)));
+  const hasProcesses = new Set(after.applications.map((p) => String(p.name)));
+  const applicationsAdded = [...hasProcesses].filter((n) => !hadProcesses.has(n)).sort();
+  const applicationsRemoved = [...hadProcesses].filter((n) => !hasProcesses.has(n)).sort();
 
   const wasAt = before === undefined ? new Map<string, string>() : placement(before);
   const willBe = placement(after);
@@ -159,8 +159,8 @@ export function impactOf(
 
   return {
     arriving,
-    processesAdded,
-    processesRemoved,
+    applicationsAdded,
+    applicationsRemoved,
     moved,
     bindingsAdded,
     bindingsChanged,
@@ -172,8 +172,8 @@ export function impactOf(
 export function isEmpty(impact: Impact): boolean {
   return (
     impact.arriving.length === 0 &&
-    impact.processesAdded.length === 0 &&
-    impact.processesRemoved.length === 0 &&
+    impact.applicationsAdded.length === 0 &&
+    impact.applicationsRemoved.length === 0 &&
     impact.moved.length === 0 &&
     impact.bindingsAdded.length === 0 &&
     impact.bindingsChanged.length === 0 &&

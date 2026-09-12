@@ -21,10 +21,10 @@ use crate::error::LockError;
 /// which is what lets [`read`](crate::read) re-canonicalize a parsed lock and
 /// compare its hash to the one it was written with.
 pub fn canonicalize_order(product: &mut ResolvedProduct) {
-    product.processes.sort_by(|a, b| a.name.cmp(&b.name));
-    for process in &mut product.processes {
-        process.listens.sort_by(|a, b| a.name.cmp(&b.name));
-        process.spawns.sort_by(|a, b| a.gear.cmp(&b.gear));
+    product.applications.sort_by(|a, b| a.name.cmp(&b.name));
+    for application in &mut product.applications {
+        application.listens.sort_by(|a, b| a.name.cmp(&b.name));
+        application.spawns.sort_by(|a, b| a.gear.cmp(&b.gear));
     }
 
     product

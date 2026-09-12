@@ -308,7 +308,7 @@
 
 /* --- Process boxes ------------------------------------------------------- */
 
-/* `gbx-binary*`, not `gbx-process*`: the Product tree owns those already, and one
+/* `gbx-binary*`, not `gbx-application*`: the Product tree owns those already, and one
    name with two meanings in one document is what made a catalogue toggle swallow
    a click meant for a graph node. */
 .gbx-binaries { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 2px; }
@@ -390,7 +390,7 @@
 }
 .gbx-choice:focus-visible { outline: 1px solid var(--theia-focusBorder); outline-offset: 1px; }
 
-.gbx-process-gears { opacity: 0.7; font-size: 0.85em; font-family: var(--theia-code-font-family); }
+.gbx-application-gears { opacity: 0.7; font-size: 0.85em; font-family: var(--theia-code-font-family); }
 .gbx-pulled-in code { margin-right: 4px; }
 
 /* The downgrade chip is the one badge that must not blend in: it is the whole

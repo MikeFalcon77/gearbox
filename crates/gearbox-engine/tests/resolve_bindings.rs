@@ -296,7 +296,7 @@ fn asking_for_remote_in_a_single_process_profile_is_recorded_as_a_downgrade() {
     assert_eq!(
         binding.mode,
         ResolvedBindingMode::Local,
-        "one process, so local"
+        "one application, so local"
     );
     assert_eq!(
         binding.selected.downgraded_by,

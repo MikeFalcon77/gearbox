@@ -130,7 +130,7 @@ fn self_hosted_says_it_is_one_machine() {
 }
 
 #[test]
-fn two_rest_hosts_in_one_process_is_refused() {
+fn two_rest_hosts_in_one_application_is_refused() {
     // The registry refuses the second at startup, so this is a binary that does
     // not boot.
     let cat = support::catalogue_of(vec![
@@ -153,7 +153,7 @@ fn two_rest_hosts_in_one_process_is_refused() {
 }
 
 #[test]
-fn two_grpc_hubs_in_one_process_is_refused() {
+fn two_grpc_hubs_in_one_application_is_refused() {
     let cat = support::catalogue_of(vec![
         support::gear_with_caps("first", &[RuntimeCap::GrpcHub], &[]),
         support::gear_with_caps("second", &[RuntimeCap::GrpcHub], &[]),

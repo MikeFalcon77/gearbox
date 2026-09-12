@@ -123,7 +123,7 @@ fn intent(key: &str, value: serde_json::Value) -> ProductIntent {
         selected_gears: vec![selection],
         bindings: Vec::new(),
         cluster_scopes: Vec::new(),
-        process_pins: Vec::new(),
+        application_pins: Vec::new(),
         preferences: Vec::new(),
     }
 }

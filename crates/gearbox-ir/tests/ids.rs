@@ -8,7 +8,7 @@
 //! product that cannot compile, and accepting less would reject a real gear.
 
 use gearbox_ir::{
-    CapabilityId, ContractId, GearId, NodeId, ProcessId, ProfileId, ProviderId, RelPath,
+    ApplicationId, CapabilityId, ContractId, GearId, NodeId, ProfileId, ProviderId, RelPath,
     RequirementId, SourceId,
 };
 
@@ -129,12 +129,18 @@ fn kebab_rule_is_shared_by_all_kebab_ids() {
     for good in ["api-gateway", "dev", "prod", "gears-rust"] {
         assert!(ProfileId::new(good).is_ok(), "ProfileId rejected `{good}`");
         assert!(SourceId::new(good).is_ok(), "SourceId rejected `{good}`");
-        assert!(ProcessId::new(good).is_ok(), "ProcessId rejected `{good}`");
+        assert!(
+            ApplicationId::new(good).is_ok(),
+            "ApplicationId rejected `{good}`"
+        );
     }
     for bad in ["Dev", "dev_1", "dev-"] {
         assert!(ProfileId::new(bad).is_err(), "ProfileId accepted `{bad}`");
         assert!(SourceId::new(bad).is_err(), "SourceId accepted `{bad}`");
-        assert!(ProcessId::new(bad).is_err(), "ProcessId accepted `{bad}`");
+        assert!(
+            ApplicationId::new(bad).is_err(),
+            "ApplicationId accepted `{bad}`"
+        );
     }
 }
 

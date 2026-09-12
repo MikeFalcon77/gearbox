@@ -8,4 +8,4 @@ import type { GearId } from "./GearId";
  * order candidates that already satisfy every hard requirement, so no preference
  * can ever make an invalid product valid.
  */
-export type Preference = { "prefer": "existing_infrastructure" } | { "prefer": "fewer_processes" } | { "prefer": "isolate", gear: GearId, };
+export type Preference = { "prefer": "existing_infrastructure" } | { "prefer": "fewer_applications" } | { "prefer": "isolate", gear: GearId, };

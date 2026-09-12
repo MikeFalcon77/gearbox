@@ -11,7 +11,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --uid {{ uid }} --system --no-create-home app
 COPY --from=build --chown={{ uid }}:{{ uid }} /src/{{ out_rel }}/target/release/{{ bin_name }} /usr/local/bin/{{ bin_name }}
-COPY --from=build --chown={{ uid }}:{{ uid }} /src/{{ out_rel }}/config/{{ process }}.yaml /etc/gearbox/{{ process }}.yaml
+COPY --from=build --chown={{ uid }}:{{ uid }} /src/{{ out_rel }}/config/{{ application }}.yaml /etc/gearbox/{{ application }}.yaml
 USER {{ uid }}
 {% for port in ports %}EXPOSE {{ port }}
-{% endfor %}CMD ["{{ bin_name }}", "--config", "/etc/gearbox/{{ process }}.yaml"]
+{% endfor %}CMD ["{{ bin_name }}", "--config", "/etc/gearbox/{{ application }}.yaml"]

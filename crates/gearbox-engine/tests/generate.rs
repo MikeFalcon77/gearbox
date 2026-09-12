@@ -22,9 +22,9 @@ use gearbox_engine::generate::{
 };
 use gearbox_engine::{SourceRoot, load_catalogue, load_product};
 use gearbox_ir::{
-    ClusterPrimitive, ClusterResolution, ConfigFieldDecl, ConfigFieldType, DiagnosticCode,
-    FileAction, FileEntry, FileKind, FileSet, GearId, Ownership, ProcessKind, ProfileId, RelPath,
-    ResolvedClusterBinding, ResolvedProduct, Selected, SourceId,
+    ApplicationKind, ClusterPrimitive, ClusterResolution, ConfigFieldDecl, ConfigFieldType,
+    DiagnosticCode, FileAction, FileEntry, FileKind, FileSet, GearId, Ownership, ProfileId,
+    RelPath, ResolvedClusterBinding, ResolvedProduct, Selected, SourceId,
 };
 
 fn gears_rust() -> Option<PathBuf> {
@@ -202,11 +202,11 @@ fn the_manifest_and_the_link_file_agree() {
         "processes/api-gateway/src/registered_gears.rs",
     );
 
-    let process = lock
-        .process(&gearbox_ir::ProcessId::new("api-gateway").unwrap())
-        .expect("the embedded profile resolves one process");
+    let application = lock
+        .application(&gearbox_ir::ApplicationId::new("api-gateway").unwrap())
+        .expect("the embedded profile resolves one application");
 
-    for id in &process.gears {
+    for id in &application.gears {
         let gear = lock.gears.get(id).unwrap();
         assert!(
             manifest.contains(&format!("[dependencies.{}]", gear.package.lib_ident)),
@@ -239,16 +239,16 @@ fn the_config_carries_every_resolved_socket() {
         return;
     };
     let config = text(&files.files, "config/api-gateway.yaml");
-    let process = lock
-        .process(&gearbox_ir::ProcessId::new("api-gateway").unwrap())
+    let application = lock
+        .application(&gearbox_ir::ApplicationId::new("api-gateway").unwrap())
         .unwrap();
 
     assert!(
-        !process.listens.is_empty(),
+        !application.listens.is_empty(),
         "the resolver must assign the REST host a bind address; `bind_addr` has no \
          serde default, so a config without one fails at startup"
     );
-    for endpoint in &process.listens {
+    for endpoint in &application.listens {
         assert!(
             config.contains(&format!("{}: {}", endpoint.config_key, endpoint.address)),
             "`{}`'s `{}` is missing from the generated configuration",
@@ -258,7 +258,7 @@ fn the_config_carries_every_resolved_socket() {
     }
 
     // Every composed gear appears, so `--list-gears` and the composed set match.
-    for id in &process.gears {
+    for id in &application.gears {
         assert!(
             config.contains(&format!("  {id}:")),
             "`{id}` is composed into the binary but absent from its configuration"
@@ -308,9 +308,9 @@ fn the_lock_s_gear_order_is_a_valid_topological_order() {
     let Some((lock, _)) = generated("dev") else {
         return;
     };
-    for process in &lock.processes {
+    for application in &lock.applications {
         let mut seen: Vec<&GearId> = Vec::new();
-        for id in &process.gears {
+        for id in &application.gears {
             let gear = lock.gears.get(id).unwrap();
             for dep in &gear.colocated_deps {
                 assert!(
@@ -669,12 +669,12 @@ fn a_self_hosted_profile_generates_both_processes() {
     }
 
     // Every process in the lock produced a crate. There is no "skipped" list to
-    // check any more -- the dispatch on `ProcessKind` is exhaustive, so a kind
+    // check any more -- the dispatch on `ApplicationKind` is exhaustive, so a kind
     // this cannot generate is a compile error rather than a silent omission.
     assert_eq!(
         paths.iter().filter(|p| p.ends_with("/src/main.rs")).count(),
-        lock.processes.len(),
-        "one entry point per process in {paths:?}"
+        lock.applications.len(),
+        "one entry point per application in {paths:?}"
     );
 
     // Both crates are workspace members. A generated crate inside the workspace
@@ -702,7 +702,7 @@ fn a_self_hosted_profile_generates_both_processes() {
     );
 
     assert_eq!(
-        lock.processes.len(),
+        lock.applications.len(),
         2,
         "the local profile is a host and one worker"
     );
@@ -769,7 +769,7 @@ fn a_worker_is_configured_to_serve_rest_and_advertise_itself() {
     // The address is the resolver's, from the same deduplicated pool the
     // listening ports come from -- not a number the template invented.
     let worker = lock
-        .processes
+        .applications
         .iter()
         .find(|p| p.is_worker())
         .expect("the local profile has a worker");
@@ -779,7 +779,7 @@ fn a_worker_is_configured_to_serve_rest_and_advertise_itself() {
         "{worker_config}"
     );
     let host_ports: Vec<&str> = lock
-        .processes
+        .applications
         .iter()
         .flat_map(|p| p.listens.iter())
         .map(|e| e.address.as_str())
@@ -840,8 +840,8 @@ fn a_kubernetes_profile_generates_a_dockerfile_per_process() {
         return;
     };
 
-    for process in &lock.processes {
-        let path = format!("docker/{}/Dockerfile", process.name);
+    for application in &lock.applications {
+        let path = format!("docker/{}/Dockerfile", application.name);
         let body = text(&files.files, &path);
         let entry = files
             .files
@@ -853,11 +853,11 @@ fn a_kubernetes_profile_generates_a_dockerfile_per_process() {
         assert!(
             body.contains(&format!(
                 r#"CMD ["{}", "--config", "/etc/gearbox/{}.yaml"]"#,
-                process.bin_name, process.name
+                application.bin_name, application.name
             )),
             "{path}:\n{body}"
         );
-        for endpoint in &process.listens {
+        for endpoint in &application.listens {
             if let Some(port) = endpoint.address.rsplit(':').next() {
                 assert!(
                     body.contains(&format!("EXPOSE {port}")),
@@ -865,7 +865,7 @@ fn a_kubernetes_profile_generates_a_dockerfile_per_process() {
                 );
             }
         }
-        if let Some(serve) = &process.serve
+        if let Some(serve) = &application.serve
             && let Some(port) = serve.listen_addr.rsplit(':').next()
         {
             assert!(
@@ -894,11 +894,11 @@ fn a_kubernetes_profile_generates_a_dockerfile_per_process() {
         script.contains("--ignorefile"),
         "generate() cannot write .dockerignore at the context root:\n{script}"
     );
-    for process in &lock.processes {
+    for application in &lock.applications {
         assert!(
-            script.contains(process.name.as_str()),
+            script.contains(application.name.as_str()),
             "build.sh does not name {}:\n{script}",
-            process.name
+            application.name
         );
     }
 }
@@ -918,8 +918,11 @@ fn a_kubernetes_profile_generates_an_umbrella_and_a_subchart_per_process() {
         !chart.contains("<<"),
         "Chart.yaml is serialized data, not a template:\n{chart}"
     );
-    for process in &lock.processes {
-        let sub = process.subchart.as_deref().unwrap_or(process.name.as_str());
+    for application in &lock.applications {
+        let sub = application
+            .subchart
+            .as_deref()
+            .unwrap_or(application.name.as_str());
         assert!(
             chart.contains(&format!("condition: {sub}.enabled")),
             "{chart}"
@@ -944,7 +947,10 @@ fn a_kubernetes_profile_generates_an_umbrella_and_a_subchart_per_process() {
         );
         let packed = text(
             &files.files,
-            &format!("helm/{product}/charts/{sub}/files/{}.yaml", process.name),
+            &format!(
+                "helm/{product}/charts/{sub}/files/{}.yaml",
+                application.name
+            ),
         );
         assert!(
             packed.contains("gears:"),
@@ -1226,7 +1232,7 @@ fn generated_values_name_a_secret_and_never_contain_one() {
     let requester = text(&files.files, "config/audit.yaml");
     assert!(
         !requester.contains("profiles:"),
-        "the requester's process must not be handed the cluster gear's config:\n{requester}"
+        "the requester's application must not be handed the cluster gear's config:\n{requester}"
     );
 }
 
@@ -1335,10 +1341,10 @@ fn a_helm_mustache_in_prefix_path_is_refused() {
         return;
     };
     let host = lock
-        .processes
+        .applications
         .iter()
-        .find(|p| p.kind == ProcessKind::Host)
-        .expect("a host process");
+        .find(|p| p.kind == ApplicationKind::Host)
+        .expect("a host application");
     let rest_host = host.rest_host.clone().expect("the host names a REST gear");
     lock.gears
         .get_mut(&rest_host)
@@ -1377,7 +1383,7 @@ fn generated_with_cluster_secret() -> Option<(ResolvedProduct, Generated)> {
     // explicitly, so `prod` already resolves it into `api-gateway`. All this
     // fixture still adds is a binding with a scope name and options of its own.
     let requester = lock
-        .processes
+        .applications
         .iter()
         .find(|p| p.name.as_str() == "audit")
         .expect("the demo's audit worker")
@@ -1512,8 +1518,11 @@ fn the_image_registry_is_a_value_of_its_own() {
         values.contains("repository: gbx-audit"),
         "the repository must not carry the registry:\n{values}"
     );
-    for process in &lock.processes {
-        let image = process.image.as_ref().expect("kubernetes builds images");
+    for application in &lock.applications {
+        let image = application
+            .image
+            .as_ref()
+            .expect("kubernetes builds images");
         assert!(
             !image.repository.contains('/'),
             "`{}` still carries a registry",
@@ -1523,10 +1532,10 @@ fn the_image_registry_is_a_value_of_its_own() {
 
     // The template's two-source composition: the per-image registry by default,
     // `global.imageRegistry` when the operator sets one.
-    let sub = lock.processes[0]
+    let sub = lock.applications[0]
         .subchart
         .as_deref()
-        .unwrap_or(lock.processes[0].name.as_str());
+        .unwrap_or(lock.applications[0].name.as_str());
     let deployment = text(
         &files.files,
         &format!("helm/{product}/charts/{sub}/templates/deployment.yaml"),
@@ -1663,10 +1672,10 @@ fn the_house_label_hooks_reach_all_four_resources() {
         return;
     };
     let product = lock.product.id.as_str();
-    let sub = lock.processes[0]
+    let sub = lock.applications[0]
         .subchart
         .as_deref()
-        .unwrap_or(lock.processes[0].name.as_str());
+        .unwrap_or(lock.applications[0].name.as_str());
 
     for resource in ["deployment", "service", "configmap", "serviceaccount"] {
         let body = text(
@@ -1739,10 +1748,10 @@ fn probe_timings_are_values_and_probe_paths_are_not() {
         "a probe path in values is one that can contradict the config:\n{values}"
     );
 
-    let sub = lock.processes[0]
+    let sub = lock.applications[0]
         .subchart
         .as_deref()
-        .unwrap_or(lock.processes[0].name.as_str());
+        .unwrap_or(lock.applications[0].name.as_str());
     let deployment = text(
         &files.files,
         &format!("helm/{product}/charts/{sub}/templates/deployment.yaml"),
@@ -1779,10 +1788,10 @@ fn the_home_volume_is_chosen_by_a_field_not_by_a_shape() {
         "the Kubernetes shape as a default is what merged wrongly:\n{values}"
     );
 
-    let sub = lock.processes[0]
+    let sub = lock.applications[0]
         .subchart
         .as_deref()
-        .unwrap_or(lock.processes[0].name.as_str());
+        .unwrap_or(lock.applications[0].name.as_str());
     let deployment = text(
         &files.files,
         &format!("helm/{product}/charts/{sub}/templates/deployment.yaml"),
@@ -1816,10 +1825,10 @@ fn the_chart_exposes_the_hatches_a_house_policy_needs() {
         &format!("helm/{product}/values.schema.json"),
     ))
     .expect("valid JSON");
-    let sub = lock.processes[0]
+    let sub = lock.applications[0]
         .subchart
         .as_deref()
-        .unwrap_or(lock.processes[0].name.as_str());
+        .unwrap_or(lock.applications[0].name.as_str());
     let properties = &schema["properties"][sub]["properties"];
 
     for hatch in [
@@ -1874,10 +1883,10 @@ fn custom_is_open_and_everything_around_it_is_closed() {
         &format!("helm/{product}/values.schema.json"),
     ))
     .expect("valid JSON");
-    let sub = lock.processes[0]
+    let sub = lock.applications[0]
         .subchart
         .as_deref()
-        .unwrap_or(lock.processes[0].name.as_str());
+        .unwrap_or(lock.applications[0].name.as_str());
 
     assert_eq!(schema["properties"][sub]["additionalProperties"], false);
     let custom = &schema["properties"][sub]["properties"]["custom"];

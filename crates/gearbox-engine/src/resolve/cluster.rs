@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use gearbox_ir::{
     CapabilityId, Catalogue, Choice, ClusterPrimitive, ClusterProviderDecl, ClusterResolution,
     Diagnostic, DiagnosticCode, Diagnostics, GearId, Location, Preference, ProviderBinding,
-    RequirementKind, ResolvedClusterBinding, ResolvedProcess, Selected,
+    RequirementKind, ResolvedApplication, ResolvedClusterBinding, Selected,
 };
 
 use super::closure::Closure;
@@ -180,11 +180,11 @@ fn provider_table(catalogue: &Catalogue, closure: &Closure) -> Vec<ClusterProvid
 
 /// Whether the topology can put two things in different memory.
 fn is_spread(partition: &Partition) -> bool {
-    partition.processes.len() > 1
+    partition.applications.len() > 1
         || partition
-            .processes
+            .applications
             .iter()
-            .any(gearbox_ir::ResolvedProcess::is_replicated)
+            .any(gearbox_ir::ResolvedApplication::is_replicated)
 }
 
 fn decide(
@@ -451,7 +451,8 @@ fn why(ctx: &Context<'_>, candidates: &[&ClusterProviderDecl]) -> String {
     }
     if ctx.spread {
         reasons.push(
-            "the topology has more than one process, so a process-local backend ranked last".into(),
+            "the topology has more than one application, so a process-local backend ranked last"
+                .into(),
         );
     }
     reasons.push("ties broke on the name".into());
@@ -550,11 +551,11 @@ fn guard_process_local(
                 ctx.primitive.config_key(),
                 ctx.scope
             ),
-            "the topology has more than one process or a replicated one, so each copy gets its \
-             own state: a lock locks nothing across processes, and leader election over such a \
+            "the topology has more than one application or a replicated one, so each copy gets its \
+             own state: a lock locks nothing across applications, and leader election over such a \
              cache elects a leader per replica. The runtime starts this without complaint. \
              Choose a backend that is not process-local, or keep the requesters in one \
-             unreplicated process",
+             unreplicated application",
         )
         .at(loc(ctx.uri)),
     );
@@ -684,20 +685,20 @@ pub fn report_stateful_replicas(
     // It serves its scopes over gRPC as well as in-process, so a replicated
     // process reaches an election that lives elsewhere; requiring co-location
     // here would warn about topologies that coordinate perfectly well.
-    let elected = |process: &ResolvedProcess| {
+    let elected = |application: &ResolvedApplication| {
         bindings.iter().any(|b| {
             b.primitive == ClusterPrimitive::LeaderElection
                 && !matches!(b.resolved, ClusterResolution::Unsatisfied)
-                && b.requesters.iter().any(|g| process.contains(g))
+                && b.requesters.iter().any(|g| application.contains(g))
         })
     };
 
-    for process in partition
-        .processes
+    for application in partition
+        .applications
         .iter()
         .filter(|p| p.is_replicated() && !elected(p))
     {
-        let stateful: Vec<&GearId> = process
+        let stateful: Vec<&GearId> = application
             .gears
             .iter()
             .filter(|g| {
@@ -719,9 +720,9 @@ pub fn report_stateful_replicas(
             Diagnostic::new(
                 DiagnosticCode::ClusterStatefulReplicasWithoutElection,
                 format!(
-                    "process `{}` runs {} copies of stateful gears with no leader election: \
+                    "application `{}` runs {} copies of stateful gears with no leader election: \
                      {named}",
-                    process.name, process.replicas
+                    application.name, application.replicas
                 ),
             )
             .with_help(

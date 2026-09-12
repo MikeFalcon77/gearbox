@@ -740,7 +740,7 @@ fn report_cluster_colocation(
             DiagnosticCode::GapClusterNotDeployable,
             format!(
                 "gear `{id}` requires {} cluster primitive(s) and also declares \
-                 `deps = [{CLUSTER_GEAR_NAME}]`, which pins it into that gear's process and \
+                 `deps = [{CLUSTER_GEAR_NAME}]`, which pins it into that gear's application and \
                  stops it being spawned out of process at all",
                 requires.len()
             ),
@@ -755,7 +755,7 @@ fn report_cluster_colocation(
         .with_help(
             "the dep is no longer needed for the requirement to resolve: the cluster gear is \
              deployable out of process and serves its scopes over gRPC, so a consumer reaches it \
-             from another process. Drop `deps` unless this gear is meant to stay co-located -- \
+             from another application. Drop `deps` unless this gear is meant to stay co-located -- \
              keeping it is what makes an out-of-process build fail",
         ),
     );

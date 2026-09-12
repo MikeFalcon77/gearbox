@@ -121,9 +121,9 @@ product(
         ),
     ],
 
-    processes = [
-        process("audit", anchor = "api-contracts-consumer", replicas = 2, profiles = ["prod"]),
+    applications = [
+        application("audit", anchor = "api-contracts-consumer", replicas = 2, profiles = ["prod"]),
     ],
 
-    preferences = [prefer.existing_infrastructure(), prefer.fewer_processes()],
+    preferences = [prefer.existing_infrastructure(), prefer.fewer_applications()],
 )

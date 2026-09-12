@@ -189,7 +189,7 @@ test.describe("session trust [ADR-0011 amendment 2026-09-02]", () => {
     // `Overview · Gears · Topology · Validation` since 2026-09-07 -- and a
     // selection made there is the one this claim is about.
     await productSection(studio.page, "topology");
-    await studio.page.locator("[data-process]").first().click();
+    await studio.page.locator("[data-application]").first().click();
     await expect(studio.page.locator(".gbx-inspector, .gbx-explain, .gbx-detail").first()).toBeVisible({
       timeout: 30_000,
     });

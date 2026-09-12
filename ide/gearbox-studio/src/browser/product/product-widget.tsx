@@ -23,7 +23,7 @@ import type { Diagnostic } from "../../common/generated/Diagnostic";
 import type { Discovery } from "../../common/generated/Discovery";
 import type { InclusionReason } from "../../common/generated/InclusionReason";
 import type { ResolvedBinding } from "../../common/generated/ResolvedBinding";
-import type { ResolvedProcess } from "../../common/generated/ResolvedProcess";
+import type { ResolvedApplication } from "../../common/generated/ResolvedApplication";
 import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
 import type { ProductRef } from "../../common/protocol";
 import {
@@ -98,7 +98,7 @@ export class ProductWidget extends ReactWidget {
    * the fifth stage and stays a view of its own; the strip links to it rather
    * than reproducing a file plan and an Apply button in two places.
    *
-   * Folds are kept underneath: a section with three processes and eight bindings
+   * Folds are kept underneath: a section with three applications and eight bindings
    * still wants them, and the two mechanisms answer different questions --
    * "which stage" and "how much of this stage".
    */
@@ -594,7 +594,7 @@ export class ProductWidget extends ReactWidget {
               *
               The lock hash used to be shown here and is not any more: it told a
               reader nothing they could act on. That the profile matters is already
-              visible in the process count, the binding modes and which plugin was
+              visible in the application count, the binding modes and which plugin was
               linked -- all of which say *what* differs, where the digest only said
               *that* something does. It stays on the element as `data-lock-hash`,
               because "three profiles, three distinct locks" is a fact still worth
@@ -646,7 +646,7 @@ export class ProductWidget extends ReactWidget {
     const asked = entries.filter(([, gear]) =>
       gear.selected_by.some((reason) => reason.reason === "selected"),
     ).length;
-    const processes = product.processes.length;
+    const applications = product.applications.length;
     const bindings = (product.bindings ?? []).length;
     const cluster = (product.cluster ?? []).length;
     return (
@@ -667,14 +667,14 @@ export class ProductWidget extends ReactWidget {
         <button
           type="button"
           className="gbx-figure"
-          data-figure="processes"
+          data-figure="applications"
           onClick={() => this.showSection("topology")}
         >
-          <span className="gbx-figure-value" data-overview-processes={processes}>
-            {processes}
+          <span className="gbx-figure-value" data-overview-applications={applications}>
+            {applications}
           </span>
           <span className="gbx-figure-label">
-            {processes === 1 ? "process" : "processes"}
+            {applications === 1 ? "application" : "applications"}
             {bindings > 0 && `, ${bindings} ${bindings === 1 ? "binding" : "bindings"}`}
             {cluster > 0 && `, ${cluster} in the cluster`}
           </span>
@@ -776,7 +776,7 @@ export class ProductWidget extends ReactWidget {
    * Security is not modelled in the IR at all. Artifacts live in the Generate
    * view, which the strip links to. And Contracts and Cluster are inside
    * Topology rather than beside it, because a binding's `mode` is a consequence
-   * of which processes its ends landed in, and a reader checking that needs both
+   * of which applications its ends landed in, and a reader checking that needs both
    * at once.
    */
   protected renderGears(product: ResolvedProduct): React.ReactNode {
@@ -818,11 +818,11 @@ export class ProductWidget extends ReactWidget {
   }
 
   /**
-   * How the product deploys: processes, the bindings between them, and the
+   * How the product deploys: applications, the bindings between them, and the
    * cluster primitives it asks for.
    *
    * One section rather than three tabs, because the three are read together --
-   * a binding's `mode` is a consequence of which processes its ends landed in,
+   * a binding's `mode` is a consequence of which applications its ends landed in,
    * and a reader checking that needs both on screen.
    */
   protected renderTopology(product: ResolvedProduct): React.ReactNode {
@@ -832,11 +832,11 @@ export class ProductWidget extends ReactWidget {
     return (
       <>
         {this.renderBranch(
-          "processes",
+          "applications",
           "server-process",
           "Processes",
-          product.processes.length,
-          <>{product.processes.map((process) => this.renderProcess(process))}</>,
+          product.applications.length,
+          <>{product.applications.map((application) => this.renderApplication(application))}</>,
         )}
 
         {this.renderBranch(
@@ -1098,32 +1098,32 @@ export class ProductWidget extends ReactWidget {
     );
   }
 
-  protected renderProcess(process: ResolvedProcess): React.ReactNode {
+  protected renderApplication(application: ResolvedApplication): React.ReactNode {
     const focus = this.store.focus;
-    const selected = focus?.kind === "process" && focus.id === process.name;
+    const selected = focus?.kind === "application" && focus.id === application.name;
     return (
       <div
-        className={`gbx-row gbx-process ${selected ? "gbx-selected" : ""}`}
-        key={process.name}
-        data-process={process.name}
+        className={`gbx-row gbx-application ${selected ? "gbx-selected" : ""}`}
+        key={application.name}
+        data-application={application.name}
         role="option"
         aria-selected={selected}
         tabIndex={0}
-        onClick={() => this.store.setFocus({ kind: "process", id: process.name })}
+        onClick={() => this.store.setFocus({ kind: "application", id: application.name })}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            this.store.setFocus({ kind: "process", id: process.name });
+            this.store.setFocus({ kind: "application", id: application.name });
           }
         }}
       >
-        <span className="gbx-row-name">{process.name}</span>
-        <span className="gbx-badge">{process.kind}</span>
-        {process.replicas > 1 && <span className="gbx-badge">×{process.replicas}</span>}
+        <span className="gbx-row-name">{application.name}</span>
+        <span className="gbx-badge">{application.kind}</span>
+        {application.replicas > 1 && <span className="gbx-badge">×{application.replicas}</span>}
         {/* The gears are listed rather than counted because they may overlap
-            another process: co-location is a closure, not a partition, and a
+            another application: co-location is a closure, not a partition, and a
             count hides the gear that is linked into two binaries. */}
-        <span className="gbx-process-gears">{process.gears.join(", ")}</span>
+        <span className="gbx-application-gears">{application.gears.join(", ")}</span>
       </div>
     );
   }

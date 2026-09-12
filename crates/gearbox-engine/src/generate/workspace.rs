@@ -1,6 +1,6 @@
 //! The generated workspace root, its toolchain pin, and the lock beside them.
 
-use gearbox_ir::{FileEntry, FileKind, Ownership, ResolvedProcess, ResolvedProduct};
+use gearbox_ir::{FileEntry, FileKind, Ownership, ResolvedApplication, ResolvedProduct};
 use serde::Serialize;
 
 use super::{GenerateError, GenerateInput, header, paths};
@@ -58,11 +58,13 @@ struct WorkspaceTable {
 ///
 /// # Errors
 /// Returns [`GenerateError`] if the manifest cannot be serialized.
-pub fn workspace_manifest(processes: &[&ResolvedProcess]) -> Result<FileEntry, GenerateError> {
+pub fn workspace_manifest(
+    applications: &[&ResolvedApplication],
+) -> Result<FileEntry, GenerateError> {
     let manifest = WorkspaceManifest {
         workspace: WorkspaceTable {
             resolver: "3",
-            members: processes
+            members: applications
                 .iter()
                 .map(|p| format!("processes/{}", p.name))
                 .collect(),

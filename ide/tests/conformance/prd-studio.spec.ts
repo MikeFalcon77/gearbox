@@ -179,12 +179,12 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
     studio,
   }) => {
     await openProduct(studio.page, "prod");
-    await openGraphView(studio.page, "processes");
+    await openGraphView(studio.page, "applications");
 
     // Boxes with gear chips, as plan §9 specifies, rather than the `.gbx-svg` this
     // test guessed at before the view existed: a node-link drawing cannot show one
     // gear inside two boxes, which is the whole content of the view.
-    const graph = studio.page.locator("[data-graph='processes']");
+    const graph = studio.page.locator("[data-graph='applications']");
     await expect(graph).toBeVisible();
     // Three, not two: `audit` is declared in the description, and `api-contracts`
     // becomes a process of its own because the remote binding needs it reachable

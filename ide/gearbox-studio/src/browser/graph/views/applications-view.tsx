@@ -5,7 +5,7 @@
 // other way of showing a topology -- a partition, a tree, one chip per gear with
 // an owner label -- implies that a gear belongs to one process, and the resolver's
 // central finding is that it does not: `deps` is link-time, so a process is the
-// closure of its anchor and closures overlap. `ResolvedProcess.gears` says so in
+// closure of its anchor and closures overlap. `ResolvedApplication.gears` says so in
 // its own doc comment: "**May overlap other processes.** A gear reached by two
 // closures is linked into both binaries; that is a consequence of co-location
 // being a closure rather than a partition, not a mistake."
@@ -26,25 +26,25 @@
 
 import React from "@theia/core/shared/react";
 
-import type { ResolvedProcess } from "../../../common/generated/ResolvedProcess";
+import type { ResolvedApplication } from "../../../common/generated/ResolvedApplication";
 
-export interface ProcessesViewProps {
-  readonly processes: readonly ResolvedProcess[];
+export interface ApplicationsViewProps {
+  readonly applications: readonly ResolvedApplication[];
   readonly profile: string | undefined;
 }
 
-export function ProcessesView({ processes, profile }: ProcessesViewProps): React.ReactElement {
-  if (processes.length === 0) {
+export function ApplicationsView({ applications, profile }: ApplicationsViewProps): React.ReactElement {
+  if (applications.length === 0) {
     return (
       <div className="gbx-empty">
-        This profile resolved no processes. A process comes from a
+        This profile resolved no applications. A process comes from a
         <code> process(...)</code> entry in the description, or from the single host
         the profile implies.
       </div>
     );
   }
 
-  const shared = sharedGears(processes);
+  const shared = sharedGears(applications);
 
   return (
     <>
@@ -77,8 +77,8 @@ export function ProcessesView({ processes, profile }: ProcessesViewProps): React
           </>
         )}
       </div>
-      <div className="gbx-binaries" data-graph="processes">
-        {[...processes]
+      <div className="gbx-binaries" data-graph="applications">
+        {[...applications]
           .sort((a, b) => a.name.localeCompare(b.name))
           .map((process) => (
             <div className="gbx-binary" key={process.name} data-binary={process.name}>
@@ -143,14 +143,14 @@ export function ProcessesView({ processes, profile }: ProcessesViewProps): React
  * Gears that more than one process links in.
  *
  * The classes here are `gbx-binary*` and the attribute is `data-binary`, not
- * `gbx-process*`/`data-process`: the Product tree already owns those, and the
- * Product view's own test reads `[data-process]` across the whole document. One
+ * `gbx-application*`/`data-application`: the Product tree already owns those, and the
+ * Product view's own test reads `[data-application]` across the whole document. One
  * name, one meaning per document -- the same rule the catalogue toggle learned
  * when its `data-gear` swallowed a click meant for a graph node.
  */
-function sharedGears(processes: readonly ResolvedProcess[]): Set<string> {
+function sharedGears(applications: readonly ResolvedApplication[]): Set<string> {
   const seen = new Map<string, number>();
-  for (const process of processes) {
+  for (const process of applications) {
     // Over a de-duplicated set per process: a gear listed twice inside one
     // `gears` array would otherwise count as shared with itself, which would
     // report an overlap that does not exist.
@@ -161,6 +161,6 @@ function sharedGears(processes: readonly ResolvedProcess[]): Set<string> {
   return new Set([...seen].filter(([, count]) => count > 1).map(([gear]) => gear));
 }
 
-function iconFor(process: ResolvedProcess): string {
+function iconFor(process: ResolvedApplication): string {
   return process.kind === "worker" ? "server-process" : "server";
 }

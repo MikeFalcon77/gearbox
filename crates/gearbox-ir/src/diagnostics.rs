@@ -534,7 +534,7 @@ diagnostic_codes! {
     ///
     /// The runtime registry permits exactly one, and says so before any gear
     /// starts: the build phase stops with `RegistryError::MultipleRestHosts`.
-    TopologyMultipleRestHost = "GBX0303", Topology, Error, true, "more than one REST host in a process",
+    TopologyMultipleRestHost = "GBX0303", Topology, Error, true, "more than one REST host in an application",
         prevents = Prevents::error("cf-gears-toolkit", "RegistryError", "MultipleRestHosts");
 
     /// A process contains more than one gRPC hub gear.
@@ -543,7 +543,7 @@ diagnostic_codes! {
     /// the registry refuses the build with `RegistryError::MultipleGrpcHubs`.
     /// Written down here for the first time, because until the reference
     /// existed there was nothing to write it against.
-    TopologyMultipleGrpcHub = "GBX0304", Topology, Error, true, "more than one gRPC hub in a process",
+    TopologyMultipleGrpcHub = "GBX0304", Topology, Error, true, "more than one gRPC hub in an application",
         prevents = Prevents::error("cf-gears-toolkit", "RegistryError", "MultipleGrpcHubs");
 
     /// A process exposes REST interfaces but contains no REST host to mount them.
@@ -572,19 +572,19 @@ diagnostic_codes! {
     TopologyNoTargetDir = "GBX0310", Topology, Error, false, "worker has no resolvable executable path";
 
     /// A gear in the closure was not placed in any process.
-    TopologyOrphanGear = "GBX0311", Topology, Error, false, "gear placed in no process";
+    TopologyOrphanGear = "GBX0311", Topology, Error, false, "gear placed in no application";
 
     /// A worker process contains a REST host gear.
     ///
     /// A worker serves over its own out-of-process HTTP router, not through the
     /// API gateway, so a REST host there would never receive traffic.
-    TopologyRestHostInWorker = "GBX0312", Topology, Error, true, "REST host in a worker process";
+    TopologyRestHostInWorker = "GBX0312", Topology, Error, true, "REST host in a worker application";
 
     /// A `self_hosted` profile produced workers but no host to spawn them.
     ///
     /// Spawn specs are attached to the host process. Without one they are
     /// dropped, and the workers the lock named never start.
-    TopologyNoHost = "GBX0313", Topology, Error, false, "workers have no host process to spawn them";
+    TopologyNoHost = "GBX0313", Topology, Error, false, "workers have no host application to spawn them";
 
     /// A process registers gRPC services and contains no gRPC hub to mount them.
     ///
@@ -803,7 +803,7 @@ diagnostic_codes! {
     /// `ClientHub`, and `get_scoped` has no remote path, so the host can only
     /// find a plugin that shares its process. Neither side declares this in
     /// `deps`, which is why it has to be checked here.
-    PluginNotColocated = "GBX0514", Cluster, Error, true, "plugin and host are in different processes",
+    PluginNotColocated = "GBX0514", Cluster, Error, true, "plugin and host are in different applications",
         prevents = Prevents::error("cf-gears-toolkit", "ClientHubError", "ScopedNotFound");
 
     /// A gear other than the host consumes a plugin gear's contract.

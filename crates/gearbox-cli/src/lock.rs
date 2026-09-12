@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Subcommand, ValueEnum};
-use gearbox_ir::{GearId, ProcessId, ResolvedProduct};
+use gearbox_ir::{ApplicationId, GearId, ResolvedProduct};
 
 use crate::Format;
 
@@ -35,7 +35,7 @@ pub enum LockQuery {
 
         /// Which process.
         #[arg(long, value_name = "ID")]
-        process: String,
+        application: String,
 
         #[arg(long, value_enum, default_value_t = Order::Topo)]
         order: Order,
@@ -82,11 +82,11 @@ pub fn run(query: &LockQuery) -> anyhow::Result<ExitCode> {
     match query {
         LockQuery::Gears {
             lock,
-            process,
+            application,
             order,
             with_deps,
-        } => gears(lock.as_deref(), process, *order, *with_deps),
-        LockQuery::Processes { lock, format } => processes(lock.as_deref(), *format),
+        } => gears(lock.as_deref(), application, *order, *with_deps),
+        LockQuery::Processes { lock, format } => applications(lock.as_deref(), *format),
     }
 }
 
@@ -99,16 +99,16 @@ fn read(path: Option<&Path>) -> anyhow::Result<ResolvedProduct> {
 
 fn gears(
     path: Option<&Path>,
-    process: &str,
+    application: &str,
     order: Order,
     with_deps: bool,
 ) -> anyhow::Result<ExitCode> {
     let lock = read(path)?;
-    let id = ProcessId::new(process)?;
-    let Some(resolved) = lock.process(&id) else {
-        let known: Vec<&str> = lock.processes.iter().map(|p| p.name.as_str()).collect();
+    let id = ApplicationId::new(application)?;
+    let Some(resolved) = lock.application(&id) else {
+        let known: Vec<&str> = lock.applications.iter().map(|p| p.name.as_str()).collect();
         anyhow::bail!(
-            "the lock has no process `{process}`; it has: {}",
+            "the lock has no application `{application}`; it has: {}",
             known.join(", ")
         );
     };
@@ -136,18 +136,18 @@ fn gears(
     Ok(ExitCode::SUCCESS)
 }
 
-fn processes(path: Option<&Path>, format: Format) -> anyhow::Result<ExitCode> {
+fn applications(path: Option<&Path>, format: Format) -> anyhow::Result<ExitCode> {
     let lock = read(path)?;
     match format {
-        Format::Json => println!("{}", serde_json::to_string_pretty(&lock.processes)?),
+        Format::Json => println!("{}", serde_json::to_string_pretty(&lock.applications)?),
         Format::Text => {
-            for process in &lock.processes {
-                let gears: Vec<&str> = process.gears.iter().map(GearId::as_str).collect();
+            for application in &lock.applications {
+                let gears: Vec<&str> = application.gears.iter().map(GearId::as_str).collect();
                 println!(
                     "{}\t{}\tx{}\t{}",
-                    process.name,
-                    process.bin_name,
-                    process.replicas,
+                    application.name,
+                    application.bin_name,
+                    application.replicas,
                     gears.join(",")
                 );
             }

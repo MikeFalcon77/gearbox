@@ -127,7 +127,7 @@ fn real_profiles_project_from_the_cluster_examples() {
     assert_eq!(
         names,
         vec!["analytics".to_owned(), "primary".to_owned()],
-        "one process binds a distinct backend under each typed profile; both \
+        "one application binds a distinct backend under each typed profile; both \
          must project"
     );
 }

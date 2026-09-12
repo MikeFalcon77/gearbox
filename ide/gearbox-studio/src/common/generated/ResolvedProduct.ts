@@ -4,10 +4,10 @@ import type { Diagnostics } from "./Diagnostics";
 import type { GearId } from "./GearId";
 import type { KubernetesSettings } from "./KubernetesSettings";
 import type { ProvenanceEdge } from "./ProvenanceEdge";
+import type { ResolvedApplication } from "./ResolvedApplication";
 import type { ResolvedBinding } from "./ResolvedBinding";
 import type { ResolvedClusterBinding } from "./ResolvedClusterBinding";
 import type { ResolvedGear } from "./ResolvedGear";
-import type { ResolvedProcess } from "./ResolvedProcess";
 import type { ResolvedProductHeader } from "./ResolvedProductHeader";
 import type { ResolvedSource } from "./ResolvedSource";
 import type { SelfHostedSettings } from "./SelfHostedSettings";
@@ -27,7 +27,7 @@ self_hosted?: SelfHostedSettings | null, sources: { [key in SourceId]: ResolvedS
 /**
  * Ordered by name.
  */
-processes: Array<ResolvedProcess>, 
+applications: Array<ResolvedApplication>, 
 /**
  * Ordered by consumer then contract.
  */

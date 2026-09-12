@@ -106,7 +106,7 @@ pub fn intent(gears: &[&str]) -> ProductIntent {
             .collect(),
         bindings: Vec::new(),
         cluster_scopes: Vec::new(),
-        process_pins: Vec::new(),
+        application_pins: Vec::new(),
         preferences: Vec::new(),
     }
 }
@@ -276,7 +276,7 @@ pub fn self_hosted_intent(gears: &[&str]) -> ProductIntent {
         local.clone(),
         gearbox_ir::DeploymentProfileDecl::SelfHosted {
             id: local,
-            host: gearbox_ir::ProcessId::new("gateway").unwrap(),
+            host: gearbox_ir::ApplicationId::new("gateway").unwrap(),
             discovery: gearbox_ir::Discovery::Static,
             target_dir: None,
             cargo_profile: None,
@@ -319,7 +319,7 @@ pub fn self_hosted(
         local.clone(),
         gearbox_ir::DeploymentProfileDecl::SelfHosted {
             id: local,
-            host: gearbox_ir::ProcessId::new("host").unwrap(),
+            host: gearbox_ir::ApplicationId::new("host").unwrap(),
             discovery,
             target_dir: target_dir.map(ToOwned::to_owned),
             cargo_profile: None,
@@ -348,8 +348,8 @@ pub fn kubernetes(gears: &[&str], discovery: gearbox_ir::Discovery) -> ProductIn
 
 /// Force a second process by pinning a gear to one.
 pub fn pin(intent: &mut ProductIntent, name: &str, anchor: &str, replicas: u32) {
-    intent.process_pins.push(gearbox_ir::ProcessPin {
-        name: gearbox_ir::ProcessId::new(name).unwrap(),
+    intent.application_pins.push(gearbox_ir::ApplicationPin {
+        name: gearbox_ir::ApplicationId::new(name).unwrap(),
         anchor: gid(anchor),
         replicas,
         profiles: BTreeSet::new(),

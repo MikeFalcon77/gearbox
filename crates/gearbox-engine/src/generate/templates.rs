@@ -75,12 +75,12 @@
 /// author is told the table is the contract, so the contract has to be checkable.
 #[cfg(test)]
 const HELM_CONTEXT_DOC: &[(&str, &[&str])] = &[
-    ("helm/helpers.tpl", &["name", "process"]),
+    ("helm/helpers.tpl", &["name", "application"]),
     (
         "helm/deployment.yaml",
         &[
             "name",
-            "process",
+            "application",
             "config_filename",
             "http_port",
             "liveness_path",

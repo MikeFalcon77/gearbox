@@ -100,7 +100,7 @@ fn the_capability_matrix_comes_out_of_rust() {
         vec!["cluster.cache.linearizable"],
         "the NOTIFY channel carries one key per payload, so prefix routing is \
          infeasible -- and that absence is what later makes \
-         cache(linearizable + prefix_watch) unsatisfiable in a multi-process \
+         cache(linearizable + prefix_watch) unsatisfiable in a multi-application \
          profile"
     );
     assert_eq!(
@@ -136,7 +136,7 @@ fn deployment_semantics_are_declared_because_rust_does_not_state_them() {
 
     assert!(
         by("standalone").process_local,
-        "an in-memory store coordinates nothing across processes; this is the \
+        "an in-memory store coordinates nothing across applications; this is the \
          fact GBX0503 rests on"
     );
     assert!(!by("standalone").needs_credentials);

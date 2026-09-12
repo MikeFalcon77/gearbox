@@ -498,7 +498,7 @@ fn print_intent(intent: &gearbox_ir::ProductIntent) {
     for id in intent.profiles.keys() {
         let bindings = intent.bindings_for(id);
         let scopes = intent.cluster_scopes_for(id);
-        let pins = intent.process_pins_for(id);
+        let pins = intent.application_pins_for(id);
         if bindings.is_empty() && scopes.is_empty() && pins.is_empty() {
             continue;
         }
@@ -529,7 +529,7 @@ fn print_intent(intent: &gearbox_ir::ProductIntent) {
         }
         for pin in pins {
             println!(
-                "    process `{}` anchored on {} x{}",
+                "    application `{}` anchored on {} x{}",
                 pin.name, pin.anchor, pin.replicas
             );
         }
@@ -691,17 +691,17 @@ fn print_resolution(resolved: &gearbox_ir::ResolvedProduct) {
     );
     println!("  {}", resolved.product.lock_hash);
     println!(
-        "  {} gear(s) in {} process(es)",
+        "  {} gear(s) in {} application(s)",
         resolved.gears.len(),
-        resolved.processes.len()
+        resolved.applications.len()
     );
-    for process in &resolved.processes {
+    for application in &resolved.applications {
         println!(
             "    {} [{}] x{} -- {}",
-            process.name,
-            describe_kind(process.kind),
-            process.replicas,
-            process
+            application.name,
+            describe_kind(application.kind),
+            application.replicas,
+            application
                 .gears
                 .iter()
                 .map(ToString::to_string)
@@ -737,10 +737,10 @@ fn print_resolution(resolved: &gearbox_ir::ResolvedProduct) {
 
 /// Written out rather than derived from `Debug`, which the workspace forbids in
 /// output a person reads.
-const fn describe_kind(kind: gearbox_ir::ProcessKind) -> &'static str {
+const fn describe_kind(kind: gearbox_ir::ApplicationKind) -> &'static str {
     match kind {
-        gearbox_ir::ProcessKind::Host => "host",
-        gearbox_ir::ProcessKind::Worker => "worker",
+        gearbox_ir::ApplicationKind::Host => "host",
+        gearbox_ir::ApplicationKind::Worker => "worker",
     }
 }
 
@@ -977,7 +977,7 @@ fn describe_mode(mode: gearbox_ir::BindingMode) -> &'static str {
 fn describe_preference(preference: &gearbox_ir::Preference) -> String {
     match preference {
         gearbox_ir::Preference::ExistingInfrastructure => "existing-infrastructure".to_owned(),
-        gearbox_ir::Preference::FewerProcesses => "fewer-processes".to_owned(),
+        gearbox_ir::Preference::FewerApplications => "fewer-applications".to_owned(),
         gearbox_ir::Preference::Isolate { gear } => format!("isolate {gear}"),
     }
 }

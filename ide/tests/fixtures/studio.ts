@@ -566,7 +566,7 @@ export async function closeGraph(page: Page): Promise<void> {
  */
 export async function openGraphView(
   page: Page,
-  view: "deps" | "contracts" | "processes" | "cluster",
+  view: "deps" | "contracts" | "applications" | "cluster",
 ): Promise<void> {
   await openGraph(page);
   await page.locator(`.gearbox-graph .gbx-view-tab[data-view="${view}"]`).click();

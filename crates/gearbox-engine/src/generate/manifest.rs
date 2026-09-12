@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use gearbox_ir::{FileEntry, FileKind, GearId, Ownership, ResolvedGear, ResolvedProcess};
+use gearbox_ir::{FileEntry, FileKind, GearId, Ownership, ResolvedApplication, ResolvedGear};
 use serde::Serialize;
 
 use super::{GenerateError, GenerateInput, header, paths, workspace};
@@ -95,35 +95,38 @@ impl Dependency {
 /// for, when a gear is absent from the lock's gear table, or when two gears in
 /// the process share a library identifier -- each of which would produce a
 /// manifest that does not build.
-pub fn process_manifest(
+pub fn application_manifest(
     input: &GenerateInput<'_>,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
 ) -> Result<FileEntry, GenerateError> {
-    let crate_dir = input.out_root.join("processes").join(process.name.as_str());
-    let dependencies = dependencies(input, process, &crate_dir)?;
+    let crate_dir = input
+        .out_root
+        .join("processes")
+        .join(application.name.as_str());
+    let dependencies = dependencies(input, application, &crate_dir)?;
 
     let manifest = Manifest {
         package: Package {
-            name: process.crate_name.clone(),
+            name: application.crate_name.clone(),
             version: input.lock.product.version.clone(),
             edition: workspace::package_edition(),
             rust_version: workspace::package_rust_version(),
             publish: false,
         },
         bins: vec![Bin {
-            name: process.bin_name.clone(),
+            name: application.bin_name.clone(),
             path: "src/main.rs",
         }],
         dependencies,
     };
 
     let body = toml::to_string_pretty(&manifest).map_err(|source| GenerateError::Toml {
-        what: "a process manifest",
+        what: "an application manifest",
         source,
     })?;
 
     Ok(FileEntry::text(
-        paths::rel(&["processes", process.name.as_str(), "Cargo.toml"])?,
+        paths::rel(&["processes", application.name.as_str(), "Cargo.toml"])?,
         format!("{}\n{body}", header("#")),
         FileKind::Toml,
         Ownership::Generated,
@@ -140,7 +143,7 @@ pub fn process_manifest(
 /// one file and `cf-api-contracts` in the other.
 fn dependencies(
     input: &GenerateInput<'_>,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
     crate_dir: &Path,
 ) -> Result<BTreeMap<String, Dependency>, GenerateError> {
     let mut dependencies = BTreeMap::new();
@@ -149,7 +152,7 @@ fn dependencies(
     // gears from several sources would need to say which one is the platform;
     // no field records that today, and the anchor's source is the only answer
     // available that is not a guess about directory names.
-    let anchor = gear_of(input, process, &process.anchor)?;
+    let anchor = gear_of(input, application, &application.anchor)?;
     let anchor_root = source_root(input, anchor)?;
     dependencies.insert(
         TOOLKIT_ALIAS.to_owned(),
@@ -166,8 +169,8 @@ fn dependencies(
         dependencies.insert(name.to_owned(), dependency);
     }
 
-    for id in &process.gears {
-        let gear = gear_of(input, process, id)?;
+    for id in &application.gears {
+        let gear = gear_of(input, application, id)?;
         let root = source_root(input, gear)?;
         let dependency = Dependency {
             // Always spelled out, even where it matches the key: the key is the
@@ -206,7 +209,7 @@ fn dependencies(
 /// The lock's entry for a gear the process claims to contain.
 fn gear_of<'a>(
     input: &'a GenerateInput<'_>,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
     id: &GearId,
 ) -> Result<&'a ResolvedGear, GenerateError> {
     input
@@ -214,7 +217,7 @@ fn gear_of<'a>(
         .gears
         .get(id)
         .ok_or_else(|| GenerateError::UnknownGear {
-            process: process.name.to_string(),
+            application: application.name.to_string(),
             gear: id.to_string(),
         })
 }

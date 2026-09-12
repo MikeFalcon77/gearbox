@@ -30,7 +30,7 @@ import { injectable } from "@theia/core/shared/inversify";
  */
 export type Selection =
   | { readonly kind: "gear"; readonly id: string }
-  | { readonly kind: "process"; readonly id: string }
+  | { readonly kind: "application"; readonly id: string }
   | { readonly kind: "binding"; readonly consumer: string; readonly contract: string }
   /** A catalogue row with no id yet: still pending, so nothing can be joined to it. */
   | { readonly kind: "catalogue-row"; readonly key: string };
@@ -75,7 +75,7 @@ export function sameSelection(a: Selection | undefined, b: Selection | undefined
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
     case "gear":
-    case "process":
+    case "application":
       return a.id === (b as { id: string }).id;
     case "catalogue-row":
       return a.key === (b as { key: string }).key;

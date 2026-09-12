@@ -17,7 +17,7 @@ use ts_rs::TS;
 
 use crate::contract::Transport;
 use crate::diagnostics::Location;
-use crate::ids::{ContractId, GearId, ProcessId, ProfileId, RelPath, SourceId};
+use crate::ids::{ApplicationId, ContractId, GearId, ProfileId, RelPath, SourceId};
 use crate::requirement::ClusterPrimitive;
 
 /// Where to get a gear's source.
@@ -132,7 +132,7 @@ pub enum DeploymentProfileDecl {
     SelfHosted {
         id: ProfileId,
         /// Which process is the host.
-        host: ProcessId,
+        host: ApplicationId,
         discovery: Discovery,
         /// Where worker binaries will be built, needed to write each worker's
         /// executable path.
@@ -195,7 +195,7 @@ impl DeploymentProfileDecl {
 
     /// Whether this profile can have more than one process.
     #[must_use]
-    pub const fn is_multi_process(&self) -> bool {
+    pub const fn is_multi_application(&self) -> bool {
         !matches!(self, Self::Embedded { .. })
     }
 
@@ -479,8 +479,8 @@ impl ClusterScopeIntent {
 /// Only needed to name or replicate a process; the resolver derives the partition
 /// on its own otherwise.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct ProcessPin {
-    pub name: ProcessId,
+pub struct ApplicationPin {
+    pub name: ApplicationId,
 
     /// The gear whose co-location closure this process is built from.
     pub anchor: GearId,
@@ -509,7 +509,7 @@ pub enum Preference {
     ExistingInfrastructure,
 
     /// Keep gears together when the choice is otherwise free.
-    FewerProcesses,
+    FewerApplications,
 
     /// Give this gear its own process when that is possible.
     Isolate { gear: GearId },
@@ -559,7 +559,7 @@ pub struct ProductIntent {
     pub cluster_scopes: Vec<ClusterScopeIntent>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub process_pins: Vec<ProcessPin>,
+    pub application_pins: Vec<ApplicationPin>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preferences: Vec<Preference>,
@@ -600,8 +600,8 @@ impl ProductIntent {
 
     /// The process pins that apply under `profile`.
     #[must_use]
-    pub fn process_pins_for(&self, profile: &ProfileId) -> Vec<&ProcessPin> {
-        self.process_pins
+    pub fn application_pins_for(&self, profile: &ProfileId) -> Vec<&ApplicationPin> {
+        self.application_pins
             .iter()
             .filter(|p| Self::applies(&p.profiles, profile))
             .collect()

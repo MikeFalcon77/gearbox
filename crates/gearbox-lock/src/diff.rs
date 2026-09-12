@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use gearbox_ir::{
-    ClusterPrimitive, ContractId, GearId, NodeId, ProcessId, ProvenanceKind, ResolvedProduct,
+    ApplicationId, ClusterPrimitive, ContractId, GearId, NodeId, ProvenanceKind, ResolvedProduct,
     SourceId,
 };
 use serde::Serialize;
@@ -82,9 +82,9 @@ pub struct LockDiff {
     pub gears_removed: Vec<GearId>,
     pub gears_changed: Vec<GearId>,
 
-    pub processes_added: Vec<ProcessId>,
-    pub processes_removed: Vec<ProcessId>,
-    pub processes_changed: Vec<ProcessId>,
+    pub applications_added: Vec<ApplicationId>,
+    pub applications_removed: Vec<ApplicationId>,
+    pub applications_changed: Vec<ApplicationId>,
 
     pub bindings_added: Vec<BindingKey>,
     pub bindings_removed: Vec<BindingKey>,
@@ -123,9 +123,9 @@ impl LockDiff {
             gears_added,
             gears_removed,
             gears_changed,
-            processes_added,
-            processes_removed,
-            processes_changed,
+            applications_added,
+            applications_removed,
+            applications_changed,
             bindings_added,
             bindings_removed,
             bindings_changed,
@@ -155,9 +155,9 @@ impl LockDiff {
             && gears_added.is_empty()
             && gears_removed.is_empty()
             && gears_changed.is_empty()
-            && processes_added.is_empty()
-            && processes_removed.is_empty()
-            && processes_changed.is_empty()
+            && applications_added.is_empty()
+            && applications_removed.is_empty()
+            && applications_changed.is_empty()
             && bindings_added.is_empty()
             && bindings_removed.is_empty()
             && bindings_changed.is_empty()
@@ -207,11 +207,11 @@ impl LockDiff {
         );
         marked(
             &mut lines,
-            "process",
+            "application",
             [
-                &self.processes_added,
-                &self.processes_removed,
-                &self.processes_changed,
+                &self.applications_added,
+                &self.applications_removed,
+                &self.applications_changed,
             ],
             ToString::to_string,
         );
@@ -296,7 +296,7 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
         self_hosted: before_hw,
         sources: _,
         gears: _,
-        processes: _,
+        applications: _,
         bindings: _,
         cluster: _,
         cuttable_if_declared: _,
@@ -310,7 +310,7 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
         self_hosted: after_hw,
         sources: _,
         gears: _,
-        processes: _,
+        applications: _,
         bindings: _,
         cluster: _,
         cuttable_if_declared: _,
@@ -462,15 +462,15 @@ pub fn diff(before: &ResolvedProduct, after: &ResolvedProduct) -> LockDiff {
 
     let (gears_added, gears_removed, gears_changed) = diff_keyed(&before.gears, &after.gears);
 
-    let by_process_name = |product: &ResolvedProduct| {
+    let by_application_name = |product: &ResolvedProduct| {
         product
-            .processes
+            .applications
             .iter()
             .map(|p| (p.name.clone(), p.clone()))
             .collect::<BTreeMap<_, _>>()
     };
-    let (processes_added, processes_removed, processes_changed) =
-        diff_keyed(&by_process_name(before), &by_process_name(after));
+    let (applications_added, applications_removed, applications_changed) =
+        diff_keyed(&by_application_name(before), &by_application_name(after));
 
     let by_binding_key = |product: &ResolvedProduct| {
         product
@@ -562,9 +562,9 @@ pub fn diff(before: &ResolvedProduct, after: &ResolvedProduct) -> LockDiff {
         gears_added,
         gears_removed,
         gears_changed,
-        processes_added,
-        processes_removed,
-        processes_changed,
+        applications_added,
+        applications_removed,
+        applications_changed,
         bindings_added,
         bindings_removed,
         bindings_changed,

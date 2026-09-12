@@ -14,9 +14,9 @@
 //! would be writing a lie into the lock.
 
 use gearbox_ir::{
-    BindingMechanism, BindingMode, BindingRequest, Catalogue, ContractDescriptor, ContractId,
-    DeploymentProfileDecl, Diagnostic, DiagnosticCode, Diagnostics, Discovery, GearId, Location,
-    NodeKind, ProcessId, ResolvedBinding, ResolvedBindingMode, Selected, Transport, binding_key,
+    ApplicationId, BindingMechanism, BindingMode, BindingRequest, Catalogue, ContractDescriptor,
+    ContractId, DeploymentProfileDecl, Diagnostic, DiagnosticCode, Diagnostics, Discovery, GearId,
+    Location, NodeKind, ResolvedBinding, ResolvedBindingMode, Selected, Transport, binding_key,
 };
 
 use super::cuts::Cuts;
@@ -43,22 +43,29 @@ pub fn derive(
 
         // Placement decides the mode. Both being in one process is not a
         // preference the resolver expressed; it is where they ended up.
-        let together = partition.share_a_process(&edge.consumer, &edge.provider);
-        let Some(consumer_process) = process_of(partition, &edge.consumer) else {
+        let together = partition.share_an_application(&edge.consumer, &edge.provider);
+        let Some(consumer_application) = application_of(partition, &edge.consumer) else {
             continue;
         };
-        let Some(provider_process) = process_of(partition, &edge.provider) else {
+        let Some(provider_application) = application_of(partition, &edge.provider) else {
             continue;
         };
 
         let binding = if together {
-            local(edge, contract, consumer_process, request, uri, diagnostics)
+            local(
+                edge,
+                contract,
+                consumer_application,
+                request,
+                uri,
+                diagnostics,
+            )
         } else {
             remote(
                 edge,
                 contract,
-                consumer_process,
-                provider_process,
+                consumer_application,
+                provider_application,
                 request,
                 declaration,
                 uri,
@@ -110,9 +117,9 @@ fn report_unhonoured_endpoints(
 ///
 /// An overlapping gear is in several; the host is the answer that matters for a
 /// binding, and the host is always first.
-fn process_of(partition: &Partition, gear: &GearId) -> Option<ProcessId> {
+fn application_of(partition: &Partition, gear: &GearId) -> Option<ApplicationId> {
     partition
-        .processes
+        .applications
         .iter()
         .find(|p| p.contains(gear))
         .map(|p| p.name.clone())
@@ -138,7 +145,7 @@ fn requested(
 fn local(
     edge: &super::cuts::CuttableEdge,
     contract: &ContractDescriptor,
-    process: ProcessId,
+    application: ApplicationId,
     request: Option<BindingRequest>,
     uri: &str,
     diagnostics: &mut Diagnostics,
@@ -152,14 +159,14 @@ fn local(
             Diagnostic::new(
                 DiagnosticCode::BindingForcedLocal,
                 format!(
-                    "`{}` asked for a remote binding of `{}`, but both gears are in process `{}`",
-                    edge.consumer, edge.contract, process
+                    "`{}` asked for a remote binding of `{}`, but both gears are in application `{}`",
+                    edge.consumer, edge.contract, application
                 ),
             )
             .with_help(
                 "the client hub finds the in-process instance and short-circuits before any \
                  endpoint is consulted, so a remote address here would be ignored rather than \
-                 used; separating them needs a profile with more than one process",
+                 used; separating them needs a profile with more than one application",
             )
             .at(Location::file(uri.to_owned())),
         );
@@ -167,10 +174,10 @@ fn local(
 
     ResolvedBinding {
         consumer: edge.consumer.clone(),
-        consumer_process: process.clone(),
+        consumer_application: application.clone(),
         contract: contract.id.clone(),
         provider: edge.provider.clone(),
-        provider_process: process,
+        provider_application: application,
         mode: ResolvedBindingMode::Local,
         transport: Transport::Local,
         mechanism: BindingMechanism::colocated(),
@@ -195,8 +202,8 @@ fn local(
 fn remote(
     edge: &super::cuts::CuttableEdge,
     contract: &ContractDescriptor,
-    consumer_process: ProcessId,
-    provider_process: ProcessId,
+    consumer_application: ApplicationId,
+    provider_application: ApplicationId,
     request: Option<BindingRequest>,
     declaration: &DeploymentProfileDecl,
     uri: &str,
@@ -236,15 +243,15 @@ fn remote(
     // slot; the lock must not pretend they are independently addressable.
     let endpoint_source = match discovery {
         Discovery::Static => static_endpoint_source(&edge.consumer, &edge.provider),
-        Discovery::Directory => format!("directory:{provider_process}"),
+        Discovery::Directory => format!("directory:{provider_application}"),
     };
 
     ResolvedBinding {
         consumer: edge.consumer.clone(),
-        consumer_process,
+        consumer_application,
         contract: contract.id.clone(),
         provider: edge.provider.clone(),
-        provider_process,
+        provider_application,
         mode: ResolvedBindingMode::Remote,
         transport: Transport::Rest,
         mechanism,
@@ -285,9 +292,9 @@ pub fn pin_static_endpoints(
     };
     for binding in bindings.iter_mut().filter(|b| b.is_remote()) {
         let Some(provider) = partition
-            .processes
+            .applications
             .iter()
-            .find(|process| process.name == binding.provider_process)
+            .find(|application| application.name == binding.provider_application)
         else {
             continue;
         };

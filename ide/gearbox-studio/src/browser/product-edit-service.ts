@@ -407,7 +407,7 @@ export class ProductEditService {
    * Resolve the product as it *would* be with this gear and these edits.
    *
    * Answers the question the configurator exists for -- which gears the closure
-   * pulls in, which processes change, which bindings stop being local -- before
+   * pulls in, which applications change, which bindings stop being local -- before
    * anything is written. Nothing is written: the engine applies the edits to the
    * text in memory and resolves that.
    *

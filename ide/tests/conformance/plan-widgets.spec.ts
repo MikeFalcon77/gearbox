@@ -202,7 +202,7 @@ test.describe("where the views live", () => {
     const topologyBranches = await studio.page
       .locator("[data-branch]")
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-branch")));
-    expect(topologyBranches).toEqual(["processes", "contracts", "cluster"]);
+    expect(topologyBranches).toEqual(["applications", "contracts", "cluster"]);
 
     // A branch folds, and says so rather than only looking folded.
     await productSection(studio.page, "gears");
@@ -566,7 +566,7 @@ test.describe("the graph is four views of one product", () => {
     await openGraph(studio.page);
     const tabs = studio.page.locator(".gearbox-graph .gbx-view-tab");
     await expect(tabs).toHaveCount(4);
-    await expect(tabs).toHaveText(["co-location", "contracts", "processes", "cluster"]);
+    await expect(tabs).toHaveText(["co-location", "contracts", "applications", "cluster"]);
   });
 
   test("co-location shows first, and needs no product [plan §9: Graph four views]", async ({
@@ -603,10 +603,10 @@ test.describe("the graph is four views of one product", () => {
     // subscribes to `ProductStore.onChanged`, which is the same edge that made the
     // catalogue's in-product toggles appear.
     await openProduct(studio.page, "dev");
-    await openGraphView(studio.page, "processes");
-    await expect(studio.page.locator("[data-graph='processes'] .gbx-binary")).toHaveCount(1);
+    await openGraphView(studio.page, "applications");
+    await expect(studio.page.locator("[data-graph='applications'] .gbx-binary")).toHaveCount(1);
 
     await openProduct(studio.page, "prod");
-    await expect(studio.page.locator("[data-graph='processes'] .gbx-binary")).toHaveCount(3);
+    await expect(studio.page.locator("[data-graph='applications'] .gbx-binary")).toHaveCount(3);
   });
 });

@@ -522,7 +522,7 @@ fn forced_local(
         ),
     )
     .with_help(
-        "the runtime short-circuits to a local instance when one is in the process, so a \
+        "the runtime short-circuits to a local instance when one is in the application, so a \
          configured endpoint for this binding would have no effect; separating the two would \
          require removing the `deps` entry that links them, which is a source change in the gear",
     )
@@ -574,7 +574,7 @@ fn cuttable_if_declared(
         ),
     )
     .with_help(format!(
-        "`{consumer}` keeps `{provider}` in its process with a `deps` entry, which is how a gear \
+        "`{consumer}` keeps `{provider}` in its application with a `deps` entry, which is how a gear \
          guarantees a type-keyed hub lookup will find it -- and that lookup leaves no trace the \
          resolver can read. Add `{edit}` beside `{consumer}`'s `#[toolkit::gear]` attribute and \
          drop `{provider}` from its `deps`, and the pair becomes severable"

@@ -394,11 +394,11 @@ test.describe("Overview says what the product is", () => {
     await productSection(page, "overview");
 
     const gears = page.locator("[data-overview-gears]");
-    const processes = page.locator("[data-overview-processes]");
+    const processes = page.locator("[data-overview-applications]");
     await expect(gears).toBeVisible();
     await expect(processes).toBeVisible();
     expect(Number(await gears.getAttribute("data-overview-gears"))).toBeGreaterThan(0);
-    expect(Number(await processes.getAttribute("data-overview-processes"))).toBeGreaterThan(0);
+    expect(Number(await processes.getAttribute("data-overview-applications"))).toBeGreaterThan(0);
     // The count that surprises people: a closure nobody asked for.
     await expect(gears).toHaveText(/\d+/);
     await expect(page.locator("[data-figure='gears']")).toContainText("pulled in");
@@ -433,7 +433,7 @@ test.describe("Overview says what the product is", () => {
     expect(await status.getAttribute("data-overview-generate")).not.toBe("planning");
 
     // A count with no way through is trivia: the figures move between stages.
-    await page.locator("[data-figure='processes']").click();
+    await page.locator("[data-figure='applications']").click();
     await expect(page.locator('[data-product-section="topology"]')).toHaveAttribute(
       "aria-selected",
       "true",

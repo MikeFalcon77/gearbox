@@ -14,8 +14,8 @@
 //! this resolver can prevent.
 
 use gearbox_ir::{
-    Catalogue, DeploymentProfileDecl, Diagnostic, DiagnosticCode, Diagnostics, Discovery, GearId,
-    ProcessKind, ResolvedProcess, RuntimeCap,
+    ApplicationKind, Catalogue, DeploymentProfileDecl, Diagnostic, DiagnosticCode, Diagnostics,
+    Discovery, GearId, ResolvedApplication, RuntimeCap,
 };
 
 use super::partition::Partition;
@@ -33,12 +33,12 @@ pub fn check(
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) {
-    for process in &partition.processes {
-        check_singletons(catalogue, process, uri, diagnostics);
-        check_worker_shape(process, uri, diagnostics);
-        check_rest_without_host(catalogue, process, uri, diagnostics);
-        check_grpc_without_hub(catalogue, process, uri, diagnostics);
-        check_host_with_nothing_to_host(catalogue, process, uri, diagnostics);
+    for application in &partition.applications {
+        check_singletons(catalogue, application, uri, diagnostics);
+        check_worker_shape(application, uri, diagnostics);
+        check_rest_without_host(catalogue, application, uri, diagnostics);
+        check_grpc_without_hub(catalogue, application, uri, diagnostics);
+        check_host_with_nothing_to_host(catalogue, application, uri, diagnostics);
     }
     check_discovery(partition, declaration, uri, diagnostics);
     check_worker_paths(partition, declaration, uri, diagnostics);
@@ -52,7 +52,7 @@ pub fn check(
 /// reader has to act on, not the count.
 fn check_singletons(
     catalogue: &Catalogue,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) {
@@ -68,7 +68,7 @@ fn check_singletons(
             "gRPC hub",
         ),
     ] {
-        let holders: Vec<&GearId> = process
+        let holders: Vec<&GearId> = application
             .gears
             .iter()
             .filter(|g| has_cap(catalogue, g, cap))
@@ -83,13 +83,13 @@ fn check_singletons(
                 Diagnostic::error(
                     code,
                     format!(
-                        "process `{}` contains {} {what} gears: {named}",
-                        process.name,
+                        "application `{}` contains {} {what} gears: {named}",
+                        application.name,
                         holders.len()
                     ),
                     format!(
                         "the registry allows one {what} per process and refuses the rest at \
-                         startup; separate them into different processes, or select only one"
+                         startup; separate them into different applications, or select only one"
                     ),
                 )
                 .at(Location(uri)),
@@ -104,18 +104,21 @@ fn check_singletons(
 /// composed gateway, so a REST host there registers routes nothing will call.
 /// The process starts, reports healthy, and silently answers nothing -- which is
 /// why this is an error rather than a warning.
-fn check_worker_shape(process: &ResolvedProcess, uri: &str, diagnostics: &mut Diagnostics) {
-    if process.kind != ProcessKind::Worker {
+fn check_worker_shape(application: &ResolvedApplication, uri: &str, diagnostics: &mut Diagnostics) {
+    if application.kind != ApplicationKind::Worker {
         return;
     }
-    if let Some(host) = &process.rest_host {
+    if let Some(host) = &application.rest_host {
         diagnostics.push(
             Diagnostic::error(
                 DiagnosticCode::TopologyRestHostInWorker,
-                format!("worker `{}` contains the REST host `{host}`", process.name),
+                format!(
+                    "worker `{}` contains the REST host `{host}`",
+                    application.name
+                ),
                 "a worker serves through its own out-of-process router, so routes registered \
                  with the composed gateway are never reached; keep the REST host in the host \
-                 process, or pin this gear there with `process(...)`",
+                 application, or pin this gear there with `application(...)`",
             )
             .at(Location(uri)),
         );
@@ -139,7 +142,7 @@ const REGISTRATION_HOSTS: [(RuntimeCap, RuntimeCap, &str); 2] = [
 
 fn check_host_with_nothing_to_host(
     catalogue: &Catalogue,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) {
@@ -148,7 +151,7 @@ fn check_host_with_nothing_to_host(
             host_cap.is_process_singleton(),
             "the pairing above must stay the singleton caps, or the derivation is a coincidence"
         );
-        let hosts: Vec<&GearId> = process
+        let hosts: Vec<&GearId> = application
             .gears
             .iter()
             .filter(|g| has_cap(catalogue, g, host_cap))
@@ -156,7 +159,7 @@ fn check_host_with_nothing_to_host(
         if hosts.is_empty() {
             continue;
         }
-        if process
+        if application
             .gears
             .iter()
             .any(|g| has_cap(catalogue, g, served_cap))
@@ -172,8 +175,8 @@ fn check_host_with_nothing_to_host(
             Diagnostic::new(
                 DiagnosticCode::TopologyHostWithNothingToHost,
                 format!(
-                    "process `{}` contains {named} and no gear that registers {what} with it",
-                    process.name
+                    "application `{}` contains {named} and no gear that registers {what} with it",
+                    application.name
                 ),
             )
             .with_help(format!(
@@ -195,14 +198,14 @@ fn check_host_with_nothing_to_host(
 /// through its own out-of-process router and need no `rest_host`.
 fn check_grpc_without_hub(
     catalogue: &Catalogue,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) {
-    if process.grpc_hub.is_some() {
+    if application.grpc_hub.is_some() {
         return;
     }
-    let grpc_gears: Vec<&GearId> = process
+    let grpc_gears: Vec<&GearId> = application
         .gears
         .iter()
         .filter(|g| has_cap(catalogue, g, RuntimeCap::Grpc))
@@ -219,12 +222,12 @@ fn check_grpc_without_hub(
         Diagnostic::error(
             DiagnosticCode::TopologyGrpcWithoutHub,
             format!(
-                "process `{}` registers gRPC services with no gRPC hub to mount them: {named}",
-                process.name
+                "application `{}` registers gRPC services with no gRPC hub to mount them: {named}",
+                application.name
             ),
-            "a `grpc` gear hands its service registrations to the process's hub, and the \
+            "a `grpc` gear hands its service registrations to the application's hub, and the \
              registration is a Rust closure, so the hub has to be in the same binary; select a \
-             gear with the `grpc_hub` capability into this process",
+             gear with the `grpc_hub` capability into this application",
         )
         .with_evidence("libs/toolkit/src/runtime/host_runtime.rs:800")
         .at(Location(uri)),
@@ -234,16 +237,16 @@ fn check_grpc_without_hub(
 /// A process with REST gears and no REST host has nowhere to publish them.
 fn check_rest_without_host(
     catalogue: &Catalogue,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) {
     // Only meaningful for a host process: a worker publishes through `oop_serve`,
     // which needs no `rest_host` gear at all.
-    if process.kind != ProcessKind::Host || process.rest_host.is_some() {
+    if application.kind != ApplicationKind::Host || application.rest_host.is_some() {
         return;
     }
-    let rest_gears: Vec<&GearId> = process
+    let rest_gears: Vec<&GearId> = application
         .gears
         .iter()
         .filter(|g| has_cap(catalogue, g, RuntimeCap::Rest))
@@ -260,12 +263,12 @@ fn check_rest_without_host(
         Diagnostic::error(
             DiagnosticCode::TopologyRestWithoutHost,
             format!(
-                "process `{}` has REST gears with no REST host to compose them: {named}",
-                process.name
+                "application `{}` has REST gears with no REST host to compose them: {named}",
+                application.name
             ),
-            "a `rest` gear registers its routes with the process's REST host; without one the \
+            "a `rest` gear registers its routes with the application's REST host; without one the \
              routes exist and nothing serves them, so select a gear with the `rest_host` \
-             capability into this process",
+             capability into this application",
         )
         .at(Location(uri)),
     );
@@ -285,12 +288,12 @@ fn check_discovery(
 ) {
     if matches!(declaration, DeploymentProfileDecl::Kubernetes { .. })
         && declaration.discovery() == Some(Discovery::Static)
-        && partition.processes.len() >= 2
+        && partition.applications.len() >= 2
     {
         diagnostics.push(
             Diagnostic::new(
                 DiagnosticCode::GapNoK8sDnsResolver,
-                "the kubernetes profile pins process addresses statically; no cluster-native \
+                "the kubernetes profile pins application addresses statically; no cluster-native \
                  endpoint resolver exists",
             )
             .with_help(
@@ -309,14 +312,14 @@ fn check_discovery(
     }
     // Only relevant once something has actually moved out: a single process
     // resolves everything locally and never consults the directory.
-    if partition.processes.len() < 2 {
+    if partition.applications.len() < 2 {
         return;
     }
 
     let Some(host) = partition
-        .processes
+        .applications
         .iter()
-        .find(|process| process.kind == ProcessKind::Host)
+        .find(|application| application.kind == ApplicationKind::Host)
     else {
         return;
     };
@@ -328,7 +331,7 @@ fn check_discovery(
                 DiagnosticCode::TopologyNoOrchestrator,
                 format!(
                     "the profile discovers workers through the directory, but `{DIRECTORY_SERVER}` \
-                     is not in the host process `{}`",
+                     is not in the host application `{}`",
                     host.name
                 ),
                 format!(
@@ -347,7 +350,7 @@ fn check_discovery(
                 DiagnosticCode::TopologyNoGrpcHub,
                 format!(
                     "the profile discovers workers through the directory, but `{GRPC_HUB}` is not \
-                     in the host process `{}`",
+                     in the host application `{}`",
                     host.name
                 ),
                 format!(
@@ -374,8 +377,8 @@ fn check_worker_paths(
     if target_dir.is_some() {
         return;
     }
-    let workers: Vec<&ResolvedProcess> = partition
-        .processes
+    let workers: Vec<&ResolvedApplication> = partition
+        .applications
         .iter()
         .filter(|p| p.is_worker())
         .collect();
@@ -412,7 +415,11 @@ fn report_spawn_gap(
     if !matches!(declaration, DeploymentProfileDecl::SelfHosted { .. }) {
         return;
     }
-    if !partition.processes.iter().any(ResolvedProcess::is_worker) {
+    if !partition
+        .applications
+        .iter()
+        .any(ResolvedApplication::is_worker)
+    {
         return;
     }
     diagnostics.push(
@@ -422,7 +429,7 @@ fn report_spawn_gap(
         )
         .with_help(
             "the runtime implements one spawn backend and it is local; this profile is \
-             multi-process, not multi-machine. Use the kubernetes profile for that",
+             multi-application, not multi-machine. Use the kubernetes profile for that",
         )
         .with_evidence("libs/toolkit/src/bootstrap/run.rs:74")
         .at(Location(uri)),

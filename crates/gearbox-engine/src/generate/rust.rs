@@ -9,7 +9,7 @@
 
 use std::collections::BTreeSet;
 
-use gearbox_ir::{FileEntry, FileKind, Ownership, ResolvedProcess};
+use gearbox_ir::{FileEntry, FileKind, Ownership, ResolvedApplication};
 use minijinja::context;
 
 use super::templates;
@@ -21,21 +21,21 @@ use super::{GenerateError, GenerateInput, header, paths};
 /// Returns [`GenerateError::Template`] if the template cannot be rendered.
 pub fn host_main(
     input: &GenerateInput<'_>,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
 ) -> Result<FileEntry, GenerateError> {
     let body = templates::render(
         "main.rs",
         input.templates.get("main.rs")?,
         context! {
             header => header("//").trim_end(),
-            process => process.name.as_str(),
-            bin_name => process.bin_name.as_str(),
-            gear_count => process.gears.len(),
+            application => application.name.as_str(),
+            bin_name => application.bin_name.as_str(),
+            gear_count => application.gears.len(),
         },
     )?;
 
     Ok(FileEntry::text(
-        paths::rel(&["processes", process.name.as_str(), "src", "main.rs"])?,
+        paths::rel(&["processes", application.name.as_str(), "src", "main.rs"])?,
         body,
         FileKind::Rust,
         Ownership::Generated,
@@ -53,23 +53,23 @@ pub fn host_main(
 /// Returns [`GenerateError::Template`] if the template cannot be rendered.
 pub fn worker_main(
     input: &GenerateInput<'_>,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
 ) -> Result<FileEntry, GenerateError> {
     let body = templates::render(
         "worker_main.rs",
         input.templates.get("worker_main.rs")?,
         context! {
             header => header("//").trim_end(),
-            process => process.name.as_str(),
-            bin_name => process.bin_name.as_str(),
-            gear_count => process.gears.len(),
-            gear_name => process.anchor.as_str(),
+            application => application.name.as_str(),
+            bin_name => application.bin_name.as_str(),
+            gear_count => application.gears.len(),
+            gear_name => application.anchor.as_str(),
             version => input.lock.product.version.as_str(),
         },
     )?;
 
     Ok(FileEntry::text(
-        paths::rel(&["processes", process.name.as_str(), "src", "main.rs"])?,
+        paths::rel(&["processes", application.name.as_str(), "src", "main.rs"])?,
         body,
         FileKind::Rust,
         Ownership::Generated,
@@ -90,25 +90,25 @@ pub fn worker_main(
 /// lock does not describe.
 pub fn registered_gears(
     input: &GenerateInput<'_>,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
 ) -> Result<FileEntry, GenerateError> {
     // The dependency keys the manifest will emit. Built from the same field the
     // manifest keys on, so the two files cannot disagree.
     let mut declared: BTreeSet<&str> = BTreeSet::new();
-    for id in &process.gears {
+    for id in &application.gears {
         let gear = input
             .lock
             .gears
             .get(id)
             .ok_or_else(|| GenerateError::UnknownGear {
-                process: process.name.to_string(),
+                application: application.name.to_string(),
                 gear: id.to_string(),
             })?;
         declared.insert(gear.package.lib_ident.as_str());
     }
 
     let mut idents: BTreeSet<&str> = BTreeSet::new();
-    for id in &process.gears {
+    for id in &application.gears {
         let Some(gear) = input.lock.gears.get(id) else {
             continue;
         };
@@ -140,7 +140,7 @@ pub fn registered_gears(
     Ok(FileEntry::text(
         paths::rel(&[
             "processes",
-            process.name.as_str(),
+            application.name.as_str(),
             "src",
             "registered_gears.rs",
         ])?,

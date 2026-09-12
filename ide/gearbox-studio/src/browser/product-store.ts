@@ -238,7 +238,7 @@ export class ProductStore {
     // **The selection goes at the *start* of the change, not at the end of it.**
     // `clear()` drops it when a product closes, and opening a second product is
     // the same transition with no close in between -- the selection would
-    // otherwise still name a gear or a process from the previous product, and an
+    // otherwise still name a gear or an application from the previous product, and an
     // open takes about three seconds, all of which the Inspector would spend
     // answering about something that is no longer on screen. Doing it in the
     // shell's reconciliation instead would be too late for the same reason.

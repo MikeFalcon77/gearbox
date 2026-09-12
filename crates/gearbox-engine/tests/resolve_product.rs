@@ -101,9 +101,9 @@ fn one_description_gives_three_different_locks() {
         assert!(h.starts_with("blake3:"), "{h}");
     }
 
-    assert_eq!(dev.processes.len(), 1);
-    assert_eq!(local.processes.len(), 2);
-    assert_eq!(production.processes.len(), 3);
+    assert_eq!(dev.applications.len(), 1);
+    assert_eq!(local.applications.len(), 2);
+    assert_eq!(production.applications.len(), 3);
     // The gear set is the same in all three: co-location is link-time, and no
     // profile can change what a binary must contain.
     assert_eq!(dev.gears.len(), local.gears.len());
@@ -138,7 +138,7 @@ fn the_hash_covers_the_body_and_not_itself() {
     let recomputed = gearbox_lock::compute_hash(&product).unwrap();
     assert_eq!(recorded, recomputed, "the recorded hash is self-consistent");
 
-    product.processes[0].replicas += 1;
+    product.applications[0].replicas += 1;
     assert_ne!(
         gearbox_lock::compute_hash(&product).unwrap(),
         recorded,

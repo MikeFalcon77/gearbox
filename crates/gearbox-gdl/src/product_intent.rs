@@ -17,10 +17,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use gearbox_ir::{
-    BindingIntent, BindingMode, ClusterScopeIntent, ContractId, DeploymentProfileDecl, Diagnostic,
-    DiagnosticCode, Diagnostics, Discovery, GearId, GearSelection, Location, PluginSelection,
-    Preference, ProcessId, ProcessPin, ProductIntent, ProfileId, ProviderBinding, SourceDecl,
-    SourceId, Transport,
+    ApplicationId, ApplicationPin, BindingIntent, BindingMode, ClusterScopeIntent, ContractId,
+    DeploymentProfileDecl, Diagnostic, DiagnosticCode, Diagnostics, Discovery, GearId,
+    GearSelection, Location, PluginSelection, Preference, ProductIntent, ProfileId,
+    ProviderBinding, SourceDecl, SourceId, Transport,
 };
 
 use crate::engine::FileIdentity;
@@ -115,7 +115,7 @@ pub fn build(
         selected_gears: build_gears(uri, decl, &sources, &profiles, diagnostics),
         bindings: build_bindings(uri, decl, &profiles, diagnostics),
         cluster_scopes: build_cluster_scopes(uri, decl, &profiles, diagnostics),
-        process_pins: build_process_pins(uri, decl, &profiles, diagnostics),
+        application_pins: build_application_pins(uri, decl, &profiles, diagnostics),
         preferences: build_preferences(uri, decl, diagnostics),
         templates: build_templates(uri, decl, diagnostics),
         sources,
@@ -487,36 +487,36 @@ fn build_cluster_scopes(
     out
 }
 
-fn build_process_pins(
+fn build_application_pins(
     uri: &str,
     decl: &ProductDecl,
     profiles: &Profiles,
     diagnostics: &mut Diagnostics,
-) -> Vec<ProcessPin> {
+) -> Vec<ApplicationPin> {
     let mut pins = Vec::new();
-    for record in &decl.processes {
-        let name = match ProcessId::new(record.name.clone()) {
+    for record in &decl.applications {
+        let name = match ApplicationId::new(record.name.clone()) {
             Ok(id) => id,
             Err(e) => {
                 diagnostics.push(invalid(
                     uri,
-                    format!("process name `{}` is not valid: {e}", record.name),
-                    "process names are kebab-case",
+                    format!("application name `{}` is not valid: {e}", record.name),
+                    "application names are kebab-case",
                 ));
                 continue;
             }
         };
-        let Some(anchor) = gear_id(uri, &record.anchor, "process", diagnostics) else {
+        let Some(anchor) = gear_id(uri, &record.anchor, "application", diagnostics) else {
             continue;
         };
         let scoped = scoped_profiles(
             uri,
             &record.profiles,
-            &format!("process(\"{name}\")"),
+            &format!("application(\"{name}\")"),
             profiles,
             diagnostics,
         );
-        pins.push(ProcessPin {
+        pins.push(ApplicationPin {
             name,
             anchor,
             replicas: record.replicas,
@@ -535,7 +535,7 @@ fn build_preferences(
     for record in &decl.preferences {
         let preference = match record.kind.as_str() {
             "existing-infrastructure" => Preference::ExistingInfrastructure,
-            "fewer-processes" => Preference::FewerProcesses,
+            "fewer-applications" => Preference::FewerApplications,
             "isolate" => {
                 let raw = record.gear.clone().unwrap_or_default();
                 match gear_id(uri, &raw, "prefer.isolate", diagnostics) {
@@ -547,7 +547,7 @@ fn build_preferences(
                 diagnostics.push(invalid(
                     uri,
                     format!("unknown preference `{other}`"),
-                    "use `prefer.existing_infrastructure()`, `prefer.fewer_processes()` or \
+                    "use `prefer.existing_infrastructure()`, `prefer.fewer_applications()` or \
                      `prefer.isolate(gear = \"...\")`",
                 ));
                 continue;
@@ -706,13 +706,13 @@ fn deployment_profile(
         }),
         "self-hosted" => {
             let raw = record.host.clone().unwrap_or_default();
-            let host = match ProcessId::new(raw.clone()) {
+            let host = match ApplicationId::new(raw.clone()) {
                 Ok(host) => host,
                 Err(e) => {
                     diagnostics.push(invalid(
                         uri,
                         format!("profile `{id}` names host `{raw}`, which is not valid: {e}"),
-                        "the host is a process name, kebab-case",
+                        "the host is an application name, kebab-case",
                     ));
                     return None;
                 }

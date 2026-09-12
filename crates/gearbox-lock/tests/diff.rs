@@ -9,7 +9,7 @@
 
 mod support;
 
-use gearbox_ir::{ClusterPrimitive, ContractId, GearId, ProcessId};
+use gearbox_ir::{ApplicationId, ClusterPrimitive, ContractId, GearId};
 
 #[test]
 fn identical_products_diff_to_nothing() {
@@ -95,20 +95,20 @@ fn detects_process_and_binding_changes() {
     let mut after = support::fixture();
 
     after
-        .processes
+        .applications
         .iter_mut()
-        .find(|p| p.name == ProcessId::new("payments-audit").unwrap())
+        .find(|p| p.name == ApplicationId::new("payments-audit").unwrap())
         .unwrap()
         .replicas = 2;
     after.bindings[0].critical = true;
 
     let d = gearbox_lock::diff(&before, &after);
     assert_eq!(
-        d.processes_changed,
-        vec![ProcessId::new("payments-audit").unwrap()]
+        d.applications_changed,
+        vec![ApplicationId::new("payments-audit").unwrap()]
     );
-    assert!(d.processes_added.is_empty());
-    assert!(d.processes_removed.is_empty());
+    assert!(d.applications_added.is_empty());
+    assert!(d.applications_removed.is_empty());
 
     assert_eq!(d.bindings_changed.len(), 1);
     assert_eq!(

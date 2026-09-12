@@ -53,7 +53,7 @@ export function selectionOf(subject: string | null | undefined): Selection | und
   if (at < 0) return undefined;
   const kind = subject.slice(0, at);
   const payload = subject.slice(at + 1);
-  if (kind === "gear" || kind === "process") {
+  if (kind === "gear" || kind === "application") {
     return { kind, id: payload };
   }
   if (kind === "binding") {
@@ -216,7 +216,7 @@ function Where(props: {
 function label(selection: Selection): string {
   switch (selection.kind) {
     case "gear":
-    case "process":
+    case "application":
       return selection.id;
     case "binding":
       return `${selection.consumer} → ${selection.contract}`;

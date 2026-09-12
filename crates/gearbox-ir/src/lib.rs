@@ -35,21 +35,21 @@ pub use explain::{
 };
 pub use fileset::{FileAction, FileEntry, FileKind, FilePlan, FileSet, Ownership};
 pub use ids::{
-    CapabilityId, ContractId, GearId, IdError, NodeId, ProcessId, ProfileId, ProviderId, RelPath,
-    RequirementId, SourceId,
+    ApplicationId, CapabilityId, ContractId, GearId, IdError, NodeId, ProfileId, ProviderId,
+    RelPath, RequirementId, SourceId,
 };
 pub use intent::{
-    BindingIntent, BindingMode, ClusterScopeIntent, ConfigValue, DeploymentProfileDecl, Discovery,
-    GearSelection, PluginSelection, Preference, ProcessPin, ProductIntent, ProviderBinding,
-    SourceDecl,
+    ApplicationPin, BindingIntent, BindingMode, ClusterScopeIntent, ConfigValue,
+    DeploymentProfileDecl, Discovery, GearSelection, PluginSelection, Preference, ProductIntent,
+    ProviderBinding, SourceDecl,
 };
 pub use requirement::{
     Capability, ClusterPrimitive, ClusterProviderDecl, Requirement, RequirementKind, capabilities,
 };
 pub use resolved::{
-    BindingMechanism, BindingRequest, Choice, ClusterResolution, CutBlocker, CutCandidate,
-    CutSavings, Entrypoint, ImageRef, InclusionReason, KubernetesSettings, LOCK_SCHEMA_VERSION,
-    ProcessKind, ResolvedBinding, ResolvedBindingMode, ResolvedClusterBinding, ResolvedEndpoint,
-    ResolvedGear, ResolvedProcess, ResolvedProduct, ResolvedProductHeader, Selected,
-    SelfHostedSettings, SpawnSpec, WorkerServe,
+    ApplicationKind, BindingMechanism, BindingRequest, Choice, ClusterResolution, CutBlocker,
+    CutCandidate, CutSavings, Entrypoint, ImageRef, InclusionReason, KubernetesSettings,
+    LOCK_SCHEMA_VERSION, ResolvedApplication, ResolvedBinding, ResolvedBindingMode,
+    ResolvedClusterBinding, ResolvedEndpoint, ResolvedGear, ResolvedProduct, ResolvedProductHeader,
+    Selected, SelfHostedSettings, SpawnSpec, WorkerServe,
 };

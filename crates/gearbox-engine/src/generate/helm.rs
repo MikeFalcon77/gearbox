@@ -23,7 +23,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use gearbox_ir::{FileEntry, FileKind, FileSet, Ownership, ProcessKind, ResolvedProcess};
+use gearbox_ir::{ApplicationKind, FileEntry, FileKind, FileSet, Ownership, ResolvedApplication};
 use minijinja::context;
 use serde::Serialize;
 
@@ -64,19 +64,19 @@ pub fn files(input: &GenerateInput<'_>, files: &FileSet) -> Result<Vec<FileEntry
     out.extend(umbrella_values(input, files)?);
     out.push(umbrella_helpers(product)?);
 
-    for process in &input.lock.processes {
-        let sub = subchart_name(process);
+    for application in &input.lock.applications {
+        let sub = subchart_name(application);
         out.push(subchart_chart(product, sub, version)?);
-        out.extend(subchart_templates(input, process, files)?);
+        out.extend(subchart_templates(input, application, files)?);
     }
     Ok(out)
 }
 
-fn subchart_name(process: &ResolvedProcess) -> &str {
-    process
+fn subchart_name(application: &ResolvedApplication) -> &str {
+    application
         .subchart
         .as_deref()
-        .unwrap_or_else(|| process.name.as_str())
+        .unwrap_or_else(|| application.name.as_str())
 }
 
 fn umbrella_chart(
@@ -101,8 +101,8 @@ fn umbrella_chart(
     body.push_str(version);
     body.push_str("\"\n");
     body.push_str("dependencies:\n");
-    for process in &input.lock.processes {
-        let sub = subchart_name(process);
+    for application in &input.lock.applications {
+        let sub = subchart_name(application);
         helm_safe("Chart.yaml dependency name", sub)?;
         body.push_str("  - name: ");
         body.push_str(sub);
@@ -170,19 +170,19 @@ fn umbrella_values(
     files: &FileSet,
 ) -> Result<Vec<FileEntry>, GenerateError> {
     let mut blocks = BTreeMap::new();
-    for process in &input.lock.processes {
-        let image = image_values(process, input);
-        let config_rel = paths::rel(&["config", &format!("{}.yaml", process.name)])?;
+    for application in &input.lock.applications {
+        let image = image_values(application, input);
+        let config_rel = paths::rel(&["config", &format!("{}.yaml", application.name)])?;
         let keys = files
             .get(&config_rel)
             .and_then(FileEntry::as_text)
             .map(secret_vars)
             .unwrap_or_default();
         blocks.insert(
-            subchart_name(process).to_owned(),
+            subchart_name(application).to_owned(),
             SubchartValues {
                 enabled: true,
-                replica_count: process.replicas,
+                replica_count: application.replicas,
                 image,
                 service_account: ServiceAccountValues {
                     create: true,
@@ -226,7 +226,7 @@ fn umbrella_values(
                 init_containers: None,
                 extra_containers: None,
                 custom: BTreeMap::new(),
-                existing_secret: existing_secret(process, input)?,
+                existing_secret: existing_secret(application, input)?,
                 secret_keys: if keys.is_empty() { None } else { Some(keys) },
             },
         );
@@ -282,8 +282,8 @@ fn values_schema(input: &GenerateInput<'_>) -> Result<FileEntry, GenerateError> 
     let mut properties = serde_json::Map::new();
     properties.insert("global".to_owned(), global_schema()?);
     let mut required = Vec::new();
-    for process in &input.lock.processes {
-        let name = subchart_name(process);
+    for application in &input.lock.applications {
+        let name = subchart_name(application);
         properties.insert(name.to_owned(), subchart.clone());
         required.push(serde_json::Value::String(name.to_owned()));
     }
@@ -814,12 +814,12 @@ fn umbrella_helpers(product: &str) -> Result<FileEntry, GenerateError> {
 
 fn subchart_templates(
     input: &GenerateInput<'_>,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
     files: &FileSet,
 ) -> Result<Vec<FileEntry>, GenerateError> {
     let product = input.lock.product.id.as_str();
-    let name = subchart_name(process);
-    let config_filename = format!("{}.yaml", process.name);
+    let name = subchart_name(application);
+    let config_filename = format!("{}.yaml", application.name);
     let config_rel = paths::rel(&["config", &config_filename])?;
     let config_raw = files
         .get(&config_rel)
@@ -828,21 +828,24 @@ fn subchart_templates(
             path: config_rel.as_str().to_owned(),
         })?;
 
-    let ports = named_ports(process);
-    let http_port = process
+    let ports = named_ports(application);
+    let http_port = application
         .service_port
         .or_else(|| ports.first().map(|p| p.port))
         .unwrap_or(80);
-    let prefix = rest_prefix(input, process)?;
+    let prefix = rest_prefix(input, application)?;
     let liveness_path = probe_path(&prefix, "/healthz");
     helm_safe("liveness probe path", &liveness_path)?;
     let readiness_path = probe_path(&prefix, "/readyz");
     helm_safe("readiness probe path", &readiness_path)?;
-    let cluster_service = process.gears.iter().any(|g| g.as_str() == CLUSTER_SERVICE);
+    let cluster_service = application
+        .gears
+        .iter()
+        .any(|g| g.as_str() == CLUSTER_SERVICE);
 
     let common = context! {
         name => name,
-        process => process.name.as_str(),
+        application => application.name.as_str(),
     };
 
     let helpers = templates::render_helm(
@@ -855,7 +858,7 @@ fn subchart_templates(
         input.templates.get("helm/deployment.yaml")?,
         context! {
             name => name,
-            process => process.name.as_str(),
+            application => application.name.as_str(),
             config_filename => config_filename.as_str(),
             http_port => http_port,
             liveness_path => liveness_path.as_str(),
@@ -988,11 +991,15 @@ fn is_env_name(name: &str) -> bool {
 /// the operator already created. Any other shape stays in config only:
 /// a vault path is not a Kubernetes object name.
 fn existing_secret(
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
     input: &GenerateInput<'_>,
 ) -> Result<Option<String>, GenerateError> {
     let Some(name) = input.lock.cluster.iter().find_map(|binding| {
-        if !binding.requesters.iter().any(|gear| process.contains(gear)) {
+        if !binding
+            .requesters
+            .iter()
+            .any(|gear| application.contains(gear))
+        {
             return None;
         }
         binding
@@ -1018,12 +1025,12 @@ fn existing_secret(
 /// A profile that builds no images leaves `image` unset. Naming the binary and
 /// the product version is the same answer `build.sh` gives there, so a chart
 /// generated for such a profile is at least self-consistent.
-fn image_values(process: &ResolvedProcess, input: &GenerateInput<'_>) -> ImageValues {
-    let (registry, repository, tag) = process.image.as_ref().map_or_else(
+fn image_values(application: &ResolvedApplication, input: &GenerateInput<'_>) -> ImageValues {
+    let (registry, repository, tag) = application.image.as_ref().map_or_else(
         || {
             (
                 None,
-                process.bin_name.clone(),
+                application.bin_name.clone(),
                 input.lock.product.version.clone(),
             )
         },
@@ -1043,10 +1050,10 @@ fn image_values(process: &ResolvedProcess, input: &GenerateInput<'_>) -> ImageVa
     }
 }
 
-fn named_ports(process: &ResolvedProcess) -> Vec<NamedPort> {
+fn named_ports(application: &ResolvedApplication) -> Vec<NamedPort> {
     let mut ports = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
-    for endpoint in &process.listens {
+    for endpoint in &application.listens {
         if let Some(port) = port_of(&endpoint.address)
             && seen.insert(port)
         {
@@ -1056,7 +1063,7 @@ fn named_ports(process: &ResolvedProcess) -> Vec<NamedPort> {
             });
         }
     }
-    if let Some(serve) = &process.serve
+    if let Some(serve) = &application.serve
         && let Some(port) = port_of(&serve.listen_addr)
         && seen.insert(port)
     {
@@ -1086,12 +1093,12 @@ fn port_name(raw: &str) -> String {
 
 fn rest_prefix(
     input: &GenerateInput<'_>,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
 ) -> Result<String, GenerateError> {
-    if !matches!(process.kind, ProcessKind::Host) {
+    if !matches!(application.kind, ApplicationKind::Host) {
         return Ok(String::new());
     }
-    let Some(id) = &process.rest_host else {
+    let Some(id) = &application.rest_host else {
         return Ok(String::new());
     };
     let Some(gear) = input.lock.gears.get(id) else {

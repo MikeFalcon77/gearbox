@@ -54,7 +54,7 @@ pub fn assemble(
         self_hosted: self_hosted(declaration),
         sources,
         gears: gears(catalogue, intent, resolution),
-        processes: resolution.partition.processes.clone(),
+        applications: resolution.partition.applications.clone(),
         bindings: resolution.bindings.clone(),
         cluster: resolution.cluster.clone(),
         cuttable_if_declared: resolution.cuts.blocked.clone(),
@@ -321,28 +321,28 @@ fn explain_gears(
 
 /// One node per process, pointing at the gear whose placement created it.
 fn explain_processes(resolution: &Resolution, graph: &mut ExplanationGraph) {
-    for process in &resolution.partition.processes {
+    for application in &resolution.partition.applications {
         let (Some(id), Some(anchor)) = (
-            node_id(NodeKind::Process, process.name.as_str()),
-            node_id(NodeKind::Gear, process.anchor.as_str()),
+            node_id(NodeKind::Application, application.name.as_str()),
+            node_id(NodeKind::Gear, application.anchor.as_str()),
         ) else {
             continue;
         };
         graph.add_node(ExplanationNode::new(
             id.clone(),
-            NodeKind::Process,
-            process.name.to_string(),
+            NodeKind::Application,
+            application.name.to_string(),
         ));
         graph.add_edge(ProvenanceEdge::new(
             id,
             anchor,
             ProvenanceKind::DerivedFrom,
             format!(
-                "process `{}` is the co-location closure of `{}`: the {} gears that \
+                "application `{}` is the co-location closure of `{}`: the {} gears that \
                  `deps` links to it, in one binary",
-                process.name,
-                process.anchor,
-                process.gears.len()
+                application.name,
+                application.anchor,
+                application.gears.len()
             ),
         ));
     }
@@ -352,9 +352,9 @@ fn explain_processes(resolution: &Resolution, graph: &mut ExplanationGraph) {
 fn explain_bindings(intent: &ProductIntent, resolution: &Resolution, graph: &mut ExplanationGraph) {
     for binding in &resolution.bindings {
         let key = binding_key(binding.consumer.as_str(), binding.contract.as_str());
-        let (Some(id), Some(consumer_process)) = (
+        let (Some(id), Some(consumer_application)) = (
             node_id(NodeKind::Binding, &key),
-            node_id(NodeKind::Process, binding.consumer_process.as_str()),
+            node_id(NodeKind::Application, binding.consumer_application.as_str()),
         ) else {
             continue;
         };
@@ -374,11 +374,11 @@ fn explain_bindings(intent: &ProductIntent, resolution: &Resolution, graph: &mut
         graph.add_node(node);
         graph.add_edge(ProvenanceEdge::new(
             id.clone(),
-            consumer_process,
+            consumer_application,
             ProvenanceKind::DerivedFrom,
             format!(
                 "the binding is {} because the consumer is in `{}` and the provider in `{}`",
-                binding.mode, binding.consumer_process, binding.provider_process
+                binding.mode, binding.consumer_application, binding.provider_application
             ),
         ));
         // The edge a reader comes here for: you asked for X and got Y.

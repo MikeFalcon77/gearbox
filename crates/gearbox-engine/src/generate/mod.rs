@@ -32,7 +32,7 @@
 //! naming the workers this could not produce, on the argument that a generator
 //! emitting four files out of six and saying nothing is indistinguishable from
 //! a finished one. That argument was right and the list is gone anyway: the
-//! dispatch on [`ProcessKind`] is exhaustive, so a kind this cannot generate is
+//! dispatch on [`ApplicationKind`] is exhaustive, so a kind this cannot generate is
 //! now a compile error at the `match` rather than a value at run time. The list
 //! should come back the moment something can genuinely be skipped, with a
 //! producer -- an always-empty field is a report nobody can ever read.
@@ -52,7 +52,7 @@ mod workspace;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use gearbox_ir::{Catalogue, Diagnostics, FileSet, ProcessKind, ResolvedProduct, SourceId};
+use gearbox_ir::{ApplicationKind, Catalogue, Diagnostics, FileSet, ResolvedProduct, SourceId};
 
 pub use apply::{ApplyOutcome, apply_generate, base_root_for, plan, summarize};
 pub use templates::TemplateSet;
@@ -79,15 +79,15 @@ pub(crate) const K8S_HOME_DIR: &str = "/var/lib/gearbox";
 /// says immediately.
 #[derive(Debug, thiserror::Error)]
 pub enum GenerateError {
-    #[error("gear `{gear}` is in process `{process}` but not in the lock's gear table")]
-    UnknownGear { process: String, gear: String },
+    #[error("gear `{gear}` is in application `{application}` but not in the lock's gear table")]
+    UnknownGear { application: String, gear: String },
 
     #[error("gear `{gear}` names source `{id}`, which the generator was not given a path for")]
     UnknownSource { gear: String, id: String },
 
     #[error(
         "gear `{gear}` links `{ident}`, whose crate root `{root}` is not a library identifier the \
-         process depends on; the generated `registered_gears.rs` would not compile"
+         application depends on; the generated `registered_gears.rs` would not compile"
     )]
     UnlinkableIdent {
         gear: String,
@@ -267,27 +267,30 @@ pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
     // Every process is a workspace member, host or worker. A generated crate
     // sitting inside the workspace root without being a member is the failure
     // Cargo reports as "believes it's in a workspace when it's not".
-    let processes: Vec<_> = input.lock.processes.iter().collect();
+    let applications: Vec<_> = input.lock.applications.iter().collect();
 
-    insert(&mut files, workspace::workspace_manifest(&processes)?)?;
+    insert(&mut files, workspace::workspace_manifest(&applications)?)?;
     insert(&mut files, workspace::toolchain()?)?;
     insert(&mut files, workspace::lock_file(input.lock)?)?;
     if let Some(cargo_config) = workspace::cargo_config(input)? {
         insert(&mut files, cargo_config)?;
     }
 
-    for process in processes {
-        insert(&mut files, manifest::process_manifest(input, process)?)?;
+    for application in applications {
+        insert(
+            &mut files,
+            manifest::application_manifest(input, application)?,
+        )?;
         // The entry point is the only file that differs between the two kinds.
         // Everything else -- the manifest, the link file, the configuration --
         // is a function of the process, not of how it is started.
-        let entry = match process.kind {
-            ProcessKind::Host => rust::host_main(input, process)?,
-            ProcessKind::Worker => rust::worker_main(input, process)?,
+        let entry = match application.kind {
+            ApplicationKind::Host => rust::host_main(input, application)?,
+            ApplicationKind::Worker => rust::worker_main(input, application)?,
         };
         insert(&mut files, entry)?;
-        insert(&mut files, rust::registered_gears(input, process)?)?;
-        insert(&mut files, config::app_config(input, process)?)?;
+        insert(&mut files, rust::registered_gears(input, application)?)?;
+        insert(&mut files, config::app_config(input, application)?)?;
     }
 
     for entry in docker::files(input)? {

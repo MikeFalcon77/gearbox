@@ -33,9 +33,9 @@ import { GraphDefs } from "./graph-defs";
 import { ClusterView } from "./views/cluster-view";
 import { ContractsView } from "./views/contracts-view";
 import { DepsView } from "./views/deps-view";
-import { ProcessesView } from "./views/processes-view";
+import { ApplicationsView } from "./views/applications-view";
 
-export type GraphView = "deps" | "contracts" | "processes" | "cluster";
+export type GraphView = "deps" | "contracts" | "applications" | "cluster";
 
 interface ViewSpec {
   readonly id: GraphView;
@@ -47,7 +47,7 @@ interface ViewSpec {
 const VIEWS: readonly ViewSpec[] = [
   { id: "deps", label: "co-location", needsProduct: false },
   { id: "contracts", label: "contracts", needsProduct: true },
-  { id: "processes", label: "processes", needsProduct: true },
+  { id: "applications", label: "applications", needsProduct: true },
   { id: "cluster", label: "cluster", needsProduct: true },
 ];
 
@@ -152,8 +152,8 @@ export class GraphWidget extends ReactWidget {
             profile={profile}
           />
         );
-      case "processes":
-        return <ProcessesView processes={resolved.processes ?? []} profile={profile} />;
+      case "applications":
+        return <ApplicationsView applications={resolved.applications ?? []} profile={profile} />;
       case "cluster":
         return (
           <ClusterView

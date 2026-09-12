@@ -19,8 +19,8 @@ fn gid(s: &str) -> GearId {
     GearId::new(s).unwrap()
 }
 
-fn pid(s: &str) -> ProcessId {
-    ProcessId::new(s).unwrap()
+fn pid(s: &str) -> ApplicationId {
+    ApplicationId::new(s).unwrap()
 }
 
 fn sid(s: &str) -> SourceId {
@@ -115,10 +115,10 @@ fn gears() -> BTreeMap<GearId, ResolvedGear> {
     ])
 }
 
-fn gateway_process() -> ResolvedProcess {
-    ResolvedProcess {
+fn gateway_process() -> ResolvedApplication {
+    ResolvedApplication {
         name: pid("gateway"),
-        kind: ProcessKind::Host,
+        kind: ApplicationKind::Host,
         anchor: gid("api-gateway"),
         gears: vec![
             gid("types-registry"),
@@ -158,10 +158,10 @@ fn gateway_process() -> ResolvedProcess {
     }
 }
 
-fn payments_audit_process() -> ResolvedProcess {
-    ResolvedProcess {
+fn payments_audit_process() -> ResolvedApplication {
+    ResolvedApplication {
         name: pid("payments-audit"),
-        kind: ProcessKind::Worker,
+        kind: ApplicationKind::Worker,
         anchor: gid("payments-audit"),
         gears: vec![gid("cluster"), gid("payments-audit")],
         replicas: 1,
@@ -184,10 +184,10 @@ fn payments_audit_process() -> ResolvedProcess {
 fn binding() -> ResolvedBinding {
     ResolvedBinding {
         consumer: gid("payments-audit"),
-        consumer_process: pid("payments-audit"),
+        consumer_application: pid("payments-audit"),
         contract: payment_api_v1(),
         provider: gid("api-contracts"),
-        provider_process: pid("gateway"),
+        provider_application: pid("gateway"),
         mode: ResolvedBindingMode::Remote,
         transport: Transport::Rest,
         mechanism: BindingMechanism::ConsumesDirectory,
@@ -333,7 +333,7 @@ pub fn fixture() -> ResolvedProduct {
             },
         )]),
         gears: gears(),
-        processes: vec![gateway_process(), payments_audit_process()],
+        applications: vec![gateway_process(), payments_audit_process()],
         bindings: vec![binding()],
         cluster: cluster_bindings(),
         cuttable_if_declared: cuttable_candidates(),
@@ -398,10 +398,10 @@ fn fisher_yates<T>(items: &mut [T], rng: &mut SplitMix64) {
 )]
 pub fn shuffle_orderings(product: &mut ResolvedProduct, seed: u64) {
     let mut rng = SplitMix64(seed);
-    fisher_yates(&mut product.processes, &mut rng);
-    for process in &mut product.processes {
-        fisher_yates(&mut process.listens, &mut rng);
-        fisher_yates(&mut process.spawns, &mut rng);
+    fisher_yates(&mut product.applications, &mut rng);
+    for application in &mut product.applications {
+        fisher_yates(&mut application.listens, &mut rng);
+        fisher_yates(&mut application.spawns, &mut rng);
     }
     fisher_yates(&mut product.bindings, &mut rng);
     fisher_yates(&mut product.cluster, &mut rng);

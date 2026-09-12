@@ -88,7 +88,7 @@ pub struct ProductDecl {
     pub gears: Vec<crate::records::UseGearRecord>,
     pub bindings: Vec<crate::records::BindRecord>,
     pub cluster_profiles: Vec<crate::records::ClusterProfileRecord>,
-    pub processes: Vec<crate::records::ProcessRecord>,
+    pub applications: Vec<crate::records::ApplicationRecord>,
     pub preferences: Vec<crate::records::PreferenceRecord>,
 }
 

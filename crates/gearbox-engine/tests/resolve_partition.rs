@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use gearbox_engine::resolve::resolve;
 use gearbox_engine::{SourceRoot, load_catalogue};
 use gearbox_ir::{
-    Catalogue, DiagnosticCode, GearId, ProcessKind, ProductIntent, ProfileId, SourceId,
+    ApplicationKind, Catalogue, DiagnosticCode, GearId, ProductIntent, ProfileId, SourceId,
 };
 
 fn gears_rust() -> Option<PathBuf> {
@@ -78,13 +78,13 @@ fn the_embedded_profile_holds_the_whole_product() {
     require!(cat, prod);
     let r = resolve(&cat, &prod, &pid("dev"));
 
-    assert_eq!(r.partition.processes.len(), 1);
-    let process = &r.partition.processes[0];
-    let placed: BTreeSet<&GearId> = process.gears.iter().collect();
+    assert_eq!(r.partition.applications.len(), 1);
+    let application = &r.partition.applications[0];
+    let placed: BTreeSet<&GearId> = application.gears.iter().collect();
     let expected: BTreeSet<&GearId> = r.closure.members.keys().collect();
     assert_eq!(placed, expected, "every gear in the product must be in it");
-    assert_eq!(process.kind, ProcessKind::Host);
-    assert_eq!(process.rest_host.as_ref(), Some(&gid("api-gateway")));
+    assert_eq!(application.kind, ApplicationKind::Host);
+    assert_eq!(application.rest_host.as_ref(), Some(&gid("api-gateway")));
 }
 
 #[test]
@@ -109,17 +109,17 @@ fn gears_come_after_everything_they_depend_on() {
     require!(cat, prod);
     for profile in ["dev", "local", "prod"] {
         let r = resolve(&cat, &prod, &pid(profile));
-        for process in &r.partition.processes {
-            for (index, gear) in process.gears.iter().enumerate() {
+        for application in &r.partition.applications {
+            for (index, gear) in application.gears.iter().enumerate() {
                 let Some(descriptor) = cat.gears.get(gear) else {
                     continue;
                 };
                 for dep in &descriptor.colocated_deps {
-                    if let Some(at) = process.gears.iter().position(|g| g == dep) {
+                    if let Some(at) = application.gears.iter().position(|g| g == dep) {
                         assert!(
                             at < index,
                             "{profile}/{}: {gear} at {index} precedes its dependency {dep} at {at}",
-                            process.name
+                            application.name
                         );
                     }
                 }
@@ -136,19 +136,19 @@ fn the_severable_edge_actually_moves_a_gear_out() {
     require!(cat, prod);
 
     let dev = resolve(&cat, &prod, &pid("dev"));
-    assert_eq!(dev.partition.processes.len(), 1);
+    assert_eq!(dev.partition.applications.len(), 1);
 
     let local = resolve(&cat, &prod, &pid("local"));
     let names: Vec<String> = local
         .partition
-        .processes
+        .applications
         .iter()
         .map(|p| p.name.to_string())
         .collect();
     assert_eq!(names, vec!["gateway", "api-contracts"]);
 
-    let worker = &local.partition.processes[1];
-    assert_eq!(worker.kind, ProcessKind::Worker);
+    let worker = &local.partition.applications[1];
+    assert_eq!(worker.kind, ApplicationKind::Worker);
     assert_eq!(worker.gears, vec![gid("api-contracts")]);
 }
 
@@ -159,7 +159,7 @@ fn the_host_process_takes_its_name_from_the_profile() {
     // other gear ends up orphaned.
     require!(cat, prod);
     let r = resolve(&cat, &prod, &pid("local"));
-    let host = r.partition.processes.first().expect("a host");
+    let host = r.partition.applications.first().expect("a host");
     assert_eq!(host.name.to_string(), "gateway");
     assert_eq!(host.anchor, gid("api-gateway"), "anchored on the REST host");
     assert_eq!(host.bin_name, "gbx-gateway");
@@ -171,13 +171,13 @@ fn a_pinned_process_keeps_its_name_and_replicas() {
     let r = resolve(&cat, &prod, &pid("prod"));
     let audit = r
         .partition
-        .processes
+        .applications
         .iter()
         .find(|p| p.name.as_str() == "audit")
-        .expect("the pinned process");
+        .expect("the pinned application");
     assert_eq!(audit.anchor, gid("api-contracts-consumer"));
     assert_eq!(audit.replicas, 2);
-    assert_eq!(audit.kind, ProcessKind::Worker);
+    assert_eq!(audit.kind, ApplicationKind::Worker);
 }
 
 #[test]
@@ -189,7 +189,7 @@ fn a_pin_only_applies_to_the_profiles_it_names() {
     assert!(
         !local
             .partition
-            .processes
+            .applications
             .iter()
             .any(|p| p.name.as_str() == "audit"),
         "the pin is scoped to prod"
@@ -205,26 +205,28 @@ fn processes_overlap_and_that_is_correct() {
     let intent = support::self_hosted_intent(&["host", "provider"]);
     let r = resolve(&cat, &intent, &pid("local"));
 
-    assert_eq!(r.partition.processes.len(), 2, "{:#?}", r.partition);
+    assert_eq!(r.partition.applications.len(), 2, "{:#?}", r.partition);
     let holding: Vec<String> = r
         .partition
-        .processes
+        .applications
         .iter()
         .filter(|p| p.contains(&gid("shared")))
         .map(|p| p.name.to_string())
         .collect();
     assert_eq!(holding.len(), 2, "`shared` belongs to both: {holding:?}");
     assert!(
-        !r.partition.share_a_process(&gid("host"), &gid("provider")),
+        !r.partition
+            .share_an_application(&gid("host"), &gid("provider")),
         "the severable edge did separate them"
     );
     assert!(
-        r.partition.share_a_process(&gid("host"), &gid("shared")),
+        r.partition
+            .share_an_application(&gid("host"), &gid("shared")),
         "and `shared` stayed with the host as well"
     );
     assert!(
-        r.partition.sole_process(&gid("shared")).is_none(),
-        "asking which single process holds an overlapping gear has no answer"
+        r.partition.sole_application(&gid("shared")).is_none(),
+        "asking which single application holds an overlapping gear has no answer"
     );
 }
 
@@ -243,7 +245,7 @@ fn an_embedded_profile_says_what_it_is_declining_to_do() {
     assert!(note.message.contains("severable edge"), "{}", note.message);
     assert!(
         !note.severity.is_error(),
-        "a single-process product is still buildable"
+        "a single-application product is still buildable"
     );
 }
 
@@ -260,7 +262,7 @@ fn an_unknown_profile_is_refused_rather_than_defaulted() {
         "{:#?}",
         r.diagnostics
     );
-    assert!(r.partition.processes.is_empty());
+    assert!(r.partition.applications.is_empty());
 }
 
 #[test]
@@ -269,7 +271,10 @@ fn the_partition_is_stable_across_runs() {
     for profile in ["dev", "local", "prod"] {
         let a = resolve(&cat, &prod, &pid(profile));
         let b = resolve(&cat, &prod, &pid(profile));
-        assert_eq!(a.partition.processes, b.partition.processes, "{profile}");
+        assert_eq!(
+            a.partition.applications, b.partition.applications,
+            "{profile}"
+        );
     }
 }
 
@@ -281,11 +286,11 @@ fn kubernetes_fills_the_chart_fields_and_binds_every_interface() {
     // not in a template.
     require!(cat, prod);
     let local = resolve(&cat, &prod, &pid("local"));
-    for process in &local.partition.processes {
-        assert!(process.image.is_none(), "{process:?}");
-        assert!(process.subchart.is_none(), "{process:?}");
-        assert!(process.service_port.is_none(), "{process:?}");
-        for endpoint in &process.listens {
+    for application in &local.partition.applications {
+        assert!(application.image.is_none(), "{application:?}");
+        assert!(application.subchart.is_none(), "{application:?}");
+        assert!(application.service_port.is_none(), "{application:?}");
+        for endpoint in &application.listens {
             assert!(
                 endpoint.address.starts_with("127.0.0.1:"),
                 "{}",
@@ -297,7 +302,7 @@ fn kubernetes_fills_the_chart_fields_and_binds_every_interface() {
     let prod_ = resolve(&cat, &prod, &pid("prod"));
     let gateway = prod_
         .partition
-        .processes
+        .applications
         .iter()
         .find(|p| p.anchor.as_str() == "api-gateway")
         .expect("the host");
@@ -336,7 +341,7 @@ fn kubernetes_fills_the_chart_fields_and_binds_every_interface() {
 
     let worker = prod_
         .partition
-        .processes
+        .applications
         .iter()
         .find(|p| p.is_worker() && p.anchor.as_str() == "api-contracts")
         .expect("the contracts worker");

@@ -1726,11 +1726,24 @@ fn compare_to_disk(path: &Path, resolved: &ResolvedProduct) -> Option<LockOnDisk
                 unreadable: None,
             })
         }
+        // **A lock that will not parse is not necessarily a lock somebody
+        // edited**, and the widget's wording used to assume it was. A rename in
+        // the lock's own shape -- `[[processes]]` became `[[applications]]` --
+        // makes every previously written lock fail on a missing field, and the
+        // operator who ran `gearbox generate` last month is then told their file
+        // does not verify. That reads as an accusation and is a wrong one.
+        //
+        // `LOCK_SCHEMA_VERSION` cannot carry this: it is checked before the
+        // parse and a rename that leaves the version alone sails past it. So the
+        // sentence carries the alternative instead, and names the way out.
         Err(e) => Some(LockOnDisk {
             canonical,
             lock_hash: String::new(),
             changes: Vec::new(),
-            unreadable: Some(e.to_string()),
+            unreadable: Some(format!(
+                "{e}. A lock written by an older build can fail this way when the \
+                 lock's shape has changed since; `gearbox generate` rewrites it."
+            )),
         }),
     }
 }

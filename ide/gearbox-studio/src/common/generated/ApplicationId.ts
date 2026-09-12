@@ -5,4 +5,4 @@
  *
  * Derived from the anchor gear's id, suffixed `-2`, `-3`, ... on collision.
  */
-export type ProcessId = string;
+export type ApplicationId = string;

@@ -237,8 +237,9 @@ product(
 
 #[test]
 fn scoping_to_an_undeclared_profile_is_reported() {
-    let src =
-        product(r#"processes = [process("p", anchor = "api-gateway", profiles = ["staging"])],"#);
+    let src = product(
+        r#"applications = [application("p", anchor = "api-gateway", profiles = ["staging"])],"#,
+    );
     let (_, _, messages) = eval(&src);
     assert!(
         messages.contains("staging") && messages.contains("not declared"),
@@ -463,7 +464,7 @@ fn an_unknown_argument_is_refused_not_ignored() {
 #[test]
 fn preferences_deduplicate() {
     let src = product(
-        r#"preferences = [prefer.fewer_processes(), prefer.fewer_processes(),
+        r#"preferences = [prefer.fewer_applications(), prefer.fewer_applications(),
                           prefer.isolate(gear = "api-gateway")],"#,
     );
     let (intent, codes, messages) = eval(&src);
@@ -472,8 +473,9 @@ fn preferences_deduplicate() {
 }
 
 #[test]
-fn a_process_with_zero_replicas_is_refused() {
-    let src = product(r#"processes = [process("p", anchor = "api-gateway", replicas = 0)],"#);
+fn an_application_with_zero_replicas_is_refused() {
+    let src =
+        product(r#"applications = [application("p", anchor = "api-gateway", replicas = 0)],"#);
     let (_, _, messages) = eval(&src);
     assert!(messages.contains("does not run"), "{messages}");
 }

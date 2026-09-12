@@ -109,7 +109,7 @@ export function ContractsView({
         {severed === 0 ? (
           <>
             Nothing is severed here: every edge is a function call inside one binary.
-            A profile that splits processes is where the dashed edges appear.
+            A profile that splits applications is where the dashed edges appear.
           </>
         ) : (
           <>

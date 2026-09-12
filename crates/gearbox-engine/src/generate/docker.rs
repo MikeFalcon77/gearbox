@@ -20,7 +20,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use gearbox_ir::{FileEntry, FileKind, Ownership, ResolvedProcess};
+use gearbox_ir::{FileEntry, FileKind, Ownership, ResolvedApplication};
 use minijinja::context;
 
 use super::paths::{self, relative, to_slash};
@@ -45,8 +45,8 @@ pub fn files(input: &GenerateInput<'_>) -> Result<Vec<FileEntry>, GenerateError>
     let out_rel = rel_from(&context, input.out_root)?;
 
     let mut files = Vec::new();
-    for process in &input.lock.processes {
-        files.push(dockerfile(input, process, &out_rel)?);
+    for application in &input.lock.applications {
+        files.push(dockerfile(input, application, &out_rel)?);
     }
     files.push(dockerignore(input, &context)?);
     files.push(build_script(input, &context)?);
@@ -55,7 +55,7 @@ pub fn files(input: &GenerateInput<'_>) -> Result<Vec<FileEntry>, GenerateError>
 
 fn dockerfile(
     input: &GenerateInput<'_>,
-    process: &ResolvedProcess,
+    application: &ResolvedApplication,
     out_rel: &str,
 ) -> Result<FileEntry, GenerateError> {
     let body = templates::render(
@@ -64,17 +64,17 @@ fn dockerfile(
         context! {
             header => header("#").trim_end(),
             rust_channel => workspace::rust_channel(),
-            crate_name => process.crate_name.as_str(),
-            bin_name => process.bin_name.as_str(),
-            process => process.name.as_str(),
+            crate_name => application.crate_name.as_str(),
+            bin_name => application.bin_name.as_str(),
+            application => application.name.as_str(),
             out_rel => out_rel,
             uid => NONROOT_UID,
-            ports => expose_ports(process),
+            ports => expose_ports(application),
         },
     )?;
 
     Ok(FileEntry::text(
-        paths::rel(&["docker", process.name.as_str(), "Dockerfile"])?,
+        paths::rel(&["docker", application.name.as_str(), "Dockerfile"])?,
         body,
         FileKind::Dockerfile,
         Ownership::Generated,
@@ -130,8 +130,8 @@ fn build_script(input: &GenerateInput<'_>, context: &Path) -> Result<FileEntry, 
          # cannot live there -- generate() may not write outside out_root --\n\
          # so BuildKit's --ignorefile points at the generated copy.\n\
          #\n\
-         # Usage: ./build.sh [process ...]\n\
-         #   with no arguments, every process is built.\n",
+         # Usage: ./build.sh [application ...]\n\
+         #   with no arguments, every application is built.\n",
     );
     body.push_str("set -eu\n");
     body.push_str("SCRIPT_DIR=$(CDPATH= cd -- \"$(dirname \"$0\")\" && pwd)\n");
@@ -150,10 +150,10 @@ fn build_script(input: &GenerateInput<'_>, context: &Path) -> Result<FileEntry, 
     body.push_str("}\n\n");
 
     body.push_str("if [ \"$#\" -eq 0 ]; then\n");
-    for process in &input.lock.processes {
-        let image = image_reference(process, input);
+    for application in &input.lock.applications {
+        let image = image_reference(application, input);
         body.push_str("  build_one ");
-        body.push_str(process.name.as_str());
+        body.push_str(application.name.as_str());
         body.push(' ');
         body.push_str(&sh_single(&image));
         body.push('\n');
@@ -162,17 +162,17 @@ fn build_script(input: &GenerateInput<'_>, context: &Path) -> Result<FileEntry, 
     body.push_str("fi\n\n");
     body.push_str("for name in \"$@\"; do\n");
     body.push_str("  case \"$name\" in\n");
-    for process in &input.lock.processes {
-        let image = image_reference(process, input);
+    for application in &input.lock.applications {
+        let image = image_reference(application, input);
         body.push_str("    ");
-        body.push_str(process.name.as_str());
+        body.push_str(application.name.as_str());
         body.push_str(") build_one ");
-        body.push_str(process.name.as_str());
+        body.push_str(application.name.as_str());
         body.push(' ');
         body.push_str(&sh_single(&image));
         body.push_str(" ;;\n");
     }
-    body.push_str("    *) echo \"unknown process: $name\" >&2; exit 1 ;;\n");
+    body.push_str("    *) echo \"unknown application: $name\" >&2; exit 1 ;;\n");
     body.push_str("  esac\n");
     body.push_str("done\n");
 
@@ -194,9 +194,9 @@ fn build_script(input: &GenerateInput<'_>, context: &Path) -> Result<FileEntry, 
 /// A profile that builds no images leaves `image` unset; falling back to
 /// `{bin_name}:{version}` keeps `build.sh` usable there rather than emitting a
 /// script with a hole in it.
-fn image_reference(process: &ResolvedProcess, input: &GenerateInput<'_>) -> String {
-    process.image.as_ref().map_or_else(
-        || format!("{}:{}", process.bin_name, input.lock.product.version),
+fn image_reference(application: &ResolvedApplication, input: &GenerateInput<'_>) -> String {
+    application.image.as_ref().map_or_else(
+        || format!("{}:{}", application.bin_name, input.lock.product.version),
         gearbox_ir::ImageRef::reference,
     )
 }
@@ -221,14 +221,14 @@ fn rel_from(from: &Path, target: &Path) -> Result<String, GenerateError> {
     }
 }
 
-fn expose_ports(process: &ResolvedProcess) -> Vec<u16> {
+fn expose_ports(application: &ResolvedApplication) -> Vec<u16> {
     let mut ports = BTreeSet::new();
-    for endpoint in &process.listens {
+    for endpoint in &application.listens {
         if let Some(port) = port_of(&endpoint.address) {
             ports.insert(port);
         }
     }
-    if let Some(serve) = &process.serve
+    if let Some(serve) = &application.serve
         && let Some(port) = port_of(&serve.listen_addr)
     {
         ports.insert(port);

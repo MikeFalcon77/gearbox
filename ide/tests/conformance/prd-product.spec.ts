@@ -51,7 +51,7 @@ async function snapshot(page: import("@playwright/test").Page) {
     // Scoped to the Product panel. These selectors used to run over the whole
     // document, which held only as long as no other widget rendered a
     // resolution -- and the graph panel now renders three of them. An unscoped
-    // `[data-process]` is how a test starts passing for the wrong reason.
+    // `[data-application]` is how a test starts passing for the wrong reason.
     const root = document.querySelector(".gearbox-product") ?? document;
     const attrs = (selector: string, attribute: string) =>
       Array.from(root.querySelectorAll(selector)).map(
@@ -60,10 +60,10 @@ async function snapshot(page: import("@playwright/test").Page) {
     return {
       profile: root.querySelector("[data-resolved-profile]")?.getAttribute("data-resolved-profile") ?? "",
       lock: root.querySelector("[data-lock-hash]")?.getAttribute("data-lock-hash") ?? "",
-      processes: attrs("[data-process]", "data-process"),
-      processGears: Array.from(root.querySelectorAll(".gbx-process")).map((row) => ({
-        name: row.getAttribute("data-process") ?? "",
-        gears: (row.querySelector(".gbx-process-gears")?.textContent ?? "")
+      processes: attrs("[data-application]", "data-application"),
+      processGears: Array.from(root.querySelectorAll(".gbx-application")).map((row) => ({
+        name: row.getAttribute("data-application") ?? "",
+        gears: (row.querySelector(".gbx-application-gears")?.textContent ?? "")
           .split(",")
           .map((g) => g.trim())
           .filter((g) => g.length > 0),
