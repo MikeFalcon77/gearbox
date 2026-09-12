@@ -49,7 +49,7 @@ Not refused, but outside the grammar above: arithmetic (`"a" + "b"`, `8000 + 80`
 
 **Identifiers** (language names: `use_gear`, `crate_name`): ASCII, no leading digit.
 
-**Kebab-case ids** (string values: gear, source, profile, process): lowercase letters, digits, single interior hyphens; start with a letter; no trailing hyphen; no `_`; no `--`. Example: `api-gateway`, `gears-rust`.
+**Kebab-case ids** (string values: gear, source, profile, application): lowercase letters, digits, single interior hyphens; start with a letter; no trailing hyphen; no `_`; no `--`. Example: `api-gateway`, `gears-rust`.
 
 **Strings.** `"..."` or `'...'`. Triple quotes `"""..."""` / `'''...'''` for multi-line. Prefix `r` for raw (backslashes are not escapes). Escapes in non-raw strings: `\\ \` \' \a \b \f \n \r \t \v`, octal, `\xHH`, `\uHHHH`, `\UHHHHHHHH`. No f-strings. `${NAME}` inside a string is not interpolation — GDL copies it through as text. What reads it later is a contract, not a coincidence: a config field Rust declares secret may carry nothing else (**GBX0116**).
 
@@ -79,7 +79,7 @@ Namespaces of functions, one per file kind — `cluster.*` in `gear.gdl`, `prefe
 
 ```
 cluster.cache(...) | cluster.leader_election(...) | cluster.lock(...)
-prefer.existing_infrastructure() | prefer.fewer_processes() | prefer.isolate(...)
+prefer.existing_infrastructure() | prefer.fewer_applications() | prefer.isolate(...)
 ```
 
 `cluster_cap.prefix_watch` applies only to `cluster.cache`; a lock and an election take `linearizable` and nothing else. Asking for it on either is an error.
@@ -231,9 +231,9 @@ These fields are accepted only to be refused by name (**GBX0210**). They live in
 
 ## `product.gdl`
 
-Every deployment profile is data. Resolve chooses one with `--profile`. Scope a `bind` / `cluster_profile` / `process` / `plugin` with `profiles = ["dev", "prod"]`. Empty `profiles` means all declared profiles. Two declarations that cover the same subject in the same profile are **GBX0110**. A `profiles` entry naming an id the file does not declare is **GBX0102**; **GBX0111** is the other direction — `--profile` asking for a profile this product has none of.
+Every deployment profile is data. Resolve chooses one with `--profile`. Scope a `bind` / `cluster_profile` / `application` / `plugin` with `profiles = ["dev", "prod"]`. Empty `profiles` means all declared profiles. Two declarations that cover the same subject in the same profile are **GBX0110**. A `profiles` entry naming an id the file does not declare is **GBX0102**; **GBX0111** is the other direction — `--profile` asking for a profile this product has none of.
 
-Positional constructors: `path`, `registry`, `plugin`, `use_gear`, `process`, `provider`. Everything else is keyword-only.
+Positional constructors: `path`, `registry`, `plugin`, `use_gear`, `application`, `provider`. Everything else is keyword-only.
 
 ### Sources
 
@@ -256,7 +256,7 @@ self_hosted(id, host, worker_discovery, target_dir?, cargo_profile?)
 kubernetes(id, discovery, namespace?, image_registry?)
 ```
 
-`id` is kebab-case. Duplicate ids are **GBX0110**. `worker_discovery` / `discovery` is `"static"` or `"directory"`, and nothing else. `host` is a process name, kebab-case. `cargo_profile` is a single path segment — `dev`, `release`, or a custom Cargo profile; `dev` writes under `target/debug`.
+`id` is kebab-case. Duplicate ids are **GBX0110**. `worker_discovery` / `discovery` is `"static"` or `"directory"`, and nothing else. `host` is an application name, kebab-case. `cargo_profile` is a single path segment — `dev`, `release`, or a custom Cargo profile; `dev` writes under `target/debug`.
 
 ### Gears
 
@@ -289,13 +289,13 @@ cluster_profile(name, cache, leader_election?, lock?, profiles = [])
 ### Topology and preferences
 
 ```
-process("name", anchor, replicas = 1, profiles = [])
+application("name", anchor, replicas = 1, profiles = [])
 prefer.existing_infrastructure()
-prefer.fewer_processes()
+prefer.fewer_applications()
 prefer.isolate(gear)
 ```
 
-Only the process name is positional: `process("audit", anchor = "api-contracts-consumer")`. `anchor` is a kebab gear id. `replicas` must be ≥ 1.
+Only the application name is positional: `application("audit", anchor = "api-contracts-consumer")`. `anchor` is a kebab gear id. `replicas` must be ≥ 1.
 
 ### `product(...)`
 
@@ -310,7 +310,7 @@ product(
   templates?,                       # path("...") only; git/registry refused
   bindings = [],
   cluster_profiles = [],
-  processes = [],
+  applications = [],
   preferences = [],
 )
 ```
@@ -471,9 +471,9 @@ product(
             cache = provider("postgres", connection_string = "postgres://…", schema = "cluster"),
         ),
     ],
-    processes = [process("audit", anchor = "api-contracts-consumer", replicas = 2,
+    applications = [application("audit", anchor = "api-contracts-consumer", replicas = 2,
                          profiles = ["prod"])],
-    preferences = [prefer.existing_infrastructure(), prefer.fewer_processes()],
+    preferences = [prefer.existing_infrastructure(), prefer.fewer_applications()],
 )
 ```
 

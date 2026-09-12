@@ -181,11 +181,11 @@ test.describe("session trust [ADR-0011 amendment 2026-09-02]", () => {
     expect(menus.map((m) => m.trim())).not.toContain("Product");
   });
 
-  test("Inspector opens when a process is selected [ADR-0011 §Amendment: Inspector from selection]", async ({
+  test("Inspector opens when an application is selected [ADR-0011 §Amendment: Inspector from selection]", async ({
     studio,
   }) => {
     await openProduct(studio.page, "prod");
-    // Processes live on the Topology stage -- the panel is
+    // Applications live on the Topology stage -- the panel is
     // `Overview · Gears · Topology · Validation` since 2026-09-07 -- and a
     // selection made there is the one this claim is about.
     await productSection(studio.page, "topology");

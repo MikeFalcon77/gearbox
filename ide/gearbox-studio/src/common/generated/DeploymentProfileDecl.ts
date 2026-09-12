@@ -16,7 +16,7 @@ export type DeploymentProfileDecl = { "profile": "embedded", id: ProfileId,
  */
 declared_at?: Location | null, } | { "profile": "self_hosted", id: ProfileId, 
 /**
- * Which process is the host.
+ * Which application is the host.
  */
 host: ApplicationId, discovery: Discovery, 
 /**

@@ -33,7 +33,7 @@ pub struct Partition {
 }
 
 impl Partition {
-    /// Which process a gear runs in, when exactly one contains it.
+    /// Which application a gear runs in, when exactly one contains it.
     ///
     /// `None` when a gear is in several, which is the overlap case and must be
     /// answered by asking about a specific pair rather than about a gear.

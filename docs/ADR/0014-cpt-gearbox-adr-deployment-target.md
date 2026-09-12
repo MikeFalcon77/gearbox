@@ -48,6 +48,10 @@ refers back to it by id. Four sites, each carrying
 | `cluster_profile(...)` | `intent.rs:460-462` | `product.rs:404` |
 | `process(...)` | `intent.rs:491-492` | `product.rs:420` |
 
+> **Renamed since.** ADR-0016 renamed this construct to `application(...)`,
+> and `ProcessPin` to `ApplicationPin`. The names above are what they were
+> when this decision was taken; the argument is unaffected.
+
 One predicate serves all of them — `ProductIntent::applies`,
 `intent.rs:574-581`: *"An empty scope means every profile. **This one predicate
 is what replaces conditionals in the description language.**"*

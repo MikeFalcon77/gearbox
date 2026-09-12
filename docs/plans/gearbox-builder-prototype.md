@@ -23,7 +23,7 @@ not anticipate: a fact that exists but not yet.
 
 The prototype proves the vision's central promise end to end: **one gear source, three deployment
 topologies, zero changes to business code** — and it produces the artefacts that make "gear = pod"
-possible at all (generated process crates), which is the real blocker today, not runtime support.
+possible at all (generated application crates), which is the real blocker today, not runtime support.
 
 Repo state: `gearbox-builder` is `cargo new` plus the vision doc. `gears-rust` and `cargo-gears`
 exist locally and were surveyed; `cargo-gears/design/ideas/gears-product-configurator-OLD.md` is
@@ -32,7 +32,7 @@ the repo-grounded predecessor and its conclusions are folded in below.
 ### Decisions taken with the user
 - **RPC:** JSON-RPC 2.0 over stdio with LSP `Content-Length` framing → `vscode-jsonrpc` works with
   zero adapter code in Theia, no ports/CORS/auth, and the same server backs the `.gdl` language client.
-- **Scope:** full pipeline — resolve → lock → process crates that `cargo build` → Dockerfile → Helm
+- **Scope:** full pipeline — resolve → lock → application crates that `cargo build` → Dockerfile → Helm
   umbrella + `values.schema.json`.
 - **Slice:** real gears from `gears-rust` + one new custom gear (vision §81's canonical acceptance test).
 - **Theia:** a runnable Gearbox Studio in this repo — extension + `browser-app` + `electron-app`.
@@ -63,7 +63,7 @@ Verified against `gears-rust` (all claims spot-checked in source):
 | The gear attribute's location is not uniform: 34 of 44 at `src/gear.rs`, 8 at `src/module.rs`, 2 nested; and `gears/mini-chat/mini-chat` declares **three** gears in one crate | `grep -rln '#\[toolkit::gear('` over `gears/` + `examples/` | projection needs a locator: scan `src/` by default, optional `cargo(attr = …)` to narrow, exactly-one-match required (`cpt-gearbox-fr-attribute-location`) |
 | `capabilities` is a **closed set of 7**: `db, rest, rest_host, stateful, system, grpc_hub, grpc` | same, `Capability` enum | GDL exposes exactly these, nothing more |
 | **`deps` means link-time co-location** — the macro emits `pub use ::crate as _gear_dep_x` to keep `inventory::submit!` alive | same | must be named so it can't be confused with contract consumption |
-| **Missing deps are a hard error**, so co-location is a *downward closure, not a partition* — `types-registry` is linked into every process whose closure names it, and two anchors sharing a dep do **not** merge | `RegistryError::MissingDeps`, `libs/toolkit/src/registry.rs:589` | processes **overlap**; the resolver must model that, and `deps` edges are **never cuttable** |
+| **Missing deps are a hard error**, so co-location is a *downward closure, not a partition* — `types-registry` is linked into every application whose closure names it, and two anchors sharing a dep do **not** merge | `RegistryError::MissingDeps`, `libs/toolkit/src/registry.rs:589` | processes **overlap**; the resolver must model that, and `deps` edges are **never cuttable** |
 | Contract kind is the **trait-name suffix**: `…Api` / `…Embedded` / `…Backend` / `…Extension`; only `Api`\|`Backend` are remote-capable | `libs/toolkit-contract/src/descriptor.rs` | placement constraint is derivable statically |
 | Contract version is real: `#[toolkit::contract(gear, version)]`, trailing major on the name must agree, parallel majors coexist | `toolkit-contract-macros/src/parse.rs:80-97` | version-mismatch check works without cargo metadata |
 | **`#[toolkit::consumes]` emits a REST resolving client only** — `{Contract}RestResolvingClient` is hardcoded, no gRPC branch | `consumes.rs:166` | `transport = grpc` on a cut edge is **unsupported** |
@@ -183,7 +183,7 @@ re-parses shared crates cannot be cheap however it is scheduled. Before the cach
 
 Functions: `gear`, `product`, `cargo`, `provide`, `consume`, `rest`, `grpc`, `lifecycle`,
 `endpoint`, `provider`, `cluster_profile`, `use_gear`, `source`/`path`/`git`/`registry`,
-`embedded`/`self_hosted`/`kubernetes`, `bind`, `process`, `fail`.
+`embedded`/`self_hosted`/`kubernetes`, `bind`, `application`, `fail`.
 
 Frozen namespaces (a typo is an `AttributeError` at eval time, not a silently-null string):
 - `cap.{db,rest,rest_host,stateful,system,grpc_hub,grpc}` — the closed 7
@@ -192,7 +192,7 @@ Frozen namespaces (a typo is an `AttributeError` at eval time, not a silently-nu
 - `cluster.{cache,leader_election,lock}` — the only three primitives that exist
 - `cluster_cap.{linearizable,prefix_watch}`
 - `binding_mode.{auto,local,remote}`
-- `prefer.{existing_infrastructure,fewer_processes,isolate}`
+- `prefer.{existing_infrastructure,fewer_applications,isolate}`
 
 `print` is overridden to emit a `Hint` diagnostic — **stdout is the RPC channel and nothing else
 may write to it.**
@@ -365,7 +365,7 @@ the crate root — `gdl_path` is already a `RelPath`, so the IR needs nothing ne
 
 `gearbox-builder/products/payments-demo/product.gdl` — all three profiles declared as **data**,
 selected by `gearbox resolve --profile <id>`. No `if` anywhere; profile-scoping is a
-`profiles = [...]` list field on `bind`/`cluster_profile`/`process`.
+`profiles = [...]` list field on `bind`/`cluster_profile`/`application`.
 
 ```python
 product(
@@ -400,8 +400,8 @@ product(
                 connection_string = "postgres://payments@${PG_HOST}:5432/payments?password=${PG_PASSWORD}",
                 schema = "cluster", pool_max_size = 10)),
     ],
-    processes = [process("audit", anchor = "payments-audit", replicas = 2, profiles = ["prod"])],
-    preferences = [prefer.existing_infrastructure(), prefer.fewer_processes()],
+    applications = [application("audit", anchor = "payments-audit", replicas = 2, profiles = ["prod"])],
+    preferences = [prefer.existing_infrastructure(), prefer.fewer_applications()],
 )
 ```
 
@@ -413,7 +413,7 @@ arrive via `colocated_deps` closure, which is exactly the fact the Graph widget 
 (`gearbox product --file products/payments-demo/product.gdl`). It lists the four slice gears plus `cluster`, rather
 than five: `payments-audit` was to be the new custom gear, and it never arrived — M6 turned out not
 to need it, because the description's own severable edge already splits `api-contracts` into a second
-process. A `use_gear` naming it would still reference a gear no source provides. Its cluster scope,
+application. A `use_gear` naming it would still reference a gear no source provides. Its cluster scope,
 `event-broker`, went to `api-contracts-consumer` instead: that crate now carries the
 `impl ClusterProfile` marker, so the scope has a requester that exists. `cluster` itself has to be
 selected explicitly — nothing pulls it, because the only gear declaring `deps = [cluster]` has no
@@ -422,7 +422,7 @@ description, and without it in the closure the provider registry is empty.
 Three surface decisions settled by implementing it:
 
 - **Single-argument constructors are positional** — `path("…")`, `provider("…")`, `use_gear("…")`,
-  `process("…")`. Everything else stays keyword-only, so `path(at = "…")` would only name the obvious
+  `application("…")`. Everything else stays keyword-only, so `path(at = "…")` would only name the obvious
   while `bind(consumer = …, contract = …)` genuinely needs the labels.
 - **`provider(...)` is the only function taking `**kwargs`.** A cluster plugin's option schema is
   genuinely open — the SDK hands a plugin a raw JSON map and keeps the schema out of the framework —
@@ -459,7 +459,7 @@ validating constructors as the single validation point:
 |---|---|
 | `GearId` | `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` — exactly `toolkit-macros::validate_kebab_case` |
 | `ContractId` | `{gear}/{BaseTraitName}@v{major}` — e.g. `api-contracts/PaymentApi@v1` (Rust's trailing major is stripped, so v1/v2 are one family) |
-| `ProcessId` | kebab; derived from the anchor `GearId`, `-2`/`-3` on collision |
+| `ApplicationId` | kebab; derived from the anchor `GearId`, `-2`/`-3` on collision |
 | `ProviderId` | `{primitive}:{provider}` |
 | `RequirementId` | `{gear}#{namespace}[{ordinal}]` |
 | `CapabilityId` | `{namespace}.{name}` — e.g. `cluster.cache.linearizable` |
@@ -490,12 +490,12 @@ Core shapes (full definitions in implementation):
 - `ContractKind { Api, Embedded, Backend, Extension }` with `provides()`, `requires()`,
   `remote_capable()` (= `Api | Backend`); `remote_capable == false` is the placement constraint.
 - `RequirementKind::{ Contract { contract, from, resolving_client }, Cluster { primitive, profile } }`
-- `ResolvedProduct { schema_version, product, sources, gears, processes, bindings, cluster,
+- `ResolvedProduct { schema_version, product, sources, gears, applications, bindings, cluster,
   cuttable_if_declared: Vec<CutCandidate>, provenance }`
-- `ResolvedProcess { name, kind: Host|Worker, anchor /* == OopRunOptions.gear_name for workers */,
-  gears /* topo-sorted, MAY OVERLAP other processes */, replicas, entrypoint, bin_name,
+- `ResolvedApplication { name, kind: Host|Worker, anchor /* == OopRunOptions.gear_name for workers */,
+  gears /* topo-sorted, MAY OVERLAP other applications */, replicas, entrypoint, bin_name,
   crate_name, listens, rest_host, grpc_hub, needs_db, spawns }`
-- `ResolvedBinding { consumer, consumer_process, contract, provider, provider_process, mode,
+- `ResolvedBinding { consumer, consumer_application, contract, provider, provider_application, mode,
   transport, mechanism, endpoint_source, endpoint, critical, selected: Selected<_> }`
 - `BindingMechanism { ColocatedLocal, ConsumesStatic, ConsumesDirectory, ProvidesClientWiring }`
   — names the *actual code path*, not an abstraction.
@@ -516,7 +516,7 @@ Core shapes (full definitions in implementation):
 env. Deterministic by construction: iterate `BTreeMap`/`BTreeSet` only; sort every output `Vec` by
 its ID tuple; ties break lexicographically.
 
-1. **Profile projection.** Filter `bindings`/`cluster_profiles`/`process_pins` by
+1. **Profile projection.** Filter `bindings`/`cluster_profiles`/`application_pins` by
    `profiles.is_empty() || contains(profile)`. Duplicate matching keys → GBX0110.
 2. **Closure.** BFS from `selected_gears` over `colocated_deps` (deterministic pop order).
    Unknown gear → GBX0301; cycle → GBX0302.
@@ -530,18 +530,18 @@ its ID tuple; ties break lexicographically.
    `UndeclaredHubEdge` with the literal `#[toolkit::consumes(...)]` line to add and its file.
    **Never cut** (direct `hub.get::<dyn X>()` is common and splitting breaks at runtime). GBX0401.
    *This report is a deliverable, not a limitation.*
-4. **Process partition.** `Embedded` → exactly one process (anchor = the unique `rest_host` gear);
+4. **Application partition.** `Embedded` → exactly one application (anchor = the unique `rest_host` gear);
    any split request or `replicas > 1` → GBX0307 + downgrade. `SelfHosted`/`Kubernetes` → anchors
    = host ∪ chosen-cut providers ∪ pins; **one deterministic pass** over cut candidates (no scoring,
-   no search — vision §41); `P(a).gears = topo_sort(closure(a))`, so processes **overlap**.
-5. **Structural checks.** >1 `rest_host`/`grpc_hub` per process → GBX0303/0304 (mirrors
+   no search — vision §41); `P(a).gears = topo_sort(closure(a))`, so applications **overlap**.
+5. **Structural checks.** >1 `rest_host`/`grpc_hub` per application → GBX0303/0304 (mirrors
    `registry.rs`); `rest_host` inside a Worker → GBX0312 (workers serve via `oop_serve`'s own
    router); Directory discovery without `gear-orchestrator` → GBX0308 and without `grpc-hub` →
    GBX0309 (`run_oop_spawn_phase` blocks on `wait_for_grpc_hub_endpoint()`); missing `target_dir` →
    GBX0310; orphan gear → GBX0311. `SelfHosted` always emits GBX0604 (local OS processes only).
-6. **Binding derivation.** Same process ⇒ `Local` / `ColocatedLocal` / no endpoint. Different ⇒
+6. **Binding derivation.** Same application ⇒ `Local` / `ColocatedLocal` / no endpoint. Different ⇒
    `Remote`; transport priority: explicit-and-supported → gRPC requested (GBX0402, downgrade to
-   REST) → provider ∩ `{Rest}` → else GBX0406 and revert to Local by merging the processes.
+   REST) → provider ∩ `{Rest}` → else GBX0406 and revert to Local by merging the applications.
    Mechanism `ConsumesStatic` or `ConsumesDirectory` per profile discovery. Env-only wiring request
    → GBX0409 (`remap_gear_env_key` cannot express it).
 7. **Cluster matching** over `{standalone, postgres, redis}` + SDK CAS defaults. Table-driven from
@@ -549,10 +549,10 @@ its ID tuple; ties break lexicographically.
    `gearbox-verify` rather than declared and diffed (ADR 0002), so a provider added in Rust cannot
    go missing from the table. Auto ranking:
    (a) `prefer.existing_infrastructure` favours a provider already bound for another primitive,
-   (b) multi-process-capable first when >1 process or any replicas>1, (c) lexicographic. No
+   (b) multi-process-capable first when >1 application or any replicas>1, (c) lexicographic. No
    candidate + cache bound ⇒ `SdkCasDefault` (GBX0504) — which is *always* the leader-election
    answer, since zero LE providers are registered. Then the hard guard: a **process-local** provider
-   with >1 process or replicas>1 → **GBX0503 `Error`** ("`standalone` cache is in-memory and
+   with >1 application or replicas>1 → **GBX0503 `Error`** ("`standalone` cache is in-memory and
    per-process; leader election over it elects a leader per replica"). This catches a silent
    correctness bug the runtime would happily start with — the single most valuable diagnostic here.
 8. **`stateful` + replicas without leader election** → GBX0507 `Warning`.
@@ -615,7 +615,7 @@ selected_by = ["product.gdl:use_gear"]
 # … one table per gear in the closure; `selected_by` records WHY it is here,
 #   e.g. selected_by = ["colocated_deps:api-gateway"] for grpc-hub
 
-[[process]]
+[[applications]]
 name = "gateway"; kind = "host"; anchor = "api-gateway"
 gears = ["types-registry","authn-resolver","grpc-hub","api-gateway",
          "api-contracts","api-contracts-consumer","gear-orchestrator"]
@@ -623,21 +623,21 @@ replicas = 1; entrypoint = "run_server"
 bin_name = "gbx-gateway"; crate_name = "gbx-payments-demo-gateway"
 rest_host = "api-gateway"; grpc_hub = "grpc-hub"; needs_db = false
 
-[[process.spawns]]                     # mirrors config/oop-example-master+follower.yaml
+[[applications.spawns]]                     # mirrors config/oop-example-master+follower.yaml
 gear = "payments-audit"
 executable_path = "../../../gears-rust/target/debug/gbx-payments-audit"
 args = ["--config", "config/payments-audit.yaml"]
 
-[[process]]
+[[applications]]
 name = "payments-audit"; kind = "worker"
 anchor = "payments-audit"              # == OopRunOptions.gear_name, the directory identity
 gears = ["cluster", "payments-audit"]  # `cluster` linked here, NOT in gateway
 replicas = 1; entrypoint = "run_oop_with_options"; bin_name = "gbx-payments-audit"
 
 [[binding]]
-consumer = "payments-audit"; consumer_process = "payments-audit"
+consumer = "payments-audit"; consumer_application = "payments-audit"
 contract = "api-contracts/PaymentApi@v1"
-provider = "api-contracts"; provider_process = "gateway"
+provider = "api-contracts"; provider_application = "gateway"
 mode = "remote"                        # DERIVED from placement, never configured
 transport = "rest"; mechanism = "consumes-directory"
 endpoint_source = "directory:gear-orchestrator/api-contracts"
@@ -656,8 +656,8 @@ suggested_edit = "#[toolkit::consumes(contract = payments_audit_sdk::PaymentsAud
 file = "examples/toolkit/api-contracts/api-contracts-consumer/src/gear.rs"
 ```
 
-`dev` differs by having one process with all nine gears and all bindings `mode = "local"`.
-`prod` adds `[product.kubernetes]`, per-process `image`/`subchart`/`service_port`,
+`dev` differs by having one application with all nine gears and all bindings `mode = "local"`.
+`prod` adds `[product.kubernetes]`, per-application `image`/`subchart`/`service_port`,
 `mechanism = "consumes-static"` with a `{{ .Release.Name }}`-templated endpoint, and GBX0603.
 
 ---
@@ -699,7 +699,7 @@ requirement.
 (`--list-gears`, `--dump-gears-config-yaml/json`) plus one new one:
 `--list-registered-gears`, which prints `GearRegistry::discover_and_build()`'s real
 inventory-discovered topo order and real `deps` as `<name>\t<dep>,<dep>` lines. This is the
-strongest available verification oracle — diff it against the lock's `process.gears`.
+strongest available verification oracle — diff it against the lock's `applications.gears`.
 
 **Generated `registered_gears.rs`** emits one `use <ident> as _;` per `CargoRef.link` entry (so
 nested plugin modules work) and **no `#[cfg(feature)]` gates** — the generated `Cargo.toml`'s
@@ -717,12 +717,12 @@ correct). The `leader_election` key is deliberately **omitted** from `cluster.pr
 that omission is what engages the SDK CAS default, and the lock records it as
 `resolved = { via = "sdk-cas-default" }` so it reads as intentional.
 
-**Helm.** Umbrella + one subchart per process with `enabled` flags. No `lookup`, no
+**Helm.** Umbrella + one subchart per application with `enabled` flags. No `lookup`, no
 `randAlphaNum`, no `genCA` — renders with zero cluster access. `values.generated.yaml` (Generated)
 carries images/ports/replicas/wiring; `values.yaml` (OperatorOwned) is 3-way merged.
-`values.schema.json` is composed programmatically in `SchemaGen` (top-level keys are per-process
+`values.schema.json` is composed programmatically in `SchemaGen` (top-level keys are per-application
 and therefore dynamic): `schemars::schema_for!(EscapeHatches)` + `schema_for!(ExternalDatabase)`
-merged under each process key, `additionalProperties: false`, `enum` for `pullPolicy`/`service.type`.
+merged under each application key, `additionalProperties: false`, `enum` for `pullPolicy`/`service.type`.
 **Secrets: none in values** — Bitnami `existingSecret` + `existingSecretPasswordKey` only,
 projected as `secretKeyRef` env consumed by the postgres plugin's `${PG_PASSWORD}` expansion.
 Full escape-hatch set per subchart (`nameOverride`, `global.imageRegistry`, `podAnnotations`,
@@ -770,7 +770,7 @@ must not read absence of a field on a pending entry as absence of the fact.
 `gearbox/generate/plan` returns `FilePlan[] = { path, action: create|update|unchanged|conflict,
 ownership, kind, blake3, previewAvailable }`.
 `gearbox/graph` returns a `GraphDto { nodes: {id, kind, label, group?, badges[]}[],
-edges: {from, to, kind, label?, style: solid|dashed}[] }` for views `deps|contracts|processes|cluster`.
+edges: {from, to, kind, label?, style: solid|dashed}[] }` for views `deps|contracts|applications|cluster`.
 
 **LSP subset:** `textDocument/didOpen|didChange|didSave|didClose|completion|hover|documentSymbol|definition`
 (jump from `use_gear("x")` / `from_ = "x"` to the declaring `gear.gdl`).
@@ -848,8 +848,8 @@ per frontend connection, one engine per workspace root) and `BackendApplicationC
 |---|---|
 | Catalogue | tree by `category` → gear, **with foldable categories and a filter over name, id, category and path**. `gears-rust` carries 62 crates with `#[toolkit::gear]` against the 14 described today, so the list quadruples as descriptions land; a flat list stops being readable well before that. A filter overrides a fold — a match hidden inside a collapsed category is the one thing a filter must never do, because the reader concludes the gear is absent. Badges for `runtime_caps`, chips for `colocated_deps`, provides/consumes counts. Click reveals the `gear.gdl` at its declaring range. A toggle per projected row adds the gear to the open product or takes it out, writing `products/…/product.gdl` after a preview and a confirmation. **This replaces «produces a *proposed* `use_gear(...)` diff, never an auto-edit», which this plan required until M5.** What changed is the reading of ADR-0010, not the appetite for writing: its tier 3 is «structured manifests | tool edits surgically | **Permitted**», and its survey calls manifest editing «the single most universal behaviour in the set». The tier-5 prohibition covers *human logic*, and a GDL description cannot be logic — `cpt-gearbox-fr-gdl-declarative` refuses every branching construct — so a `use_gear(...)` entry is a data entry in a list, exactly like the line `cargo add` writes. What survives from the old wording is the part that mattered: the diff is still shown first and nothing is written until it is accepted. The four refusals in front of the write are in §9.2. **Renders incrementally** (§2.3): the grouping is available at S1 because `category` is declared, while the badges arrive at S2 because `runtime_caps` and `colocated_deps` are projected — so the tree's shape settles first and fills in. Rows are keyed by `gdl_path`, not `id`, because the id does not exist until S2. A `pending` row renders dimmed, and **clicking it still reveals its `gear.gdl`** — that path is known from S0, so a pending row is never inert. |
 | Inspector | **one panel, two sections, one selection.** *What it is*: everything projected for the selected gear -- capabilities, co-location, extension points with the vendor the host selects on, what the gear fills and under which vendor, contracts with the transports **this provider wires up**, GTS types, and clickable PRD/DESIGN/ADR links. *Why it is here*: the resolver's `because` sentence per edge, nearest reason first, each linking to its `origin`, with `DowngradedBy` steps marked. This was two panels -- `Gear detail` keyed off a catalogue row and `Explain` off a product focus -- which meant the ordinary act of clicking a gear in the product tree filled one and left the other asking to be given a catalogue selection. In the bottom area, not the side panel, because the side panel clipped exactly the facts it exists to show. |
-| Product | **a tree, as vision §60 sketches it**: foldable branches for Gears (with `asked for` / `pulled in by the closure` beneath), Processes, Contracts and Cluster, each with an icon and a count. The profile switch, the resolved profile and the description-file link stay in the header rather than becoming a Deployment branch: the switch has to be reachable *while* a resolution is in flight, which a branch of the resolved product cannot be. §60's Security is absent — it is not modelled in the IR. Artifacts live in the Generate view, which exists now that `capabilities.generate` is `true`. Bindings carry mode/transport/mechanism chips; cluster shows `selected` vs `resolved`; diagnostics summarise at the bottom. |
-| Graph | four views. **deps** (solid = co-location), **contracts** (dashed = cuttable, solid = forced local, red = undeclared-hub-edge), **processes** (boxes with gear chips, overlapping gears drawn in *every* box — this is what makes closure-not-partition visible), **cluster** (requirement → capability → provider, unsatisfied in red). Layout: `elkjs` `layered` with a fixed seed → deterministic, so screenshots and "why did this move" are stable. Rendered as hand-written React SVG. |
+| Product | **a tree, as vision §60 sketches it**: foldable branches for Gears (with `asked for` / `pulled in by the closure` beneath), Applications, Contracts and Cluster, each with an icon and a count. The profile switch, the resolved profile and the description-file link stay in the header rather than becoming a Deployment branch: the switch has to be reachable *while* a resolution is in flight, which a branch of the resolved product cannot be. §60's Security is absent — it is not modelled in the IR. Artifacts live in the Generate view, which exists now that `capabilities.generate` is `true`. Bindings carry mode/transport/mechanism chips; cluster shows `selected` vs `resolved`; diagnostics summarise at the bottom. |
+| Graph | four views. **deps** (solid = co-location), **contracts** (dashed = cuttable, solid = forced local, red = undeclared-hub-edge), **applications** (boxes with gear chips, overlapping gears drawn in *every* box — this is what makes closure-not-partition visible), **cluster** (requirement → capability → provider, unsatisfied in red). Layout: `elkjs` `layered` with a fixed seed → deterministic, so screenshots and "why did this move" are stable. Rendered as hand-written React SVG. |
 | Conflicts | the resolution's diagnostics as a domain screen, not a list under a tree: code, message, the `help` sentence that says what to do, the location and every `related` location as links, the `evidence` `file:line` in `gears-rust` where a claim asserts a runtime limitation, and -- where the engine names a `subject` -- a link that points the Inspector at the thing being complained about. `Resolve again` means re-resolve after an edit; there is no automatic resolver and none is promised. A second consumer of `ProductStore.diagnostics`, beside the Problems markers, so the two cannot disagree. The Product view keeps a one-line summary that opens this. |
 | Start | what there is to do with no product open: **New Product…**, **Clone**, `Open Product…`, the products found in the workspace, and the ones opened before. New Gear / Open Gear appear only when the tier-0 scaffold exists; until then Home stays two honest product actions rather than a fake fourth button. Replaces an empty main area, which read as an application that had failed to load rather than as a tool waiting to be told what to work on. |
 | Lock | read-only Monaco view of canonical `product.lock`, diff toggle vs disk, `lock_hash` badge that goes stale-yellow when resolve ≠ disk. |
@@ -949,8 +949,8 @@ Eight widgets exist against the real engine: **Catalogue** (tree by category, st
 **Lock**, **Generate** and **Start**.
 `capabilities.generate` is `true` now that M5 is on the wire; the view appeared the same way the
 resolver notice disappeared -- driven from the engine's own capability, not from a hard-coded
-string. Docker and Helm land for a Kubernetes profile (M7): a Dockerfile per process, an umbrella
-chart with one subchart per process, `values.yaml` as `OperatorOwned`, and `values.schema.json`
+string. Docker and Helm land for a Kubernetes profile (M7): a Dockerfile per application, an umbrella
+chart with one subchart per application, `values.yaml` as `OperatorOwned`, and `values.schema.json`
 with `additionalProperties: false`. Their absence on `dev`/`local` is still a smaller output set
 rather than a flag — `generate: false` would hide a panel that answers correctly for everything it
 does cover.
@@ -1113,17 +1113,17 @@ duplicates. The widget id changed from `gearbox.graph.deps` to `gearbox.graph` w
 
 The views split by where their data comes from, and that split is visible in the interface.
 **Co-location** reads the catalogue and needs no product, because a `deps` edge is a declared fact
-that no resolution changes. **Contracts, processes and cluster** read a resolution: they are answers
+that no resolution changes. **Contracts, applications and cluster** read a resolution: they are answers
 about one profile, so with no product open each says so and says how to get one, rather than
 rendering an empty frame that is indistinguishable from a broken view.
 
 Three things the implementation learned from the data, none of them in §9:
 
 * **The interesting profile is `prod`, not the default `dev`.** On `dev` the demo product resolves
-  to two local bindings and one process of nine gears -- every view would render
+  to two local bindings and one application of nine gears -- every view would render
   truthfully and show nothing that could have made it wrong. So the conformance tests for these
   views resolve `prod`, where the same description severs a contract edge and splits into three
-  processes.
+  applications.
 * **A contract edge merges per gear pair, and that loses nothing.** `ResolvedBinding.mode` is
   "derived from placement, never configured", so two gears are either in one process or in two and
   every binding between them agrees about `mode`. `PaymentApi@v1` and `@v2` therefore travel one
@@ -1143,7 +1143,7 @@ view, and it is now observed: `api-contracts-consumer` requires the `event-broke
 `ResolvedClusterBinding` reaches the view in every profile. The empty state it used to show is
 still reachable and still asserted -- by a product that requires nothing.
 
-* **Processes do not overlap on this corpus, in any profile.** `prod`'s extra anchors declare no
+* **Applications do not overlap on this corpus, in any profile.** `prod`'s extra anchors declare no
   `deps`, so their closures are singletons and its three boxes hold 6 + 1 + 1 of the same eight
   gears `dev` puts in one. The view states this in words instead of letting an absent repeated chip
   imply that a partition is what the model produces.
@@ -1464,7 +1464,7 @@ diagnostic now sets it: GBX0409, "the endpoint override for X on Y cannot come f
 variable", whose subject is unambiguous -- exactly one binding, named by consumer and contract, and the
 explanation graph holds a node for every resolved binding. Deliberately only that one: most
 diagnostics concern a resolution as a whole ("two severable edges stay local because the profile is
-single-process" names no node), and inventing a subject for those would send a reader to a node that
+single application" names no node), and inventing a subject for those would send a reader to a node that
 does not explain them.
 
 That also produced a smaller correction worth keeping. The binding node key -- `{consumer}|{contract}`
@@ -1705,7 +1705,7 @@ states -- Home, Product, Gear -- and the work that makes each of them true:
 
 **Two of the eight phases were marked done and were half done**, which is worth recording because the
 repository did not join in. The Add Gear configurator had six of its nine intended sections: the
-hypothetical re-resolve and the process/contract diff were not built, and the widget said so on screen
+hypothetical re-resolve and the application/contract diff were not built, and the widget said so on screen
 ("the full resolution closure appears after Add"). `config_schema` is still `Option<RelPath>` with no
 projection into the IR, so configuration values are strings and the claim that would prove otherwise is
 still `test.fixme` with the reason written in it. The plan's checkboxes were wrong; the code, the UI and
@@ -1790,8 +1790,8 @@ so `existingSecret` is asserted against a lock fixture, not against `payments-de
 
 #### M7
 
-A Kubernetes profile now emits a Dockerfile per process, an umbrella chart with
-one subchart per process, `values.yaml` as `OperatorOwned`, and
+A Kubernetes profile now emits a Dockerfile per application, an umbrella chart with
+one subchart per application, `values.yaml` as `OperatorOwned`, and
 `values.schema.json` with `additionalProperties: false`. `dev`'s `lock_hash` is
 byte-identical to the commit before this milestone. `local` moved because
 `GBX0604` now carries the evidence its own `requires_evidence` flag always
@@ -1814,8 +1814,8 @@ The caption belongs on the command: `GenerateViewContribution` registers its tog
 The milestone reads "new gear lands and passes its own test *by hand first*; then generated worker
 crate". The first half was skipped, and the measurement is why: `products/payments-demo` resolved
 for `local` already produces a worker. `api-contracts` leaves the gateway because its contract edge
-is **severable** — the pin `process("audit", ...)` is scoped to `prod` and had nothing to do with
-it. So the generator had a real second process to build against without anyone writing Rust.
+is **severable** — the pin `application("audit", ...)` is scoped to `prod` and had nothing to do with
+it. So the generator had a real second application to build against without anyone writing Rust.
 
 It is also the right one. `api-contracts` / `api-contracts-consumer` is the only pair in
 `gears-rust` using `#[toolkit::provides]` / `#[toolkit::consumes]`, which makes it the only contract
@@ -1823,7 +1823,7 @@ severable over REST through the directory with no change to a gear's source. The
 unaided.
 
 Three things were missing, and each was inert without the other two, which is why none of them had
-been noticed. `ResolvedProcess::spawns` was hard-coded empty and nothing ever wrote it, so
+been noticed. `ResolvedApplication::spawns` was hard-coded empty and nothing ever wrote it, so
 `write_spawns` and its `runtime: {type: oop}` section were correct and dead. A worker had no address
 at all: its gears mount on a REST host in the monolith and a worker has none, so it serves through
 the out-of-process runtime's own listener — a top-level `oop_http` section, not a gear key, and
@@ -1835,10 +1835,10 @@ runtime discovers gears through `inventory` and takes no notice of `runtime.type
 linked and marked `oop` runs twice — in-process and as a child. The example server in `gears-rust`
 has exactly that bug for `calculator`. Configured and linked are therefore different sets, and the
 host's config is the one place they differ: it is configured to start a gear it does not contain.
-The generator gets this right because `registered_gears.rs` is built from `process.gears` and the
+The generator gets this right because `registered_gears.rs` is built from `application.gears` and the
 partition already removed the anchor, but that is now asserted rather than relied upon.
 
-`Generated::skipped` is gone rather than emptied. The dispatch on `ProcessKind` is exhaustive, so a
+`Generated::skipped` is gone rather than emptied. The dispatch on `ApplicationKind` is exhaustive, so a
 kind this cannot generate is a compile error at the `match` instead of a value at run time — and the
 field reached the Studio, where it told operators that worker entry points were unbuilt. An
 always-empty report is one nobody can read.
@@ -2185,7 +2185,7 @@ turn all of it into behaviour.
 
 **The stage after.** Overview now reports what the product *is*, from data
 `ProductStore` already holds: how many gears and how many of those nobody asked
-for, how many processes and bindings, whether a generated tree exists for this
+for, how many applications and bindings, whether a generated tree exists for this
 resolution, and which source roots the description declares. The figures are
 buttons into the stage that can act on them, because a count with no way through
 is trivia.
@@ -2381,7 +2381,7 @@ leaked its private representation into the YAML. The evidence is `readiness: dep
 
 **Three things M5 left behind, recorded here because nothing else covers them.**
 
-- **`ResolvedProcess.cargo_features` is written and never read.** `partition.rs` fills it and no
+- **`ResolvedApplication.cargo_features` is written and never read.** `partition.rs` fills it and no
   generator consults it, so it is dead weight in every lock — and its shape is wrong anyway: a flat
   `BTreeSet<String>` across every crate in the process, when a Cargo feature belongs to a specific
   dependency. Two crates asking for a feature of the same name are indistinguishable in it. Either
@@ -2464,7 +2464,7 @@ locator does real work rather than defaulting its way to a right answer.
 **Step 2 — embedded.** Resolve + generate + `cargo build --bin gbx-api-gateway`, then the oracles:
 ```bash
 ./target/debug/gbx-api-gateway --list-registered-gears | sort \
-  | diff - <(gearbox lock gears --process api-gateway --order name --with-deps)
+  | diff - <(gearbox lock gears --application api-gateway --order name --with-deps)
 ./target/debug/gbx-api-gateway --config config/api-gateway.yaml --dump-gears-config-yaml \
   | diff - fixtures/dev/effective-gears.yaml
 ```
@@ -2545,7 +2545,7 @@ are automated and green; the ones below still need M4's widgets, and each is a n
 `ide/tests/conformance/` rather than prose to be checked by hand. Catalogue lists **14** gears --
 this step said 9, which contradicted ADR-0009 and §9.1, and 14 is what the corpus has; the profile
 dropdown has dev/local/prod; switching to prod surfaces
-GBX0603 + GBX0507 in Problems; the Graph "processes" view shows 2 boxes with `cluster` inside
+GBX0603 + GBX0507 in Problems; the Graph "applications" view shows 2 boxes with `cluster` inside
 `audit`; clicking the `payments-audit → api-contracts` edge opens Explain with the DowngradedBy
 narrative; Generate shows 0 conflicts, and after hand-editing `values.yaml` a re-apply reports it
 `unchanged` (the 3-way merge preserved it).
@@ -2620,7 +2620,7 @@ the template, with the content already derived above:
 | 2 Actors | `cpt-gearbox-actor-gear-author`, `-integrator`, `-platform-engineer`, `-external-agent` (via RPC/MCP), `-theia-studio` (system actor), `-cargo` / `-helm` (system actors) |
 | 3 Operational Concept | offline, no cluster access at render time, no network at resolve time, deterministic |
 | 4 Scope | in: GDL/resolver/lock/generators/RPC/Studio for the §10 slice. out: MCP, TUI, Rego, registry sources, SAT/SMT, scoring, migration tooling, CI, mass gear migration |
-| 5 FRs | one per resolver responsibility and generator output — e.g. `-fr-gdl-declarative` (§3.2), `-fr-derive-binding-from-placement`, `-fr-never-cut-undeclared-edge`, `-fr-report-cuttable-if-declared`, `-fr-cluster-capability-match`, `-fr-generate-process-crate`, `-fr-values-schema`, `-fr-no-secrets-in-values`, `-fr-diagnose-unsupported` |
+| 5 FRs | one per resolver responsibility and generator output — e.g. `-fr-gdl-declarative` (§3.2), `-fr-derive-binding-from-placement`, `-fr-never-cut-undeclared-edge`, `-fr-report-cuttable-if-declared`, `-fr-cluster-capability-match`, `-fr-generate-application-crate`, `-fr-values-schema`, `-fr-no-secrets-in-values`, `-fr-diagnose-unsupported` |
 | 6 NFRs | `-nfr-determinism` (same input ⇒ byte-identical lock), `-nfr-explainability` (every automatic choice answers "why" without an LLM), `-nfr-provenance-during-resolution`, `-nfr-render-without-cluster`, `-nfr-operator-values-preserved`, `-nfr-engine-has-no-frontend-deps`, `-nfr-evidence-cited` (every "unsupported" diagnostic carries a real `file:line`) |
 | 7 Public Library Interfaces | the JSON-RPC surface (§8) + the `gearbox` CLI verb set — this is the external contract |
 | 8 Use Cases | `-usecase-switch-profile` (the canonical one), `-usecase-explain-provider-choice`, `-usecase-diagnose-invalid-topology` |
@@ -2651,7 +2651,7 @@ touch, and 0011 what the Studio becomes. The remaining numbering below is kept a
 |---|---|---|
 | 0001 | `gdl-starlark-over-toml` | vision says Starlark; the repo-grounded predecessor says TOML + syn and calls Starlark "a language subsystem with no consumer". Record why the prototype chose Starlark *and* what would justify reverting. |
 | 0002 | `macro-projected-catalogue` | **Written already**, ahead of M2 rather than at M9, because it constrains the GDL surface and the scanner before either exists — see `docs/ADR/0002-cpt-gearbox-adr-macro-projected-catalogue.md`. Records why the macro keeps every fact it already expresses, why GDL declares only the disjoint remainder, and the three rejected alternatives (GDL-authoritative-with-cross-check, GDL-generates-the-annotations, macro-only). Includes the three-confidence-level model that was rejected. |
-| 0003 | `colocation-is-a-closure-not-a-partition` | the `MissingDeps` finding, why `deps` edges are uncuttable, and why processes overlap. The most consequential correction to the vision. |
+| 0003 | `colocation-is-a-closure-not-a-partition` | the `MissingDeps` finding, why `deps` edges are uncuttable, and why applications overlap. The most consequential correction to the vision. |
 | 0004 | `product-lock-canonical-serialization` | TOML + `blake3` over the body, `lock_hash` elided; why arrays-of-tables and BTreeMap iteration are load-bearing, not cosmetic. |
 | 0005 | `rpc-jsonrpc-stdio-lsp-framing` | stdio LSP framing vs local HTTP vs WASM; why one server backs both the Studio and the `.gdl` language client. |
 | 0006 | `template-text-serialize-data` | minijinja for text, serde for data, `<< >>` for Helm sources; the YAML-indentation failure mode being avoided. |
@@ -2671,7 +2671,7 @@ per-diagnostic fixtures).
 ## Critical files
 
 - [docs/gearbox-builder-vision.md](docs/gearbox-builder-vision.md) — §12 (declarative rule), §22
-  (lock contents), §47–48 (process crates), §51–58 (templating + Helm) are the normative constraints
+  (lock contents), §47–48 (application crates), §51–58 (templating + Helm) are the normative constraints
 - `gears-rust/libs/toolkit/src/registry.rs` — `Registrator`, `build_topo_sorted`, `MissingDeps`;
   why `deps` is uncuttable and the source of the `--list-registered-gears` oracle
 - `gears-rust/libs/toolkit/src/runtime/host_runtime.rs` — lifecycle phase order, `consumer_wiring`

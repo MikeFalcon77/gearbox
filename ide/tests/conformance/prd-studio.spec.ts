@@ -4,7 +4,7 @@
 //
 //   The system MUST provide an Eclipse Theia application that browses the
 //   catalogue, edits and resolves a product across profiles, renders the
-//   dependency, contract, process, and cluster graphs, answers "why" for a
+//   dependency, contract, application, and cluster graphs, answers "why" for a
 //   selected decision, and previews and applies generation -- containing no
 //   resolution logic of its own.
 
@@ -128,10 +128,10 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
 
   // The three resolution graphs are checked on the **`prod`** profile, not the
   // default `dev`, and that is not incidental. On `dev` the demo product resolves
-  // to two local bindings and one process, so each of these
+  // to two local bindings and one application, so each of these
   // views would render truthfully and show nothing that could have made it wrong.
   // On `prod` the same description resolves to a severed contract edge beside a
-  // local one, and to two processes instead of one.
+  // local one, and to two applications instead of one.
   //
   // What `prod` still cannot show is a gear in two binaries: its extra anchors
   // declare no `deps`, so their closures are singletons. `prd-product.spec.ts`
@@ -175,7 +175,7 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
     await expect(local).toHaveClass(/gbx-edge-local/);
   });
 
-  test("it renders the process graph [PRD cpt-gearbox-fr-studio: renders the process graph]", async ({
+  test("it renders the application graph [PRD cpt-gearbox-fr-studio: renders the application graph]", async ({
     studio,
   }) => {
     await openProduct(studio.page, "prod");
@@ -187,9 +187,9 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
     const graph = studio.page.locator("[data-graph='applications']");
     await expect(graph).toBeVisible();
     // Three, not two: `audit` is declared in the description, and `api-contracts`
-    // becomes a process of its own because the remote binding needs it reachable
-    // across a boundary. A process the resolver *derived* is exactly the kind of
-    // thing this view exists to make visible.
+    // becomes an application of its own because the remote binding needs it
+    // reachable across a boundary. An application the resolver *derived* is
+    // exactly the kind of thing this view exists to make visible.
     await expect(graph.locator(".gbx-binary")).toHaveCount(3);
     for (const name of ["api-gateway", "audit", "api-contracts"]) {
       await expect(graph.locator(`[data-binary='${name}']`)).toBeVisible();

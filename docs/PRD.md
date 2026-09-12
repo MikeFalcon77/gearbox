@@ -14,13 +14,13 @@
 
 Gearbox Builder is the product composition and resolution layer for the Gears platform. It lets a
 developer or integrator declare *which* gears belong to a product and *what* deployment shape is
-wanted, then deterministically derives the concrete implementation: process topology, local vs
+wanted, then deterministically derives the concrete implementation: application topology, local vs
 remote contract bindings, transports, cluster provider selections, and the build and deployment
 artifacts that realize them.
 
 Key capabilities: a declarative gear/product description language (GDL) hosted in Starlark; a
 typed Rust intermediate representation; a deterministic resolver that produces a committed
-`product.lock`; generators that emit compilable per-process Cargo crates, Dockerfiles, and a Helm
+`product.lock`; generators that emit compilable per-application Cargo crates, Dockerfiles, and a Helm
 umbrella chart from that lock; a JSON-RPC engine API; and an explanation graph that answers "why
 was this decided" for every automatic choice without invoking a language model.
 
@@ -40,7 +40,7 @@ contract's kind; whether a cluster cache satisfies a requirement depends on capa
 declared in Rust but consulted only at startup. Each of these is statically decidable and is
 currently decided by hand.
 
-The specific blocker for "one gear per process" is not runtime support — local/remote binding,
+The specific blocker for "one gear per application" is not runtime support — local/remote binding,
 out-of-process serving, and directory-based discovery are all implemented. The blocker is that one
 binary links every gear, and nobody will hand-write and maintain a dozen application crates. That
 is a code-generation problem, and it is the one this system removes.
@@ -66,6 +66,7 @@ is a code-generation problem, and it is the one this system removes.
 | Catalogue | Developer-owned facts: what gears exist, what they provide, consume, and require. |
 | Intent | Operator choices: which gears are enabled, deployment profile, replicas, overrides, preferences. |
 | ResolvedProduct | The derived implementation: actual topology, bindings, transports, providers. Serialized as `product.lock`. |
+| Application | One generated binary: the co-location closure of an anchor gear, deployed as one unit with its own `replicas`. Declared with `application(...)`. Distinct from *process*, which in this document always means an operating-system process — an application with three replicas is three of them. |
 | DeploymentProfile | One of exactly `embedded`, `self-hosted`, `kubernetes`. A Gearbox concept, not a runtime type. |
 | Preset | A preference overlay such as `dev` or `production`. Orthogonal to DeploymentProfile. Out of scope for this release. |
 | ClusterScope | A named cluster coordination scope (`ClusterProfile` in the runtime API). Neither a DeploymentProfile nor a preset. A join key, not free text: it must name a profile the requiring gear's own crate implements, because the runtime resolves it as `ClientScope::new("cluster:{name}")` and a name nothing registered fails only at startup. |
@@ -142,7 +143,7 @@ is a code-generation problem, and it is the one this system removes.
 
 **ID**: `cpt-gearbox-actor-cargo`
 
-- **Role**: Builds the generated process crates and resolves their package dependencies. Owns
+- **Role**: Builds the generated application crates and resolves their package dependencies. Owns
   package and build semantics; Gearbox Builder owns product composition and does not duplicate them.
 
 #### Helm
@@ -165,7 +166,7 @@ and [`gears-rust/docs/GEARS.md`](../../gears-rust/docs/GEARS.md). Gearbox Builde
   work. No `lookup`, no render-time hooks.
 - The Catalogue is read from local source trees only. Cargo already materializes `path` and `git`
   sources on disk; registry sources are out of scope for this release.
-- Generated process crates path-depend on a `gears-rust` checkout and must build under the
+- Generated application crates path-depend on a `gears-rust` checkout and must build under the
   toolchain that repository pins (`1.97.0`).
 - The engine core has **no dependency** on any CLI, RPC, or UI crate. Enforced by an automated
   dependency test, not by convention.
@@ -179,12 +180,12 @@ and [`gears-rust/docs/GEARS.md`](../../gears-rust/docs/GEARS.md). Gearbox Builde
 - Assembling each gear's descriptor by merging the facts projected from its crate's Rust attributes
   with the facts declared in its `gear.gdl`, and rejecting a `gear.gdl` that restates a projected
   fact (ADR `cpt-gearbox-adr-macro-projected-catalogue`).
-- A deterministic resolver covering dependency closure, process partitioning, local/remote binding
+- A deterministic resolver covering dependency closure, application partitioning, local/remote binding
   derivation, transport selection, contract version and kind compatibility, cluster capability
   matching, and per-profile structural constraints.
 - `product.lock` as the single canonical resolved artifact and the sole input to every generator.
-- Generators: per-process Cargo crates with `main.rs` and `registered_gears.rs`, runtime config
-  YAML, per-process Dockerfiles, and a Helm umbrella chart with `values.schema.json`.
+- Generators: per-application Cargo crates with `main.rs` and `registered_gears.rs`, runtime config
+  YAML, per-application Dockerfiles, and a Helm umbrella chart with `values.schema.json`.
 - An explanation graph and a diagnostic set with actionable remediation text and cited evidence.
 - A JSON-RPC engine API over stdio, and a `gearbox` CLI.
 - An Eclipse Theia application (Gearbox Studio) as a client of that API.
@@ -323,20 +324,20 @@ input.
 - [ ] `p1` - **ID**: `cpt-gearbox-fr-never-cut-colocation`
 
 The system **MUST** treat co-location dependencies as a transitive closure that pulls each
-dependency into every process whose closure names it, and **MUST NOT** place a co-location
+dependency into every application whose closure names it, and **MUST NOT** place a co-location
 dependency across a process boundary.
 
 - **Rationale**: The runtime registry treats an absent declared dependency as a hard failure, so a
-  severed co-location edge is a product that cannot start. Processes therefore overlap; they are
+  severed co-location edge is a product that cannot start. Applications therefore overlap; they are
   not a partition.
-- **Verification Method**: Diff the resolved per-process gear list against the binary's own
+- **Verification Method**: Diff the resolved per-application gear list against the binary's own
   inventory-discovered registry output.
 
 #### Undeclared edges are never severed
 
 - [ ] `p1` - **ID**: `cpt-gearbox-fr-never-cut-undeclared-edge`
 
-The system **MUST NOT** place a consumer and provider in different processes unless the dependency
+The system **MUST NOT** place a consumer and provider in different applications unless the dependency
 between them is declared as a contract consumption.
 
 - **Rationale**: Direct type-keyed client lookups are widespread and are not all covered by
@@ -384,7 +385,7 @@ resolved value, and **MUST** report a diagnostic whenever the two differ.
 The system **MUST** resolve each cluster primitive requirement against the capabilities of the
 providers actually registered in the runtime, **MUST** report an error when no provider satisfies
 the required capabilities, and **MUST** report an error when a process-local provider is selected
-for a topology with more than one process or more than one replica.
+for a topology with more than one application or more than one replica.
 
 - **Rationale**: A process-local coordination backend in a multi-process product is a silent
   correctness failure — the runtime starts successfully and elects one leader per replica.
@@ -537,7 +538,7 @@ crate at most once per load.
 - [ ] `p1` - **ID**: `cpt-gearbox-fr-profile-constraints`
 
 The system **MUST** enforce the structural constraints of the selected deployment profile,
-including single-process composition for `embedded`, the presence of the directory and gRPC hub
+including single-application composition for `embedded`, the presence of the directory and gRPC hub
 gears when directory discovery is used, at most one REST host and one gRPC hub per process, and a
 resolvable executable path for each spawned worker.
 
@@ -583,15 +584,15 @@ generated artifact from that lock alone, without re-deriving any resolution deci
 - **Rationale**: Independent semantic decisions inside a renderer are how a product's Helm output
   and its Cargo output come to disagree.
 
-#### Process crates are generated and compile
+#### Application crates are generated and compile
 
-- [ ] `p1` - **ID**: `cpt-gearbox-fr-generate-process-crate`
+- [ ] `p1` - **ID**: `cpt-gearbox-fr-generate-application-crate`
 
-For each resolved process the system **MUST** generate a Cargo manifest, an entry point matching
-that process's role, and a link file that keeps every composed gear's registration alive; and the
-result **MUST** compile and run.
+For each resolved application the system **MUST** generate a Cargo manifest, an entry point
+matching that application's role, and a link file that keeps every composed gear's registration
+alive; and the result **MUST** compile and run.
 
-- **Rationale**: This is the artifact whose absence blocks one-gear-per-process today.
+- **Rationale**: This is the artifact whose absence blocks one-gear-per-application today.
 - **Verification Method**: Compile the generated crates, then diff the running binary's own
   registry output against the lock.
 
@@ -599,7 +600,7 @@ result **MUST** compile and run.
 
 - [ ] `p1` - **ID**: `cpt-gearbox-fr-generate-config`
 
-The system **MUST** generate the runtime configuration for each process, including per-gear runtime
+The system **MUST** generate the runtime configuration for each application, including per-gear runtime
 kind and execution settings for spawned workers, endpoint overrides for severed edges, and cluster
 scope provider bindings.
 
@@ -610,8 +611,8 @@ scope provider bindings.
 
 - [ ] `p1` - **ID**: `cpt-gearbox-fr-generate-deployment`
 
-The system **MUST** generate a container build definition per process image and a Helm umbrella
-chart with one conditionally enabled subchart per process, covering workload, service,
+The system **MUST** generate a container build definition per application image and a Helm umbrella
+chart with one conditionally enabled subchart per application, covering workload, service,
 configuration, and service-account resources.
 
 - **Rationale**: Helm is the lowest layer every downstream deployment tool consumes natively.
@@ -760,7 +761,7 @@ would touch, the action for each, its ownership class, and its proposed content.
 - [ ] `p2` - **ID**: `cpt-gearbox-fr-studio`
 
 The system **MUST** provide an Eclipse Theia application that browses the catalogue, edits and
-resolves a product across profiles, renders the dependency, contract, process, and cluster graphs,
+resolves a product across profiles, renders the dependency, contract, application, and cluster graphs,
 answers "why" for a selected decision, and previews and applies generation — containing no
 resolution logic of its own.
 
@@ -1012,11 +1013,11 @@ concrete remedy.
 
 **Main Flow**:
 1. The integrator resolves the product for `embedded` and generates artifacts.
-2. The generated single-process binary builds and serves every composed gear's interface, with all
+2. The generated single-application binary builds and serves every composed gear's interface, with all
    contract bindings local.
 3. The integrator changes only the profile selection and resolves again for `self-hosted`.
 4. The resolver partitions the product, derives the severed edge as remote, and selects a transport.
-5. Generation emits one crate per process plus the spawn and endpoint configuration; the host starts
+5. Generation emits one crate per application plus the spawn and endpoint configuration; the host starts
    and the worker registers and becomes ready.
 6. The integrator repeats for `kubernetes` and obtains images and a chart.
 
@@ -1125,7 +1126,7 @@ Each criterion corresponds to a step of the acceptance procedure in
 - [ ] Every gear in the slice validates clean against its own Rust source (§12 step 1).
 - [ ] The `embedded` profile builds, runs, serves both interfaces, and its running binary's own
       registry output matches the lock (§12 step 2).
-- [ ] The `self-hosted` profile produces two processes; the host spawns the worker, the worker
+- [ ] The `self-hosted` profile produces two applications; the host spawns the worker, the worker
       becomes ready, and the severed edge resolves remotely (§12 step 3).
 - [ ] The `kubernetes` profile renders offline, uses no cluster-dependent construct, contains no
       secret in any values file, carries endpoint wiring in configuration rather than environment,
@@ -1138,7 +1139,7 @@ Each criterion corresponds to a step of the acceptance procedure in
       (§12 step 7).
 - [ ] Regenerating client types is a no-op (§12 step 8).
 - [ ] The Studio browses the catalogue, switches profiles, surfaces the profile-specific
-      diagnostics, renders the process graph, answers "why" for a severed edge, and preserves a
+      diagnostics, renders the application graph, answers "why" for a severed edge, and preserves a
       hand-edited operator values file across regeneration (§12 step 9).
 
 ## 10. Dependencies
@@ -1149,10 +1150,10 @@ Each criterion corresponds to a step of the acceptance procedure in
 | Gears runtime registry and lifecycle | Composition, topological ordering, and the co-location invariant the resolver models | p1 |
 | Gears contract binding and discovery | Local/remote wiring and endpoint resolution the resolver predicts | p1 |
 | Gears cluster subsystem | The capability and provider model resolution matches against | p1 |
-| Cargo + pinned Rust toolchain | Builds generated process crates | p1 |
+| Cargo + pinned Rust toolchain | Builds generated application crates | p1 |
 | Starlark evaluator (Rust) | GDL runtime | p1 |
 | Helm | Renders and validates generated charts | p1 |
-| Docker | Builds process images | p2 |
+| Docker | Builds application images | p2 |
 | Eclipse Theia | Host application for the configurator client | p2 |
 | PostgreSQL | The only cross-process cluster backend that exists; required for multi-process profiles | p2 |
 
@@ -1184,7 +1185,7 @@ Each criterion corresponds to a step of the acceptance procedure in
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Co-location closure swallows the product, so per-gear placement collapses to one process | The resolver is correct but useless; the central promise is undemonstrable | Choose a slice with at least one genuinely severable declared edge; report severable-if-declared pairs as an actionable list (`cpt-gearbox-fr-report-cuttable-if-declared`) |
+| Co-location closure swallows the product, so per-gear placement collapses to one application | The resolver is correct but useless; the central promise is undemonstrable | Choose a slice with at least one genuinely severable declared edge; report severable-if-declared pairs as an actionable list (`cpt-gearbox-fr-report-cuttable-if-declared`) |
 | The description language duplicates facts already in code and drifts from them | `gear.gdl` stops being trustworthy | Structurally prevented: overlapping facts are projected from the attributes, and a description restating one is rejected (`cpt-gearbox-fr-catalogue-projection`, `cpt-gearbox-fr-gdl-no-restatement`) |
 | Catalogue loading now depends on parsing Rust successfully, so a `syn` failure or an unlocatable attribute blocks resolution entirely | No catalogue, no product; the failure is total rather than degraded | Accepted deliberately (ADR `cpt-gearbox-adr-macro-projected-catalogue`); the attribute locator reports candidates and the exact narrowing line to add (`cpt-gearbox-fr-attribute-location`) |
 | An editor reads an empty field on a partially loaded gear as "this gear has none" | Confidently wrong information — the failure mode this project has already hit three times (`has_extension_point`, provider transports, plugin GTS types) | Structurally prevented: unprojected gears live in `CatalogueScan.pending` and never appear in the catalogue at all, so `Option::None` and an empty `Vec` keep the single meaning *absent* (`cpt-gearbox-fr-incremental-catalogue`, ADR `cpt-gearbox-adr-staged-catalogue-loading`) |
@@ -1204,7 +1205,7 @@ Each criterion corresponds to a step of the acceptance procedure in
 - How should the catalogue handle a gear whose declared contract edges depend on a build feature the
   resolver itself selects — a cyclic dependency between catalogue and intent?
 - Should validation report gears with no declared dependencies at all as opaque, or is that noise?
-- One image per process, or one image with several entry points? Separate images are honest about
+- One image per application, or one image with several entry points? Separate images are honest about
   size; a single image is simpler to build and publish.
 - Where do the engine crates ultimately live, and how are they versioned relative to the runtime
   whose behaviour they model?

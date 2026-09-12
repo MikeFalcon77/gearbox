@@ -30,14 +30,14 @@ Its purpose is to let a developer or integrator express:
 
 Gearbox Builder then deterministically derives a valid concrete product:
 
-- the process/pod topology;
+- the application/pod topology;
 - local vs remote contract bindings;
 - contract compatibility;
 - required transports and discovery;
 - cluster primitive providers;
 - per-instance addressing requirements;
 - build graph;
-- generated process crates;
+- generated application crates;
 - container images;
 - Helm deployment artifacts;
 - documentation and other derived outputs.
@@ -506,7 +506,7 @@ struct ProductIntent {
 
 struct ResolvedProduct {
     gears: Vec<ResolvedGear>,
-    processes: Vec<ResolvedProcess>,
+    applications: Vec<ResolvedApplication>,
     bindings: Vec<ResolvedBinding>,
     providers: Vec<ResolvedProvider>,
     requirements: Vec<ResolvedRequirement>,
@@ -564,7 +564,7 @@ source/version selections
 Derived implementation:
 
 ```text
-actual process topology
+actual application topology
 actual local/remote bindings
 actual providers
 transport choice
@@ -712,7 +712,7 @@ What remains is genuinely new information with no home in Rust: `name`, `descrip
 ```python
 gear(
     name = "Types Registry",
-    description = "Shared entity-type registry. Pulled in by roughly 22 gears via deps, so it is linked into most processes.",
+    description = "Shared entity-type registry. Pulled in by roughly 22 gears via deps, so it is linked into most applications.",
     category = "core-functionality",
     visibility = "internal",
 
@@ -804,7 +804,7 @@ work. Adding `#[toolkit::consumes]` to a gear both declares the edge to the reso
 the client it will need once the edge is cut.
 
 **No Rust is generated into a gear crate.** Generated glue exists only in the composition crates
-Gearbox Builder owns end to end — a generated process crate's `main.rs` and `registered_gears.rs`.
+Gearbox Builder owns end to end — a generated application crate's `main.rs` and `registered_gears.rs`.
 See ADR `cpt-gearbox-adr-macro-projected-catalogue`.
 
 ---
@@ -862,7 +862,7 @@ product(
 - **`deployment = kubernetes()` became `profiles = [...]` plus `default_profile`.** One product needs
   to describe dev, on-premise and Kubernetes at once; a single `deployment` field would force one
   file per topology, and then the three would drift. Profile-scoping is a `profiles = [...]` list
-  field on `bind`, `cluster_profile` and `process` — **not** an `if`, because GDL has none and a
+  field on `bind`, `cluster_profile` and `application` — **not** an `if`, because GDL has none and a
   description that could branch on the resolve target would be a program whose output depends on how
   it was invoked.
 - **`use(...)` became `use_gear(...)`,** because `use` is a Starlark-adjacent word that reads as an
@@ -1004,7 +1004,7 @@ exact Gear source revisions/versions
 
 enabled Gears
 
-resolved process topology
+resolved application topology
 
 replica counts
 
@@ -1032,7 +1032,7 @@ Example:
 name = "my-product"
 deployment = "kubernetes"
 
-[[process]]
+[[applications]]
 name = "mini-chat"
 gears = ["mini-chat", "types-registry"]
 replicas = 3
@@ -1130,7 +1130,7 @@ A preset is an intent overlay or preference bundle.
 
 > **Not implemented.** There is no `preset(...)` in GDL, and no `require_high_availability()` or
 > `prefer_external_state()`. The only preference surface that exists is `preferences = [...]` on
-> `product(...)`, taking `prefer.existing_infrastructure()`, `prefer.fewer_processes()` and
+> `product(...)`, taking `prefer.existing_infrastructure()`, `prefer.fewer_applications()` and
 > `prefer.isolate()`. The distinction this section draws -- a preset is not a deployment profile --
 > is still the right one, and is why profiles were not allowed to absorb it.
 
@@ -1216,14 +1216,14 @@ deployable cluster gear is built: `gears-rust` commit `de3551f9` introduced `Rem
 over gRPC, one `dyn ClusterClient` per process with local winning over remote, and an endpoint
 derived by DNS rather than configured. Gearbox already sees it — the cluster gear projects
 `runtime_caps = [rest, stateful, system, grpc]`, and the Helm generator emits a dedicated `cluster`
-Service on port 50051 for whichever process holds the gear
+Service on port 50051 for whichever application holds the gear
 (`crates/gearbox-engine/src/generate/helm.rs`, `templates/helm/service.yaml.jinja`).
 
 So a cluster consumer is **not** pinned to the gear's process, and two things followed from believing
 otherwise. A diagnostic was added to report the "split" as a defect and then withdrawn, because the
 constraint it reported does not exist. And more consequentially, the configuration generator keyed a
 scope's backend section on the requester being co-located, which meant the demo's `prod` profile —
-where a process pin separates them — configured the cluster gear with nothing at all while the lock
+where an application pin separates them — configured the cluster gear with nothing at all while the lock
 said the scope had resolved. That filter is gone: the section is written wherever the gear is, and
 the gear serves it to consumers in either direction.
 
@@ -1403,7 +1403,7 @@ provider:
     foo-extension
 
 placement:
-    different processes
+    different applications
 
 Possible fixes:
     colocate components
@@ -1483,7 +1483,7 @@ Avoid reintroducing a generic `entrypoint` flag.
 The mapping above -- one gear, several roles, each with its own directory name -- is the part the
 runtime cannot do. A worker's directory identity *is* its anchor gear's id, taken verbatim from a
 field fixed in the binary, with no configuration override
-(`crates/gearbox-ir/src/resolved.rs`, on `ResolvedProcess::anchor`). One binary therefore registers
+(`crates/gearbox-ir/src/resolved.rs`, on `ResolvedApplication::anchor`). One binary therefore registers
 under exactly one name, and "dispatcher -> event-broker, ingest -> event-broker-ingest" would need
 three.
 
@@ -1778,7 +1778,7 @@ The deterministic Rust resolver should handle:
 dependency closure
 contract compatibility
 placement constraints
-process grouping
+application grouping
 local/remote binding derivation
 transport selection
 capability matching
@@ -1878,11 +1878,11 @@ This graph can be consumed by:
 
 ---
 
-# 47. Canonical Build Output: Generated Process Crates
+# 47. Canonical Build Output: Generated Application Crates
 
 One important earlier observation remains valuable:
 
-A major obstacle to “Gear = process/pod” is not necessarily runtime support.
+A major obstacle to “Gear = application/pod” is not necessarily runtime support.
 
 It is the burden of manually creating and maintaining many application crates.
 
@@ -1908,29 +1908,29 @@ Example:
         registered_gears.rs
 ```
 
-Each resolved process becomes a generated build target.
+Each resolved application becomes a generated build target.
 
 ---
 
-# 48. Process Topology Is a Resolver Output
+# 48. Application Topology Is a Resolver Output
 
 Example `product.lock` concept:
 
 ```toml
-[[process]]
+[[applications]]
 name = "mini-chat"
 gears = ["mini-chat", "types-registry"]
 replicas = 3
 
-[[process]]
+[[applications]]
 name = "authn-resolver"
 gears = ["authn-resolver"]
 replicas = 2
 ```
 
-Hard/co-location dependencies determine process grouping.
+Hard/co-location dependencies determine application grouping.
 
-Remote-capable contract edges can cross those process boundaries.
+Remote-capable contract edges can cross those boundaries.
 
 ---
 
@@ -1939,7 +1939,7 @@ Remote-capable contract edges can cross those process boundaries.
 The resolved product can generate:
 
 ```text
-Cargo.toml per process
+Cargo.toml per application
 main.rs
 registered_gears.rs
 Dockerfile per image
@@ -2205,7 +2205,7 @@ would claim a surface that does not exist.
 **Artifacts are absent** because they need `capabilities.generate`, which this
 engine reports as `false`. It returns when the generator does.
 
-Processes, on the other hand, is a branch §60 does not list and the resolver
+Applications, on the other hand, is a branch §60 does not list and the resolver
 computes -- and it is the one that makes co-location legible, since a gear reached
 by two closures appears in both boxes. Added.
 
@@ -2651,7 +2651,7 @@ gear.gdl       --> declared   --+
 ```
 
 What genuinely does get replaced is *handwritten registration code* — `registered_gears.rs` and the
-per-process `main.rs`, which are Gearbox-owned composition artefacts, not gear source. See ADR
+per-application `main.rs`, which are Gearbox-owned composition artefacts, not gear source. See ADR
 `cpt-gearbox-adr-macro-projected-catalogue`.
 
 ---
@@ -2827,7 +2827,7 @@ Verify:
 
 ```text
 product resolves
-one process where appropriate
+one application where appropriate
 local bindings resolve correctly
 build succeeds
 runtime starts
@@ -2841,7 +2841,7 @@ diagnostics/explanation graph are populated
 Verify:
 
 ```text
-multiple generated process crates
+multiple generated application crates
 DirectoryService / endpoint resolution works
 remote bindings become WireOutcome::Remote
 critical remote dependencies affect readiness
@@ -2934,7 +2934,7 @@ Use the same Gear source and product intent with:
 deployment = self-hosted
 ```
 
-and prove generated process composition works.
+and prove generated application composition works.
 
 ---
 
@@ -2984,9 +2984,9 @@ Verify that the resolver can validate/select an implementation without duplicati
 
 ---
 
-# 93. Spike A7: Process Crate Generation
+# 93. Spike A7: Application Crate Generation
 
-Generate a standalone Cargo crate for a resolved process outside the monorepo.
+Generate a standalone Cargo crate for a resolved application outside the monorepo.
 
 Prove it builds successfully from pinned sources.
 
@@ -3080,7 +3080,7 @@ Possible result:
 Product: cyber-protect
 Deployment: kubernetes
 
-Processes:
+Applications:
   event-broker-ingest x3
   event-broker-delivery x2
   authn-resolver x2
@@ -3240,7 +3240,7 @@ Write `product.lock`.
 Generate:
 
 ```text
-resolved process crates
+resolved application crates
 Cargo manifests
 registered gears
 binaries
@@ -3463,7 +3463,7 @@ The detailed repository-aware design should still answer:
 16. Which cluster capabilities are statically discoverable?
 17. How are runtime config schemas attached to the product model?
 18. What is generated versus operator-owned in Helm?
-19. How should process/image grouping be overridden?
+19. How should application/image grouping be overridden?
 20. How should proposal transactions be represented for MCP?
 
 ---
@@ -3691,7 +3691,7 @@ This vision intentionally combines:
 - cluster capability/provider design;
 - existing build/run/generator work;
 - known-good mini-chat and OoP examples identified during earlier repository review;
-- the earlier `product.lock`, generated-process, Helm, and external-integrator ideas;
+- the earlier `product.lock`, generated-application, Helm, and external-integrator ideas;
 - the newer decision to give product metadata one home in `gear.gdl` while leaving every Rust
   attribute authoritative for what it already declares
   (ADR `cpt-gearbox-adr-macro-projected-catalogue`);

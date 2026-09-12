@@ -19,7 +19,7 @@ import { expect, openProduct, productSection, test } from "../fixtures/studio";
  * **Read across the stages.** The Product view is
  * `Overview · Gears · Topology · Validation` since 2026-09-07 -- one strip had
  * become the whole product -- so a single DOM snapshot can no longer see the
- * gears and the processes at once. Each stage is visited and the parts are
+ * gears and the applications at once. Each stage is visited and the parts are
  * merged, which keeps every claim below about the product rather than about the
  * panel's shape.
  */
@@ -36,8 +36,8 @@ async function shown(page: import("@playwright/test").Page) {
   return {
     profile: header.profile,
     lock: header.lock,
-    processes: topology.processes,
-    processGears: topology.processGears,
+    applications: topology.applications,
+    applicationGears: topology.applicationGears,
     modes: topology.modes,
     mechanisms: topology.mechanisms,
     askedFor: gears.askedFor,
@@ -60,8 +60,8 @@ async function snapshot(page: import("@playwright/test").Page) {
     return {
       profile: root.querySelector("[data-resolved-profile]")?.getAttribute("data-resolved-profile") ?? "",
       lock: root.querySelector("[data-lock-hash]")?.getAttribute("data-lock-hash") ?? "",
-      processes: attrs("[data-application]", "data-application"),
-      processGears: Array.from(root.querySelectorAll(".gbx-application")).map((row) => ({
+      applications: attrs("[data-application]", "data-application"),
+      applicationGears: Array.from(root.querySelectorAll(".gbx-application")).map((row) => ({
         name: row.getAttribute("data-application") ?? "",
         gears: (row.querySelector(".gbx-application-gears")?.textContent ?? "")
           .split(",")
@@ -165,26 +165,26 @@ test.describe("a product resolved across profiles", () => {
     expect(registry?.why).toContain("co-located with");
   });
 
-  test("every gear in the closure ends up in some process [plan §9: no orphans]", async ({
+  test("every gear in the closure ends up in some application [plan §9: no orphans]", async ({
     studio,
   }) => {
     // The invariant that caught a real resolver bug twice during M4: partitioning
-    // built one process from the wrong anchor and left five of six gears out, and
+    // built one application from the wrong anchor and left five of six gears out, and
     // the code reported its own mistake as orphans. A gear that is in the product
-    // and in no process is a gear nothing will build.
+    // and in no application is a gear nothing will build.
     await openProduct(studio.page, "prod");
     const state = await shown(studio.page);
     const closure = new Set([...state.askedFor, ...state.pulledIn.map((g) => g.id)]);
-    const placed = new Set(state.processGears.flatMap((process) => process.gears));
+    const placed = new Set(state.applicationGears.flatMap((application) => application.gears));
     expect(closure.size).toBeGreaterThan(0);
     expect([...closure].filter((gear) => !placed.has(gear))).toEqual([]);
     expect([...placed].filter((gear) => !closure.has(gear))).toEqual([]);
   });
 
-  test("processes overlap rather than partition the gears [plan §9: closure not partition]", async ({
+  test("applications overlap rather than partition the gears [plan §9: closure not partition]", async ({
     studio,
   }) => {
-    // prod is the only profile with more than one process, so it is the only place
+    // prod is the only profile with more than one application, so it is the only place
     // overlap could show. On this corpus it does not, and that is a property of
     // the corpus rather than of the resolver: the two extra anchors --
     // `api-contracts` and `api-contracts-consumer` -- declare no `deps`, so their
@@ -198,11 +198,11 @@ test.describe("a product resolved across profiles", () => {
     // property on the catalogue side, where it *is* observable.
     await openProduct(studio.page, "prod");
     const state = await shown(studio.page);
-    expect(state.processes.length).toBeGreaterThan(1);
+    expect(state.applications.length).toBeGreaterThan(1);
 
     const counts = new Map<string, number>();
-    for (const process of state.processGears) {
-      for (const gear of process.gears) {
+    for (const application of state.applicationGears) {
+      for (const gear of application.gears) {
         counts.set(gear, (counts.get(gear) ?? 0) + 1);
       }
     }

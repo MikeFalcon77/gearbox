@@ -22,7 +22,7 @@ const DEFAULT_LOCK: &str = "product.lock";
 
 #[derive(Subcommand)]
 pub enum LockQuery {
-    /// List the gears composed into one process.
+    /// List the gears composed into one application.
     ///
     /// The reference side of the `--list-registered-gears` oracle: the binary
     /// reports what the linker and `inventory` actually produced, this reports
@@ -33,7 +33,7 @@ pub enum LockQuery {
         #[arg(long, value_name = "FILE")]
         lock: Option<PathBuf>,
 
-        /// Which process.
+        /// Which application.
         #[arg(long, value_name = "ID")]
         application: String,
 

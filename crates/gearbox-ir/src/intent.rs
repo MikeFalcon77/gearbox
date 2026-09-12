@@ -131,7 +131,7 @@ pub enum DeploymentProfileDecl {
     /// implemented, so this profile is one machine.
     SelfHosted {
         id: ProfileId,
-        /// Which process is the host.
+        /// Which application is the host.
         host: ApplicationId,
         discovery: Discovery,
         /// Where worker binaries will be built, needed to write each worker's
