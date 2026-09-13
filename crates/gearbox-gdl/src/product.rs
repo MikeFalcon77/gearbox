@@ -3,7 +3,7 @@
 //! A product description states operator intent. The shape that matters most is
 //! that **every deployment profile is declared as data**, and the one to resolve
 //! is chosen at resolve time (`gearbox resolve --profile <id>`). That is why
-//! `bind`, `cluster_profile` and `process` each carry a `profiles = [...]` list
+//! `bind`, `cluster_profile` and `application` each carry a `profiles = [...]` list
 //! instead of the file carrying an `if`: GDL has no `if`, by design, and a
 //! description that could branch on the profile would be a program whose output
 //! depends on how it was invoked.
@@ -162,7 +162,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     /// `path("...")` -- a local directory, relative to the description.
     ///
     /// Positional, like the other single-argument constructors (`provider`,
-    /// `use_gear`, `process`): `path(at = "...")` would name the obvious.
+    /// `use_gear`, `application`): `path(at = "...")` would name the obvious.
     fn path(#[starlark(require = pos)] at: &str) -> anyhow::Result<SourceAtRecord> {
         Ok(SourceAtRecord {
             kind: "path".to_owned(),
@@ -412,7 +412,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         })
     }
 
-    /// `process("name", anchor = ..., replicas = ..., profiles = [...])`
+    /// `application("name", anchor = ..., replicas = ..., profiles = [...])`
     fn application(
         #[starlark(require = pos)] name: &str,
         #[starlark(require = named)] anchor: &str,

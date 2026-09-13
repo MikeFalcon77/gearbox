@@ -321,9 +321,25 @@ an enumeration of ids, with the same weakness the reference matching inherits.
 * Refines `cpt-gearbox-fr-explain` and `cpt-gearbox-nfr-explainability`
   indirectly: a referenced gear's inclusion reason is a new answer to "why is
   this here".
-* Relaxes the rule GBX0301 enforces (`resolve/structural.rs:212-228`).
-* Retires the holding position GBX0411 took (`resolve/bindings.rs`), which
-  refuses a declared endpoint until this decision exists.
+* **Will relax** the rule GBX0301 enforces (`resolve/structural.rs:212-228`).
+* **Will retire** the holding position GBX0411 took (`resolve/bindings.rs`),
+  which refuses a declared endpoint until this decision exists.
+
+> **Both are future tense, and were written in the past tense by mistake.**
+> Neither has happened: GBX0411 is still an error and its help text still tells
+> an operator "Pointing at a provider outside the product is not expressible
+> yet", and GBX0301 still says a gear is "not in the catalogue". An ADR that
+> claims a change it has not made is worse than one that claims nothing, because
+> the next reader stops checking.
+>
+> **Decisions 2, 3 and 4 have landed** — `application`, the configurable `apps/`
+> layout with GBX0706 for the tree it leaves behind, and `cargo_features` with
+> GBX0213 and GBX0316. **Decision 1 — `installation` — has not been started.**
+> Nothing in `crates/` mentions it, `product(...)` takes no reference to another
+> lock, `InclusionReason` still has its three original variants, the version-skew
+> diagnostic does not exist, and the corpus still holds one product where this
+> decision's Consequences call a second one "necessary, not optional". Until that
+> work happens, this ADR stays `proposed`.
 * Extends ADR-0002: a referenced lock is a locator, and what is read out of it
   is projected rather than restated.
 * Was blocked by ADR-0014's open question about two profiles of one kind in

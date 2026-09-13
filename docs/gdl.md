@@ -11,7 +11,7 @@ Two file kinds, two vocabularies. `gear()` is not callable in a product file; `p
 
 Zero or two top-level declarations is **GBX0105**. Profile-specific behaviour is a `profiles = [...]` list on the declaration, not a branch.
 
-Arguments are keyword-only except the positional constructors listed below. An unknown argument is **GBX0106**. Records returned by constructors (`cargo(...)`, `provide(...)`, …) are opaque: pass them on, do not inspect them.
+Arguments are keyword-only except for eight positional ones: `feature` and `fail` in a `gear.gdl`, and `path`, `registry`, `plugin`, `use_gear`, `application`, `provider` in a `product.gdl`. An unknown **named** argument is **GBX0106**; a stray positional one is **GBX0102**, because it never reaches the argument name at all. Records returned by constructors (`cargo(...)`, `provide(...)`, …) are opaque: pass them on, do not inspect them.
 
 ---
 
@@ -84,7 +84,7 @@ prefer.existing_infrastructure() | prefer.fewer_applications() | prefer.isolate(
 
 `cluster_cap.prefix_watch` applies only to `cluster.cache`; a lock and an election take `linearizable` and nothing else. Asking for it on either is an error.
 
-`cap.*` and `contract_kind.*` have no legal use site. The only arguments that would take them — `gear(runtime_caps = ...)` and `provide(kind = ...)` — are accepted only to be refused by name (**GBX0210**), because those facts are projected from Rust. The members resolve so that the refusal is about the argument rather than about the attribute.
+`cap.*` and `contract_kind.*` have no legal use site. The only arguments that would take them — `gear(runtime_caps = ...)`, `provide(kind = ...)` and `consume(kind = ...)` — are accepted only to be refused by name (**GBX0210**), because those facts are projected from Rust. The members resolve so that the refusal is about the argument rather than about the attribute.
 
 ---
 
@@ -116,7 +116,7 @@ Paths relative to the description. Only needed when documents are not at the usu
 config(rust?, exposes = [])
 ```
 
-`rust` is the config struct path. `exposes` is which fields to show, in order. A name that is not a field of the struct is an error later, at projection.
+`rust` is the config struct path, and it is optional because the projector can usually find the struct itself — from the single `ctx.config*()` call in `impl Gear::init`. Declare it only when that search is ambiguous. `exposes` is which fields to show, in order. A name that is not a field of the struct is an error later, at projection.
 
 ### `feature(...)` → cargo feature
 
@@ -136,7 +136,7 @@ One Cargo feature the gear offers, for `gear(cargo_features = [...])`. `name` is
 endpoint(name, config_key?, default_port?, via?)
 ```
 
-`default_port` is 0–65535. `via` marks a gear mounted on another host (usually `"rest_host"`) rather than binding itself.
+`default_port` is 0–65535. `via` marks a gear mounted on another host (usually `"rest_host"`) rather than binding itself. `config_key` is the field the gear reads its listen address from — a REST host reads `bind_addr`, a gRPC hub reads `listen_addr` — and generation writes the resolved address there.
 
 ### `rest(...)` → rest
 
@@ -246,7 +246,7 @@ These fields are accepted only to be refused by name (**GBX0210**). They live in
 
 Every deployment profile is data. Resolve chooses one with `--profile`. Scope a `bind` / `cluster_profile` / `application` / `plugin` with `profiles = ["dev", "prod"]`. Empty `profiles` means all declared profiles. Two declarations that cover the same subject in the same profile are **GBX0110**. A `profiles` entry naming an id the file does not declare is **GBX0102**; **GBX0111** is the other direction — `--profile` asking for a profile this product has none of.
 
-Positional constructors: `path`, `registry`, `plugin`, `use_gear`, `application`, `provider`. Everything else is keyword-only.
+Positional constructors in a product file: `path`, `registry`, `plugin`, `use_gear`, `application`, `provider`. Everything else is keyword-only. (`gear.gdl` adds `feature` and `fail`.)
 
 ### Sources
 
@@ -269,7 +269,7 @@ self_hosted(id, host, worker_discovery, target_dir?, cargo_profile?)
 kubernetes(id, discovery, namespace?, image_registry?)
 ```
 
-`id` is kebab-case. Duplicate ids are **GBX0110**. `worker_discovery` / `discovery` is `"static"` or `"directory"`, and nothing else. `host` is an application name, kebab-case. `cargo_profile` is a single path segment — `dev`, `release`, or a custom Cargo profile; `dev` writes under `target/debug`.
+`id` is kebab-case. Duplicate ids are **GBX0110**. `worker_discovery` / `discovery` is `"static"` or `"directory"`, and nothing else. `host` is an application name, kebab-case. `cargo_profile` is a single path segment — `dev`, `release`, or a custom Cargo profile; `dev` writes under `target/debug`. `target_dir` is the Cargo target directory the host spawns workers out of, **as written** and relative to the description; a `self_hosted` profile without one cannot say where a worker binary is, which is **GBX0310**. On `kubernetes`, `namespace` and `image_registry` prefix what the chart deploys and where it pulls from; both are optional and both end up in the generated values rather than in the lock.
 
 ### Gears
 
@@ -305,7 +305,7 @@ cluster_profile(name, cache, leader_election?, lock?, profiles = [])
 application("name", anchor, replicas = 1, profiles = [])
 prefer.existing_infrastructure()
 prefer.fewer_applications()
-prefer.isolate(gear)
+prefer.isolate(gear = "api-gateway")
 ```
 
 Only the application name is positional: `application("audit", anchor = "api-contracts-consumer")`. `anchor` is a kebab gear id. `replicas` must be ≥ 1.
@@ -393,11 +393,18 @@ This table is the authoring subset, curated and hand-written, because the stage 
 | GBX0108 | `category` is not one the platform uses (warning) | building the catalogue |
 | GBX0109 | a `docs(...)` path does not exist | building the catalogue |
 | GBX0112 | `config_schema` names no usable struct | building the catalogue |
+| GBX0212 | `exposes` names a field the struct does not declare | building the catalogue |
+| GBX0213 | `cargo_features` names a feature the crate does not declare | building the catalogue |
 | GBX0113 | `config` value has the wrong type | validate / resolve |
 | GBX0114 | `config` key is derived from topology (warning) | validate / resolve |
 | GBX0115 | `config` key the gear does not declare | validate / resolve |
 | GBX0116 | a credential is written into the file | validate / resolve |
 | GBX0111 | `--profile` asked for a profile the file does not declare | resolve |
+| GBX0316 | a selected feature belongs to another deployment kind | resolve |
+| GBX0506 | a provider needs a credential and the scope names no source | resolve |
+| GBX0508 | a `cluster_profile` name no selected gear implements | resolve |
+| GBX0601, GBX0602 | `role(...)` and sharding are recorded, not supported (warnings) | resolve |
+| GBX0706 | a generated crate directory the product no longer builds (warning) | generate |
 
 ---
 
@@ -447,6 +454,10 @@ gear(
         cluster.leader_election(profile = "event-broker"),
     ],
     serves = [endpoint(name = "rest", via = "rest_host")],
+    cargo_features = [
+        feature("otel"),
+        feature("k8s-auth", kinds = ["kubernetes"]),
+    ],
 )
 ```
 
@@ -457,15 +468,21 @@ product(
     id = "payments-demo",
     name = "Payments Demo",
     version = "0.1.0",
+    layout = "apps",
     sources = [source(id = "gears-rust", at = path("../../../gears-rust"))],
     profiles = [
         embedded(id = "dev"),
-        self_hosted(id = "local", host = "gateway", worker_discovery = "directory"),
+        self_hosted(id = "local", host = "gateway", worker_discovery = "directory",
+                    target_dir = "../../../gears-rust/target"),
         kubernetes(id = "prod", discovery = "static", namespace = "payments"),
     ],
     default_profile = "dev",
     gears = [
         use_gear("api-gateway", source = "gears-rust"),
+        use_gear("gear-orchestrator", source = "gears-rust"),
+        use_gear("api-contracts", source = "gears-rust"),
+        use_gear("api-contracts-consumer", source = "gears-rust"),
+        use_gear("cluster", source = "gears-rust"),
         use_gear("authn-resolver", source = "gears-rust", plugins = [
             plugin("static-authn-plugin", profiles = ["dev", "local"],
                    config = {"mode": "accept_all"}),
@@ -488,7 +505,8 @@ product(
         cluster_profile(
             name = "event-broker",
             profiles = ["local", "prod"],
-            cache = provider("postgres", connection_string = "postgres://…", schema = "cluster"),
+            cache = provider("postgres", connection_string = "postgres://…", schema = "cluster",
+                             secret_ref = "env:PG_PASSWORD"),
         ),
     ],
     applications = [application("audit", anchor = "api-contracts-consumer", replicas = 2,

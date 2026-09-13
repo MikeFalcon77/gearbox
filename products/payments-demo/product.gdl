@@ -3,7 +3,7 @@
 # All three deployment profiles are declared as DATA and selected at resolve
 # time (`gearbox resolve --profile <id>`). There is no `if` anywhere -- GDL has
 # none by design -- so profile-scoping is a `profiles = [...]` list field on
-# `bind`, `cluster_profile` and `process`. A description that could branch on
+# `bind`, `cluster_profile` and `application`. A description that could branch on
 # the profile would be a program whose output depends on how it was invoked.
 
 product(
