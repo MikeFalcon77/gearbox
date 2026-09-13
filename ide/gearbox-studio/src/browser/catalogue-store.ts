@@ -259,19 +259,6 @@ export class CatalogueStore implements GearboxClient {
    * claiming it is still projecting.
    */
   async load(session?: StudioSession): Promise<void> {
-    // **One load at a time, and the second waits rather than replacing it.**
-    //
-    // `initialize` disposes the engine and spawns a new one, so two loads in the
-    // air mean two respawns -- and the second one's spawn can land while the
-    // first's `loadProduct` is mid-flight, which the first sees as an engine that
-    // died under it. That is a race the boot sequence walks straight into: the
-    // application starts one load at `onStart`, and a product session opening in
-    // the same tick starts another with the product's own roots.
-    //
-    // Queued, not deduplicated: `Reload Catalogue` after a load in flight has to
-    // actually re-read, so a second call cannot be answered with the first one's
-    // promise. It waits, then runs. The epoch guard still decides which load's
-    // answers are installed.
     // Remembered here, and **captured here**, which are two different things.
     //
     // `Reload Catalogue` and the reconnect path call `load()` with nothing and
@@ -287,7 +274,51 @@ export class CatalogueStore implements GearboxClient {
       this.session = session;
     }
     const forThisLoad = this.session;
+    return this.queued(() => this.doLoad(forThisLoad));
+  }
 
+  /**
+   * Re-read the source roots **without restarting the engine**.
+   *
+   * `load()` respawns, because `initialize` is what changes the roots and the
+   * write boundary, and a catalogue only ever belongs to the roots it was
+   * scanned from. Nothing about re-reading *the same* roots needs that:
+   * `gearbox/catalogue/load` re-runs the staged load from disk and replaces the
+   * server's cached catalogue on the process that is already running. The
+   * pairing of the two calls in `doLoad` is a client-side habit, not a protocol
+   * requirement, and this is the path that does not pay for it.
+   *
+   * For the filesystem watcher, which fires on every saved `gear.gdl`. A
+   * respawn per save would be a restart wearing a refresh's name.
+   *
+   * Never rejects, for the same reason `load()` does not.
+   */
+  async refresh(): Promise<void> {
+    return this.queued(() => this.doRefresh());
+  }
+
+  /**
+   * Run `work` after whatever is already in flight, never concurrently with it.
+   *
+   * **One at a time, and the second waits rather than replacing it.**
+   *
+   * `initialize` disposes the engine and spawns a new one, so two loads in the
+   * air mean two respawns -- and the second one's spawn can land while the
+   * first's `loadProduct` is mid-flight, which the first sees as an engine that
+   * died under it. That is a race the boot sequence walks straight into: the
+   * application starts one load at `onStart`, and a product session opening in
+   * the same tick starts another with the product's own roots.
+   *
+   * Queued, not deduplicated: `Reload Catalogue` after a load in flight has to
+   * actually re-read, so a second call cannot be answered with the first one's
+   * promise. It waits, then runs. The epoch guard still decides which load's
+   * answers are installed.
+   *
+   * A refresh joins the same queue as a load, because they mutate the same rows
+   * and the same streaming epoch -- a refresh reading the tree while a respawn
+   * is half-done would install answers from an engine that is being killed.
+   */
+  protected async queued(work: () => Promise<void>): Promise<void> {
     const previous = this.loading;
     const started = (async () => {
       // The previous load never rejects -- a failure is a state -- but `catch`
@@ -296,7 +327,7 @@ export class CatalogueStore implements GearboxClient {
       if (previous !== undefined) {
         await previous.catch(() => undefined);
       }
-      await this.doLoad(forThisLoad);
+      await work();
     })();
     this.loading = started;
     try {
@@ -327,27 +358,10 @@ export class CatalogueStore implements GearboxClient {
       this.engine.markConnected();
       this.capabilities = init.capabilities;
       this.rootsById = new Map((init.roots ?? []).map((r) => [r.id, r.path]));
-      const failedRoots = init.failed_roots ?? [];
 
-      // Resolves at the S1/S2 boundary: the whole tree, none of it projected.
-      const loaded = await this.service.loadCatalogue();
-      if (epoch !== this.epoch) {
+      if (!(await this.installCatalogue(epoch, init.failed_roots ?? []))) {
         return;
       }
-      for (const gear of loaded.pending) {
-        this.rowsByKey.set(keyFor(gear.source, gear.gdl_path), { kind: "pending", gear });
-      }
-      this.state = {
-        status: "loading",
-        rows: this.sorted(),
-        diagnostics: loaded.diagnostics,
-        failedRoots,
-        error: undefined,
-        total: loaded.total,
-        completed: 0,
-      };
-      // The boundary is passed: projections for *this* load are now welcome.
-      this.streaming = epoch;
     } catch (error) {
       if (epoch !== this.epoch) {
         return;
@@ -363,6 +377,104 @@ export class CatalogueStore implements GearboxClient {
       this.rowsByKey.clear();
     }
     this.onChangedEmitter.fire();
+  }
+
+  /**
+   * One staged read, against an engine that is already running.
+   *
+   * The half both paths share, extracted so they cannot drift: `doLoad` runs it
+   * after respawning, `doRefresh` runs it alone. `false` means a newer load
+   * superseded this one, and the caller must stop without firing a change for
+   * answers nobody is waiting for.
+   */
+  protected async installCatalogue(
+    epoch: number,
+    failedRoots: CatalogueState["failedRoots"],
+    keepProjected = false,
+  ): Promise<boolean> {
+    // Resolves at the S1/S2 boundary: the whole tree, none of it projected.
+    const loaded = await this.service.loadCatalogue();
+    if (epoch !== this.epoch) {
+      return false;
+    }
+    // **The key set is replaced; the facts behind it are not, on a refresh.**
+    //
+    // Rebuilt from `pending` rather than merged into, because that is what
+    // makes a *deleted* gear disappear: it has no entry here and no
+    // `catalogueChanged` to announce its absence, so anything additive would
+    // keep its row forever.
+    //
+    // But `pending` is the S1 answer -- every gear, none of them projected --
+    // and installing it verbatim would downgrade every row that already had
+    // its facts, for the length of the S2 pass. That is not cosmetic: the
+    // dependency graph renders `rows.filter(isProjected)`, so a refresh would
+    // empty it for about a second on every saved `gear.gdl`. A regression
+    // claim caught exactly that (`every edge is directed`), and it was right
+    // to. On a refresh the roots have not moved, so a row that was projected
+    // still describes the gear at that path until its replacement lands.
+    //
+    // A *load* keeps the plain behaviour: the roots may have changed, so a
+    // carried-over projection could be about a gear the new roots do not have.
+    const previous = this.rowsByKey;
+    this.rowsByKey = new Map();
+    for (const gear of loaded.pending) {
+      const key = keyFor(gear.source, gear.gdl_path);
+      const carried = keepProjected ? previous.get(key) : undefined;
+      this.rowsByKey.set(
+        key,
+        carried?.kind === "projected" ? carried : { kind: "pending", gear },
+      );
+    }
+    this.state = {
+      status: "loading",
+      rows: this.sorted(),
+      diagnostics: loaded.diagnostics,
+      failedRoots,
+      error: undefined,
+      total: loaded.total,
+      completed: 0,
+    };
+    // The boundary is passed: projections for *this* load are now welcome.
+    this.streaming = epoch;
+    return true;
+  }
+
+  /**
+   * One re-read, on the engine that is already running.
+   *
+   * **What it deliberately does not do is blank the panel.** `doLoad` opens by
+   * clearing every row and setting `status: "loading"`, which is right when the
+   * roots are about to change: nothing on screen is known to still apply. Here
+   * the roots are the same and almost every row will come back identical, so
+   * emptying the Catalogue and the Inspector for the length of a rescan --
+   * on every save of every `gear.gdl` -- would be a worse answer to "it does
+   * not update" than leaving it alone. The rows stay until
+   * `installCatalogue` swaps them at the boundary.
+   */
+  protected async doRefresh(): Promise<void> {
+    const epoch = ++this.epoch;
+    // Stop accepting projections from the previous load immediately. They are
+    // about rows this read is replacing, and one arriving mid-flight would be
+    // installed under a key the new tree may not even have.
+    this.streaming = undefined;
+
+    try {
+      if (await this.installCatalogue(epoch, this.state.failedRoots, true)) {
+        this.onChangedEmitter.fire();
+      }
+      return;
+    } catch (error) {
+      if (epoch !== this.epoch) {
+        return;
+      }
+      // **Fall through to the full path rather than reporting a failure.**
+      // `loadCatalogue` refuses outright when the child is gone -- "the engine
+      // is not running" -- and that is a situation a respawn fixes and a
+      // refresh cannot. Paying for one here is paying for it exactly when it
+      // is the thing needed.
+      this.onLog(`catalogue refresh failed (${describe(error)}); reloading`);
+    }
+    await this.doLoad(this.session);
   }
 
   onCatalogueChanged(event: CatalogueChanged): void {

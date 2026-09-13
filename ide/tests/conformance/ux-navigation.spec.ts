@@ -544,4 +544,45 @@ test.describe("opening a product is one act", () => {
       writeFileSync(gdl, original);
     }
   });
+
+  test("saving a gear description re-reads the catalogue without a reload [plan §9.1: the panel shows what the file says]", async ({
+    freshStudio,
+  }) => {
+    // The other half of the same complaint. `product.gdl` was picked up above;
+    // a `gear.gdl` was not, and the reason recorded in `DescriptionWatchService`
+    // -- that catching it would mean respawning the engine -- turned out to be a
+    // client-side habit rather than a protocol requirement. `catalogue/load`
+    // re-reads on the process already running.
+    //
+    // The gear's `description` is the probe, and the choice is load-bearing.
+    // Not its `name`: `detailOf` finds a row *by* display name and four other
+    // claims call `detailOf("API Gateway")`, so a run interrupted between the
+    // write and the restore would break them with a failure naming nothing.
+    // Not a structural fact like `deps` either -- that moves resolutions this
+    // suite asserts on elsewhere. A description is declared, presentational,
+    // and pinned by nobody.
+    const { page } = freshStudio;
+    await settled(page);
+
+    // Selected *before* the edit, and not touched after it. The claim is that
+    // an open panel changes on its own; re-clicking the row afterwards would
+    // prove only that the store can be re-read, which was never in doubt.
+    const shown = await freshStudio.detailOf("API Gateway");
+    expect(shown, "the api-gateway row is in the catalogue").not.toBeNull();
+
+    const gdl = join(REPO, "../gears-rust/gears/system/api-gateway/gear.gdl");
+    const original = readFileSync(gdl, "utf8");
+    const probe = `watched at ${Date.now()}`;
+
+    try {
+      writeFileSync(gdl, original.replace(/description = "[^"]*"/, `description = "${probe}"`));
+      // No click, no command, no reveal between here and the assertion. The
+      // budget covers a 700ms settle plus a full staged rescan of the corpus.
+      await expect(page.locator(".gbx-detail")).toContainText(probe, { timeout: 60_000 });
+    } finally {
+      // Load-bearing: `global-setup` guards `products/` only, so nothing else
+      // in this suite would notice a `gear.gdl` left rewritten.
+      writeFileSync(gdl, original);
+    }
+  });
 });
