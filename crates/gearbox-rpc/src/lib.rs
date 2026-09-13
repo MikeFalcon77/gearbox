@@ -16,6 +16,10 @@
 pub mod protocol;
 
 #[cfg(test)]
+#[path = "initialize_tests.rs"]
+mod initialize_tests;
+
+#[cfg(test)]
 #[path = "preview_tests.rs"]
 mod preview_tests;
 
@@ -337,6 +341,15 @@ fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Re
         // roots -- which is exactly what a reconnecting client sends -- was
         // answered for the rest of the session out of a cache built from the
         // first set. Cheap to be wrong about, and impossible to notice.
+        //
+        // **Inside this `if`, deliberately.** `state.roots` is assigned here and
+        // nowhere else, so the cache provably cannot outlive a change of roots,
+        // and an `initialize` naming *no* roots changes none: what it keeps is
+        // still the catalogue of exactly these roots. Clearing it there would
+        // discard a valid cache and buy a full rescan with it. That is not
+        // obvious from the outside -- it has been reported as a bug -- so
+        // `initialize_tests.rs` pins all three cases rather than leaving the
+        // invariant to be inferred from where two statements sit.
         state.catalogue = None;
     }
     state.initialized = true;
@@ -2303,7 +2316,22 @@ fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> 
     // `None`, and did the entire scan again *non-staged*: the same seconds of
     // work, this time with no progress notifications and with the request thread
     // blocked, for a catalogue the client already had on screen.
-    state.catalogue = Some(scan.catalogue);
+    //
+    // **Only a load that ran to the end.** A stopped one is missing most of its
+    // gears, and caching it would have every later `product/resolve` answer out
+    // of a tree with holes in it -- `GBX0301`, "unknown gear", for gears that
+    // are on disk and were simply never reached.
+    //
+    // The stop today means the client is gone, and a gone client ends the
+    // request loop, so nothing would ever read this. The guard is for the
+    // sentence twenty lines above this one: cancellation is the answer to a slow
+    // load. When that exists, stopping early stops being fatal and starts being
+    // routine, and this becomes the line that poisons the session.
+    if disconnected {
+        state.catalogue = None;
+    } else {
+        state.catalogue = Some(scan.catalogue);
+    }
 
     if answered {
         return None;

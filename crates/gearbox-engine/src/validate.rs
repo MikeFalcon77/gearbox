@@ -78,6 +78,21 @@ pub fn validate_at(
     product: Option<&ProductIntent>,
     product_path: Option<&std::path::Path>,
 ) -> ValidateReport {
+    // **Loaded fresh, every time, and that is the point of the call.**
+    //
+    // The RPC server keeps a catalogue cache and `product/resolve` answers from
+    // it, so this looks like the one read path that forgot. It did not. Validate
+    // has a single caller -- the Gear Author's `Validate` button -- whose whole
+    // job is to say what is on disk *now*, after an edit the cache may not have
+    // seen. Answering from the cache would return what the client already has
+    // from `catalogue/load`: the button would stop checking and start
+    // restating. And `undescribed::find` below walks the filesystem regardless,
+    // so a cached answer would be half fresh and half stale, which is worse than
+    // either.
+    //
+    // The cost is one scan per press, in a session whose roots are usually the
+    // single gear being authored. Reported as waste once; recorded here so it is
+    // not reported again.
     let scan = crate::catalogue::load_catalogue(roots);
 
     let mut diagnostics = Diagnostics::new();
