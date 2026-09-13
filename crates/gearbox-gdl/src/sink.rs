@@ -84,6 +84,11 @@ pub struct ProductDecl {
     /// product -- one house template set shared by twenty products rather than
     /// twenty copies of it, which is what the convention alone forced.
     pub templates: Option<crate::records::SourceAtRecord>,
+    /// The directory generated application crates go under, when it says.
+    ///
+    /// Absent means `apps/`. A checkout generated before the layout was
+    /// configurable can say `processes` and keep the tree it has.
+    pub layout: Option<String>,
     pub profiles: Vec<crate::records::ProfileRecord>,
     pub gears: Vec<crate::records::UseGearRecord>,
     pub bindings: Vec<crate::records::BindRecord>,

@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **78**.
+Codes: **79**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -936,6 +936,7 @@ by declaring the edge.
 | [GBX0703](#gbx0703) | error | chart render or lint failed |
 | [GBX0704](#gbx0704) | error | could not read package metadata |
 | [GBX0705](#gbx0705) | warning | the lock carries a credential, which generation replaced |
+| [GBX0706](#gbx0706) | warning | a generated crate directory is no longer part of the product |
 
 ### GBX0701
 
@@ -971,4 +972,23 @@ A lock resolved by an older build carries a credential.
 A warning, not an error: generation replaces it, so nothing it writes
 carries the value. What the operator must still do is re-resolve, because
 the lock they have keeps it until they do.
+
+### GBX0706
+
+**a generated crate directory is no longer part of the product**
+
+A generated crate directory survives that this run does not write.
+
+**A warning with a named remedy, because the generator cannot delete.**
+Every fate `apply` has is create, update, keep or conflict, so an
+application removed from the description -- or a `layout` changed --
+leaves its old crate directory behind while the rewritten root
+`Cargo.toml` stops listing it. That is a package inside a workspace that
+neither includes nor excludes it, which `cargo metadata` and
+rust-analyzer refuse and a root `cargo build` does not, so nothing fails
+until someone opens the tree in an editor.
+
+Reported rather than pruned: the directory is the operator's, this build
+has no delete path worth trusting with a recursive remove, and a tree
+generated once under a different layout may hold work nobody wants gone.
 

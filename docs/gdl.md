@@ -308,6 +308,7 @@ product(
   gears,                            # use_gear(...)
   name?,                            # display name; omit → id
   templates?,                       # path("...") only; git/registry refused
+  layout?,                          # one directory name; omit → "apps"
   bindings = [],
   cluster_profiles = [],
   applications = [],
@@ -316,6 +317,12 @@ product(
 ```
 
 Omit `templates` to use a `templates/` directory beside the file.
+
+`layout` names the directory the generated application crates go under, one
+path segment: `apps/<name>/Cargo.toml` by default, `layout = "processes"` for a
+checkout generated before it was configurable. It is recorded in the lock, so
+changing it changes `lock_hash`. Generation has no delete path, so the old
+directory stays where it is and **GBX0706** names it.
 
 ---
 

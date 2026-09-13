@@ -15,7 +15,7 @@ use minijinja::context;
 use super::templates;
 use super::{GenerateError, GenerateInput, header, paths};
 
-/// `processes/<p>/src/main.rs`.
+/// `<layout>/<p>/src/main.rs`.
 ///
 /// # Errors
 /// Returns [`GenerateError::Template`] if the template cannot be rendered.
@@ -35,14 +35,14 @@ pub fn host_main(
     )?;
 
     Ok(FileEntry::text(
-        paths::rel(&["processes", application.name.as_str(), "src", "main.rs"])?,
+        paths::rel(&[input.layout(), application.name.as_str(), "src", "main.rs"])?,
         body,
         FileKind::Rust,
         Ownership::Generated,
     ))
 }
 
-/// `processes/<w>/src/main.rs` for a worker.
+/// `<layout>/<w>/src/main.rs` for a worker.
 ///
 /// A second function rather than a branch inside [`host_main`]: this module's
 /// shape is one function per file it produces, and the two entry points share
@@ -69,14 +69,14 @@ pub fn worker_main(
     )?;
 
     Ok(FileEntry::text(
-        paths::rel(&["processes", application.name.as_str(), "src", "main.rs"])?,
+        paths::rel(&[input.layout(), application.name.as_str(), "src", "main.rs"])?,
         body,
         FileKind::Rust,
         Ownership::Generated,
     ))
 }
 
-/// `processes/<p>/src/registered_gears.rs`.
+/// `<layout>/<p>/src/registered_gears.rs`.
 ///
 /// One `use <ident> as _;` per [`CargoRef::link`](gearbox_ir::CargoRef::link)
 /// entry, so a gear whose plugins are separate registrations inside one crate
@@ -139,7 +139,7 @@ pub fn registered_gears(
 
     Ok(FileEntry::text(
         paths::rel(&[
-            "processes",
+            input.layout(),
             application.name.as_str(),
             "src",
             "registered_gears.rs",

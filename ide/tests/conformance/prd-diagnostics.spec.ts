@@ -100,7 +100,7 @@ test.describe("diagnostics reach a person", () => {
     // satisfy the line above by accident.
     expect(prod.markers.some((marker) => !dev.markers.includes(marker))).toBe(true);
     // Deliberately *not* "every prod marker is gone". A diagnostic both profiles
-    // report -- GBX0410 says `prefer.fewer_processes` is not honoured, and the
+    // report -- GBX0410 says `prefer.fewer_applications` is not honoured, and the
     // description declares it whatever the profile -- is not stale, and demanding
     // its removal made this claim fail the day such a diagnostic first existed.
   });

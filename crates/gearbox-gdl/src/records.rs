@@ -415,7 +415,7 @@ gdl_record! {
 gdl_record! {
     /// `prefer.existing_infrastructure()` and friends.
     PreferenceRecord as "gdl_preference" {
-        /// `existing-infrastructure`, `fewer-processes` or `isolate`.
+        /// `existing-infrastructure`, `fewer-applications` or `isolate`.
         pub kind: String,
         pub gear: Option<String>,
     }

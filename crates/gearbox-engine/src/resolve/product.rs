@@ -45,6 +45,10 @@ pub fn assemble(
             version: intent.version.clone(),
             profile: resolution.profile.clone(),
             profile_kind: declaration.map_or("unknown", |d| d.kind()).to_owned(),
+            layout: intent
+                .layout
+                .clone()
+                .unwrap_or_else(|| gearbox_ir::DEFAULT_LAYOUT.to_owned()),
             gearbox_version: env!("CARGO_PKG_VERSION").to_owned(),
             // Filled in below, once the body is final. Hashing it before that
             // would hash a value that no longer describes the thing.

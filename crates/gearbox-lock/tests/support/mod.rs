@@ -319,6 +319,7 @@ pub fn fixture() -> ResolvedProduct {
             version: "0.1.0".to_owned(),
             profile: ProfileId::new("local").unwrap(),
             profile_kind: "self-hosted".to_owned(),
+            layout: gearbox_ir::DEFAULT_LAYOUT.to_owned(),
             gearbox_version: "0.1.0".to_owned(),
             lock_hash: String::new(),
         },

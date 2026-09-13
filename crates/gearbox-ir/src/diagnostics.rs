@@ -940,6 +940,22 @@ diagnostic_codes! {
     /// carries the value. What the operator must still do is re-resolve, because
     /// the lock they have keeps it until they do.
     GenLiteralSecretInLock = "GBX0705", Generator, Warning, false, "the lock carries a credential, which generation replaced";
+
+    /// A generated crate directory survives that this run does not write.
+    ///
+    /// **A warning with a named remedy, because the generator cannot delete.**
+    /// Every fate `apply` has is create, update, keep or conflict, so an
+    /// application removed from the description -- or a `layout` changed --
+    /// leaves its old crate directory behind while the rewritten root
+    /// `Cargo.toml` stops listing it. That is a package inside a workspace that
+    /// neither includes nor excludes it, which `cargo metadata` and
+    /// rust-analyzer refuse and a root `cargo build` does not, so nothing fails
+    /// until someone opens the tree in an editor.
+    ///
+    /// Reported rather than pruned: the directory is the operator's, this build
+    /// has no delete path worth trusting with a recursive remove, and a tree
+    /// generated once under a different layout may hold work nobody wants gone.
+    GenOrphanedCrate = "GBX0706", Generator, Warning, false, "a generated crate directory is no longer part of the product";
 }
 
 /// A diagnostic code string that this build does not know.

@@ -545,6 +545,15 @@ pub struct ProductIntent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub templates: Option<String>,
 
+    /// Which directory the generated application crates go under.
+    ///
+    /// Product-level rather than profile-level: a directory name is a fact
+    /// about the tree, and one description produces one tree shape whichever
+    /// profile it resolves for. Absent means
+    /// [`DEFAULT_LAYOUT`](crate::resolved::DEFAULT_LAYOUT).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<String>,
+
     pub profiles: BTreeMap<ProfileId, DeploymentProfileDecl>,
 
     pub default_profile: ProfileId,

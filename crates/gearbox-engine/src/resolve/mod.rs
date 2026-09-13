@@ -126,7 +126,7 @@ pub fn resolve_at(
                 diagnostics.push(
                     Diagnostic::new(
                         DiagnosticCode::PreferenceNotHonoured,
-                        "`prefer.fewer_processes` is recorded but the resolver does not honour it",
+                        "`prefer.fewer_applications` is recorded but the resolver does not honour it",
                     )
                     .with_help(
                         "remove it, or wait until application packing is implemented; it does not \

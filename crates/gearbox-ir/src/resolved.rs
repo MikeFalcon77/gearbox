@@ -736,6 +736,32 @@ pub struct CutCandidate {
     pub estimated_savings: CutSavings,
 }
 
+/// Where generated application crates live when the description says nothing.
+///
+/// `apps/`, not `processes/`: the directory names what it holds, and what it
+/// holds is one application per entry (ADR-0016).
+pub const DEFAULT_LAYOUT: &str = "apps";
+
+fn default_layout() -> String {
+    DEFAULT_LAYOUT.to_owned()
+}
+
+/// Whether `segment` may name the generated application directory.
+///
+/// One path segment, so it cannot climb out of the output root or bury the
+/// crates under a path the workspace manifest would have to spell differently.
+/// Deliberately permissive about the spelling itself -- `processes` has to keep
+/// working for a checkout that already has one.
+#[must_use]
+pub fn is_valid_layout(segment: &str) -> bool {
+    !segment.is_empty()
+        && segment != "."
+        && segment != ".."
+        && !segment.contains('/')
+        && !segment.contains('\\')
+        && !segment.starts_with('.')
+}
+
 /// Identity and provenance of a resolved product.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ResolvedProductHeader {
@@ -746,6 +772,24 @@ pub struct ResolvedProductHeader {
 
     /// The profile family: `embedded`, `self-hosted`, or `kubernetes`.
     pub profile_kind: String,
+
+    /// The directory the generated application crates live under, one path
+    /// segment. Default [`DEFAULT_LAYOUT`].
+    ///
+    /// **In the lock rather than only in the intent**, unlike `templates`, and
+    /// for a reason the orphan hazard makes concrete. The generator has no
+    /// delete path: every fate is create, update, keep or conflict. So a tree
+    /// generated under one layout and regenerated under another keeps both, and
+    /// the rewritten root `Cargo.toml` lists only the new one -- a package
+    /// inside a workspace that neither includes nor excludes it, which is the
+    /// state `generate::workspace` exists to prevent. Recording the layout in
+    /// the lock, which is written *into* the generated tree, is what lets the
+    /// next run see what the last one used and say so.
+    ///
+    /// It is covered by `lock_hash` as every other field is, so changing the
+    /// layout is a change to the lock rather than a silent move.
+    #[serde(default = "default_layout")]
+    pub layout: String,
 
     /// Which build produced this, so a stale lock is recognizable.
     pub gearbox_version: String,

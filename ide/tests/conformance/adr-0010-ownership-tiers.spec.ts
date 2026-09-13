@@ -259,7 +259,7 @@ test.describe("what the tool may write", () => {
     await openProduct(studio.page, "dev");
     await openGenerate(studio.page);
     await studio.page
-      .locator('[data-plan-path="processes/api-gateway/src/registered_gears.rs"]')
+      .locator('[data-plan-path="apps/api-gateway/src/registered_gears.rs"]')
       .click();
     // The preview is a diff editor, so `.monaco-editor` matches three hosts
     // (gutter, original, modified). The header lives on the proposed side.

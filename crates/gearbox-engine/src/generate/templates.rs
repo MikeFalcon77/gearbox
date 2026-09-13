@@ -17,9 +17,9 @@
 //!
 //! | key | produces |
 //! |-----|----------|
-//! | `main.rs` | host `processes/<p>/src/main.rs` |
-//! | `worker_main.rs` | worker `processes/<p>/src/main.rs` |
-//! | `registered_gears.rs` | `processes/<p>/src/registered_gears.rs` |
+//! | `main.rs` | host `<layout>/<p>/src/main.rs` |
+//! | `worker_main.rs` | worker `<layout>/<p>/src/main.rs` |
+//! | `registered_gears.rs` | `<layout>/<p>/src/registered_gears.rs` |
 //! | `docker/Dockerfile` | `docker/<p>/Dockerfile` |
 //! | `docker/dockerignore` | `docker/.dockerignore` |
 //! | `helm/helpers.tpl` | `helm/<product>/charts/<sub>/templates/_helpers.tpl` |

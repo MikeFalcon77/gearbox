@@ -10,6 +10,24 @@ export type ResolvedProductHeader = { id: string, version: string, profile: Prof
  */
 profile_kind: string, 
 /**
+ * The directory the generated application crates live under, one path
+ * segment. Default [`DEFAULT_LAYOUT`].
+ *
+ * **In the lock rather than only in the intent**, unlike `templates`, and
+ * for a reason the orphan hazard makes concrete. The generator has no
+ * delete path: every fate is create, update, keep or conflict. So a tree
+ * generated under one layout and regenerated under another keeps both, and
+ * the rewritten root `Cargo.toml` lists only the new one -- a package
+ * inside a workspace that neither includes nor excludes it, which is the
+ * state `generate::workspace` exists to prevent. Recording the layout in
+ * the lock, which is written *into* the generated tree, is what lets the
+ * next run see what the last one used and say so.
+ *
+ * It is covered by `lock_hash` as every other field is, so changing the
+ * layout is a change to the lock rather than a silent move.
+ */
+layout: string, 
+/**
  * Which build produced this, so a stale lock is recognizable.
  */
 gearbox_version: string, 

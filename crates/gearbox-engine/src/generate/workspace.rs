@@ -60,13 +60,14 @@ struct WorkspaceTable {
 /// Returns [`GenerateError`] if the manifest cannot be serialized.
 pub fn workspace_manifest(
     applications: &[&ResolvedApplication],
+    layout: &str,
 ) -> Result<FileEntry, GenerateError> {
     let manifest = WorkspaceManifest {
         workspace: WorkspaceTable {
             resolver: "3",
             members: applications
                 .iter()
-                .map(|p| format!("processes/{}", p.name))
+                .map(|p| format!("{layout}/{}", p.name))
                 .collect(),
         },
     };

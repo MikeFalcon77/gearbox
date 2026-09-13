@@ -46,7 +46,7 @@ product(
         use_gear("api-contracts", source = "gears-rust"),
     ],
 
-    preferences = [prefer.fewer_processes()],
+    preferences = [prefer.fewer_applications()],
 )
 "#;
 

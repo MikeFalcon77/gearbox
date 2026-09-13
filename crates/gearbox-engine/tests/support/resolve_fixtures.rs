@@ -76,6 +76,7 @@ pub fn intent(gears: &[&str]) -> ProductIntent {
     let dev = ProfileId::new("dev").unwrap();
     ProductIntent {
         templates: None,
+        layout: None,
         id: "fixture".to_owned(),
         display_name: "Fixture".to_owned(),
         version: "0.0.0".to_owned(),

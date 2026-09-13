@@ -139,7 +139,7 @@ impl std::fmt::Display for FileKind {
 /// would offer clients an `Array<number>` that nothing should ever send.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileEntry {
-    /// Relative to the output root, e.g. `processes/api-gateway/Cargo.toml`.
+    /// Relative to the output root, e.g. `apps/api-gateway/Cargo.toml`.
     pub path: RelPath,
     pub bytes: Vec<u8>,
     pub kind: FileKind,

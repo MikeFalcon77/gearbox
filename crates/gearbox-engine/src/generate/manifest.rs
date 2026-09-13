@@ -1,4 +1,4 @@
-//! `processes/<p>/Cargo.toml`.
+//! `<layout>/<p>/Cargo.toml`.
 //!
 //! Every inherited field is written out as a literal. The generated crates sit
 //! under `.gearbox/<product>/<profile>/`, which is outside the `gears-rust`
@@ -101,7 +101,7 @@ pub fn application_manifest(
 ) -> Result<FileEntry, GenerateError> {
     let crate_dir = input
         .out_root
-        .join("processes")
+        .join(input.layout())
         .join(application.name.as_str());
     let dependencies = dependencies(input, application, &crate_dir)?;
 
@@ -126,7 +126,7 @@ pub fn application_manifest(
     })?;
 
     Ok(FileEntry::text(
-        paths::rel(&["processes", application.name.as_str(), "Cargo.toml"])?,
+        paths::rel(&[input.layout(), application.name.as_str(), "Cargo.toml"])?,
         format!("{}\n{body}", header("#")),
         FileKind::Toml,
         Ownership::Generated,

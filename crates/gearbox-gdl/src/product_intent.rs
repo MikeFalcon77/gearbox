@@ -118,6 +118,7 @@ pub fn build(
         application_pins: build_application_pins(uri, decl, &profiles, diagnostics),
         preferences: build_preferences(uri, decl, diagnostics),
         templates: build_templates(uri, decl, diagnostics),
+        layout: decl.layout.clone(),
         sources,
         profiles,
         default_profile,

@@ -35,7 +35,16 @@ gdl_path: RelPath, sources: { [key in SourceId]: SourceDecl },
  * Only `path(...)` is expressible. `git(...)` would make generation fetch,
  * and `generate` is a pure function of the lock.
  */
-templates?: string | null, profiles: { [key in ProfileId]: DeploymentProfileDecl }, default_profile: ProfileId, 
+templates?: string | null, 
+/**
+ * Which directory the generated application crates go under.
+ *
+ * Product-level rather than profile-level: a directory name is a fact
+ * about the tree, and one description produces one tree shape whichever
+ * profile it resolves for. Absent means
+ * [`DEFAULT_LAYOUT`](crate::resolved::DEFAULT_LAYOUT).
+ */
+layout?: string | null, profiles: { [key in ProfileId]: DeploymentProfileDecl }, default_profile: ProfileId, 
 /**
  * The gears asked for directly. Their co-location closures bring in more.
  */

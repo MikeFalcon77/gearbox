@@ -330,6 +330,7 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
             version,
             profile: _,
             profile_kind,
+            layout,
             gearbox_version,
             lock_hash,
         } = header;
@@ -337,15 +338,20 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
             id.clone(),
             version.clone(),
             profile_kind.clone(),
+            layout.clone(),
             gearbox_version.clone(),
             lock_hash.clone(),
         )
     };
-    let (bid, bver, bkind, beng, bhash) = header_scalars(before_header);
-    let (aid, aver, akind, aeng, ahash) = header_scalars(after_header);
+    let (bid, bver, bkind, blayout, beng, bhash) = header_scalars(before_header);
+    let (aid, aver, akind, alayout, aeng, ahash) = header_scalars(after_header);
     compare("product.id", bid, aid);
     compare("product.version", bver, aver);
     compare("product.profile_kind", bkind, akind);
+    // Reported like any other header scalar. A layout change moves every
+    // application crate, so a diff that stayed silent about it would show a
+    // tree of creations with no stated cause.
+    compare("product.layout", blayout, alayout);
     compare("product.gearbox_version", beng, aeng);
     compare("product.lock_hash", bhash, ahash);
 

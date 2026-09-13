@@ -217,6 +217,19 @@ pub struct GenerateInput<'a> {
     pub catalogue: Option<&'a Catalogue>,
 }
 
+impl GenerateInput<'_> {
+    /// The directory the application crates go under, as the lock records it.
+    ///
+    /// One accessor rather than six call sites reaching into the header: the
+    /// segment appears in the crate path, the workspace members and the plan
+    /// the Studio renders, and two of those agreeing while the third does not
+    /// is precisely the unbuildable tree this exists to prevent.
+    #[must_use]
+    pub fn layout(&self) -> &str {
+        &self.lock.product.layout
+    }
+}
+
 /// What one generation run produced.
 pub struct Generated {
     pub files: FileSet,
@@ -269,7 +282,10 @@ pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
     // Cargo reports as "believes it's in a workspace when it's not".
     let applications: Vec<_> = input.lock.applications.iter().collect();
 
-    insert(&mut files, workspace::workspace_manifest(&applications)?)?;
+    insert(
+        &mut files,
+        workspace::workspace_manifest(&applications, input.layout())?,
+    )?;
     insert(&mut files, workspace::toolchain()?)?;
     insert(&mut files, workspace::lock_file(input.lock)?)?;
     if let Some(cargo_config) = workspace::cargo_config(input)? {

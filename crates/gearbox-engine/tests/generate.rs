@@ -129,10 +129,10 @@ fn the_embedded_profile_generates_the_documented_output_set() {
         paths,
         [
             "Cargo.toml",
+            "apps/api-gateway/Cargo.toml",
+            "apps/api-gateway/src/main.rs",
+            "apps/api-gateway/src/registered_gears.rs",
             "config/api-gateway.yaml",
-            "processes/api-gateway/Cargo.toml",
-            "processes/api-gateway/src/main.rs",
-            "processes/api-gateway/src/registered_gears.rs",
             "product.lock",
             "rust-toolchain.toml",
         ],
@@ -181,7 +181,7 @@ fn no_generated_manifest_inherits_from_a_workspace() {
         );
     }
 
-    let manifest = text(&files.files, "processes/api-gateway/Cargo.toml");
+    let manifest = text(&files.files, "apps/api-gateway/Cargo.toml");
     assert!(manifest.contains("edition = \"2024\""));
     assert!(manifest.contains("rust-version = \"1.95.0\""));
 }
@@ -196,11 +196,8 @@ fn the_manifest_and_the_link_file_agree() {
     let Some((lock, files)) = generated("dev") else {
         return;
     };
-    let manifest = text(&files.files, "processes/api-gateway/Cargo.toml");
-    let links = text(
-        &files.files,
-        "processes/api-gateway/src/registered_gears.rs",
-    );
+    let manifest = text(&files.files, "apps/api-gateway/Cargo.toml");
+    let links = text(&files.files, "apps/api-gateway/src/registered_gears.rs");
 
     let application = lock
         .application(&gearbox_ir::ApplicationId::new("api-gateway").unwrap())
@@ -649,17 +646,17 @@ fn a_products_config_reaches_the_generated_configuration() {
 /// contract edge is severable — no pin required — so this exercises the shape
 /// the resolver reaches on its own.
 #[test]
-fn a_self_hosted_profile_generates_both_processes() {
+fn a_self_hosted_profile_generates_both_applications() {
     let Some((lock, files)) = generated("local") else {
         return;
     };
 
     let paths: Vec<&str> = files.files.iter().map(|f| f.path.as_str()).collect();
     for expected in [
-        "processes/gateway/src/main.rs",
-        "processes/api-contracts/src/main.rs",
-        "processes/api-contracts/Cargo.toml",
-        "processes/api-contracts/src/registered_gears.rs",
+        "apps/gateway/src/main.rs",
+        "apps/api-contracts/src/main.rs",
+        "apps/api-contracts/Cargo.toml",
+        "apps/api-contracts/src/registered_gears.rs",
         "config/api-contracts.yaml",
     ] {
         assert!(
@@ -681,11 +678,11 @@ fn a_self_hosted_profile_generates_both_processes() {
     // root that is not a member is what Cargo reports as "believes it's in a
     // workspace when it's not".
     let workspace = text(&files.files, "Cargo.toml");
-    assert!(workspace.contains("processes/gateway"), "{workspace}");
-    assert!(workspace.contains("processes/api-contracts"), "{workspace}");
+    assert!(workspace.contains("apps/gateway"), "{workspace}");
+    assert!(workspace.contains("apps/api-contracts"), "{workspace}");
 
     // The worker's entry point is the out-of-process runtime, not the host's.
-    let worker_main = text(&files.files, "processes/api-contracts/src/main.rs");
+    let worker_main = text(&files.files, "apps/api-contracts/src/main.rs");
     assert!(
         worker_main.contains("run_oop_with_options"),
         "{worker_main}"
@@ -718,11 +715,8 @@ fn a_spawned_gear_is_configured_by_the_host_but_not_linked_into_it() {
         return;
     };
 
-    let host_links = text(&files.files, "processes/gateway/src/registered_gears.rs");
-    let worker_links = text(
-        &files.files,
-        "processes/api-contracts/src/registered_gears.rs",
-    );
+    let host_links = text(&files.files, "apps/gateway/src/registered_gears.rs");
+    let worker_links = text(&files.files, "apps/api-contracts/src/registered_gears.rs");
 
     // The worker links its gear; the host does not. `cf_api_contracts` is the
     // library identifier -- the crate has no `[lib]`, which is the whole reason
@@ -814,7 +808,7 @@ fn a_product_template_overrides_the_builtin() {
         catalogue: None,
     })
     .expect("generation succeeds with an overlay");
-    let main = text(&generated.files, "processes/api-gateway/src/main.rs");
+    let main = text(&generated.files, "apps/api-gateway/src/main.rs");
     assert!(
         main.contains("/* product-local */"),
         "the overlay did not win:\n{main}"
@@ -1900,4 +1894,108 @@ fn custom_is_open_and_everything_around_it_is_closed() {
     // nobody opens.
     let values = text(&files.files, &format!("helm/{product}/values.yaml"));
     assert!(values.contains("custom: {}"), "{values}");
+}
+
+/// The hazard `GBX0706` exists for, produced the way an operator produces it.
+///
+/// Generation has no delete path, so a crate directory written by an earlier
+/// run survives a run that does not write it -- whether because the application
+/// was removed from the description or because `layout` moved the whole tree.
+/// The root `Cargo.toml` is rewritten without it either way, and a package
+/// inside a workspace that neither includes nor excludes it is refused by
+/// `cargo metadata` and by rust-analyzer while a root `cargo build` says
+/// nothing.
+#[test]
+fn a_generated_crate_left_behind_by_a_layout_change_is_reported() {
+    let out = Out::new("orphan-layout");
+    let base = base_root_for(&out.root());
+
+    // What a previous run under `processes/` left on disk.
+    out.write(
+        "processes/api-gateway/Cargo.toml",
+        "# GENERATED by gearbox 0.1.0 -- do not edit.\n[package]\nname = \"gbx-api-gateway\"\n",
+    );
+
+    // This run writes the same crate under `apps/`.
+    let files = one(
+        "apps/api-gateway/Cargo.toml",
+        "[package]\nname = \"gbx-api-gateway\"\n",
+        Ownership::Generated,
+    );
+    let outcome = gearbox_engine::apply_generate(&files, &out.root(), &base).unwrap();
+
+    let orphans: Vec<_> = outcome
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == gearbox_ir::DiagnosticCode::GenOrphanedCrate)
+        .collect();
+    assert_eq!(orphans.len(), 1, "{:#?}", outcome.diagnostics);
+    assert!(
+        orphans[0].message.contains("processes/api-gateway"),
+        "the warning must name the directory to delete: {}",
+        orphans[0].message
+    );
+
+    // A warning, not an error: the new tree is still written. Refusing to
+    // generate because an old directory exists would leave the operator with
+    // no way forward except deleting it blind.
+    assert!(
+        !outcome.diagnostics.has_errors(),
+        "{:#?}",
+        outcome.diagnostics
+    );
+    assert!(out.root().join("apps/api-gateway/Cargo.toml").exists());
+}
+
+/// The crate this run writes is not its own orphan.
+#[test]
+fn a_crate_this_run_writes_is_not_reported() {
+    let out = Out::new("orphan-none");
+    let base = base_root_for(&out.root());
+
+    let files = one(
+        "apps/api-gateway/Cargo.toml",
+        "# GENERATED by gearbox 0.1.0 -- do not edit.\n[package]\nname = \"gbx-api-gateway\"\n",
+        Ownership::Generated,
+    );
+    gearbox_engine::apply_generate(&files, &out.root(), &base).unwrap();
+    let again = gearbox_engine::apply_generate(&files, &out.root(), &base).unwrap();
+
+    assert!(
+        !again
+            .diagnostics
+            .iter()
+            .any(|d| d.code == gearbox_ir::DiagnosticCode::GenOrphanedCrate),
+        "{:#?}",
+        again.diagnostics
+    );
+}
+
+/// A crate the operator wrote is theirs, and telling them to delete it would
+/// be wrong. The generated marker is what separates the two.
+#[test]
+fn a_hand_written_crate_in_the_output_root_is_not_an_orphan() {
+    let out = Out::new("orphan-handwritten");
+    let base = base_root_for(&out.root());
+
+    out.write(
+        "scratch/experiment/Cargo.toml",
+        "[package]\nname = \"my-experiment\"\n",
+    );
+
+    let files = one(
+        "apps/api-gateway/Cargo.toml",
+        "[package]\nname = \"gbx-api-gateway\"\n",
+        Ownership::Generated,
+    );
+    let outcome = gearbox_engine::apply_generate(&files, &out.root(), &base).unwrap();
+
+    assert!(
+        !outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.code == gearbox_ir::DiagnosticCode::GenOrphanedCrate),
+        "{:#?}",
+        outcome.diagnostics
+    );
 }

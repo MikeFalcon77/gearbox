@@ -5,7 +5,7 @@
 //! deployment the lock did not decide.
 //!
 //! **The build context is the common ancestor of this output tree and the
-//! source roots**, not the generated directory. `processes/<p>/Cargo.toml`
+//! source roots**, not the generated directory. `<layout>/<p>/Cargo.toml`
 //! carries path dependencies of the form `../../../../../../gears-rust/...`,
 //! which `docker build` from `.gearbox/<product>/<profile>/` cannot see.
 //! That fact is written into `.dockerignore` (as a comment) and into

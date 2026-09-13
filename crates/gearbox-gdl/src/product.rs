@@ -439,6 +439,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] version: &str,
         #[starlark(require = named)] sources: UnpackList<&'v SourceRecord>,
         #[starlark(require = named)] templates: Option<&'v SourceAtRecord>,
+        #[starlark(require = named)] layout: Option<&str>,
         #[starlark(require = named)] profiles: UnpackList<&'v ProfileRecord>,
         #[starlark(require = named)] default_profile: &str,
         #[starlark(require = named)] gears: UnpackList<&'v UseGearRecord>,
@@ -448,6 +449,18 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] preferences: Option<UnpackList<&'v PreferenceRecord>>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<NoneType> {
+        // Refused here rather than lowered and reported later: `layout` names a
+        // directory this build is about to write into, and one path segment is
+        // the whole contract. A value with a separator in it would put the
+        // generated crates somewhere the workspace manifest does not list.
+        if let Some(layout) = layout
+            && !gearbox_ir::is_valid_layout(layout)
+        {
+            return Err(anyhow::anyhow!(
+                "layout = \"{layout}\" is not a single directory name; \
+                 it must not be empty, start with a dot, or contain a path separator"
+            ));
+        }
         sink(eval)?.set_product(ProductDecl {
             id: id.to_owned(),
             display_name: name.unwrap_or(id).to_owned(),
@@ -455,6 +468,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             default_profile: default_profile.to_owned(),
             sources: sources.items.into_iter().cloned().collect(),
             templates: templates.cloned(),
+            layout: layout.map(str::to_owned),
             profiles: profiles.items.into_iter().cloned().collect(),
             gears: gears.items.into_iter().cloned().collect(),
             bindings: bindings
