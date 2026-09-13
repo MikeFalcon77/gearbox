@@ -114,6 +114,9 @@ pub fn resolve_at(
     // rather than validates, and a check only `validate` performed would never
     // reach the person setting the value. `Diagnostics::finish` dedups.
     crate::config_check::check(catalogue, intent, &uri, &mut diagnostics);
+    // The same shape, for features: a gear declares which deployment kinds a
+    // feature belongs to, and only a resolution knows which one is being built.
+    crate::feature_check::check(catalogue, intent, &[profile], &uri, &mut diagnostics);
 
     // Step 4 -- processes. An unknown profile is reported rather than assumed,
     // because guessing `embedded` would silently resolve the wrong topology.

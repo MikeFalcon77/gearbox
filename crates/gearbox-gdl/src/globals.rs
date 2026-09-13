@@ -34,9 +34,11 @@ use starlark::values::Value;
 use starlark::values::list::UnpackList;
 use starlark::values::none::NoneType;
 
+use crate::edit::PROFILE_KINDS;
 use crate::records::{
     CargoRecord, ClusterPluginRecord, ClusterRequireRecord, ConfigRecord, ConsumeRecord,
-    DocsRecord, EndpointRecord, GrpcRecord, LifecycleRecord, ProvideRecord, RestRecord, RoleRecord,
+    DocsRecord, EndpointRecord, FeatureRecord, GrpcRecord, LifecycleRecord, ProvideRecord,
+    RestRecord, RoleRecord,
 };
 use crate::sink::{GdlSink, GearDecl};
 use crate::values::GdlEnum;
@@ -121,6 +123,34 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         Ok(ConfigRecord {
             rust: rust.map(str::to_owned),
             exposes: exposes.map(|l| l.items).unwrap_or_default(),
+        })
+    }
+
+    /// `feature("name", kinds = [...])` -- one Cargo feature this gear offers.
+    ///
+    /// The name is positional because it is the whole subject; `kinds` is the
+    /// exception rather than the rule and reads better named.
+    fn feature(
+        #[starlark(require = pos)] name: &str,
+        #[starlark(require = named)] kinds: Option<UnpackList<String>>,
+    ) -> anyhow::Result<FeatureRecord> {
+        let kinds = kinds.map(|l| l.items).unwrap_or_default();
+        // Checked here rather than lowered and reported later, for the reason a
+        // fixed enumeration always is: there are exactly three deployment kinds,
+        // a fourth spelling is a typo, and a typo that survived would silently
+        // make the feature unofferable everywhere.
+        for kind in &kinds {
+            if !PROFILE_KINDS.contains(&kind.as_str()) {
+                return Err(anyhow::anyhow!(
+                    "feature(\"{name}\", kinds = [... \"{kind}\" ...]) names no deployment kind; \
+                     write one of {}",
+                    PROFILE_KINDS.join(", ")
+                ));
+            }
+        }
+        Ok(FeatureRecord {
+            name: name.to_owned(),
+            kinds,
         })
     }
 
@@ -319,6 +349,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] cluster_plugins: Option<UnpackList<&'v ClusterPluginRecord>>,
         #[starlark(require = named)] roles: Option<UnpackList<&'v RoleRecord>>,
         #[starlark(require = named)] config_schema: Option<&'v ConfigRecord>,
+        #[starlark(require = named)] cargo_features: Option<UnpackList<&'v FeatureRecord>>,
         // Accepted only to be refused by name, so the diagnostic can say which
         // attribute owns the fact instead of "unknown argument".
         #[starlark(require = named)] id: Option<&str>,
@@ -388,6 +419,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
                 .map(|l| l.items.into_iter().cloned().collect())
                 .unwrap_or_default(),
             config_schema: config_schema.cloned(),
+            cargo_features: cargo_features.map(|l| l.items.into_iter().cloned().collect()),
             declared_at: crate::declarative::call_location(eval),
         });
         Ok(NoneType)

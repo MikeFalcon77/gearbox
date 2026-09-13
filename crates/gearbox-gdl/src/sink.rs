@@ -60,6 +60,15 @@ pub struct GearDecl {
     pub cluster_plugins: Vec<crate::records::ClusterPluginRecord>,
     pub declared_roles: Vec<RoleRecord>,
     pub config_schema: Option<crate::records::ConfigRecord>,
+    /// The Cargo features this gear offers an integrator, curated and scoped.
+    ///
+    /// **`None` and `Some([])` are different answers**, which is why this is an
+    /// option and not a list. Absent means nobody has curated this gear, and a
+    /// client falls back to the projected `available_features` while saying it
+    /// is uncurated. An empty list is a curation: `types-registry` declares one
+    /// feature, `integration`, which wants a Docker daemon -- "there is nothing
+    /// here for you" is the true answer and it has to be expressible.
+    pub cargo_features: Option<Vec<crate::records::FeatureRecord>>,
     /// Where the `gear(...)` call was written in the description.
     pub declared_at: Option<gearbox_ir::Location>,
 }

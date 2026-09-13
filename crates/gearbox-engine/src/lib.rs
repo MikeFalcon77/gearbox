@@ -15,6 +15,8 @@ pub mod cluster;
 pub mod config;
 pub mod config_check;
 pub mod docs;
+pub mod feature_check;
+pub mod features;
 pub mod generate;
 pub mod manifest_check;
 pub mod merge;

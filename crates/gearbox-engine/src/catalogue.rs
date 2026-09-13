@@ -501,6 +501,16 @@ fn project_and_merge(
         }
     };
 
+    // The manifest is already in the scan cache: `manifest_check` read the same
+    // directory a few lines above, so this costs a map lookup. An unreadable
+    // manifest is reported there, not twice, and yields no features rather than
+    // no gear -- a crate whose `Cargo.toml` cannot be read fails the build,
+    // which is a louder answer than this.
+    let available_features = scans
+        .manifest(&crate_dir)
+        .map(|manifest| manifest.features.clone())
+        .unwrap_or_default();
+
     let plugin = crate::plugin::project(identity, decl, &files, &sdk_files, diagnostics);
     let config = crate::config::project(identity, decl, &files, diagnostics);
 
@@ -565,10 +575,13 @@ fn project_and_merge(
             // An unreadable manifest is reported there, not twice, and yields no
             // features rather than no gear -- a crate whose `Cargo.toml` cannot
             // be read fails the build, which is a louder answer than this.
-            available_features: scans
-                .manifest(&crate_dir)
-                .map(|manifest| manifest.features.clone())
-                .unwrap_or_default(),
+            available_features: available_features.clone(),
+            cargo_features: crate::features::project(
+                identity,
+                decl,
+                &available_features,
+                diagnostics,
+            ),
         },
         diagnostics,
     )

@@ -336,6 +336,15 @@ this ADR's previous amendment makes for config fields, whose declared half is `e
 `exposes_features` is the follow-up; presenting the projected list as if it were curated would be
 the drift ADR `cpt-gearbox-adr-macro-projected-catalogue` exists to prevent.
 
+> **Done, as `cargo_features`.** The name changed: `exposes` reads well inside
+> `config(...)`, where the context is given, but at the top of `gear(...)` an
+> "exposes_features" is a verb phrase jammed together and a Cargo feature is not
+> exposed — it is offered. `gear(cargo_features = [feature("otel"), feature(
+> "k8s-auth", kinds = ["kubernetes"])])`, checked against the crate's own table
+> by `GBX0213`. `available_features` stays exactly as described above and is
+> what a client falls back to for a gear nobody has curated, which is why
+> absent and `[]` are different answers.
+
 `available_features` is catalogue-only and never enters the lock, for the same reason
 `config_schema` does not: what a gear *can* be built with is not a decision the resolution made. So
 `lock_hash` is unchanged, and the golden snapshot is the assertion.

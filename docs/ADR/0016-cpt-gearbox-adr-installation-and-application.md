@@ -257,6 +257,25 @@ string `default`. **This is a cross-repo commitment**: all fourteen `gear.gdl`
 files live in `gears-rust`, on its `feature/gearbox` branch, and while there is
 precedent — `exposes` is already ours — it has to be agreed rather than assumed.
 
+> **Both halves landed, and the second did not need the language change.**
+> `gear(cargo_features = [...])` carries the curation *and* the scope:
+> `feature("k8s-auth", kinds = ["kubernetes"])`. The cross-repo agreement was
+> taken — seven `gear.gdl` files on `feature/gearbox` declare one, and the other
+> seven declare no Cargo features to curate.
+>
+> The scoping avoided `use_gear(profiles = ...)` by turning the question around.
+> A product scoping its own choice by profile would be the language change
+> feared below; a **gear** declaring which deployment kinds its own feature
+> belongs to is a fact about the gear, and the resolution only reports the
+> contradiction (`GBX0316`). ADR-0014's "never a selection" rule is amended
+> there rather than here, and only in that direction.
+>
+> What it does *not* do is let one product enable a feature for `prod` and not
+> for `dev`: `use_gear` still takes no `profiles`, so a feature is selected for
+> every profile, and a product declaring an embedded profile simply cannot ask
+> for `k8s-auth` at all. That is why `validate` checks every declared profile
+> and not just the one being resolved.
+
 *Scoping a choice to a profile* is a language change: `use_gear` takes no
 `profiles`, and only `plugin`, `bind`, `cluster_profile` and `process` are
 scopable. ADR-0014 closes the shortcut in advance — `kind()` "feeds the lock

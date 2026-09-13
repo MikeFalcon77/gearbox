@@ -373,7 +373,12 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
    * host's extension point, and a host to one plugin's point.
    */
   protected resetProposal(): void {
-    this.features = [];
+    // **Seeded, not emptied, when the gear declares features for this kind.**
+    // `k8s-auth` is what a Kubernetes deployment needs rather than something it
+    // may have, so starting unchecked would make the ordinary path the one that
+    // has to be remembered. Still a checkbox: unticking it is a choice the
+    // description then records, which is why the resolver does not add it back.
+    this.features = this.defaultFeatures();
     this.plugins = [];
     this.config = [];
     this.typed.clear();
@@ -888,8 +893,61 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
    * projected list as if it were curated would be the drift ADR
    * `cpt-gearbox-adr-macro-projected-catalogue` exists to prevent.
    */
+  /** The deployment kind this product is resolving for, when it has resolved. */
+  protected profileKind(): string | undefined {
+    return this.products.current.resolution?.product?.product.profile_kind;
+  }
+
+  /**
+   * Which features to offer, and which of those belong to this deployment kind.
+   *
+   * `cargo_features` is the curated half, and when a gear has one it replaces
+   * the projected table rather than filtering it: curation is a judgement about
+   * what an integrator should see, and showing the rest beside it would undo
+   * the judgement. A gear nobody has curated falls back to the projected list,
+   * which is why both fields exist.
+   */
+  protected featureChoices(gear: GearDescriptor): {
+    offered: string[];
+    elsewhere: { name: string; kinds: string[] }[];
+    curated: boolean;
+  } {
+    // `null`/absent is "nobody curated this"; an empty list is a curation that
+    // offers nothing. Only the first falls back to the projected table.
+    const curated = gear.cargo_features;
+    if (curated === undefined || curated === null) {
+      return { offered: [...(gear.available_features ?? [])], elsewhere: [], curated: false };
+    }
+    const kind = this.profileKind();
+    const offered: string[] = [];
+    const elsewhere: { name: string; kinds: string[] }[] = [];
+    for (const feature of curated) {
+      const kinds = feature.kinds ?? [];
+      // An empty `kinds` is "every kind", and an unresolved profile is not a
+      // reason to hide anything: offering it and letting GBX0316 answer is
+      // better than a panel that silently shrinks while a resolution is in
+      // flight.
+      if (kinds.length === 0 || kind === undefined || kinds.includes(kind)) {
+        offered.push(feature.name);
+      } else {
+        elsewhere.push({ name: feature.name, kinds: [...kinds] });
+      }
+    }
+    return { offered, elsewhere, curated: true };
+  }
+
+  /** Curated features this deployment kind is the reason for, ticked to begin with. */
+  protected defaultFeatures(): string[] {
+    const gear = this.descriptor();
+    const kind = this.profileKind();
+    if (gear === undefined || kind === undefined) return [];
+    return (gear.cargo_features ?? [])
+      .filter((feature) => (feature.kinds ?? []).includes(kind))
+      .map((feature) => feature.name);
+  }
+
   protected renderFeatures(gear: GearDescriptor): React.ReactNode {
-    const available = gear.available_features ?? [];
+    const { offered: available, elsewhere, curated } = this.featureChoices(gear);
     const chosen = new Set(this.features);
     // A staged name the crate does not declare: kept and shown, because the scan
     // reads one manifest and a feature can come from a workspace-level table or
@@ -897,15 +955,26 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
     const extra = this.features.filter((feature) => !available.includes(feature));
     return (
       <div className="gbx-features-list" data-add-gear-features>
-        {available.length === 0 ? (
+        {available.length === 0 && elsewhere.length === 0 ? (
           <div className="gbx-empty" data-add-gear-features-none>
-            This crate declares no Cargo features.
+            {curated
+              ? "This gear offers no Cargo features."
+              : "This crate declares no Cargo features."}
           </div>
         ) : (
           <>
             <p className="gbx-add-gear-note">
-              Cargo features <code>{gear.package.crate_name}</code> declares. Some may exist for
-              the crate&apos;s own tests rather than for a product.
+              {curated ? (
+                <>
+                  Cargo features <code>{gear.package.crate_name}</code> offers for this
+                  deployment.
+                </>
+              ) : (
+                <>
+                  Cargo features <code>{gear.package.crate_name}</code> declares. Some may exist
+                  for the crate&apos;s own tests rather than for a product.
+                </>
+              )}
             </p>
             <div className="gbx-feature-choices">
               {available.map((feature) => (
@@ -930,6 +999,20 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
               ))}
             </div>
           </>
+        )}
+        {/* Named, not hidden. Someone looking for `k8s-auth` on a local profile
+            needs to be told it exists and why it is not here; a list that
+            silently omits it reads as a missing feature. */}
+        {elsewhere.length > 0 && (
+          <p className="gbx-add-gear-note" data-add-gear-features-elsewhere>
+            Not for this deployment:{" "}
+            {elsewhere.map((feature, index) => (
+              <span key={feature.name} data-add-gear-feature-elsewhere={feature.name}>
+                {index > 0 && ", "}
+                <code>{feature.name}</code> ({feature.kinds.join(", ")})
+              </span>
+            ))}
+          </p>
         )}
         {extra.map((feature) => (
           <span className="gbx-badge gbx-downgraded" key={feature} data-feature={feature}>

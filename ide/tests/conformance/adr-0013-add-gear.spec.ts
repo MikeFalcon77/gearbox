@@ -380,14 +380,20 @@ test.describe("Add Gear shows consequences before the write", () => {
     await page.locator("[data-add-gear-cancel]").click();
   });
 
-  test("features are the crate's own, and absence says so [plan §9.1: features are projected]", async ({
+  test("features are curated, and one that is not for this deployment says so [plan §9.1: features are projected]", async ({
     studio,
   }) => {
-    // "No features yet" could not be told from "this gear has none", and the box
-    // beside it took any string -- so a typo became a Cargo feature that does not
-    // exist and a build failure two steps later. Measured across the corpus: 7 of
-    // 14 gear crates declare a `[features]` table.
+    // Three different answers, and telling them apart is the whole point.
+    //
+    // It began as one: "No features yet" could not be told from "this gear has
+    // none", and the box beside it took any string, so a typo became a Cargo
+    // feature that does not exist and a build failure two steps later. The
+    // projected `[features]` table answered that -- 7 of 14 gear crates declare
+    // one -- but uncurated, and `integration` wants a Docker daemon while
+    // `default` is not a choice anyone makes. `cargo_features` is the curation.
     const page = studio.page;
+
+    // (1) The crate declares no features at all.
     await configure(page, "tenant-resolver");
     await expect(page.locator("[data-add-gear-features-none]")).toContainText(
       "no Cargo features",
@@ -395,19 +401,34 @@ test.describe("Add Gear shows consequences before the write", () => {
     );
     await expect(page.locator("[data-add-gear-feature-option]")).toHaveCount(0);
 
-    // `types-registry` declares exactly one -- `integration`, which gates tests
-    // needing a Docker daemon. It is offered *and* the panel says the list is the
-    // crate's own rather than a curated one, because nobody has curated it.
+    // (2) The crate declares one and the gear offers none of them.
+    // `types-registry`'s only feature is `integration`; `cargo_features = []`
+    // says so deliberately, which is not the same as saying nothing -- and the
+    // wording separates it from (1).
     //
     // Through "Choose a different gear", because the picker is not on screen once
     // a gear is chosen -- the overview replaces it, which is also what makes the
     // staged features, config and plugins safe to clear on a change of subject.
     await page.locator("[data-add-gear-change]").click();
     await page.locator("[data-add-gear-select]").selectOption("types-registry");
-    await expect(page.locator('[data-add-gear-feature-option="integration"]')).toBeVisible({
-      timeout: 60_000,
-    });
-    await expect(page.locator("[data-add-gear-features]")).toContainText("declares");
+    await expect(page.locator("[data-add-gear-features-none]")).toContainText(
+      "offers no Cargo features",
+      { timeout: 60_000 },
+    );
+    await expect(page.locator("[data-add-gear-feature-option]")).toHaveCount(0);
+
+    // (3) The feature exists, is offered, and belongs to another deployment.
+    // `grpc-hub` declares `k8s-auth` for `kubernetes`; this product is being
+    // shown on its default `dev` profile, which is embedded. It is named rather
+    // than hidden, because someone looking for it needs to be told it exists and
+    // why it is not on offer here -- a list that silently omitted it would read
+    // as a missing feature.
+    await page.locator("[data-add-gear-change]").click();
+    await page.locator("[data-add-gear-select]").selectOption("grpc-hub");
+    await expect(
+      page.locator('[data-add-gear-feature-elsewhere="k8s-auth"]'),
+    ).toContainText("kubernetes", { timeout: 60_000 });
+    await expect(page.locator('[data-add-gear-feature-option="k8s-auth"]')).toHaveCount(0);
     await page.locator("[data-add-gear-cancel]").click();
   });
 

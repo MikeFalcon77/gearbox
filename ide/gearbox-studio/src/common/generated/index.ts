@@ -11,6 +11,7 @@ export * from "./BindingMode";
 export * from "./BindingRequest";
 export * from "./Capabilities";
 export * from "./CapabilityId";
+export * from "./CargoFeature";
 export * from "./CargoRef";
 export * from "./Catalogue";
 export * from "./CatalogueChanged";

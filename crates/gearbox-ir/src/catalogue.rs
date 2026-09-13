@@ -422,6 +422,26 @@ pub struct GearDescriptor {
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub available_features: BTreeSet<String>,
 
+    /// The Cargo features this gear offers, curated and scoped by the
+    /// description.
+    ///
+    /// The declared counterpart of [`GearDescriptor::available_features`], and
+    /// the same split `config_schema` makes with `exposes`: Cargo states what
+    /// features *exist*, and the description states which are worth offering
+    /// and where each belongs. Empty means nobody has curated this gear yet,
+    /// which is why a client falls back to the projected list rather than
+    /// showing nothing.
+    ///
+    /// Checked, not trusted: a name here that the crate's `[features]` does not
+    /// declare is `GBX0213`, for the reason `exposes` is checked against the
+    /// struct it curates.
+    ///
+    /// Not carried into the lock, like `available_features`: what a gear *can*
+    /// be built with is not a decision the resolution made. What the resolution
+    /// decided is `ResolvedGear.selected_features`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cargo_features: Option<Vec<CargoFeature>>,
+
     /// The gear's configuration surface, when its description locates one.
     ///
     /// Was an opaque `RelPath` pointing at a schema file that nothing ever
@@ -535,6 +555,25 @@ impl GearDocs {
     pub fn is_empty(&self) -> bool {
         self.prd.is_none() && self.design.is_none() && self.adr.is_empty() && self.openapi.is_none()
     }
+}
+
+/// One curated Cargo feature, and the deployment kinds it belongs to.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct CargoFeature {
+    /// The Cargo feature name, as `use_gear(features = [...])` would write it.
+    pub name: String,
+
+    /// Which deployment kinds this feature belongs to: `embedded`,
+    /// `self-hosted`, `kubernetes`, spelled as `DeploymentProfileDecl::kind`
+    /// spells them.
+    ///
+    /// **Empty means every kind, and that is the ordinary case.** A non-empty
+    /// list is two statements at once: the feature is *offered* for those kinds
+    /// and *refused* for the rest. `k8s-auth` is the case that motivated it --
+    /// a Kubernetes deployment needs it and a local one must not have it, and
+    /// nothing in `Cargo.toml` can say so.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub kinds: BTreeSet<String>,
 }
 
 /// A GTS type a gear exposes.

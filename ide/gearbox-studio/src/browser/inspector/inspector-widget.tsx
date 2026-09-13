@@ -285,7 +285,14 @@ export class InspectorWidget extends ReactWidget {
       Object.entries(config).filter(([key]) => !typedKeys.has(key)),
     );
     const features = this.edits.draftFeatures(gearId, picked.features ?? []);
-    const available = descriptor.available_features ?? [];
+    // The curated list when the gear has one, the projected table otherwise --
+    // the same fallback the Add Gear panel makes, and for the same reason: a
+    // gear nobody has curated still has features worth offering.
+    const curatedFeatures = descriptor.cargo_features;
+    const available =
+      curatedFeatures === undefined || curatedFeatures === null
+        ? (descriptor.available_features ?? [])
+        : curatedFeatures.map((feature) => feature.name);
     const chosenFeatures = new Set(features);
     const extraFeatures = features.filter((feature) => !available.includes(feature));
     const keyProblem = configKeyProblem(this.newConfigKey);

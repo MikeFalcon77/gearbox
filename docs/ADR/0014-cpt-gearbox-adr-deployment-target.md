@@ -88,6 +88,16 @@ what the language scattered.
    topology is spread"*. Add a fourth profile and that list must be remembered;
    nothing will remind anyone.
 
+   > **Amended.** `kind()` now feeds one check as well: `GBX0316` refuses a
+   > selected Cargo feature whose gear declares it for other deployment kinds
+   > (`gear(cargo_features = [feature("k8s-auth", kinds = ["kubernetes"])])`).
+   > The rule above holds for what it was defending — no *product* branches on a
+   > kind, and `cluster_profile` still enumerates ids. What changed is the
+   > direction: the constraint is declared by the **gear**, about itself, in
+   > `gears-rust`, and the resolution only reports a contradiction. A product
+   > that wanted to scope its own choice by kind would still have to enumerate
+   > profiles, and that shortcut stays closed.
+
 ### What the model does not have
 
 Checked and absent: inheritance, composition, presets, selection by kind, shared

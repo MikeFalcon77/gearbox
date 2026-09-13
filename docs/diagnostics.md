@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **79**.
+Codes: **81**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -204,6 +204,7 @@ The author has to take it out, and the help says what to write instead.
 | [GBX0210](#gbx0210) | error | description restates a projected fact |
 | [GBX0211](#gbx0211) | error | gear attribute could not be located unambiguously |
 | [GBX0212](#gbx0212) | error | exposed config field is not declared by the gear |
+| [GBX0213](#gbx0213) | error | offered Cargo feature is not declared by the crate |
 
 ### GBX0206
 
@@ -272,6 +273,19 @@ refers to Rust facts, and a reference that no longer resolves is drift --
 detected here rather than surfacing as a control writing a key the gear
 ignores.
 
+### GBX0213
+
+**offered Cargo feature is not declared by the crate**
+
+A description offers a Cargo feature its gear's crate does not declare.
+
+The same check `GBX0212` makes for `exposes`, for the same reason:
+`cargo_features` is a curation of a projected fact, and a curation whose
+names have drifted from the `[features]` table would offer a build that
+cannot succeed. Cargo fails on an unknown `--features` name, so the
+alternative to reporting it here is a build failure two steps later with
+nothing pointing back at the description.
+
 ## `GBX03xx` — Process topology and structural constraints
 
 | Code | Severity | Summary |
@@ -291,6 +305,7 @@ ignores.
 | [GBX0313](#gbx0313) | error | workers have no host application to spawn them |
 | [GBX0314](#gbx0314) | error | gRPC gears with no gRPC hub |
 | [GBX0315](#gbx0315) | warning | registration host with nothing to host |
+| [GBX0316](#gbx0316) | error | a selected Cargo feature does not belong to this deployment kind |
 
 ### GBX0301
 
@@ -459,6 +474,25 @@ A warning rather than an error: the process is pointless, not wrong, and
 where isolating a host actually breaks something the breakage is
 reported on the other side -- the gears it left behind raise GBX0305 or
 GBX0314, which are errors.
+
+*Asserts a limitation of the runtime, so every occurrence cites the source that proves it.*
+
+### GBX0316
+
+**a selected Cargo feature does not belong to this deployment kind**
+
+A selected Cargo feature belongs to a deployment kind this profile is not.
+
+`cargo_features` lets a gear say where a feature belongs, and `k8s-auth`
+is why: it wires authentication to a Kubernetes service account, so a
+Kubernetes deployment needs it and an embedded or self-hosted one must
+not have it. Selecting it anyway produces a binary that looks for a token
+path that does not exist, and it fails at startup rather than at build
+time -- which is exactly the class of mistake the projected feature list
+was introduced to stop.
+
+An error, because the remedy is always available and always the same:
+drop the feature, or resolve for the profile it belongs to.
 
 *Asserts a limitation of the runtime, so every occurrence cites the source that proves it.*
 

@@ -521,6 +521,16 @@ diagnostic_codes! {
     /// ignores.
     ValidateConfigFieldUnknown = "GBX0212", Validate, Error, false, "exposed config field is not declared by the gear";
 
+    /// A description offers a Cargo feature its gear's crate does not declare.
+    ///
+    /// The same check `GBX0212` makes for `exposes`, for the same reason:
+    /// `cargo_features` is a curation of a projected fact, and a curation whose
+    /// names have drifted from the `[features]` table would offer a build that
+    /// cannot succeed. Cargo fails on an unknown `--features` name, so the
+    /// alternative to reporting it here is a build failure two steps later with
+    /// nothing pointing back at the description.
+    ValidateFeatureUnknown = "GBX0213", Validate, Error, false, "offered Cargo feature is not declared by the crate";
+
     // ---------------------------------------------------------------- GBX03xx
     /// A selected or depended-upon gear is not in the catalogue.
     TopologyUnknownGear = "GBX0301", Topology, Error, false, "unknown gear",
@@ -628,6 +638,20 @@ diagnostic_codes! {
     /// reported on the other side -- the gears it left behind raise GBX0305 or
     /// GBX0314, which are errors.
     TopologyHostWithNothingToHost = "GBX0315", Topology, Warning, true, "registration host with nothing to host";
+
+    /// A selected Cargo feature belongs to a deployment kind this profile is not.
+    ///
+    /// `cargo_features` lets a gear say where a feature belongs, and `k8s-auth`
+    /// is why: it wires authentication to a Kubernetes service account, so a
+    /// Kubernetes deployment needs it and an embedded or self-hosted one must
+    /// not have it. Selecting it anyway produces a binary that looks for a token
+    /// path that does not exist, and it fails at startup rather than at build
+    /// time -- which is exactly the class of mistake the projected feature list
+    /// was introduced to stop.
+    ///
+    /// An error, because the remedy is always available and always the same:
+    /// drop the feature, or resolve for the profile it belongs to.
+    TopologyFeatureWrongKind = "GBX0316", Topology, Error, true, "a selected Cargo feature does not belong to this deployment kind";
 
     // ---------------------------------------------------------------- GBX04xx
     /// This consumer and provider could be placed in separate processes, but the

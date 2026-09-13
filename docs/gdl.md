@@ -118,6 +118,18 @@ config(rust?, exposes = [])
 
 `rust` is the config struct path. `exposes` is which fields to show, in order. A name that is not a field of the struct is an error later, at projection.
 
+### `feature(...)` → cargo feature
+
+```
+feature(name, kinds = [])
+```
+
+One Cargo feature the gear offers, for `gear(cargo_features = [...])`. `name` is positional and must be a key of the crate's own `[features]` table — a name that is not is **GBX0213**, the same check `exposes` gets against its struct.
+
+`kinds` says which deployment kinds the feature belongs to: `embedded`, `self_hosted`, `kubernetes`. Empty (the usual case) means every kind. A non-empty list says two things at once — the feature is offered for those kinds and **refused** for the rest, which is **GBX0316** when a product selects it anyway. `k8s-auth` is why: a Kubernetes deployment needs it and a local one must not have it, and `Cargo.toml` has no way to say so.
+
+`cargo_features` distinguishes absent from empty. Absent means nobody has curated this gear and a client falls back to the crate's whole `[features]` table, labelled uncurated. `cargo_features = []` is a curation that offers nothing, which is the right answer for a crate whose only feature gates its own tests.
+
 ### `endpoint(...)` → endpoint
 
 ```
@@ -202,6 +214,7 @@ gear(
   cluster_plugins = [],             # cluster_plugin(...)
   roles = [],                       # role(...) — recorded, not resolved
   config_schema?,                   # config(...)
+  cargo_features?,                  # feature(...) — curated, and absent ≠ []
 )
 ```
 

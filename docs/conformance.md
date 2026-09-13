@@ -111,7 +111,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | a plugin is attached to a host, and the impact is of that | `ADR-0013 §Amendment: a plugin is not a selected gear` | ✅ built |  |
 | an invalid value disables Add before the next debounce | `plan §9.1: checked where the caret is` | ✅ built |  |
 | a config key that no field could be is refused at the row | `plan §9.1: checked where the caret is` | ✅ built |  |
-| features are the crate's own, and absence says so | `plan §9.1: features are projected` | ✅ built |  |
+| features are curated, and one that is not for this deployment says so | `plan §9.1: features are projected` | ✅ built |  |
 | errors warn beside the button and never disable it | `—` | ⚪ not observed | no gear in this corpus makes the resolution fail when added, so the warning cannot be observed here |
 
 ## `conformance/adr-0013-create-product.spec.ts`

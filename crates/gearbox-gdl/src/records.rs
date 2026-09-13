@@ -134,6 +134,28 @@ gdl_record! {
 }
 
 gdl_record! {
+    /// `feature("k8s-auth", kinds = ["kubernetes"])` -- one Cargo feature a gear
+    /// offers an integrator, and where it belongs.
+    ///
+    /// **The declared half of a projected fact, exactly as `exposes` is for
+    /// config fields.** A crate's `[features]` table is projected into
+    /// `available_features`, and it is uncurated: `integration` wants a Docker
+    /// daemon, `e2e-diagnostics` is a test switch, and `default` is not a choice
+    /// at all. Which of them is worth putting in front of someone composing a
+    /// product is a judgement Cargo has no way to hold.
+    ///
+    /// `kinds` is the second judgement, and the one the manifest cannot express
+    /// either: `k8s-auth` is not merely *available* for a Kubernetes
+    /// deployment, it is what that deployment needs and what a local one must
+    /// not have. Empty means the feature suits every deployment kind, which is
+    /// the ordinary case and why it is not written.
+    FeatureRecord as "gdl_feature" {
+        pub name: String,
+        pub kinds: Vec<String>,
+    }
+}
+
+gdl_record! {
     /// `lifecycle(entry = ..., stop_timeout = ..., await_ready = ...)`
     LifecycleRecord as "gdl_lifecycle" {
         pub entry: Option<String>,
