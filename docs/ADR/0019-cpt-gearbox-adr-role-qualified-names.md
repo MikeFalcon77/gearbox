@@ -229,17 +229,22 @@ any gear writes a role-qualified `gear = "..."` in Rust, whether or not a
   lose to another. A silent wrong merge, not an error.
 * `static_endpoint_source` in `resolve/bindings.rs` builds the `consumer_wiring`
   override key from the provider's `GearId`, while the runtime reads the key the
-  macro emitted from `from`. Role-qualify `from` and the two disagree by exactly
-  the role suffix; the override is written where nothing reads it and silently
-  never fires. This is the failure mode `GBX0206` already exists to catch, so
-  that check is extended rather than reinvented.
+  macro emitted from `from`. Role-qualify `from` and the override is written
+  where nothing reads it, silently. Two skews hide here and only one is about
+  roles: the description's `consume(from_ = ...)` was a second copy of the
+  attribute's `from`, and the *selected* provider can differ from the declared
+  one whenever `select_provider` falls back. The first is not cross-checked but
+  **removed** -- `from_` is refused by `GBX0210` and the attribute projected, so
+  there is one copy -- which is what ADR-0002 asks for and what makes the second
+  checkable at all. `GBX0206` keeps the half the macro still owns twice: the
+  consumer segment, derived from the struct identifier.
 
 One thing does need a `gears-rust` change, and it is not `#[toolkit::contract]`:
 ADR-0009 requires role-qualified **gRPC service names**, because
 `resolve_grpc_service` is service-name-scoped across all gears and gear-name
 isolation does not reach it. That name comes from the gRPC contract and the
-proto. Per ADR-0010 this repository reads `gears-rust` and never writes it, so
-that is named as their work rather than designed here.
+proto, which is the platform's surface to shape rather than ours -- so it is
+named here as their work rather than designed.
 
 ### 4. The boundary is the model, and `GBX0601` moves rather than being reworded
 
@@ -302,7 +307,8 @@ affected, and the order between them is load-bearing.
   `WorkerServe`, one on `OopHttpSection`, a per-instance value source, and a
   Kubernetes workload that is not a single VIP-fronted `Deployment`. That is its
   own decision.
-* **Role-qualified gRPC service names** — `gears-rust`'s, per ADR-0010.
+* **Role-qualified gRPC service names** — the platform's own surface, named
+  rather than designed.
 * **`TopologyView`, ownership assignment and stale-owner fencing** — consumer-gear
   domain logic by ADR-0009's own scoping. Gearbox generates none of it, and
   saying so keeps this ADR from being read later as having promised it.
@@ -423,9 +429,11 @@ affected, and the order between them is load-bearing.
   for the projection-over-restatement correction it reuses, **ADR-0010** for the
   tier rules the scaffold and the surgical editor answer to, and **ADR-0015** for
   why the evidence contract exists and why it is what exposed this.
-* **Respects ADR-0010's other half**: `gears-rust` is read, never written. The
-  role-qualified gRPC service-name requirement and `event-broker`'s missing
-  `gear.gdl` are named as that repository's work.
+* **Names, rather than designs, two pieces of the platform's own work**: the
+  role-qualified gRPC service-name requirement, and `event-broker`'s missing
+  `gear.gdl`. Both are shapes that repository owns. This is not a claim that
+  `gears-rust` cannot be written to -- ADR-0010 argues the opposite, that a ban
+  by location is the wrong boundary and ownership is the right one.
 * Related requirements: `cpt-gearbox-fr-gdl-no-restatement`,
   `cpt-gearbox-nfr-evidence-cited`.
 * **Does not decide** the shard and label axis, the Kubernetes workload shape, or

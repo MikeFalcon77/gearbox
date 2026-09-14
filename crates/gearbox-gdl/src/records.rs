@@ -224,8 +224,6 @@ gdl_record! {
         pub contract: String,
         pub rust: String,
         pub sdk: CargoRecord,
-        /// The gear expected to provide it.
-        pub from: String,
         pub critical: bool,
         pub resolving_client: Option<String>,
     }

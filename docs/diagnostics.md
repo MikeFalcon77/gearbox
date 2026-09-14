@@ -224,22 +224,22 @@ The runtime's static endpoint resolver reads
   test pins with the comment "`from` is a directory lookup key and must
   survive untouched".
 
-Either segment disagreeing makes the override key unreachable: the
+Either segment being wrong makes the override key unreachable: the
 generator writes it under one name, the runtime looks for it under
-another, and the runtime only warns. A description that declares a
-consumption with no attribute behind it is the third shape of the same
-failure -- no registration is emitted, so the edge is never wired at all.
+another, and the runtime only warns.
 
-Three conditions, one code, because the outcome is one outcome and the
-remedy is one family: make the two spellings agree.
+Two conditions, one code, because the outcome is one outcome. The other
+is a description that declares a consumption with no attribute behind
+it: no registration is emitted, so the wiring phase has nothing to
+replay and the edge is never established -- and there is not even a gear
+name to resolve against, since the attribute is the only place one is
+written.
 
-The description's `consume(from_ = ...)` is itself a restatement of the
-attribute's `from` -- the class of second copy that ADR
-`cpt-gearbox-adr-macro-projected-catalogue` retired GBX0201-GBX0205 for.
-Projecting it away would be the consistent fix, and it is unavailable
-only because this repository reads `gears-rust` and never writes it, so
-the corpus's descriptions cannot be edited to drop the argument. Until
-they can, the copy is checked rather than trusted.
+`dep_gear` is not cross-checked, because there is nothing to cross-check
+it against. `consume(from_ = ...)` was a second copy of the attribute's
+`from`, the class ADR `cpt-gearbox-adr-macro-projected-catalogue`
+retired GBX0201-GBX0205 over, and it is refused by GBX0210 rather than
+compared.
 
 *Asserts a limitation of the runtime, so every occurrence cites the source that proves it.*
 

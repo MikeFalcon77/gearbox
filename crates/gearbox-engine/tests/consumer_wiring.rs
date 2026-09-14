@@ -6,8 +6,11 @@
 //! `from`. Either one disagreeing writes the override where nothing reads it,
 //! and the runtime only warns -- so the report has to happen here.
 //!
-//! The `owner_gear` half has existed since the projected catalogue landed and
-//! has never had a test asserting it fires. It does now.
+//! `dep_gear` has one source: the description's `from_` is refused as a
+//! restatement, so there is no second copy to disagree with. What is left to
+//! report is the attribute's absence -- and the `owner_gear` half, which has
+//! existed since the projected catalogue landed and never had a test asserting
+//! it fires.
 
 #![allow(
     clippy::unwrap_used,
@@ -36,7 +39,7 @@ const CONSUMER_MANIFEST: &str = "[package]\nname = \"consumer\"\nversion = \"0.1
 
 /// A consumer crate whose Rust half and description half are set separately,
 /// which is the whole point: the two spellings are what this file compares.
-fn root(struct_ident: &str, attribute: &str, declared_from: &str) -> PathBuf {
+fn root(struct_ident: &str, attribute: &str) -> PathBuf {
     let nth = NEXT.fetch_add(1, Ordering::Relaxed);
     let root =
         std::env::temp_dir().join(format!("gbx-consumer-wiring-{}-{nth}", std::process::id()));
@@ -63,8 +66,7 @@ pub struct {struct_ident};
     .unwrap();
     std::fs::write(
         consumer.join("gear.gdl"),
-        format!(
-            r#"
+        r#"
 gear(
     name = "Consumer",
     description = "d",
@@ -76,19 +78,17 @@ gear(
             contract = "ThingApi",
             rust = "thing_sdk::ThingApi",
             sdk = cargo(crate_name = "thing-sdk", lib = "thing_sdk", path = "../thing-sdk"),
-            from_ = "{declared_from}",
         ),
     ],
 )
-"#
-        ),
+"#,
     )
     .unwrap();
     root
 }
 
-fn catalogue(struct_ident: &str, attribute: &str, declared_from: &str) -> Catalogue {
-    let path = root(struct_ident, attribute, declared_from);
+fn catalogue(struct_ident: &str, attribute: &str) -> Catalogue {
+    let path = root(struct_ident, attribute);
     let source = SourceRoot::open(SourceId::new("demo").unwrap(), &path).unwrap();
     load_catalogue(&[source]).catalogue
 }
@@ -104,48 +104,33 @@ fn mismatches(catalogue: &Catalogue) -> Vec<&gearbox_ir::Diagnostic> {
 const AGREEING: &str = r#"#[toolkit::consumes(contract = thing_sdk::ThingApi, from = "provider")]"#;
 
 #[test]
-fn agreeing_spellings_are_silent() {
-    let catalogue = catalogue("Consumer", AGREEING, "provider");
+fn the_attributes_from_is_what_reaches_the_requirement() {
+    // One source, so this is a lookup rather than a comparison -- and the
+    // string it finds is the one the resolver keys every provider decision on.
+    let catalogue = catalogue("Consumer", AGREEING);
     assert!(
         mismatches(&catalogue).is_empty(),
         "{:?}",
         mismatches(&catalogue)
     );
-}
 
-#[test]
-fn a_dep_gear_the_description_spells_differently_is_reported() {
-    // The role-shaped case: the attribute points at a role-qualified name and
-    // the description restates a bare one. The generated override key would
-    // name `provider` and the runtime would look for `provider-ingest`.
-    let catalogue = catalogue(
-        "Consumer",
-        r#"#[toolkit::consumes(contract = thing_sdk::ThingApi, from = "provider-ingest")]"#,
-        "provider",
-    );
-    let found = mismatches(&catalogue);
-    assert_eq!(found.len(), 1, "{found:?}");
-    assert!(
-        found[0].message.contains("provider-ingest") && found[0].message.contains("provider"),
-        "both spellings belong in the message: {}",
-        found[0].message
-    );
-    assert!(
-        found[0]
-            .help
-            .as_deref()
-            .unwrap_or_default()
-            .contains("authority"),
-        "the help says which side wins: {:?}",
-        found[0].help
-    );
+    let gear = catalogue
+        .gears
+        .get(&gearbox_ir::GearId::new("consumer").unwrap())
+        .expect("the consumer is in the catalogue");
+    let declared = gear
+        .consumes
+        .first()
+        .and_then(gearbox_ir::Requirement::declared_provider)
+        .expect("a declared provider");
+    assert_eq!(declared.as_str(), "provider");
 }
 
 #[test]
 fn a_consumption_with_no_attribute_behind_it_is_reported() {
     // Nothing noticed this before: the description declares an edge, the macro
     // emits no registration, and the wiring phase has nothing to replay.
-    let catalogue = catalogue("Consumer", "", "provider");
+    let catalogue = catalogue("Consumer", "");
     let found = mismatches(&catalogue);
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(
@@ -160,7 +145,7 @@ fn a_struct_ident_that_is_not_the_gear_name_is_still_reported() {
     // The half that has existed all along and was never asserted to fire.
     // `ConsumerThing` kebabs to `consumer-thing`, the gear is named `consumer`,
     // so the *first* segment of the key is unreachable.
-    let catalogue = catalogue("ConsumerThing", AGREEING, "provider");
+    let catalogue = catalogue("ConsumerThing", AGREEING);
     let found = mismatches(&catalogue);
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(

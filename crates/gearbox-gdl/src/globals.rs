@@ -268,12 +268,16 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] contract: &str,
         #[starlark(require = named)] rust: &str,
         #[starlark(require = named)] sdk: &'v CargoRecord,
-        #[starlark(require = named)] from_: &str,
         #[starlark(require = named, default = false)] critical: bool,
         #[starlark(require = named)] resolving_client: Option<&str>,
+        // Accepted only to be refused by name: see `restated`.
+        #[starlark(require = named)] from_: Option<&str>,
         #[starlark(require = named)] version: Option<&str>,
         #[starlark(require = named)] kind: Option<&'v GdlEnum>,
     ) -> anyhow::Result<ConsumeRecord> {
+        if from_.is_some() {
+            return Err(restated("from_", "#[toolkit::consumes(from = ...)]"));
+        }
         if version.is_some() {
             return Err(restated("version", "#[toolkit::contract(version = ...)]"));
         }
@@ -284,7 +288,6 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             contract: contract.to_owned(),
             rust: rust.to_owned(),
             sdk: sdk.clone(),
-            from: from_.to_owned(),
             critical,
             resolving_client: resolving_client.map(str::to_owned),
         })

@@ -229,19 +229,22 @@ pub fn merge(
         else {
             continue;
         };
-        report_consumer_wiring_dep(
+        let Some(declared_from) = projected_from(
             uri,
             &id,
             record,
             &projected_contract.trait_ident,
             projected,
             diagnostics,
-        );
+        ) else {
+            continue;
+        };
         if let Some((requirement, contract)) = build_consumer(
             uri,
             &id,
             record,
             projected_contract,
+            declared_from,
             ordinal,
             &gdl_dir,
             diagnostics,
@@ -349,69 +352,55 @@ pub fn merge(
     })
 }
 
-/// The `dep_gear` half of the `consumer_wiring` key, checked against the macro.
+/// The `dep_gear` half of the `consumer_wiring` key, read from the attribute
+/// that owns it.
 ///
-/// `#[toolkit::consumes(from = "...")]` is what the runtime reads;
-/// `consume(from_ = "...")` is the description's restatement of it, and it is
-/// what `Requirement::declared_provider` carries into the resolver. So a
-/// disagreement is two failures at once: the emitted override key names the
-/// wrong gear, and every resolver decision keyed on the declared provider is
-/// made against a gear the runtime will never ask for.
-fn report_consumer_wiring_dep(
+/// `#[toolkit::consumes(from = "...")]` is the only statement of which gear a
+/// consumption points at. The description used to restate it as
+/// `consume(from_ = ...)` and the two could disagree; `from_` is now refused as
+/// a restatement, so this is a lookup rather than a comparison.
+///
+/// The one thing left to report is the attribute's absence. A description that
+/// declares a consumption with no attribute behind it emits no registration, so
+/// the wiring phase has nothing to replay and the edge is never established --
+/// and now there is not even a gear name to resolve against.
+fn projected_from<'a>(
     uri: &str,
     id: &GearId,
     record: &gearbox_gdl::records::ConsumeRecord,
     trait_ident: &str,
-    projected: &ProjectedGear,
+    projected: &'a ProjectedGear,
     diagnostics: &mut Diagnostics,
-) {
-    let evidence = "libs/toolkit-contract-macros/src/consumes.rs \
-                    (ConsumesAttr.from, emitted verbatim as dep_gear)";
-    match projected
+) -> Option<&'a str> {
+    let found = projected
         .consumes
         .iter()
-        .find(|c| c.contract_ident == trait_ident)
-    {
-        Some(consumed) if consumed.from == record.from => {}
-        Some(consumed) => diagnostics.push(
+        .find(|c| c.contract_ident == trait_ident);
+    let Some(consumed) = found else {
+        diagnostics.push(
             Diagnostic::error(
                 DiagnosticCode::ValidateConsumerWiringMismatch,
                 format!(
-                    "gear `{id}` declares `consume(contract = \"{trait_ident}\", from_ = \"{}\")`, \
-                     but `#[toolkit::consumes]` for that contract names `{}`. The macro emits its \
-                     own spelling as `dep_gear`, so the override key the generator writes is not \
-                     the one the runtime reads.",
-                    record.from, consumed.from
+                    "gear `{id}` declares `consume(contract = \"{trait_ident}\")`, and its \
+                         Rust carries no `#[toolkit::consumes]` for that contract. No \
+                         registration is emitted, so there is nothing for the wiring phase to \
+                         replay and the edge is never established."
                 ),
                 format!(
-                    "make the two agree: write `from_ = \"{}\"` in the description, or change \
-                     the attribute's `from` to `\"{}\"`. The attribute is the authority -- it is \
-                     what the runtime reads.",
-                    consumed.from, record.from
+                    "add `#[toolkit::consumes(contract = {}, from = \"...\")]` beside the \
+                         gear attribute, or remove the `consume(...)` record",
+                    record.rust
                 ),
             )
             .at(Location::file(uri.to_owned()))
-            .with_evidence(evidence),
-        ),
-        None => diagnostics.push(
-            Diagnostic::error(
-                DiagnosticCode::ValidateConsumerWiringMismatch,
-                format!(
-                    "gear `{id}` declares `consume(contract = \"{trait_ident}\")`, and its Rust \
-                     carries no `#[toolkit::consumes]` for that contract. No registration is \
-                     emitted, so there is nothing for the wiring phase to replay and the edge is \
-                     never established."
-                ),
-                format!(
-                    "add `#[toolkit::consumes(contract = {}, from = \"{}\")]` beside the gear \
-                     attribute, or remove the `consume(...)` record",
-                    record.rust, record.from
-                ),
-            )
-            .at(Location::file(uri.to_owned()))
-            .with_evidence(evidence),
-        ),
-    }
+            .with_evidence(
+                "libs/toolkit-contract-macros/src/consumes.rs \
+                 (the registration is emitted by the attribute and by nothing else)",
+            ),
+        );
+        return None;
+    };
+    Some(consumed.from.as_str())
 }
 
 /// Find the projected contract a `provide`/`consume` joins to by trait name.
@@ -600,11 +589,17 @@ fn build_provider(
     Some((provider, contract))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is a distinct fact the requirement records; the projected `from` travels \
+              beside the record rather than inside it because the record no longer carries one"
+)]
 fn build_consumer(
     uri: &str,
     consumer: &GearId,
     record: &gearbox_gdl::records::ConsumeRecord,
     projected: &ProjectedContract,
+    declared_from: &str,
     ordinal: usize,
     gdl_dir: &RelPath,
     diagnostics: &mut Diagnostics,
@@ -640,13 +635,17 @@ fn build_consumer(
         }
     };
 
-    let from = match GearId::new(&record.from) {
+    // Projected from `#[toolkit::consumes(from = ...)]`. The runtime uses this
+    // string as a directory key, so the id it parses to is the one the override
+    // key has to name.
+    let from = match GearId::new(declared_from) {
         Ok(id) => id,
         Err(e) => {
             diagnostics.push(invalid(
                 uri,
-                format!("invalid `from_` gear `{}`: {e}", record.from),
-                "name the providing gear by its kebab-case id",
+                format!("invalid `from` gear `{declared_from}`: {e}"),
+                "name the providing gear by its kebab-case id in \
+                 `#[toolkit::consumes(from = \"...\")]`",
             ));
             return None;
         }

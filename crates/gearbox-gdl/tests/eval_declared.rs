@@ -113,7 +113,7 @@ gear(
     package = cargo(crate_name = "c", lib = "c"),
     consumes = [
         consume(contract = "PaymentApi", rust = "s::PaymentApi", sdk = SDK,
-                from_ = "api-contracts", critical = True),
+                critical = True),
     ],
 )
 "#;
@@ -121,9 +121,32 @@ gear(
     assert!(codes.is_empty(), "{codes:?}");
     let decl = value.unwrap();
     assert_eq!(decl.consumes.len(), 1);
-    // Which gear supplies it, and whether it gates readiness: both product-level.
-    assert_eq!(decl.consumes[0].from, "api-contracts");
+    // Whether it gates readiness is a product judgement and stays here. Which
+    // gear supplies it is not: `#[toolkit::consumes(from = ...)]` owns that.
     assert!(decl.consumes[0].critical);
+}
+
+#[test]
+fn from_is_refused_because_the_attribute_owns_the_directory_key() {
+    // The runtime reads the attribute's spelling as a directory key, so a
+    // second copy here is a second place for it to be wrong. Refused rather
+    // than cross-checked, which is what ADR
+    // `cpt-gearbox-adr-macro-projected-catalogue` asks for everywhere else --
+    // and refused under GBX0210, the code that names the owning attribute
+    // instead of saying "unknown argument".
+    let src = r#"
+SDK = cargo(crate_name = "s", lib = "s")
+gear(
+    package = cargo(crate_name = "c", lib = "c"),
+    consumes = [
+        consume(contract = "PaymentApi", rust = "s::PaymentApi", sdk = SDK,
+                from_ = "api-contracts"),
+    ],
+)
+"#;
+    let (value, codes) = eval(src);
+    assert!(value.is_none());
+    assert_eq!(codes, [DiagnosticCode::ValidateRestatement]);
 }
 
 #[test]
