@@ -109,14 +109,23 @@ fn the_one_declared_edge_in_the_slice_is_severable() {
 
 #[test]
 fn nothing_in_the_slice_is_severable_if_declared_and_that_is_the_finding() {
-    // Empty on purpose, and the emptiness is information rather than a gap. A
-    // `deps` entry becomes convertible only when its target declares a contract,
-    // and in this slice exactly one gear provides anything -- `api-contracts` --
-    // which nothing pulls in by co-location. So there is no `deps` edge here that
-    // an annotation could turn into a severable one.
+    // Empty for *this product*, and the emptiness is information rather than a
+    // gap. A `deps` entry becomes convertible only when its target declares a
+    // contract, and nothing in the demo product's closure depends on a gear
+    // that does.
     //
-    // If this ever starts failing, a platform gear has grown a declared contract
-    // and the work list is no longer empty. That is a good failure.
+    // **The good failure this comment predicted has happened, and the
+    // prediction was right.** It used to say "exactly one gear provides
+    // anything -- `api-contracts` -- which nothing pulls in by co-location",
+    // and that a platform gear growing a declared contract would end the
+    // emptiness. `authz-resolver` grew one: it provides `AuthZResolverApi` over
+    // REST, and `account-management`, `resource-group` and `credstore` each
+    // reach it through `deps`.
+    //
+    // The work list is still empty only because the demo product selects none
+    // of those three. So the corpus can now *demonstrate* a severable-if-
+    // declared edge -- the central promise it previously could not show -- and
+    // the product that shows it is a product nobody has written yet.
     require!(cat, prod);
     let r = resolve(&cat, &prod, &pid("dev"));
 
@@ -137,8 +146,8 @@ fn nothing_in_the_slice_is_severable_if_declared_and_that_is_the_finding() {
         .collect();
     assert_eq!(
         providers,
-        vec![&gid("api-contracts")],
-        "the emptiness above depends on this being the only provider in the slice"
+        vec![&gid("api-contracts"), &gid("authz-resolver")],
+        "the emptiness above depends on which gears provide anything at all"
     );
 }
 

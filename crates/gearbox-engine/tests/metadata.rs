@@ -148,9 +148,17 @@ fn a_gear_with_no_documents_reports_none_rather_than_empty() {
 }
 
 #[test]
-fn no_gear_claims_an_openapi_spec_it_does_not_have() {
-    // Four gears in the platform check one in, none of them in the slice. A
-    // convention that matched too eagerly would show up right here.
+fn an_openapi_spec_is_claimed_only_by_the_gears_that_have_one() {
+    // **This assertion got stronger by accident, and the accident is worth
+    // keeping.** It used to read `claimed.is_empty()`, on the grounds that the
+    // four platform gears checking a spec in were none of them in the slice --
+    // so the only thing it could catch was a convention matching too eagerly.
+    //
+    // Describing `credstore` and `resource-group` put two of those four in the
+    // slice, and they do have one: `gears/credstore/docs/api/openapi.yaml` and
+    // `gears/system/resource-group/docs/openapi.yaml`. So the check now proves
+    // both halves at once -- the convention finds a real spec, and invents one
+    // for none of the other sixteen.
     let c = require!();
     let claimed: Vec<&str> = c
         .gears
@@ -158,7 +166,11 @@ fn no_gear_claims_an_openapi_spec_it_does_not_have() {
         .filter(|g| g.docs.as_ref().is_some_and(|d| d.openapi.is_some()))
         .map(|g| g.id.as_str())
         .collect();
-    assert!(claimed.is_empty(), "unexpected openapi: {claimed:?}");
+    assert_eq!(
+        claimed,
+        ["credstore", "resource-group"],
+        "openapi claims moved"
+    );
 }
 
 // ---------------------------------------------------------------- gts

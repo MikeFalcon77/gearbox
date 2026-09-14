@@ -67,8 +67,15 @@ fn the_slice_loads_without_diagnostics() {
         problems.join("\n")
     );
     // Eight original gears, plus tenant-resolver and the five plugin gears
-    // that make the extension-point projection testable on real code.
-    assert_eq!(catalogue.gears.len(), 14, "the slice gears");
+    // that make the extension-point projection testable on real code, plus the
+    // four `platform-host` members described later: account-management,
+    // authz-resolver, resource-group, credstore.
+    //
+    // The assertion above is the one that matters -- eighteen descriptions and
+    // not one diagnostic between them. The count is here so that a corpus
+    // moving underneath the suite is found in one place rather than inferred
+    // from a stranger failure elsewhere.
+    assert_eq!(catalogue.gears.len(), 18, "the slice gears");
 }
 
 #[test]
@@ -175,8 +182,14 @@ fn the_client_trait_is_projected() {
 
 #[test]
 fn contract_identity_is_projected_from_the_contract_attribute() {
-    // No gear.gdl states a version or a kind; both majors came from
+    // No gear.gdl states a version or a kind; every major came from
     // #[toolkit::contract(gear, version)] plus the trait-name suffix.
+    //
+    // `AuthZResolverApi@v1` is the platform's first real contract in this
+    // catalogue -- the two `PaymentApi` majors are the example pair. It arrived
+    // with `authz-resolver`'s description and is what makes an installation's
+    // surface projectable rather than restated: the contract is read out of the
+    // SDK, and the description only names the trait as a join key.
     let catalogue = require_tree!();
     let ids: Vec<&str> = catalogue
         .contracts
@@ -185,7 +198,11 @@ fn contract_identity_is_projected_from_the_contract_attribute() {
         .collect();
     assert_eq!(
         ids,
-        ["api-contracts/PaymentApi@v1", "api-contracts/PaymentApi@v2"]
+        [
+            "api-contracts/PaymentApi@v1",
+            "api-contracts/PaymentApi@v2",
+            "authz-resolver/AuthZResolverApi@v1",
+        ]
     );
 
     let v2 = catalogue
