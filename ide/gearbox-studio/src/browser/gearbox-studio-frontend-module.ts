@@ -1,7 +1,12 @@
 // Frontend wiring: the views, two stores, one proxied service.
 
-import { bindToolProvider } from "@theia/ai-core";
-import { FrontendApplicationContribution, bindViewContribution } from "@theia/core/lib/browser";
+import { Agent, AIVariableContribution, bindToolProvider } from "@theia/ai-core";
+import { ChatAgent, DefaultChatAgentId, FallbackChatAgentId } from "@theia/ai-chat";
+import {
+  FrontendApplicationContribution,
+  LabelProviderContribution,
+  bindViewContribution,
+} from "@theia/core/lib/browser";
 import { PerspectiveContribution } from "@theia/core/lib/browser/perspective-service";
 import { WebSocketConnectionProvider } from "@theia/core/lib/browser/messaging";
 import { CommandContribution } from "@theia/core/lib/common/command";
@@ -20,6 +25,25 @@ import { GEARBOX_SERVICE_PATH, GearboxClient, GearboxService } from "../common/p
 import { CatalogueStore } from "./catalogue-store";
 import { GenerateService } from "./generate/generate-service";
 import { ProductGearTool } from "./ai/product-tools";
+import { GearboxChatAgent } from "./ai/gearbox-chat-agent";
+import { GearboxContextContribution } from "./ai/gearbox-context";
+import { GEARBOX_TOOLS } from "./ai/gearbox-tools";
+import { AIChatContribution } from "@theia/ai-chat-ui/lib/browser/ai-chat-ui-contribution";
+import { ChatInTheBottomPanel } from "./theia/ai-chat-ui/chat-in-the-bottom-panel";
+import { PreferenceLayoutProvider } from "@theia/preferences/lib/browser/util/preference-layout";
+import { PreferenceNodeRendererContribution } from "@theia/preferences/lib/browser/views/components/preference-node-renderer-creator";
+import { bindGearboxPreferences } from "../common/gearbox-preferences";
+import { GearboxPreferenceLayout } from "./theia/preferences/gearbox-preference-layout";
+import { ApiKeyService } from "./settings/api-key-service";
+import { SettingsContribution } from "./settings/settings-contribution";
+import {
+  SecretPreferenceRenderer,
+  SecretPreferenceRendererContribution,
+} from "./settings/secret-preference-renderer";
+import {
+  GearboxSelectionChip,
+  GearboxVariableLabelProvider,
+} from "./ai/gearbox-selection-chip";
 import { ProductEditService } from "./product-edit-service";
 import { ProductStore } from "./product-store";
 import { ResolutionMarkers } from "./resolution-markers";
@@ -360,5 +384,80 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // helper, and the tool it registers holds no policy: it calls the same
   // `ProductEditService.toggle` the catalogue's control calls, so the preview
   // and the refusal on unsaved changes are the ones already in place.
+  // Why: the chat asked for the right panel, where the Inspector already lives
+  // and takes the panel on every selection -- so clicking a gear hid the chat.
+  // The override moves it to the bottom, the one area nothing opens
+  // automatically.
+  // **Studio's own settings, in Theia's own editor.** The Anthropic key already
+  // exists as a preference and is unreachable: `@theia/ai-core` stamps every
+  // `ai-features.*` key `hidden: true`, because upstream expects the AI
+  // Configuration view -- which ships in the `@theia/ai-ide` this application
+  // does not install -- to replace the settings editor for them. Declaring
+  // `gearbox.*` sidesteps that filter, which matches by literal prefix, and
+  // costs no widget: the editor renders whatever a schema declares.
+  bindGearboxPreferences(bind);
+  bind(SettingsContribution).toSelf().inSingletonScope();
+  bind(CommandContribution).toService(SettingsContribution);
+  bind(MenuContribution).toService(SettingsContribution);
+  bind(ApiKeyService).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(ApiKeyService);
+
+  // Why: without a category of its own, `gearbox.*` files under *Extensions* --
+  // `PreferenceTreeGenerator` falls back there for any namespace the layout does
+  // not know. There is no contribution point for sections, so this is ADR-0011's
+  // own mechanism, `rebind(TheiaX).to(MyX)`.
+  rebind(PreferenceLayoutProvider).to(GearboxPreferenceLayout).inSingletonScope();
+
+  // Why: Theia's settings editor renders every string preference with
+  // `input.type = "text"` and has no schema flag for a secret. The renderer
+  // registry does have a score-based override, which is what this uses.
+  bind(SecretPreferenceRenderer).toSelf();
+  bind(PreferenceNodeRendererContribution)
+    .to(SecretPreferenceRendererContribution)
+    .inSingletonScope();
+
+  rebind(AIChatContribution).to(ChatInTheBottomPanel).inSingletonScope();
+
   bindToolProvider(ProductGearTool, bind);
+
+  // **The agent, without which none of the above was reachable.** `@theia/ai-chat`
+  // registers no user-facing agent -- Theia's own live in `@theia/ai-ide`, which
+  // this application does not install -- so until now every chat request came
+  // back as "No agent was found to handle this request", and the tool above had
+  // never been offered to a model: a tool reaches one only through an agent's
+  // `functions`.
+  bind(GearboxChatAgent).toSelf().inSingletonScope();
+  bind(Agent).toService(GearboxChatAgent);
+  bind(ChatAgent).toService(GearboxChatAgent);
+
+  // **And it is the default, which registering does not make it.** A request
+  // that names no agent goes to `getDefaultAgent`, then `getFallbackAgent`, and
+  // both read bound ids rather than "the only agent there is" -- so with the
+  // agent registered but neither id bound, typing a plain sentence still failed
+  // with "No agent was found to handle this request", while `@Gearbox`
+  // succeeded. Both are bound because they answer different questions: the
+  // default is for a fresh session, the fallback for a request whose named
+  // agent has gone (an id from a restored session, say).
+  bind(DefaultChatAgentId).toConstantValue({ id: GearboxChatAgent.ID });
+  bind(FallbackChatAgentId).toConstantValue({ id: GearboxChatAgent.ID });
+
+  // The context the chat gets without being told: selection, product,
+  // diagnostics, topology and the selected gear's effective configuration. Read
+  // from the same stores the panels render from, never from the panels.
+  bind(GearboxContextContribution).toSelf().inSingletonScope();
+  bind(AIVariableContribution).toService(GearboxContextContribution);
+
+  // Theia renders a context chip's title through the label provider, and ships
+  // no contribution that handles a bare variable request -- so without this the
+  // chips above appear as empty pills.
+  bind(GearboxVariableLabelProvider).toSelf().inSingletonScope();
+  bind(LabelProviderContribution).toService(GearboxVariableLabelProvider);
+
+  // Keeps one selection chip attached to the chat input and current. It never
+  // creates the chat widget: opening a panel as a side effect of clicking a
+  // catalogue row is not something anybody asked for.
+  bind(GearboxSelectionChip).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(GearboxSelectionChip);
+
+  for (const tool of GEARBOX_TOOLS) bindToolProvider(tool, bind);
 });

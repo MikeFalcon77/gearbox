@@ -83,3 +83,12 @@ dist/
 
 # Agent worktrees, created by the harness under .claude/worktrees/.
 .claude/
+
+# Local secrets. Never committed: this file holds API keys, and it is not
+# tracked, so an unignored `.env` is one `git add -A` away from a live
+# credential in the history.
+# Unanchored on purpose: a root-anchored `/.env` missed `docs/.env`, which is
+# exactly where one got written. These match at any depth.
+.env
+.env.*
+!.env.example

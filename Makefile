@@ -130,7 +130,13 @@ grammar-check: grammar
 # view of the catalogue). The curated table in docs/gdl.md stays hand-written:
 # it carries a column -- which stage reports the code -- that the catalogue does
 # not know.
-DIAGNOSTICS_OUT := docs/diagnostics.md
+#
+# Two outputs, one generator. Studio sees a diagnostic code as the opaque string
+# the wire carries, so it cannot answer "what does GBX0410 mean" without an
+# occurrence in hand; the TypeScript catalogue is that answer, generated from the
+# same declaration as the reference page so the two cannot drift apart.
+DIAGNOSTICS_OUT := docs/diagnostics.md \
+	ide/gearbox-studio/src/browser/ai/generated/diagnostic-catalogue.ts
 
 diagnostics:
 	$(CARGO) test -p gearbox-ir --test export_diagnostics
@@ -138,7 +144,7 @@ diagnostics:
 # The anti-drift guard: regenerating must change nothing.
 diagnostics-check: diagnostics
 	@git diff --exit-code -- $(DIAGNOSTICS_OUT) \
-		|| { echo "ERROR: the diagnostics reference is stale. Run 'make diagnostics' and commit the result."; exit 1; }
+		|| { echo "ERROR: the generated diagnostics are stale. Run 'make diagnostics' and commit the result."; exit 1; }
 	@# As in grammar-check: `git diff` only sees tracked files, so a first-ever
 	@# generated file would pass while being absent from the commit.
 	@[ -z "$$(git ls-files --others --exclude-standard -- $(DIAGNOSTICS_OUT))" ] \

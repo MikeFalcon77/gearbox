@@ -214,6 +214,10 @@ and [`gears-rust/docs/GEARS.md`](../../gears-rust/docs/GEARS.md). Gearbox Builde
 - Generated Ingress/Gateway resources, bundled database subcharts, ArgoCD ApplicationSets.
 - Continuous integration configuration.
 - Product presets as a first-class concept.
+- A general-purpose coding assistant in the configurator. The conversational surface
+  `cpt-gearbox-fr-chat-context` permits is a view over the resolver: no file or terminal tools, no
+  unpreviewed write, and no language model in the engine, the CLI, or any assertion path
+  (ADR `cpt-gearbox-adr-native-chat-surface`).
 
 ## 5. Functional Requirements
 
@@ -768,6 +772,29 @@ resolution logic of its own.
 - **Rationale**: The engine must be usable by a human without a terminal, and the UI must not become
   a second implementation of product semantics.
 - **Actors**: `cpt-gearbox-actor-integrator`, `cpt-gearbox-actor-platform-engineer`
+
+#### The configurator answers in words, from the resolver's own output
+
+- [ ] `p2` - **ID**: `cpt-gearbox-fr-chat-context`
+
+The configurator **MAY** provide a conversational surface, which **MUST** derive every statement it
+makes about a product from engine output reached through typed tools — the resolved product, the
+explanation graph, a diagnostic's own remedy, and the generated diagnostic catalogue — and **MUST
+NOT** be given the description, gear sources, or the filesystem to read. It **MUST** contribute the
+active selection, product, profile, diagnostics, topology, and the selected gear's effective
+configuration as context read from the services that render them rather than from the rendering.
+Its resolution and generation tools **MUST** write nothing, and any change to a product **MUST** go
+through the previewed, operator-confirmed path `cpt-gearbox-fr-generate-preview` and ADR
+`cpt-gearbox-adr-authoring-ownership-tiers` already require.
+
+- **Rationale**: An agent outside the editor cannot see what is selected, which profile is shown, or
+  which resolution produced the diagnostics on screen — that state is in the frontend and not on the
+  wire. Withholding the description from the model is what keeps `cpt-gearbox-nfr-explainability`
+  true structurally: it has no means to form an opinion about a topology, only the resolver's
+  conclusions to read aloud.
+- **Actors**: `cpt-gearbox-actor-theia-studio`, `cpt-gearbox-actor-integrator`
+- **Verification Method**: Browser-observable; the tool surface's *absences* are asserted alongside
+  its behaviour (ADR `cpt-gearbox-adr-native-chat-surface`).
 
 #### Diagnostics reach the editor
 

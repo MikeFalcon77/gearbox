@@ -26,6 +26,7 @@ import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
 import { RevealService } from "../reveal-service";
 import { ADD_GEAR } from "../shell/session-command-ids";
+import { GEARBOX_DRAG_MIME } from "../ai/gearbox-context";
 
 @injectable()
 export class CatalogueWidget extends ReactWidget {
@@ -289,6 +290,22 @@ export class CatalogueWidget extends ReactWidget {
         role="option"
         aria-selected={selected}
         data-row-key={key}
+        // Draggable into the chat, which is the only consumer: a projected row
+        // carries its `GearId`, a pending one has none yet (ADR-0009) and so is
+        // not worth dragging anywhere. The payload is the id rather than the
+        // label, because the chat resolves ids and labels collide.
+        draggable={row.kind === "projected"}
+        onDragStart={(event) => {
+          if (row.kind !== "projected") return;
+          event.dataTransfer.setData(
+            GEARBOX_DRAG_MIME,
+            JSON.stringify({ kind: "gear", id: row.gear.id }),
+          );
+          // Plain text too, so dropping on anything else leaves something
+          // readable rather than nothing.
+          event.dataTransfer.setData("text/plain", row.gear.id);
+          event.dataTransfer.effectAllowed = "copy";
+        }}
         // One tab stop for the whole tree, not one per row. `tabIndex={0}`
         // everywhere put 62 stops between the filter box and the rest of the
         // shell today and will put hundreds there as the catalogue grows, which

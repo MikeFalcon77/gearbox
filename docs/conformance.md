@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **163** — 157 built, 1 not built, 0 broken, 5 not observed.
+Claims: **172** — 166 built, 1 not built, 0 broken, 5 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -85,6 +85,14 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Home has no Product menu while Start is showing | `ADR-0011 §Amendment: no Product menu on Home` | ✅ built |  |
 | Inspector opens when an application is selected | `ADR-0011 §Amendment: Inspector from selection` | ✅ built |  |
 
+## `conformance/adr-0011-settings.spec.ts`
+
+| Claim | Source | Status | Note |
+|---|---|---|---|
+| the settings editor has a Gearbox section | `ADR-0011 §Amendment: Studio declares its own settings` | ✅ built |  |
+| the Anthropic key is a setting a person can find | `ADR-0011 §Amendment: Studio declares its own settings` | ✅ built |  |
+| the key field does not show what it holds | `ADR-0011 §Amendment: Studio declares its own settings` | ✅ built |  |
+
 ## `conformance/adr-0011-workspace-and-scm.spec.ts`
 
 | Claim | Source | Status | Note |
@@ -129,6 +137,17 @@ Rust, and the ADRs' own Confirmation sections say which.
 | draft edits two config keys with one Apply preview; Discard restores | `ADR-0013 §Confirmation` | ✅ built |  |
 | a config key named password is refused with an explanation | `ADR-0013 §Confirmation` | ✅ built |  |
 | an added profile appears in the switcher and resolves | `ADR-0013 §Confirmation` | ✅ built |  |
+
+## `conformance/adr-0017-native-chat.spec.ts`
+
+| Claim | Source | Status | Note |
+|---|---|---|---|
+| the chat offers a Gearbox agent to answer with | `ADR-0017 Decision Outcome` | ✅ built |  |
+| selecting a gear names it on a chip in the chat | `ADR-0017 context from the services` | ✅ built |  |
+| selecting another gear renames the chip rather than adding one | `ADR-0017 context from the services` | ✅ built |  |
+| opening the chat after a selection still shows the chip | `ADR-0017 context from the services` | ✅ built |  |
+| a catalogue row dropped on the chat becomes a chip | `ADR-0017 context from the services` | ✅ built |  |
+| a conflict row dropped on the chat becomes a chip | `ADR-0017 context from the services` | ✅ built |  |
 
 ## `conformance/plan-widgets.spec.ts`
 

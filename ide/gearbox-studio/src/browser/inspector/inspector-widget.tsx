@@ -37,7 +37,13 @@ import { configKeyProblem, unknownConfigKeyNote } from "../../common/config-keys
 import { CatalogueStore } from "../catalogue-store";
 import { Focus, ProductStore } from "../product-store";
 import { ProductEditService } from "../product-edit-service";
-import { ConfigFields, type ConfigProvenance } from "../add-gear/config-fields";
+import { ConfigFields } from "../add-gear/config-fields";
+import {
+  describeFocus,
+  nodeIdOf,
+  provenanceOf,
+  type ConfigSources,
+} from "./effective-config";
 import { RevealLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
 import { Selection, SelectionService } from "../shell/selection-service";
@@ -51,36 +57,6 @@ interface Step {
   readonly depth: number;
 }
 
-/**
- * The node id for a selection.
- *
- * `NodeId` is documented as `{kind}:{payload}` and content-derived, so the format
- * is part of the wire contract rather than an internal detail. It is still a
- * second place where the convention is written down, which is why the render says
- * so out loud when the lookup fails instead of showing an empty list -- a silent
- * "no explanation" is exactly how a drifted id format would hide.
- */
-function nodeIdOf(focus: Focus): string {
-  switch (focus.kind) {
-    case "gear":
-      return `gear:${focus.id}`;
-    case "application":
-      return `application:`;
-    case "binding":
-      return `binding:${focus.consumer}|${focus.contract}`;
-  }
-}
-
-function describeFocus(focus: Focus): string {
-  switch (focus.kind) {
-    case "gear":
-      return `gear ${focus.id}`;
-    case "application":
-      return `application `;
-    case "binding":
-      return `binding ${focus.consumer} → ${focus.contract}`;
-  }
-}
 
 /**
  * Every reason reachable from `start`, nearest first.
@@ -309,7 +285,9 @@ export class InspectorWidget extends ReactWidget {
             fields={fields}
             values={this.edits.draftConfigValues(gearId, picked.config ?? {})}
             onChange={(key, value) => this.queueConfig(gearId, key, value)}
-            provenanceOf={(key) => this.provenanceOf(gearId, key, picked.config ?? {})}
+            provenanceOf={(key) =>
+              provenanceOf(this.configSources(), gearId, key, picked.config ?? {})
+            }
             isDrafted={(key) => this.edits.isDraftedConfig(gearId, key)}
             // A reset is a `set_config` with no value, which is how the wire
             // spells "remove this key" -- so it queues into the same draft and
@@ -496,35 +474,14 @@ export class InspectorWidget extends ReactWidget {
   }
 
   /**
-   * Where the value in a control came from.
+   * The two services a config answer is derived from, as one value.
    *
-   * Derived from what is already on screen, with no new wire field: the intent
-   * says what the *description* sets, the resolution says what the product will
-   * run with, and the difference between them is what the resolver decided.
-   * `GBX0114` is the engine's opinion about the overlap -- setting a key an
-   * endpoint derives -- and this is the same fact rendered before the warning.
+   * The Inspector and the chat's tools ask `effective-config` the same
+   * questions, so the module takes its inputs rather than reaching for a
+   * widget's fields. This is the widget's side of that bargain.
    */
-  protected provenanceOf(
-    gearId: string,
-    key: string,
-    declared: Readonly<Record<string, unknown>>,
-  ): ConfigProvenance {
-    // The draft wins over the file, because it is what this product will say once
-    // Apply runs: a control just typed into must not read as "the gear's
-    // default", and a key a reset has queued for removal must not still read as
-    // "set by this product".
-    const drafted = this.edits.draftConfigState(gearId, key);
-    if (drafted === "set") return "explicit";
-    // Reset queues removal: the value on disk (and therefore in the last
-    // resolution) is about to go, so do not label it "derived by the resolver"
-    // just because the resolved product still holds the old key.
-    if (drafted === "removed") return "default";
-    if (drafted === undefined && Object.prototype.hasOwnProperty.call(declared, key)) {
-      return "explicit";
-    }
-    const resolved = this.products.current.resolution?.product?.gears?.[gearId]?.config ?? {};
-    if (Object.prototype.hasOwnProperty.call(resolved, key)) return "derived";
-    return "default";
+  protected configSources(): ConfigSources {
+    return { edits: this.edits, products: this.products };
   }
 
   protected queueNewConfig(gear: string): void {

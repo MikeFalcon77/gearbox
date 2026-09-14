@@ -25,6 +25,7 @@ import type { Diagnostic } from "../../common/generated/Diagnostic";
 import type { Location } from "../../common/generated/Location";
 import type { Severity } from "../../common/generated/Severity";
 import type { Selection } from "../shell/selection-service";
+import { GEARBOX_DRAG_MIME } from "../ai/gearbox-context";
 
 /** Worst first. A list that buries the error under three hints is sorted wrong. */
 const ORDER: Record<Severity, number> = { error: 0, warning: 1, info: 2, hint: 3 };
@@ -137,6 +138,18 @@ export function DiagnosticRow({
       data-conflict-code={diagnostic.code}
       data-conflict-severity={diagnostic.severity}
       data-conflict-subject={diagnostic.subject ?? ""}
+      // Draggable into the chat. The payload is the code alone: the chat's
+      // `#gearboxDiagnostics` already carries every occurrence, so what a drag
+      // adds is which one the person meant.
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.setData(
+          GEARBOX_DRAG_MIME,
+          JSON.stringify({ kind: "diagnostic", code: diagnostic.code }),
+        );
+        event.dataTransfer.setData("text/plain", `${diagnostic.code}: ${diagnostic.message}`);
+        event.dataTransfer.effectAllowed = "copy";
+      }}
     >
       <div className="gbx-conflict-head">
         <span className={`${codicon(ICON[diagnostic.severity])} gbx-conflict-icon`} />

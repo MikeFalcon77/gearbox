@@ -56,3 +56,16 @@ export const FILE_PRODUCT: MenuPath = [...MAIN_MENU_BAR, "1_file", "0_product"];
 export const VIEW_CATALOGUE: MenuPath = [...MAIN_MENU_BAR, "4_view", "1_catalogue"];
 
 export const VIEW_ADVANCED: MenuPath = [...MAIN_MENU_BAR, "4_view", "9_advanced"];
+
+/**
+ * `File > 5_settings`: the tool's own settings, beside Theia's.
+ *
+ * Not under `Product`: that submenu is gated `gearbox.context == 'product'` and
+ * labelled for one, while an API key is a fact about this installation. The same
+ * mistake is recorded twice already in this file and in the catalogue's menus --
+ * a menu about a product offering work that has nothing to do with one.
+ *
+ * `5_settings` needs no whitelist change: `ShellPolicy.MENU_KEEP` already keeps
+ * it, with the reason "themes and preferences are about the tool".
+ */
+export const FILE_SETTINGS: MenuPath = [...MAIN_MENU_BAR, "1_file", "5_settings"];

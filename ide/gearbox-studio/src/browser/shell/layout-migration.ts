@@ -82,6 +82,15 @@ export const CLOSED_ON_MIGRATION: readonly string[] = [
   // bottom panel still shows it on Home. Close once; `problems.` stays in
   // `KEPT_COMMAND_PREFIXES` so on-demand open still works. Version 5.
   "problems",
+  // The chat moved out of the right panel, for the reason
+  // `theia/ai-chat-ui/chat-in-the-bottom-panel.ts` gives: the Inspector shares
+  // that panel and takes it on every selection, so the chat was covered by the
+  // very act it exists to support. A saved layout keeps it where it was, so it
+  // is closed once and rebuilt in the bottom panel on the next open. Safe for
+  // the same reason the Inspector was: `bindChatViewWidget` is a plain
+  // `WidgetFactory`, and it re-creates the widget when its cached one has been
+  // disposed. Version 7.
+  "chat-view-widget",
   // **No `terminal-` here, and that was learned the hard way.** Closing the boot
   // terminal broke the capability: `widget.close()` disposes the widget while
   // `WidgetManager` keeps its entry under the same id, so the next
@@ -95,7 +104,7 @@ export const CLOSED_ON_MIGRATION: readonly string[] = [
 const MIGRATION_KEY = "gearbox.layoutMigration";
 
 /** Bump when `CLOSED_ON_MIGRATION` changes, so the sweep runs again -- once. */
-const MIGRATION_VERSION = 6;
+const MIGRATION_VERSION = 7;
 
 /**
  * Prefixes detached on **every** perspective switch, not once.

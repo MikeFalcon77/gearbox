@@ -94,3 +94,17 @@ export const SHOW_GENERATE = {
   label: "Gearbox: Show Generate",
   shortTitle: "Generate",
 };
+
+/**
+ * Open the settings editor on Studio's own section.
+ *
+ * `preferences:open` takes an optional query, which is how Theia's own
+ * `Show AI Settings` is implemented -- so this needs no widget of its own, and a
+ * person who lands here can see every Gearbox setting rather than the one they
+ * were sent for.
+ */
+export const SHOW_SETTINGS = {
+  id: "gearbox.settings.show",
+  label: "Gearbox: Settings",
+  shortTitle: "Settings",
+};

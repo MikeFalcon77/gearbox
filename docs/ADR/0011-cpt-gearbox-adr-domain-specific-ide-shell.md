@@ -866,3 +866,85 @@ stopped expecting.
   and the Theia traps) and §9.1 (what diverged and why).
 * Depends on: ADR `cpt-gearbox-adr-staged-catalogue-loading` — the Catalogue perspective renders
   a staged load, and the shell must not assume a view has all its data when it first appears.
+
+## Amendment 2026-09-14: Studio declares its own settings, and the editor stays Theia's
+
+**Status: accepted. It adds a surface rather than reversing one; the package
+exclusions, the whitelist and the perspectives are untouched.**
+
+Excluding `@theia/ai-ide` (for `puppeteer-core` and the AI terminal this ADR
+withdrew) had a consequence nobody costed at the time: it also excluded the only
+user interface for configuring AI. Upstream moved that configuration out of the
+settings editor and into an AI Configuration view that ships in that package, and
+enforced the move with a filter — `hide-ai-preferences-contribution.js` stamps
+`hidden: true` on every preference whose key starts `ai-features.`. So in this
+application the Anthropic API key was registered, validated, read, and reachable
+only by editing JSON by hand or setting an environment variable before start.
+
+While the chat was inert this cost nothing. `cpt-gearbox-adr-native-chat-surface`
+made it a real feature, and an integrator handed Studio could not turn it on.
+
+### The decision
+
+**Studio contributes preferences; it does not build a settings screen.**
+
+The filter that hides the AI keys matches by literal prefix, so a `gearbox.*`
+namespace renders in the ordinary settings editor untouched. Three small pieces
+follow from that, and each uses a mechanism this ADR already names:
+
+1. **A `PreferenceContribution`** (`src/common/gearbox-preferences.ts`) declaring
+   `gearbox.ai.apiKey`. Adding a second setting is one entry in that schema —
+   which is the point of doing it this way rather than with a widget.
+2. **`rebind(PreferenceLayoutProvider)`** so the settings land in a top-level
+   *Gearbox* section instead of under *Extensions*, where
+   `PreferenceTreeGenerator` files every namespace its layout does not know. There
+   is no contribution point for sections; rebinding is the mechanism in this
+   ADR's own table. The override sits in `src/browser/theia/preferences/`,
+   mirroring the package it overrides, as the rest of that directory does.
+3. **A renderer for secrets** keyed on the schema's `typeDetails`, because Theia
+   renders every string preference with `input.type = "text"` and has no flag for
+   a masked one. Keyed on the flag rather than the preference id, so the next
+   secret is covered without editing it.
+
+`File > 5_settings` holds the entry, and needs no whitelist change: `MENU_KEEP`
+already keeps that group, with the reason "themes and preferences are about the
+tool". The `gearbox.` command prefix is likewise already kept.
+
+### What is *not* decided here
+
+**The key is in clear text, and the setting says so.** A preference lives in
+`~/.theia/settings.json`. `scope: PreferenceScope.User` is the control that
+matters — it makes the key unwritable into a workspace or folder settings file,
+which are the ones that get committed — and the masking is cosmetic: it keeps a
+key out of screenshots and failure traces, not off the disk. The description
+names `ANTHROPIC_API_KEY` as the alternative that never touches a file.
+
+The OS keychain (`CredentialsService`) was considered and not taken. It degrades
+silently to process memory when keytar cannot load, and using it would mean
+restating `createAnthropicModelDescription` in this repository to re-register the
+models — a second home for facts that are Theia's. Worth revisiting if Studio ever
+holds more than one secret.
+
+**The exclusion of `@theia/ai-ide` stands.** This reuses Theia's settings editor
+rather than reinstating the package or rebuilding its view.
+
+### Confirmation
+
+* `ide/tests/conformance/adr-0011-settings.spec.ts` — the *Gearbox* section
+  exists, the key is a setting a person can find, and its field renders masked.
+* Verified by a live pass, outside the suite: typing a key into the field made
+  the chat answer **without a reload**, `gearbox.ai.apiKey` appeared in
+  `~/.theia/settings.json`, and `ai-features.anthropic.AnthropicApiKey` did
+  **not** — the mirror is written at `PreferenceScope.Session`, which is
+  in-memory, so one secret does not end up persisted twice under two names.
+* Not asserted by a test: the chat's refusal when no model is ready. Whether one
+  is ready depends on a key in the environment or the user's settings, so such a
+  test would report on the machine it ran on.
+
+### Traceability
+
+* Closes the gap recorded in `cpt-gearbox-adr-native-chat-surface`'s Consequences.
+* Serves `cpt-gearbox-fr-chat-context` (`docs/PRD.md`): the surface it requires is
+  now configurable by the person using it.
+* Uses this ADR's own mechanisms — `rebind(TheiaX).to(MyX)`, and the
+  `src/browser/theia/**` mirror for every override.

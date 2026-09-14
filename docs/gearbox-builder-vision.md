@@ -2290,6 +2290,38 @@ Developers already work inside AI-enabled editors and agents.
 
 Gearbox Builder should expose the engine to those agents instead.
 
+## 63.1 Amended 2026-09-13: narrowed, not reversed
+
+**Status: amended by ADR `cpt-gearbox-adr-native-chat-surface`. The text above
+stands as the reasoning; the blanket prohibition does not.**
+
+Seven of the eight reasons listed above object to *building chat
+infrastructure* — provider integration, credentials, streaming, session state,
+tool loops, and the input surface. Theia AI supplies all seven, and the
+application already depends on it, so that cost is paid whether or not the
+surface is finished.
+
+The eighth — duplicate UX with existing developer agents — still holds, and is
+why §64 remains the direction for agents outside the IDE. It is also the one an
+in-IDE surface answers rather than worsens: an external agent cannot see what is
+selected in Studio, which profile is being shown, or which resolution produced
+the diagnostics on screen. That state lives in the frontend and is not on the
+wire.
+
+**What is now permitted is narrow:** a chat that is a *view over the resolver*.
+Every tool it has returns engine output; it cannot read a description, a gear's
+source, or the filesystem, so it has no means to form an opinion of its own
+about a topology. Its previews are the engine's own dry runs and write nothing,
+and its single write verb is the previewed, operator-confirmed one ADR-0010
+requires.
+
+**What is still forbidden:** a general-purpose assistant in this application.
+No file tools, no terminal, no write that skips the preview, and no language
+model in the engine, the CLI, or any assertion path. §70's rule governs —
+`resolver decides / LLM explains` — and §61 stands unchanged: explainability
+does not depend on an LLM, because the explanation is the resolver's and the
+chat only reads it aloud.
+
 ---
 
 # 64. MCP Is the Agent Interface
@@ -3325,7 +3357,6 @@ Do not require in V1:
 custom parser/language
 SAT/SMT
 complex optimization/scoring
-embedded AI chat
 full organizational policy engine
 every current Gear migrated
 private package registry
@@ -3338,6 +3369,11 @@ Argo ApplicationSet generation
 ```
 
 Build the core model first.
+
+`embedded AI chat` was on this list until 2026-09-13. It was removed by ADR
+`cpt-gearbox-adr-native-chat-surface`, which permits one narrow form of it — a
+view over the resolver, with no file access and no unpreviewed write — and
+leaves a general-purpose assistant out of scope. See §63.1.
 
 ---
 
