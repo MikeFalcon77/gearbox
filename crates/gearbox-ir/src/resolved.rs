@@ -306,9 +306,17 @@ pub struct ResolvedApplication {
 
     /// The gear whose co-location closure defines this application.
     ///
-    /// For a worker this is also its directory identity, verbatim: the runtime
-    /// takes that name from a field fixed in the binary, with no configuration
-    /// override, which is why roles cannot be expressed.
+    /// For a worker this is also its directory identity, verbatim -- and the
+    /// reason is here rather than in the runtime. `generate::rust` writes this
+    /// name into `worker_main.rs` as a literal, and `OopRunOptions::gear_name`
+    /// is a plain `String` that takes whatever it is given. The name is fixed in
+    /// the binary because we fixed it.
+    ///
+    /// What roles need is a second application for the same anchor, and `split`
+    /// in `resolve::partition` finds a pin rather than filtering for all of
+    /// them: one gear yields one application, so one gear yields one directory
+    /// name. That is the limitation, and it is ours
+    /// (ADR `cpt-gearbox-adr-role-qualified-names`).
     pub anchor: GearId,
 
     /// The gears in this binary, in dependency order.
