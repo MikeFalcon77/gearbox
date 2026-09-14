@@ -127,7 +127,8 @@ grammar-check: grammar
 # The diagnostics reference is generated from the one catalogue that declares
 # the codes, so the documents cannot describe a code the engine does not have
 # nor miss one it does (cpt-gearbox-nfr-no-type-drift, applied to the documents'
-# view of the catalogue). The curated table in docs/gdl.md stays hand-written:
+# view of the catalogue). The curated table in the GDL reference (now
+# gears-rust/docs/gdl.md) stays hand-written:
 # it carries a column -- which stage reports the code -- that the catalogue does
 # not know.
 #

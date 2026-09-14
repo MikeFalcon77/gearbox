@@ -122,12 +122,13 @@ allow-list starts empty, so an exception has to be written down.
 
 ### The catalogue is documented, generated
 
-`docs/gdl.md` described seventeen of the codes in a hand-written table with no
+The GDL reference described seventeen of the codes in a hand-written table with no
 drift guard, and `DiagnosticCode::title()` had no caller outside its own test: it
 was declared for a reference page nobody built. `make diagnostics` now generates
 `docs/diagnostics.md` from `DiagnosticCode::ALL`, guarded by
 `make diagnostics-check` exactly as the editor's grammar vocabulary is. The
-curated table in `docs/gdl.md` stays hand-written, because it carries a column —
+curated table in the GDL reference (since moved to `gears-rust/docs/gdl.md`) stays
+hand-written, because it carries a column —
 which stage reports the code — that the catalogue does not know.
 
 ### Not localized

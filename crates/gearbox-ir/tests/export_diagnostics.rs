@@ -5,7 +5,7 @@
 //! code only as the opaque string the wire carries. One generator rather than
 //! two because the failure worth preventing is the two disagreeing.
 //!
-//! Until this existed, `docs/gdl.md` described seventeen of the codes in a
+//! Until this existed, the GDL reference described seventeen of the codes in a
 //! hand-written table and the other fifty-seven were documented only in Rust.
 //! `DiagnosticCode::title()` had no caller at all outside its own test: it was
 //! declared for a reference page that was never built. This is that page.
@@ -16,7 +16,7 @@
 //! documents' view of the catalogue).
 //!
 //! **Generated, therefore ordered by code and not by importance.** A reference
-//! is looked up, not read through; the curated table in `docs/gdl.md` is where a
+//! is looked up, not read through; the curated table in the GDL reference is where a
 //! reading order lives, and it stays hand-written because it carries a column
 //! -- which stage reports the code -- that the catalogue does not know.
 
