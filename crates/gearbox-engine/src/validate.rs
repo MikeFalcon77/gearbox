@@ -14,7 +14,9 @@
 //! beside" (GBX0208), the other is "no crate anywhere declares this"
 //! (GBX0301). Reporting them as one code would make the common case unhelpful.
 
-use gearbox_ir::{Diagnostic, DiagnosticCode, Diagnostics, Location, ProductIntent, Severity};
+use gearbox_ir::{
+    Diagnostic, DiagnosticCode, Diagnostics, GearId, Location, ProductIntent, Severity,
+};
 
 use crate::catalogue::CatalogueScan;
 use crate::source::SourceRoot;
@@ -183,7 +185,7 @@ fn check_selections(
                         "`use_gear(\"{}\")` names a gear no source declares",
                         selection.gear.as_str()
                     ),
-                    nearest_hint(scan, selection.gear.as_str()),
+                    nearest_hint(scan.catalogue.gears.keys(), selection.gear.as_str()),
                 )
                 .at(Location::file(uri.to_owned())),
             ),
@@ -217,11 +219,17 @@ fn skeleton(found: &crate::undescribed::UndescribedGear) -> String {
 ///
 /// Cheap and only on this path. Reported as part of the help rather than as a
 /// separate diagnostic: a near miss is a guess, and a guess belongs in advice.
-fn nearest_hint(scan: &CatalogueScan, wanted: &str) -> String {
-    let nearest = scan
-        .catalogue
-        .gears
-        .keys()
+///
+/// Takes the ids rather than a [`CatalogueScan`] because the contract-owner
+/// check in `catalogue.rs` wants the same hint and runs *before* a scan exists
+/// -- the scan is assembled after the load finishes. It only ever read
+/// `scan.catalogue.gears.keys()` anyway.
+pub(crate) fn nearest_hint<'a>(
+    known: impl IntoIterator<Item = &'a GearId>,
+    wanted: &str,
+) -> String {
+    let nearest = known
+        .into_iter()
         .map(|id| (distance(wanted, id.as_str()), id.as_str()))
         .filter(|(d, _)| *d <= 3)
         .min();
