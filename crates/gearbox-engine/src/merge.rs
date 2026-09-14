@@ -26,11 +26,26 @@ use gearbox_ir::{
 };
 use gearbox_project::{ProjectedContract, ProjectedGear};
 
-/// A gear plus the contracts its description referenced.
+/// A gear plus the contracts its description referenced, split by where each
+/// came from.
+///
+/// **Provenance is carried, not re-derived.** The catalogue used to ask
+/// "is `contract.owner == declared_by`" to decide whether a copy was the
+/// owner's complete one. That question has a wrong answer the moment a
+/// contract's `#[toolkit::contract(gear = ...)]` names a role rather than a
+/// gear: no declaring gear's id equals the owner, every copy looks like a
+/// consumer's partial restatement, and the merge degenerates to whoever was
+/// walked first. These two lists are built in two loops below, so the fact is
+/// free here and a guess anywhere later.
 #[derive(Debug)]
 pub struct MergedGear {
     pub gear: GearDescriptor,
-    pub contracts: Vec<ContractDescriptor>,
+    /// Built from this gear's own `provide(...)` records: complete, carrying
+    /// the transport projections.
+    pub provided: Vec<ContractDescriptor>,
+    /// Built from its `consume(...)` records: identity and sdk only, with
+    /// `rest` and `grpc` absent rather than empty.
+    pub consumed: Vec<ContractDescriptor>,
 }
 
 /// An error attributable to the description.
@@ -179,7 +194,8 @@ pub fn merge(
         }
     }
 
-    let mut contracts = Vec::new();
+    let mut provided_contracts = Vec::new();
+    let mut consumed_contracts = Vec::new();
     let mut provides = Vec::new();
     for record in &decl.provides {
         let Some(projected_contract) =
@@ -202,7 +218,7 @@ pub fn merge(
             diagnostics,
         ) {
             provides.push(provider);
-            contracts.push(contract);
+            provided_contracts.push(contract);
         }
     }
 
@@ -223,7 +239,7 @@ pub fn merge(
             diagnostics,
         ) {
             consumes.push(requirement);
-            contracts.push(contract);
+            consumed_contracts.push(contract);
         }
     }
 
@@ -318,7 +334,11 @@ pub fn merge(
         declared_at: decl.declared_at.clone(),
     };
 
-    Some(MergedGear { gear, contracts })
+    Some(MergedGear {
+        gear,
+        provided: provided_contracts,
+        consumed: consumed_contracts,
+    })
 }
 
 /// Find the projected contract a `provide`/`consume` joins to by trait name.

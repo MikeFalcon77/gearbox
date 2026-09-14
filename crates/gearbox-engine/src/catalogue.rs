@@ -128,6 +128,7 @@ pub fn load_catalogue_staged(
 ) -> CatalogueScan {
     let gdl = GdlEngine::new();
     let mut catalogue = Catalogue::default();
+    let mut contracts = ContractMerge::default();
     let mut diagnostics = Diagnostics::new();
     // One cache per load: a crate named by several gears is parsed once.
     let mut scans = crate::scans::CrateScans::new();
@@ -302,7 +303,7 @@ pub fn load_catalogue_staged(
             } else {
                 catalogue.gears.insert(id.clone(), merged.gear);
             }
-            merge_contracts(&mut catalogue.contracts, merged.contracts, &id);
+            contracts.absorb(merged.provided, merged.consumed, &id);
 
             // Borrowed from the catalogue, so the callback sees the merged gear
             // rather than a copy made for its benefit.
@@ -313,6 +314,8 @@ pub fn load_catalogue_staged(
             }
         }
     }
+
+    catalogue.contracts = contracts.finish();
 
     // The whole gear set is known only here. Inside the loop above,
     // `catalogue.gears` holds only what `discover()`'s sorted order has reached,
@@ -683,27 +686,85 @@ fn description_uri(roots: &[SourceRoot], gear: &GearDescriptor) -> Option<String
     ))
 }
 
-/// Insert contracts, letting the owner's description win.
+/// How authoritative one copy of a contract descriptor is.
 ///
 /// A contract is described twice on purpose: the provider declares it fully,
 /// and each consumer restates its Rust path so the consumer's generated client
 /// needs nothing from the provider's file. The provider's copy is the complete
-/// one -- it carries the transport projections -- so it takes precedence, and a
-/// consumer's copy only fills a gap when the provider is out of scope.
+/// one -- it carries the transport projections -- so it wins, and a consumer's
+/// copy only fills a gap when the provider is out of scope.
 ///
-/// `declared_by` is the gear whose file these came from, which is what makes
-/// "is this the owner's copy" an exact question rather than a guess about
-/// whether a missing projection means absent or merely unstated.
-fn merge_contracts(
-    into: &mut BTreeMap<ContractId, ContractDescriptor>,
-    contracts: Vec<ContractDescriptor>,
-    declared_by: &GearId,
-) {
-    for contract in contracts {
-        let from_owner = contract.owner == *declared_by;
-        if from_owner || !into.contains_key(&contract.id) {
-            into.insert(contract.id.clone(), contract);
+/// **Three ranks rather than two**, and the top one is what keeps this inert
+/// for every tree with no roles in it. When two gears provide one contract, the
+/// gear whose id equals the owner wins today; collapsing that into a plain
+/// "provided beats consumed" would hand the win to whichever gear the walk
+/// reached first instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum ContractAuthority {
+    /// From a `consume(...)`: identity and sdk, no transport projections.
+    Consumed,
+    /// From a `provide(...)` in a gear the attribute does not name as owner.
+    Provided,
+    /// From a `provide(...)` in the gear the attribute names as owner.
+    OwnerProvided,
+}
+
+/// The contract table under construction, with each entry's provenance.
+///
+/// The provenance is carried from [`crate::merge::MergedGear`] rather than
+/// re-derived from `owner == declared_by`. That comparison is false for every
+/// file once a contract answers to a role rather than to a gear, which turned
+/// the rule into "whoever was walked first" and let a consumer's stub -- whose
+/// `rest` and `grpc` are deliberately absent -- beat the provider's complete
+/// descriptor. Silently.
+#[derive(Default)]
+struct ContractMerge {
+    descriptors: BTreeMap<ContractId, ContractDescriptor>,
+    authority: BTreeMap<ContractId, ContractAuthority>,
+}
+
+impl ContractMerge {
+    /// Absorb one gear's contracts.
+    ///
+    /// A strictly more authoritative copy replaces the incumbent; an equally
+    /// authoritative one does not, so the first declared wins -- the same rule
+    /// the gear map itself uses.
+    fn absorb(
+        &mut self,
+        provided: Vec<ContractDescriptor>,
+        consumed: Vec<ContractDescriptor>,
+        declared_by: &GearId,
+    ) {
+        let ranked = provided
+            .into_iter()
+            .map(|c| {
+                let rank = if c.owner == *declared_by {
+                    ContractAuthority::OwnerProvided
+                } else {
+                    ContractAuthority::Provided
+                };
+                (rank, c)
+            })
+            .chain(
+                consumed
+                    .into_iter()
+                    .map(|c| (ContractAuthority::Consumed, c)),
+            );
+
+        for (rank, contract) in ranked {
+            let beaten = self
+                .authority
+                .get(&contract.id)
+                .is_none_or(|held| rank > *held);
+            if beaten {
+                self.authority.insert(contract.id.clone(), rank);
+                self.descriptors.insert(contract.id.clone(), contract);
+            }
         }
+    }
+
+    fn finish(self) -> BTreeMap<ContractId, ContractDescriptor> {
+        self.descriptors
     }
 }
 
@@ -795,3 +856,7 @@ fn discover(root: &Path) -> (Vec<PathBuf>, Vec<String>) {
     failures.sort();
     (found, failures)
 }
+
+#[cfg(test)]
+#[path = "catalogue_tests.rs"]
+mod catalogue_tests;

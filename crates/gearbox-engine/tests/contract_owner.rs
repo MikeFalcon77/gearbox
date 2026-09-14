@@ -94,6 +94,47 @@ gear(
     root
 }
 
+/// The same tree plus a consumer whose directory name sorts *before* the
+/// provider's, so the walk reaches the partial copy first.
+fn root_with_consumer(owner: &str, roles: &str) -> PathBuf {
+    let root = root(owner, roles);
+    let consumer = root.join("aaa-consumer");
+    std::fs::create_dir_all(consumer.join("src")).unwrap();
+    std::fs::write(
+        consumer.join("Cargo.toml"),
+        "[package]\nname = \"aaa-consumer\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+         [lib]\nname = \"aaa_consumer\"\npath = \"src/lib.rs\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        consumer.join("src/lib.rs"),
+        "\n#[toolkit::gear(name = \"aaa-consumer\", capabilities = [system])]\npub struct AaaConsumerGear;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        consumer.join("gear.gdl"),
+        r#"
+gear(
+    name = "Consumer",
+    description = "d",
+    category = "core-functionality",
+    visibility = "internal",
+    package = cargo(crate_name = "aaa-consumer", lib = "aaa_consumer", path = "."),
+    consumes = [
+        consume(
+            contract = "ThingApi",
+            rust = "thing_sdk::ThingApi",
+            sdk = cargo(crate_name = "thing-sdk", lib = "thing_sdk", path = "../thing-sdk"),
+            from_ = "provider",
+        ),
+    ],
+)
+"#,
+    )
+    .unwrap();
+    root
+}
+
 fn catalogue(owner: &str, roles: &str) -> Catalogue {
     let path = root(owner, roles);
     let source = SourceRoot::open(SourceId::new("demo").unwrap(), &path).unwrap();
@@ -154,5 +195,33 @@ fn an_owner_that_is_the_declaring_gear_is_silent() {
     assert!(
         !found.contains(&DiagnosticCode::TopologyUnknownContractOwner),
         "the ordinary tree must stay quiet: {found:?}"
+    );
+}
+
+#[test]
+fn a_consumers_stub_does_not_beat_the_providers_copy_when_the_owner_is_a_role() {
+    // Defect B, and it is silent rather than loud: no diagnostic marks it.
+    //
+    // `aaa-consumer` sorts before `provider`, so the walk reaches its partial
+    // copy first. The old rule asked `contract.owner == declared_by`, which is
+    // false for *both* gears once the owner is a role name, so it fell back to
+    // "first writer wins" and the consumer's stub -- `rest: None` -- became the
+    // catalogue's copy of a contract that has a REST projection.
+    let path = root_with_consumer(
+        "provider-ingest",
+        r#"roles = [role(name = "ingest", directory_name = "provider-ingest")],"#,
+    );
+    let source = SourceRoot::open(SourceId::new("demo").unwrap(), &path).unwrap();
+    let catalogue = load_catalogue(&[source]).catalogue;
+
+    let contract = catalogue
+        .contracts
+        .values()
+        .find(|c| c.base_name == "ThingApi")
+        .expect("the contract is in the catalogue");
+    assert!(
+        contract.rest.is_some(),
+        "the provider's copy carries the REST projection and must win; \
+         `rest: None` means the consumer's stub did"
     );
 }
