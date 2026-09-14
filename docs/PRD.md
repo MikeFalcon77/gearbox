@@ -222,7 +222,7 @@ and [`gears-rust/docs/GEARS.md`](../../gears-rust/docs/GEARS.md). Gearbox has no
 ## 5. Functional Requirements
 
 > **Testing strategy**: All requirements are verified by automated tests, plus the end-to-end
-> acceptance procedure in `docs/plans/gearbox-builder-prototype.md` §12. Verification methods are
+> acceptance procedure in `docs/plans/prototype.md` §12. Verification methods are
 > documented only where they are non-standard.
 
 ### 5.1 Description language (p1)
@@ -1148,7 +1148,7 @@ locatable from the host's description.
 ## 9. Acceptance Criteria
 
 Each criterion corresponds to a step of the acceptance procedure in
-[docs/plans/gearbox-builder-prototype.md](./plans/gearbox-builder-prototype.md) §12.
+[docs/plans/prototype.md](./plans/prototype.md) §12.
 
 - [ ] Every gear in the slice validates clean against its own Rust source (§12 step 1).
 - [ ] The `embedded` profile builds, runs, serves both interfaces, and its running binary's own
@@ -1246,12 +1246,12 @@ Each criterion corresponds to a step of the acceptance procedure in
 ## 14. Traceability
 
 - **Design**: [DESIGN.md](./DESIGN.md) — written after the prototype, per
-  [plans/gearbox-builder-prototype.md](./plans/gearbox-builder-prototype.md) §14
+  [plans/prototype.md](./plans/prototype.md) §14
 - **ADRs**: [ADR/](./ADR/) — in particular
   [0010 authoring ownership tiers](./ADR/0010-cpt-gearbox-adr-authoring-ownership-tiers.md), which
   decides the §4.1/§4.2 boundary and unblocks `cpt-gearbox-usecase-author-gear` and
   `cpt-gearbox-usecase-author-plugin`, and
   [0011 domain-specific IDE shell](./ADR/0011-cpt-gearbox-adr-domain-specific-ide-shell.md), which
   decides how Gearbox Studio narrows Theia without losing the editor `cpt-gearbox-fr-studio` needs.
-- **Plan**: [plans/gearbox-builder-prototype.md](./plans/gearbox-builder-prototype.md)
-- **Vision**: [gearbox-builder-vision.md](./gearbox-builder-vision.md)
+- **Plan**: [plans/prototype.md](./plans/prototype.md)
+- **Vision**: [vision.md](./vision.md)

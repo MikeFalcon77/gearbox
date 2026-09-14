@@ -335,14 +335,14 @@ its own `gear.gdl` pinning its own `attr`, which is also why a gear description 
 to sit at the crate root.
 
 Superseded direction: this ADR replaces the `gear-gdl-single-source-of-truth` dilemma that
-`docs/plans/gearbox-builder-prototype.md` §14 reserved for slot 0002, and answers vision §118 Q2 and
+`docs/plans/prototype.md` §14 reserved for slot 0002, and answers vision §118 Q2 and
 Q3. It is written ahead of the other planned ADRs because it constrains the GDL surface and the
 scanner before either is implemented.
 
 ## Traceability
 
 - **PRD**: [PRD.md](../PRD.md)
-- **DESIGN**: not yet written; see `docs/plans/gearbox-builder-prototype.md` §14
+- **DESIGN**: not yet written; see `docs/plans/prototype.md` §14
 
 This decision directly addresses the following requirements or design elements:
 

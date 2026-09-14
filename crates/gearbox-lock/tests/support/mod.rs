@@ -1,5 +1,5 @@
 //! Shared test fixture: a compact two-process resolved product modelled on
-//! the `payments-demo` slice from `docs/plans/gearbox-builder-prototype.md`
+//! the `payments-demo` slice from `docs/plans/prototype.md`
 //! §I -- real gear and contract shapes, small enough to hand-build.
 
 #![allow(

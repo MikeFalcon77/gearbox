@@ -286,7 +286,7 @@ should be read as one.
 
 ## Traceability
 
-* Amends vision §63 and §111 (`docs/gearbox-builder-vision.md`), which forbade
+* Amends vision §63 and §111 (`docs/vision.md`), which forbade
   this outright.
 * Applies vision §70's `resolver decides / LLM explains` as the governing rule,
   and §67's proposal model as the shape of every write.

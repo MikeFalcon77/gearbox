@@ -93,7 +93,7 @@ Implemented in `crates/gearbox-gdl/src/edit_call.rs`, `crates/gearbox-rpc`, `Pro
 
 * Extends ADR `cpt-gearbox-adr-authoring-ownership-tiers` tier 3 (see amendment 2026-09-01 below).
 * Depends on ADR `cpt-gearbox-adr-multiple-source-roots` for source checkboxes in the wizard.
-* Plan: `docs/plans/gearbox-builder-prototype.md` §9.1 (P0 outcome and editor generalisation).
+* Plan: `docs/plans/prototype.md` §9.1 (P0 outcome and editor generalisation).
 
 ## Amendment 2026-09-02: wizard paths, honest clone, Open by file
 

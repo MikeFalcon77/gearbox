@@ -14,7 +14,7 @@ gears** — так был поставлен вопрос, — но границ
 и это записано в самих репозиториях.
 
 **Vision Gearbox лежит внутри `cargo-gears`** — `design/ideas/gearbox-builder-vision.md`,
-3379 строк, статус «Vision / pitch document». Наша копия в `docs/gearbox-builder-vision.md`
+3379 строк, статус «Vision / pitch document». Наша копия в `docs/vision.md`
 разошлась с оригиналом на 524 строки диффа, в основном правкой про проекцию фактов из
 Rust-атрибутов (ADR-0002).
 

@@ -862,7 +862,7 @@ stopped expecting.
 
 * Requirements: `cpt-gearbox-fr-studio` (the Studio itself), `cpt-gearbox-fr-editor-diagnostics`
   (diagnostics rendered in the editor, which depends on the editor stack surviving).
-* Constrains: `docs/plans/gearbox-builder-prototype.md` §9 (the `ide/` structure, the widget table
+* Constrains: `docs/plans/prototype.md` §9 (the `ide/` structure, the widget table
   and the Theia traps) and §9.1 (what diverged and why).
 * Depends on: ADR `cpt-gearbox-adr-staged-catalogue-loading` — the Catalogue perspective renders
   a staged load, and the shell must not assume a view has all its data when it first appears.

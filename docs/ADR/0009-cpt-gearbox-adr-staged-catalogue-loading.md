@@ -191,7 +191,7 @@ proxy for "not projected yet". `pending` remains the only signal for that.
 ## Traceability
 
 * Requirements: `cpt-gearbox-fr-incremental-catalogue`, `cpt-gearbox-nfr-first-paint`.
-* Constrains: `docs/plans/gearbox-builder-prototype.md` §2.3 (stages), §8 (RPC notifications),
+* Constrains: `docs/plans/prototype.md` §2.3 (stages), §8 (RPC notifications),
   §9 (Catalogue widget).
 * Depends on: ADR `cpt-gearbox-adr-macro-projected-catalogue` — the projected `GearId` is what makes
   S1 unable to key a tree.

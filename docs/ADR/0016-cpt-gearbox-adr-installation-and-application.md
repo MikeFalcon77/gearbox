@@ -356,7 +356,7 @@ an enumeration of ids, with the same weakness the reference matching inherits.
 * Respects ADR-0010: `gears-rust` is read, never written, except for the
   `exposes_features` field which is called out above as a cross-repo agreement.
 * Answers the scenario that `docs/PRD.md` §4.2 and
-  `docs/gearbox-builder-vision.md` §111 leave in neither scope nor non-goals,
+  `docs/vision.md` §111 leave in neither scope nor non-goals,
   and realises for gears what the vision's §54 already asks for infrastructure:
   "integrate into an existing cluster rather than always deploying bundled
   dependencies".

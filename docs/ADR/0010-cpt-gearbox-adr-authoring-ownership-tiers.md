@@ -29,7 +29,7 @@ integrator need, given that a template is the only place declared contract edges
 manual work?"*
 
 So the question is not whether the tool may write Rust. It is **which files the tool owns**, which is
-a question the generator design in `docs/plans/gearbox-builder-prototype.md` §7 already answers for
+a question the generator design in `docs/plans/prototype.md` §7 already answers for
 its own output and has never been asked about anything else. The current ban answers it by location
 ("nothing is ever written into `gears-rust`") rather than by ownership, and that is what makes it
 block a new crate in a directory that does not exist yet.
@@ -358,7 +358,7 @@ client, because a client is not a security boundary.
 
 * Requirements: `cpt-gearbox-actor-gear-author` gains the use cases this decision unblocks;
   PRD §4.1/§4.2 carry the tier statement; PRD §13's template question narrows to content.
-* Constrains: `docs/plans/gearbox-builder-prototype.md` §7 (the ownership classes this reuses).
+* Constrains: `docs/plans/prototype.md` §7 (the ownership classes this reuses).
 * Depends on: ADR `cpt-gearbox-adr-macro-projected-catalogue` — the one-author invariant is what
   tiers 4 and 5 protect, and what `GeneratedOnce` leaves intact.
 * Depends on: ADR `cpt-gearbox-adr-staged-catalogue-loading` — discovery by walking for `gear.gdl` is
@@ -366,7 +366,7 @@ client, because a client is not a security boundary.
 * Amended by the 2026-08-29 amendment above: `cpt-gearbox-fr-gdl-declarative` is what places a GDL
   description in tier 3 rather than tier 5, and `cpt-gearbox-fr-rpc-writes-opt-in` is what gates the
   write. Implemented in `crates/gearbox-gdl/src/edit.rs`; the four client-side refusals are in
-  `docs/plans/gearbox-builder-prototype.md` §9.2.
+  `docs/plans/prototype.md` §9.2.
 
 ## Amendment 2026-09-01: any named argument in a literal list
 

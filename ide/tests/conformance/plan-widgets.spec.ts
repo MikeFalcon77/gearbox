@@ -1,4 +1,4 @@
-// The widget table in §9 of docs/plans/gearbox-builder-prototype.md: which views
+// The widget table in §9 of docs/plans/prototype.md: which views
 // exist and where they live.
 //
 // The placements are claims, not incidental. Each of the three that exist was

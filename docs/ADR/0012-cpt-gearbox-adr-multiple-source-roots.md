@@ -141,5 +141,5 @@ to partition the corpus.
   answer must not depend on filesystem order).
 * Depends on: ADR `cpt-gearbox-adr-staged-catalogue-loading` (rows are keyed before they are
   projected, which is why the key includes the source).
-* Constrains: `docs/plans/gearbox-builder-prototype.md` §9 (the product session's initialization
+* Constrains: `docs/plans/prototype.md` §9 (the product session's initialization
   order).

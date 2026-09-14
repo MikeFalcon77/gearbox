@@ -326,7 +326,7 @@ Nothing else in this ADR changes code. The two shapes remain undecided.
 
 * Refines `cpt-gearbox-fr-gdl-declarative` (`docs/PRD.md:225-236`) and
   `cpt-gearbox-fr-gdl-sandbox` (`docs/PRD.md:249-259`).
-* Revisits `docs/gearbox-builder-vision.md:860-866` (§18.1), where
+* Revisits `docs/vision.md:860-866` (§18.1), where
   `deployment = kubernetes()` was replaced by `profiles = [...]` plus
   `default_profile`.
 * Renames `cpt-cf-adr-deployment-profiles` Profile 2 rather than diverging from
@@ -335,7 +335,7 @@ Nothing else in this ADR changes code. The two shapes remain undecided.
   platform's living documents (`DESIGN.md`, `PRD.md`, ADRs 0003 / 0005 / 0009)
   carry the new name. The two repositories therefore agree on the vocabulary
   rather than each keeping its own.
-* Plan: `docs/plans/gearbox-builder-prototype.md:355-357`.
+* Plan: `docs/plans/prototype.md:355-357`.
 
 ## Groundwork recorded, not fixed
 
@@ -355,8 +355,8 @@ all are deliberately left alone here.
 3. **The principle's wording is one site behind the code.** The canonical comment
    (`products/payments-demo/product.gdl:5-6`) and its three siblings
    (`crates/gearbox-gdl/src/product.rs:6`,
-   `docs/gearbox-builder-vision.md:864-865`,
-   `docs/plans/gearbox-builder-prototype.md:356-357`) list `bind`,
+   `docs/vision.md:864-865`,
+   `docs/plans/prototype.md:356-357`) list `bind`,
    `cluster_profile` and `application` — but `plugin(...)` also takes `profiles`
    (`product.rs:307-319`), and the demo relies on it
    (`products/payments-demo/product.gdl:52-55`).

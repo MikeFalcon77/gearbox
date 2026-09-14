@@ -2,7 +2,7 @@
 
 ## Context
 
-`docs/gearbox-builder-vision.md` (127 sections) proposes a product-composition layer for the
+`docs/vision.md` (127 sections) proposes a product-composition layer for the
 Gears platform: `gear.gdl` + `product.gdl` → Starlark evaluation → typed Rust IR → deterministic
 resolver → `product.lock` → generators (Cargo crates, Docker, Helm), with CLI/GUI/MCP as clients
 of one engine. It is a vision doc: nothing is built, and its examples reference runtime features
@@ -49,7 +49,7 @@ the repo-grounded predecessor and its conclusions are folded in below.
   following the `gears-rust/docs/spec-templates/gears-sdlc/` templates.
 - No CI.
 
-This plan is also copied to `docs/plans/gearbox-builder-prototype.md` as the first commit.
+This plan is also copied to `docs/plans/prototype.md` as the first commit.
 
 ---
 
@@ -2670,7 +2670,7 @@ per-diagnostic fixtures).
 
 ## Critical files
 
-- [docs/gearbox-builder-vision.md](docs/gearbox-builder-vision.md) — §12 (declarative rule), §22
+- [docs/vision.md](../vision.md) — §12 (declarative rule), §22
   (lock contents), §47–48 (application crates), §51–58 (templating + Helm) are the normative constraints
 - `gears-rust/libs/toolkit/src/registry.rs` — `Registrator`, `build_topo_sorted`, `MissingDeps`;
   why `deps` is uncuttable and the source of the `--list-registered-gears` oracle
