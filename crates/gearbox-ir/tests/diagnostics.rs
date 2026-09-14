@@ -27,14 +27,20 @@ fn retired_codes_are_not_reused() {
     // Reusing a number would make a lock or a transcript that names GBX0203
     // silently mean something else, so the retired ones stay retired.
     //
+    // Three reasons, and the list is worth reading as three.
+    //
     // GBX0201-GBX0205 went when the catalogue became macro-projected: the facts
     // they compared now exist in one place, so there is no second copy to
     // diverge. GBX0207 went for a different reason -- both halves of it are
     // compile errors in `toolkit-contract-macros`, so a crate exhibiting either
-    // never reaches a catalogue.
+    // never reaches a catalogue. GBX0605 went for a third: the claim stopped
+    // being true. It refused a `registry(...)` source on the grounds that
+    // nothing could fetch a published gear, and `gearbox_engine::registry` now
+    // resolves one like any other source. A code with no firing site is a claim
+    // the tool no longer makes.
     let live: Vec<&str> = DiagnosticCode::ALL.iter().map(|c| c.as_str()).collect();
     for retired in [
-        "GBX0201", "GBX0202", "GBX0203", "GBX0204", "GBX0205", "GBX0207",
+        "GBX0201", "GBX0202", "GBX0203", "GBX0204", "GBX0205", "GBX0207", "GBX0605",
     ] {
         assert!(
             !live.contains(&retired),
