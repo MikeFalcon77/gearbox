@@ -182,6 +182,7 @@ pub fn resolve_at(
         );
         bindings::pin_static_endpoints(&mut derived, &partition, d);
         bindings::report_env_limits(&derived, &uri, &mut diagnostics);
+        bindings::report_wiring_key_skew(catalogue, &derived, &uri, &mut diagnostics);
         derived
     });
 

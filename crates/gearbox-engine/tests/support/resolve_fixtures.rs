@@ -238,6 +238,29 @@ pub fn catalogue_wrong_major() -> Catalogue {
     two_gears(vec![wanted, offered], vec![p], vec![r], &[])
 }
 
+/// `host` declares `from = "stranger"`, and `provider` is what actually offers
+/// the contract.
+///
+/// The one shape where the selected provider and the declared one differ:
+/// selection falls back to the sole gear that provides it and reports
+/// `GBX0404`, and the generated `consumer_wiring` key then names the fallback
+/// while the runtime reads the declared name.
+pub fn catalogue_declared_provider_does_not_provide() -> Catalogue {
+    let c = contract("Thing", 1, ContractKind::Api);
+    let p = provides(&c, &[Transport::Local, Transport::Rest]);
+    let mut r = consumes(&c.id);
+    if let RequirementKind::Contract { from, .. } = &mut r.kind {
+        *from = gid("stranger");
+    }
+    let mut catalogue = two_gears(vec![c], vec![p], vec![r], &[]);
+    // Present in the catalogue and providing nothing, so the failure is a
+    // wrong `from` rather than an unknown gear.
+    catalogue
+        .gears
+        .insert(gid("stranger"), descriptor("stranger"));
+    catalogue
+}
+
 /// Declared and remote-capable by kind, but the provider wires up no REST.
 pub fn catalogue_local_only_provider() -> Catalogue {
     let c = contract("Thing", 1, ContractKind::Api);

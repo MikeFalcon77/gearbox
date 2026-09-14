@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **82**.
+Codes: **83**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -565,6 +565,7 @@ it is a gear id.
 | [GBX0409](#gbx0409) | warning | endpoint override cannot come from the environment |
 | [GBX0410](#gbx0410) | warning | preference is recorded but not honoured |
 | [GBX0411](#gbx0411) | error | declared endpoint is not honoured |
+| [GBX0412](#gbx0412) | error | the endpoint override key names a different provider than the consumer declared |
 
 ### GBX0401
 
@@ -682,6 +683,31 @@ product *means* -- a provider this product does not build, does not
 place in a process and cannot see the topology of -- which is a model
 question and not a resolver patch. Until that is answered, a refusal is
 the honest reading of a value that changes nothing.
+
+### GBX0412
+
+**the endpoint override key names a different provider than the consumer declared**
+
+The endpoint override key names the provider the resolver selected, and
+the runtime reads the one the consumer declared.
+
+The key is built out of the provider the resolver chose, while
+`#[toolkit::consumes]` emits its last segment verbatim from its own
+`from`. The two agree in every well-formed product and diverge in
+exactly one place: when [`BindingNoProvider`] found the declared
+provider does not provide the contract and fell back to the only other
+gear that does. The generated configuration then looks right, the
+operator's override lands where nothing looks for it, and the consumer
+resolves nothing at run time.
+
+**An error, and scoped so that is defensible.** Only a statically
+discovered remote binding consults this key at all -- directory
+discovery names a lookup instead and is silent here -- so the report is
+confined to the one configuration where the key is load-bearing. The
+fallback that produces it is deliberately tolerant, because a gear
+rename should not make a product unresolvable; refusing to *generate*
+from it is a narrower claim than refusing to resolve it, and the remedy
+is one string in one attribute.
 
 ## `GBX05xx` — Cluster capabilities, providers and plugins
 

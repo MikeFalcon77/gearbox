@@ -69,6 +69,10 @@ fn pid(s: &str) -> ProfileId {
     ProfileId::new(s).unwrap()
 }
 
+fn codes(r: &gearbox_engine::resolve::Resolution) -> Vec<DiagnosticCode> {
+    r.diagnostics.iter().map(|d| d.code).collect()
+}
+
 #[test]
 fn one_description_gives_three_different_bindings() {
     // The headline claim, checked on the one edge in the slice that can carry a
@@ -447,3 +451,68 @@ fn bindings_are_stable_across_runs() {
 
 #[path = "support/resolve_fixtures.rs"]
 mod support;
+
+#[test]
+fn a_selected_provider_that_is_not_the_declared_one_skews_the_wiring_key() {
+    // The generated configuration looks right and the override never fires:
+    // the generator writes `consumer_wiring.provider`, the runtime reads
+    // `consumer_wiring.stranger` -- the name the attribute emitted.
+    let cat = support::catalogue_declared_provider_does_not_provide();
+    let intent = support::kubernetes(&["host", "provider"], Discovery::Static);
+    let r = resolve(&cat, &intent, &pid("prod"));
+
+    let found = codes(&r);
+    // The fallback that produces the skew is itself already reported.
+    assert!(
+        found.contains(&DiagnosticCode::BindingNoProvider),
+        "{found:?}"
+    );
+    let skew = r
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::BindingWiringKeySkew)
+        .expect("GBX0412");
+    assert!(
+        skew.message.contains("consumer_wiring.provider")
+            && skew.message.contains("consumer_wiring.stranger"),
+        "both keys belong in the message: {}",
+        skew.message
+    );
+    assert!(
+        skew.help
+            .as_deref()
+            .unwrap_or_default()
+            .contains("stranger"),
+        "the help names the declared gear: {:?}",
+        skew.help
+    );
+}
+
+#[test]
+fn directory_discovery_is_silent_about_the_wiring_key() {
+    // What makes the error severity defensible: the key is only read by a
+    // statically discovered binding. Under directory discovery the endpoint
+    // source is a lookup and no override key exists to be wrong.
+    let cat = support::catalogue_declared_provider_does_not_provide();
+    let intent = support::kubernetes(&["host", "provider"], Discovery::Directory);
+    let r = resolve(&cat, &intent, &pid("prod"));
+
+    assert!(
+        !codes(&r).contains(&DiagnosticCode::BindingWiringKeySkew),
+        "{:?}",
+        codes(&r)
+    );
+}
+
+#[test]
+fn the_declared_provider_being_the_selected_one_is_silent() {
+    let cat = support::catalogue_with_declared_edge();
+    let intent = support::kubernetes(&["host", "provider"], Discovery::Static);
+    let r = resolve(&cat, &intent, &pid("prod"));
+
+    assert!(
+        !codes(&r).contains(&DiagnosticCode::BindingWiringKeySkew),
+        "the ordinary product must stay quiet: {:?}",
+        codes(&r)
+    );
+}

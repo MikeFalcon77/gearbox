@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 82, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 83, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -438,6 +438,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "error",
     domain: "binding",
     docs: "A binding declares an `endpoint`, and nothing reads it.\n\nThe field is in the language and in the IR, with a doc comment promising\n\"a pinned address, overriding whatever discovery would produce\" -- and\nthe resolver takes only `mode` and `transport` from the declaration, so\nthe address is dropped in silence. Somebody reached for the escape hatch\nand the hand did not close.\n\nRefused rather than honoured, and that is a holding position rather than\na verdict. Honouring it means deciding what an address outside the\nproduct *means* -- a provider this product does not build, does not\nplace in a process and cannot see the topology of -- which is a model\nquestion and not a resolver patch. Until that is answered, a refusal is\nthe honest reading of a value that changes nothing.",
+    requiresEvidence: false,
+  },
+  GBX0412: {
+    code: "GBX0412",
+    title: "the endpoint override key names a different provider than the consumer declared",
+    severity: "error",
+    domain: "binding",
+    docs: "The endpoint override key names the provider the resolver selected, and\nthe runtime reads the one the consumer declared.\n\nThe key is built out of the provider the resolver chose, while\n`#[toolkit::consumes]` emits its last segment verbatim from its own\n`from`. The two agree in every well-formed product and diverge in\nexactly one place: when [`BindingNoProvider`] found the declared\nprovider does not provide the contract and fell back to the only other\ngear that does. The generated configuration then looks right, the\noperator's override lands where nothing looks for it, and the consumer\nresolves nothing at run time.\n\n**An error, and scoped so that is defensible.** Only a statically\ndiscovered remote binding consults this key at all -- directory\ndiscovery names a lookup instead and is silent here -- so the report is\nconfined to the one configuration where the key is load-bearing. The\nfallback that produces it is deliberately tolerant, because a gear\nrename should not make a product unresolvable; refusing to *generate*\nfrom it is a narrower claim than refusing to resolve it, and the remedy\nis one string in one attribute.",
     requiresEvidence: false,
   },
   GBX0501: {

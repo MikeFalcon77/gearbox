@@ -780,6 +780,28 @@ diagnostic_codes! {
     /// the honest reading of a value that changes nothing.
     BindingEndpointNotHonoured = "GBX0411", Binding, Error, false, "declared endpoint is not honoured";
 
+    /// The endpoint override key names the provider the resolver selected, and
+    /// the runtime reads the one the consumer declared.
+    ///
+    /// The key is built out of the provider the resolver chose, while
+    /// `#[toolkit::consumes]` emits its last segment verbatim from its own
+    /// `from`. The two agree in every well-formed product and diverge in
+    /// exactly one place: when [`BindingNoProvider`] found the declared
+    /// provider does not provide the contract and fell back to the only other
+    /// gear that does. The generated configuration then looks right, the
+    /// operator's override lands where nothing looks for it, and the consumer
+    /// resolves nothing at run time.
+    ///
+    /// **An error, and scoped so that is defensible.** Only a statically
+    /// discovered remote binding consults this key at all -- directory
+    /// discovery names a lookup instead and is silent here -- so the report is
+    /// confined to the one configuration where the key is load-bearing. The
+    /// fallback that produces it is deliberately tolerant, because a gear
+    /// rename should not make a product unresolvable; refusing to *generate*
+    /// from it is a narrower claim than refusing to resolve it, and the remedy
+    /// is one string in one attribute.
+    BindingWiringKeySkew = "GBX0412", Binding, Error, false, "the endpoint override key names a different provider than the consumer declared";
+
     // ---------------------------------------------------------------- GBX05xx
     /// A cluster provider was selected automatically.
     ClusterAutoSelected = "GBX0501", Cluster, Info, false, "cluster provider selected automatically";

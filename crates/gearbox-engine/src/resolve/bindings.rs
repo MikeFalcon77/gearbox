@@ -381,3 +381,73 @@ pub fn report_env_limits(bindings: &[ResolvedBinding], uri: &str, diagnostics: &
         diagnostics.push(diagnostic);
     }
 }
+
+/// Report a `consumer_wiring` key that names a provider the consumer did not
+/// declare.
+///
+/// Takes the catalogue because the declared provider is not on the binding:
+/// `ResolvedBinding::provider` is the gear `select_provider` chose, and the
+/// edge does not keep the declared one either -- selection consumes it and
+/// returns only the winner. The declared one is on the consumer's own
+/// `Requirement`.
+///
+/// That field is projected from `#[toolkit::consumes(from = ...)]`, which is
+/// the same string the macro emits as `dep_gear`. It used to be the
+/// description's restatement of it, and comparing against a restatement would
+/// have been comparing against the wrong thing.
+pub fn report_wiring_key_skew(
+    catalogue: &Catalogue,
+    bindings: &[ResolvedBinding],
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    for binding in bindings
+        .iter()
+        .filter(|b| b.mechanism == BindingMechanism::ConsumesStatic)
+    {
+        let Some(consumer) = catalogue.gears.get(&binding.consumer) else {
+            continue;
+        };
+        let Some(declared) = consumer
+            .consumes
+            .iter()
+            .find(|r| r.contract() == Some(&binding.contract))
+            .and_then(gearbox_ir::Requirement::declared_provider)
+        else {
+            continue;
+        };
+        if *declared == binding.provider {
+            continue;
+        }
+
+        let mut diagnostic = Diagnostic::error(
+            DiagnosticCode::BindingWiringKeySkew,
+            format!(
+                "the endpoint override for `{}` on `{}` is written as `{}`, and the runtime \
+                 reads `{}` -- the name `#[toolkit::consumes(from = \"{declared}\")]` emitted",
+                binding.consumer,
+                binding.contract,
+                static_endpoint_source(&binding.consumer, &binding.provider),
+                static_endpoint_source(&binding.consumer, declared),
+            ),
+            format!(
+                "`{declared}` does not provide `{}` in this product and `{}` does, which \
+                 GBX0404 already reported. Point `#[toolkit::consumes(..., from = \"{}\")]` \
+                 at the gear that provides it, or select `{declared}` with `use_gear`",
+                binding.contract, binding.provider, binding.provider
+            ),
+        )
+        .with_evidence(
+            "libs/toolkit-contract-macros/src/consumes.rs \
+             (ConsumesAttr.from, emitted verbatim as dep_gear)",
+        )
+        .at(Location::file(uri.to_owned()));
+        if let Some(node) = NodeKind::Binding.id_for(&binding_key(
+            binding.consumer.as_str(),
+            binding.contract.as_str(),
+        )) {
+            diagnostic = diagnostic.about(node);
+        }
+        diagnostics.push(diagnostic);
+    }
+}
