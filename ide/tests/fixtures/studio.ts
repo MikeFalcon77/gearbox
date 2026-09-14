@@ -106,7 +106,7 @@ function installSampler(): void {
   // That is not hypothetical: a diagnostics test started passing because the
   // Product panel had rendered a diagnostic the catalogue never produced.
   const q = (sel: string): Element[] =>
-    Array.from(document.querySelectorAll(`.gearbox-catalogue ${sel}`));
+    Array.from(document.querySelectorAll(`.gbx-widget-catalogue ${sel}`));
   const text = (e: Element): string => (e.textContent ?? "").trim();
   setInterval(() => {
     const rows = q(".gbx-row");
@@ -180,7 +180,7 @@ async function open(browser: Browser): Promise<{ studio: Studio; close: () => Pr
       await resetCatalogueView(page);
       const picked = await page.evaluate((wanted) => {
         const row = Array.from(
-          document.querySelectorAll(".gearbox-catalogue .gbx-row"),
+          document.querySelectorAll(".gbx-widget-catalogue .gbx-row"),
         ).find((r) =>
           r.querySelector(".gbx-row-name")?.textContent?.includes(wanted),
         );
@@ -554,7 +554,7 @@ export async function closeGraph(page: Page): Promise<void> {
   const tab = page.locator('[id="shell-tab-gearbox.graph"]');
   if ((await tab.count()) === 0) return;
   await tab.locator(".lm-TabBar-tabCloseIcon").click();
-  await page.locator(".gearbox-graph").waitFor({ state: "detached", timeout: 30_000 });
+  await page.locator(".gbx-widget-graph").waitFor({ state: "detached", timeout: 30_000 });
 }
 
 /**
@@ -569,9 +569,9 @@ export async function openGraphView(
   view: "deps" | "contracts" | "applications" | "cluster",
 ): Promise<void> {
   await openGraph(page);
-  await page.locator(`.gearbox-graph .gbx-view-tab[data-view="${view}"]`).click();
+  await page.locator(`.gbx-widget-graph .gbx-view-tab[data-view="${view}"]`).click();
   await page
-    .locator(`.gearbox-graph [data-graph="${view}"], .gearbox-graph .gbx-empty`)
+    .locator(`.gbx-widget-graph [data-graph="${view}"], .gbx-widget-graph .gbx-empty`)
     .first()
     .waitFor({ state: "visible" });
 }
@@ -704,11 +704,11 @@ export const revealCatalogue = (page: Page): Promise<void> =>
  * one's `detailOf("Payments (example provider)")` returned null.
  */
 export async function resetCatalogueView(page: Page): Promise<void> {
-  const filter = page.locator(".gearbox-catalogue .gbx-filter");
+  const filter = page.locator(".gbx-widget-catalogue .gbx-filter");
   if ((await filter.count()) > 0 && (await filter.inputValue()) !== "") {
     await filter.fill("");
   }
-  const folded = page.locator('.gearbox-catalogue .gbx-group-label[data-collapsed="true"]');
+  const folded = page.locator('.gbx-widget-catalogue .gbx-group-label[data-collapsed="true"]');
   for (let attempt = 0; attempt < 12; attempt += 1) {
     if ((await folded.count()) === 0) return;
     await folded.first().click();
@@ -820,10 +820,10 @@ export async function ensureSelection(page: Page): Promise<void> {
   // made. The Inspector publishes what it is inspecting; that is the question.
   const inspecting = page.locator(".gbx-inspector[data-inspecting]:not([data-inspecting=''])");
   if ((await inspecting.count()) > 0) return;
-  const selectedRow = page.locator(".gearbox-catalogue .gbx-row[aria-selected='true']");
+  const selectedRow = page.locator(".gbx-widget-catalogue .gbx-row[aria-selected='true']");
   if ((await selectedRow.count()) > 0) return;
   await revealCatalogue(page);
-  const row = page.locator(".gearbox-catalogue .gbx-row").first();
+  const row = page.locator(".gbx-widget-catalogue .gbx-row").first();
   await row.waitFor({ state: "visible", timeout: 60_000 });
   await row.click();
 }

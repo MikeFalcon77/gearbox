@@ -140,7 +140,7 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
     this.id = AddGearWidget.ID;
     this.title.label = AddGearWidget.LABEL;
     this.title.closable = true;
-    this.addClass("gearbox-add-gear");
+    this.addClass("gbx-widget-add-gear");
     this.toDispose.push(this.catalogue.onChanged(() => this.update()));
     this.toDispose.push(this.products.onChanged(() => this.update()));
     this.toDispose.push({

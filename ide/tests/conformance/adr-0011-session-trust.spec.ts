@@ -108,7 +108,7 @@ test.describe("session trust [ADR-0011 amendment 2026-09-02]", () => {
       // this line is about is the *rows*, so it makes sure they are on screen
       // before asking whether they are.
       await revealCatalogue(studio.page);
-      await expect(studio.page.locator(".gearbox-catalogue .gbx-row").first()).toBeVisible({
+      await expect(studio.page.locator(".gbx-widget-catalogue .gbx-row").first()).toBeVisible({
         timeout: 90_000,
       });
     }

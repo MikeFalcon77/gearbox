@@ -81,7 +81,7 @@ export class ToolbarWidget extends ReactWidget {
   protected init(): void {
     this.id = ToolbarWidget.ID;
     this.title.closable = false;
-    this.addClass("gearbox-toolbar");
+    this.addClass("gbx-widget-toolbar");
     this.toDispose.push(this.context.onDidChange(() => this.update()));
     this.toDispose.push(this.commands.onCommandsChanged(() => this.update()));
     // Resolve's enablement depends on a product being open, and its handler does

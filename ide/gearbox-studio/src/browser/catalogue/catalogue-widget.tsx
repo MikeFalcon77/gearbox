@@ -69,7 +69,7 @@ export class CatalogueWidget extends ReactWidget {
     this.title.iconClass = codicon("library");
     this.title.caption = CatalogueWidget.LABEL;
     this.title.closable = true;
-    this.addClass("gearbox-catalogue");
+    this.addClass("gbx-widget-catalogue");
     this.node.tabIndex = -1;
     this.toDispose.push(this.store.onChanged(() => this.update()));
     // And the product's, because each row now shows whether *this product* names

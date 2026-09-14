@@ -54,7 +54,7 @@ export class ConflictsWidget extends ReactWidget {
     this.title.iconClass = codicon("warning");
     this.title.caption = ConflictsWidget.LABEL;
     this.title.closable = true;
-    this.addClass("gearbox-conflicts");
+    this.addClass("gbx-widget-conflicts");
     this.toDispose.push(this.products.onChanged(() => this.update()));
     this.update();
   }

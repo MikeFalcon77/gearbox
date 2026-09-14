@@ -153,7 +153,7 @@ test.describe("a screen that wants the room", () => {
     ).toBe(false);
 
     await page.locator('[id="shell-tab-gearbox.graph"] .lm-TabBar-tabCloseIcon').click();
-    await expect(page.locator(".gearbox-graph")).toHaveCount(0);
+    await expect(page.locator(".gbx-widget-graph")).toHaveCount(0);
     expect(await leftOpen(), "the last close did not give the catalogue back").toBe(true);
   });
 });

@@ -32,7 +32,7 @@ test.describe("the panel is operable without a mouse", () => {
     // not on screen until asked for. Before the rework the catalogue was always
     // there, and this test relied on that without saying so.
     await revealCatalogue(studio.page);
-    await studio.page.locator(".gearbox-catalogue .gbx-row").first().focus();
+    await studio.page.locator(".gbx-widget-catalogue .gbx-row").first().focus();
     const focused = await studio.page.evaluate(() =>
       document.activeElement?.classList.contains("gbx-row"),
     );
@@ -45,7 +45,7 @@ test.describe("the panel is operable without a mouse", () => {
     // into the editor. Establishing the precondition here rather than relying on
     // what an earlier test left behind, since the read-only tests share one
     // loaded application.
-    await studio.page.locator(".gearbox-catalogue .gbx-row:not(.gbx-selected)").first().focus();
+    await studio.page.locator(".gbx-widget-catalogue .gbx-row:not(.gbx-selected)").first().focus();
     await studio.page.keyboard.press("Enter");
     const name = await studio.page.evaluate(() =>
       document.activeElement?.classList.contains("gbx-selected") === true
@@ -63,7 +63,7 @@ test.describe("the panel is operable without a mouse", () => {
     // reaches the list, the arrows move inside it.
     const tabbable = await studio.page.evaluate(
       () =>
-        Array.from(document.querySelectorAll(".gearbox-catalogue .gbx-row")).filter(
+        Array.from(document.querySelectorAll(".gbx-widget-catalogue .gbx-row")).filter(
           (row) => row.getAttribute("tabindex") === "0",
         ).length,
     );
@@ -79,7 +79,7 @@ test.describe("the panel is operable without a mouse", () => {
         (document.activeElement?.querySelector(".gbx-row-name")?.textContent ?? "").trim(),
       );
 
-    await studio.page.locator(".gearbox-catalogue .gbx-row").first().focus();
+    await studio.page.locator(".gbx-widget-catalogue .gbx-row").first().focus();
     const first = await names();
     await studio.page.keyboard.press("ArrowDown");
     const second = await names();

@@ -43,7 +43,7 @@ test.describe("diagnostics reach a person", () => {
     // currently skips on a clean corpus -- a selector that cannot match is a
     // claim that will never observe what it says, and the skip would have hidden
     // that indefinitely.
-    const rendered = studio.page.locator(".gearbox-catalogue .gbx-conflict");
+    const rendered = studio.page.locator(".gbx-widget-catalogue .gbx-conflict");
     const count = await rendered.count();
     test.skip(
       count === 0,

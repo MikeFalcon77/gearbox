@@ -60,7 +60,7 @@ export class LockWidget extends ReactWidget {
     this.title.iconClass = codicon("lock");
     this.title.caption = LockWidget.LABEL;
     this.title.closable = true;
-    this.addClass("gearbox-lock");
+    this.addClass("gbx-widget-lock");
     this.toDispose.push(this.store.onChanged(() => this.update()));
     this.update();
   }

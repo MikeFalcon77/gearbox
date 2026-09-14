@@ -86,7 +86,7 @@ export class GraphWidget extends ReactWidget {
     this.title.label = GraphWidget.LABEL;
     this.title.iconClass = codicon("type-hierarchy-sub");
     this.title.closable = true;
-    this.addClass("gearbox-graph");
+    this.addClass("gbx-widget-graph");
     // Both stores: the co-location view follows the catalogue as it streams, and
     // the other three follow the product as profiles are switched. Subscribing to
     // only one was how the catalogue's in-product toggles failed to appear.

@@ -123,7 +123,7 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
     this.id = CreateProductWidget.ID;
     this.title.label = CreateProductWidget.LABEL;
     this.title.closable = true;
-    this.addClass("gearbox-create");
+    this.addClass("gbx-widget-create");
     this.toDispose.push(this.engine.onDidChange(() => this.update()));
     void this.refreshRoots();
   }

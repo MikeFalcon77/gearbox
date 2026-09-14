@@ -57,7 +57,7 @@ export class StartWidget extends ReactWidget {
     // sense without it; closing this one leaves the Home context with an empty
     // main area, which is the state it exists to replace.
     this.title.closable = false;
-    this.addClass("gearbox-start");
+    this.addClass("gbx-widget-start");
     this.toDispose.push(this.products.onChanged(() => this.refresh()));
     this.toDispose.push(this.engine.onDidChange(() => this.update()));
     this.refresh();

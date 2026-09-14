@@ -669,7 +669,7 @@
    browser target (`window.menuBarVisibility` is classic); we grow to fill the
    rest of the row so the actions can sit on the right without overlapping
    File / Edit / Gearbox. */
-.gearbox-toolbar {
+.gbx-widget-toolbar {
   flex: 1 1 auto;
   min-width: 0;
 }

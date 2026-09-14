@@ -133,7 +133,7 @@ export class InspectorWidget extends ReactWidget {
     this.title.iconClass = codicon("info");
     this.title.caption = InspectorWidget.LABEL;
     this.title.closable = true;
-    this.addClass("gearbox-inspector");
+    this.addClass("gbx-widget-inspector");
     // Both stores, not the selection service alone. The selection can stay the
     // same while what is known about it changes -- a pending row projecting, a
     // re-resolve producing a different explanation -- and both of those change

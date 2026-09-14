@@ -128,7 +128,7 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
     this.id = CreateGearWidget.ID;
     this.title.label = CreateGearWidget.LABEL;
     this.title.closable = true;
-    this.addClass("gearbox-create-gear");
+    this.addClass("gbx-widget-create-gear");
     this.toDispose.push(this.engine.onDidChange(() => this.update()));
     // **The workspace may not be open yet, and the destination comes from it.**
     // `DomainWorkspace` opens the source roots asynchronously at startup, so a

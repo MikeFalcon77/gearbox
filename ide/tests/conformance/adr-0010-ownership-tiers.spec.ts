@@ -368,7 +368,7 @@ test.describe("typed config from schema (Phase 7)", () => {
     await openProduct(page, "dev");
     await revealCatalogue(page);
     await resetCatalogueView(page);
-    await page.locator(".gearbox-catalogue .gbx-row", { hasText: "api-gateway" }).click();
+    await page.locator(".gbx-widget-catalogue .gbx-row", { hasText: "api-gateway" }).click();
     await revealInspector(page);
 
     await expect(page.locator('[data-gear-config="api-gateway"]')).toBeVisible({
@@ -410,7 +410,7 @@ test.describe("typed config from schema (Phase 7)", () => {
     await openProduct(studio.page, "dev");
     await revealCatalogue(studio.page);
     await resetCatalogueView(studio.page);
-    await studio.page.locator(".gearbox-catalogue .gbx-row", { hasText: "api-gateway" }).click();
+    await studio.page.locator(".gbx-widget-catalogue .gbx-row", { hasText: "api-gateway" }).click();
     await revealInspector(studio.page);
     const config = studio.page.locator('[data-gear-config="api-gateway"]');
     await config.waitFor({ state: "visible", timeout: 60_000 });

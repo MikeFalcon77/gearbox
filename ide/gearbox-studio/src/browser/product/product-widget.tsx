@@ -114,7 +114,7 @@ export class ProductWidget extends ReactWidget {
     this.title.iconClass = codicon("project");
     this.title.caption = ProductWidget.LABEL;
     this.title.closable = true;
-    this.addClass("gearbox-product");
+    this.addClass("gbx-widget-product");
     this.toDispose.push(this.store.onChanged(() => this.update()));
     this.toDispose.push(this.edits.onDraftChanged(() => this.update()));
     // Overview reports whether a generated tree exists, so it has to hear when

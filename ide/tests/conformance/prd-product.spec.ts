@@ -52,7 +52,7 @@ async function snapshot(page: import("@playwright/test").Page) {
     // document, which held only as long as no other widget rendered a
     // resolution -- and the graph panel now renders three of them. An unscoped
     // `[data-application]` is how a test starts passing for the wrong reason.
-    const root = document.querySelector(".gearbox-product") ?? document;
+    const root = document.querySelector(".gbx-widget-product") ?? document;
     const attrs = (selector: string, attribute: string) =>
       Array.from(root.querySelectorAll(selector)).map(
         (e) => e.getAttribute(attribute) ?? "",

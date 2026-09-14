@@ -367,7 +367,7 @@ test.describe("edit config and profiles in the open product", () => {
       await revealCatalogue(studio.page);
       await resetCatalogueView(studio.page);
       await studio.page
-        .locator(".gearbox-catalogue .gbx-row", { hasText: "api-gateway" })
+        .locator(".gbx-widget-catalogue .gbx-row", { hasText: "api-gateway" })
         .click();
       await revealInspector(studio.page);
       await studio.page.locator('[data-gear-config="api-gateway"]').waitFor({ state: "visible" });
@@ -411,7 +411,7 @@ test.describe("edit config and profiles in the open product", () => {
       await openProduct(studio.page, "dev");
       await revealCatalogue(studio.page);
       await resetCatalogueView(studio.page);
-      await studio.page.locator(".gearbox-catalogue .gbx-row", { hasText: "api-gateway" }).click();
+      await studio.page.locator(".gbx-widget-catalogue .gbx-row", { hasText: "api-gateway" }).click();
       await revealInspector(studio.page);
       await studio.page.locator('[data-gear-config="api-gateway"]').waitFor({ state: "visible" });
 
@@ -485,7 +485,7 @@ test.describe("edit config and profiles in the open product", () => {
     await openProduct(studio.page, "dev");
     await revealCatalogue(studio.page);
     await resetCatalogueView(studio.page);
-    await studio.page.locator(".gearbox-catalogue .gbx-row", { hasText: "api-gateway" }).click();
+    await studio.page.locator(".gbx-widget-catalogue .gbx-row", { hasText: "api-gateway" }).click();
     await revealInspector(studio.page);
     await studio.page.locator('[data-gear-config="api-gateway"]').waitFor({ state: "visible" });
 

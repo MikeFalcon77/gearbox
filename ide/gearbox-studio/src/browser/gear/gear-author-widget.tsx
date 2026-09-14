@@ -27,7 +27,7 @@ export class GearAuthorWidget extends ReactWidget {
     this.id = GearAuthorWidget.ID;
     this.title.label = GearAuthorWidget.LABEL;
     this.title.closable = true;
-    this.addClass("gearbox-gear");
+    this.addClass("gbx-widget-gear");
     this.toDispose.push(this.session.onDidChange(() => this.update()));
     this.update();
   }

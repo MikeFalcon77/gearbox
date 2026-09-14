@@ -164,7 +164,7 @@ test.describe("the narrowed shell", () => {
     // which is the failure it was written for.
     await revealCatalogue(studio.page);
     const visible = await studio.page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll(".gearbox-catalogue .gbx-row"));
+      const rows = Array.from(document.querySelectorAll(".gbx-widget-catalogue .gbx-row"));
       return {
         total: rows.length,
         withRect: rows.filter((r) => (r as HTMLElement).getClientRects().length > 0).length,

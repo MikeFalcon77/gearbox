@@ -55,7 +55,7 @@ test.describe("where the views live", () => {
     await revealCatalogue(studio.page);
     await resetCatalogueView(studio.page);
 
-    const rows = () => studio.page.locator(".gearbox-catalogue .gbx-row").count();
+    const rows = () => studio.page.locator(".gbx-widget-catalogue .gbx-row").count();
     const all = await rows();
     expect(all).toBeGreaterThan(0);
 
@@ -67,15 +67,15 @@ test.describe("where the views live", () => {
 
     // The trap: a match inside a folded category must still show. Otherwise the
     // reader searches, sees nothing, and concludes the gear is not there.
-    await studio.page.fill(".gearbox-catalogue .gbx-filter", "Payments");
+    await studio.page.fill(".gbx-widget-catalogue .gbx-filter", "Payments");
     const found = await studio.page
-      .locator(".gearbox-catalogue .gbx-row-name")
+      .locator(".gbx-widget-catalogue .gbx-row-name")
       .allTextContents();
     expect(found.every((name) => name.includes("Payments"))).toBe(true);
     expect(found.length).toBeGreaterThan(0);
 
-    await studio.page.fill(".gearbox-catalogue .gbx-filter", "no-such-gear-anywhere");
-    await expect(studio.page.locator(".gearbox-catalogue .gbx-empty")).toContainText(
+    await studio.page.fill(".gbx-widget-catalogue .gbx-filter", "no-such-gear-anywhere");
+    await expect(studio.page.locator(".gbx-widget-catalogue .gbx-empty")).toContainText(
       "Nothing matches",
     );
 
@@ -161,7 +161,7 @@ test.describe("where the views live", () => {
     // By `data-row-key`, which is `source:gdl_path` -- the catalogue keys rows by
     // path rather than by id, because a pending row has no id yet.
     await revealLeft(studio.page, "Gearbox Catalogue");
-    await expect(studio.page.locator(".gearbox-catalogue .gbx-row.gbx-selected")).toHaveAttribute(
+    await expect(studio.page.locator(".gbx-widget-catalogue .gbx-row.gbx-selected")).toHaveAttribute(
       "data-row-key",
       /api-gateway/,
     );
@@ -479,7 +479,7 @@ test.describe("co-location is a closure, not a partition", () => {
     const painted = await studio.page.evaluate(async () => {
       // Scoped to the graph. An unscoped `[data-gear=...]` reaches whichever
       // widget rendered first, and the catalogue is to the left of this one.
-      const node = document.querySelector('.gearbox-graph [data-gear="api-gateway"]');
+      const node = document.querySelector('.gbx-widget-graph [data-gear="api-gateway"]');
       if (node === null) return null;
       node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await new Promise((r) => setTimeout(r, 300));
@@ -564,7 +564,7 @@ test.describe("the graph is four views of one product", () => {
     studio,
   }) => {
     await openGraph(studio.page);
-    const tabs = studio.page.locator(".gearbox-graph .gbx-view-tab");
+    const tabs = studio.page.locator(".gbx-widget-graph .gbx-view-tab");
     await expect(tabs).toHaveCount(4);
     await expect(tabs).toHaveText(["co-location", "contracts", "applications", "cluster"]);
   });
@@ -578,7 +578,7 @@ test.describe("the graph is four views of one product", () => {
     // impression of the whole panel.
     await openGraph(studio.page);
     await expect(
-      studio.page.locator(".gearbox-graph .gbx-view-tab[data-view='deps']"),
+      studio.page.locator(".gbx-widget-graph .gbx-view-tab[data-view='deps']"),
     ).toHaveAttribute("aria-selected", "true");
     await expect(studio.page.locator("[data-graph='deps']")).toBeVisible();
   });
@@ -590,7 +590,7 @@ test.describe("the graph is four views of one product", () => {
     // nothing to draw, and the check is that they explain that rather than render
     // an empty frame -- an empty frame and a broken view look identical.
     await openGraphView(freshStudio.page, "contracts");
-    const empty = freshStudio.page.locator(".gearbox-graph .gbx-empty");
+    const empty = freshStudio.page.locator(".gbx-widget-graph .gbx-empty");
     await expect(empty).toBeVisible();
     await expect(empty).toContainText("needs a product and a profile");
   });

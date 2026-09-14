@@ -102,7 +102,7 @@ export class GenerateWidget extends ReactWidget {
     this.title.iconClass = codicon("checklist");
     this.title.caption = GenerateWidget.LABEL;
     this.title.closable = true;
-    this.addClass("gearbox-generate");
+    this.addClass("gbx-widget-generate");
     this.toDispose.push(
       this.product.onChanged(() => {
         this.generate.forgetIfStale();

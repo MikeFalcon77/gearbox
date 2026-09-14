@@ -94,7 +94,7 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
   test("it browses the catalogue [PRD cpt-gearbox-fr-studio: browses the catalogue]", async ({
     studio,
   }) => {
-    const rows = await studio.page.locator(".gearbox-catalogue .gbx-row").count();
+    const rows = await studio.page.locator(".gbx-widget-catalogue .gbx-row").count();
     expect(rows).toBeGreaterThan(0);
     const detail = await studio.detailOf("API Gateway");
     expect(detail).toContain("api-gateway");
@@ -258,7 +258,7 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
 
       await openGraphView(page, "cluster");
       await expect(page.locator("[data-graph='cluster']")).toHaveCount(0);
-      const empty = page.locator(".gearbox-graph .gbx-cluster-empty");
+      const empty = page.locator(".gbx-widget-graph .gbx-cluster-empty");
       await expect(empty).toBeVisible();
       await expect(empty).toContainText("no gear in the catalogue currently requires it");
     } finally {
