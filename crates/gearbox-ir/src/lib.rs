@@ -1,4 +1,4 @@
-//! The canonical typed model for Gearbox Builder.
+//! The canonical typed model for Gearbox.
 //!
 //! Pure data plus construction-time validation: no filesystem, no process, no
 //! clock, no network. Everything downstream -- the description-language

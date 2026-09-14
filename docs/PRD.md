@@ -1,4 +1,4 @@
-# PRD — Gearbox Builder
+# PRD — Gearbox
 
 **System**: `gearbox`
 **Status**: draft — written before implementation, to be confirmed by the prototype
@@ -12,7 +12,7 @@
 
 ### 1.1 Purpose
 
-Gearbox Builder is the product composition and resolution layer for the Gears platform. It lets a
+Gearbox is the product composition and resolution layer for the Gears platform. It lets a
 developer or integrator declare *which* gears belong to a product and *what* deployment shape is
 wanted, then deterministically derives the concrete implementation: application topology, local vs
 remote contract bindings, transports, cluster provider selections, and the build and deployment
@@ -144,7 +144,7 @@ is a code-generation problem, and it is the one this system removes.
 **ID**: `cpt-gearbox-actor-cargo`
 
 - **Role**: Builds the generated application crates and resolves their package dependencies. Owns
-  package and build semantics; Gearbox Builder owns product composition and does not duplicate them.
+  package and build semantics; Gearbox owns product composition and does not duplicate them.
 
 #### Helm
 
@@ -156,7 +156,7 @@ is a code-generation problem, and it is the one this system removes.
 ## 3. Operational Concept & Environment
 
 Foundational context: [`gears-rust/docs/ARCHITECTURE_MANIFEST.md`](../../gears-rust/docs/ARCHITECTURE_MANIFEST.md)
-and [`gears-rust/docs/GEARS.md`](../../gears-rust/docs/GEARS.md). Gearbox Builder has no parent PRD.
+and [`gears-rust/docs/GEARS.md`](../../gears-rust/docs/GEARS.md). Gearbox has no parent PRD.
 
 ### 3.1 Gear-Specific Environment Constraints
 
@@ -1015,7 +1015,7 @@ concrete remedy.
 - **Direction**: provided to the Gears runtime
 - **Protocol/Format**: the runtime's own configuration schema (YAML)
 - **Compatibility**: Generated configuration must deserialize into the runtime's existing
-  configuration types unchanged. Gearbox Builder introduces no new runtime configuration keys.
+  configuration types unchanged. Gearbox introduces no new runtime configuration keys.
 
 #### Chart values contract
 
@@ -1221,7 +1221,7 @@ Each criterion corresponds to a step of the acceptance procedure in
 | The cluster subsystem is not composed into any running product today | Integration friction concentrated in one milestone | The custom gear in the slice is deliberately its first consumer; budget a milestone-sized slip there |
 | GDL grows into a general-purpose language | Determinism and explainability lost | Small frozen host API, dialect lockdown, and a construct blacklist (`cpt-gearbox-fr-gdl-declarative`) |
 | Too much solver too early | Complexity with no payoff while only two providers exist | Valid/invalid plus a single deterministic ranking pass; no search, no scoring |
-| Build and product versioning are conflated | Unclear ownership of resolution | Cargo owns package and build resolution; Gearbox Builder owns product composition; the lock pins the product |
+| Build and product versioning are conflated | Unclear ownership of resolution | Cargo owns package and build resolution; Gearbox owns product composition; the lock pins the product |
 | The description language runtime is pre-1.0 and its API moves | Churn on every dependency bump | Pin exactly; confine every reference to a single crate behind one facade type |
 | Generated crates and their source repository diverge in toolchain | Silent build differences | Pin the generated workspace to the same toolchain as the source repository |
 

@@ -1,6 +1,6 @@
 [package]
 name = "gearbox-ir"
-description = "Canonical typed model for Gearbox Builder: catalogue, intent, resolved product, diagnostics, explanation graph."
+description = "Canonical typed model for Gearbox: catalogue, intent, resolved product, diagnostics, explanation graph."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

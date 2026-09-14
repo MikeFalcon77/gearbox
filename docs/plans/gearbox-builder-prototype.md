@@ -1,4 +1,4 @@
-# Gearbox Builder — Prototype
+# Gearbox — Prototype
 
 ## Context
 

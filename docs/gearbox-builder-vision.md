@@ -1,8 +1,8 @@
-# Gearbox Builder
+# Gearbox
 ## Vision for a Gears Product Composition, Resolution, and Deployment System
 
 **Status:** Vision / pitch document  
-**Working name:** **Gearbox Builder**  
+**Name:** **Gearbox**  
 **Scope:** Product vision and architectural direction, not a detailed implementation design  
 **Date:** 2026-08-26
 
@@ -16,7 +16,7 @@ What is still missing is a first-class way to define a **product**.
 
 Today, product composition is distributed across Cargo features, handwritten registration code, deployment manifests, Helm charts, runtime configuration, and developer knowledge about which gears can or cannot be separated.
 
-**Gearbox Builder** is the proposed product composition layer for Gears.
+**Gearbox** is the proposed product composition layer for Gears.
 
 Its purpose is to let a developer or integrator express:
 
@@ -28,7 +28,7 @@ Its purpose is to let a developer or integrator express:
 - which provider choices are explicit and which are automatic;
 - which policies/preferences should guide automatic choices.
 
-Gearbox Builder then deterministically derives a valid concrete product:
+Gearbox then deterministically derives a valid concrete product:
 
 - the application/pod topology;
 - local vs remote contract bindings;
@@ -56,7 +56,7 @@ The central architecture principle is:
 > `product.lock` is the resolved product snapshot.  
 > GUI, TUI, CLI, and MCP are clients of the same engine.**
 
-Gearbox Builder is designed to be **AI-native, but not AI-dependent**.
+Gearbox is designed to be **AI-native, but not AI-dependent**.
 
 External AI agents can control it through MCP and skills, but no LLM is involved in correctness or resolution.
 
@@ -114,7 +114,7 @@ That does not scale.
 
 # 3. Product Vision
 
-Gearbox Builder should make the following scenario routine:
+Gearbox should make the following scenario routine:
 
 ```text
 1. Choose existing Gears components.
@@ -140,17 +140,21 @@ That is a core promise of the system:
 
 ---
 
-# 4. Why “Gearbox Builder”
+# 4. Why “Gearbox”
 
-The working name is **Gearbox Builder**.
+The name is **Gearbox**.
 
 It communicates the intended abstraction well:
 
 - Gears are reusable mechanisms/components.
-- Gearbox Builder assembles them into a working system.
+- A gearbox is what they become once they are assembled: the assembly is already in the word.
 - The result is more than a list of parts: relationships, compatibility, constraints, and topology matter.
 
 The name is preferable for a pitch to a generic “Gears Configurator”, which sounds like a settings editor rather than a product-composition system.
+
+An earlier working name, “Gearbox Builder”, spelled the assembly out in a suffix. That was
+redundant. A gearbox is not a pile of gears; it is gears meshed into one mechanism, so “Builder”
+only restated what the root already carried.
 
 The internal CLI/tool names can still use existing naming conventions such as:
 
@@ -162,9 +166,9 @@ The product name and executable names do not need to be identical.
 
 ---
 
-# 5. What Gearbox Builder Is
+# 5. What Gearbox Is
 
-Gearbox Builder is a **software product-line configurator and resolver** for Gears.
+Gearbox is a **software product-line configurator and resolver** for Gears.
 
 Conceptually, it is closer to:
 
@@ -195,9 +199,9 @@ and produces a valid resolved product.
 
 ---
 
-# 6. What Gearbox Builder Is Not
+# 6. What Gearbox Is Not
 
-Gearbox Builder is not:
+Gearbox is not:
 
 - a replacement for Cargo;
 - a replacement for Kubernetes;
@@ -286,7 +290,7 @@ That creates inevitable drift.
 Rust attribute macros are deliberately **not** in that list. `#[toolkit::gear]` is not a metadata
 format competing with the others: it is the mechanism that emits the gear's registration, its
 link-time dependency re-exports, and its compile-time capability assertions. It stays authoritative
-for every fact it already expresses, and Gearbox Builder *reads* those facts rather than restating
+for every fact it already expresses, and Gearbox *reads* those facts rather than restating
 them. See ADR `cpt-gearbox-adr-macro-projected-catalogue`.
 
 Instead:
@@ -485,7 +489,7 @@ That would destroy determinism, consistency, and explainability.
 
 GDL evaluates into typed Rust objects.
 
-After evaluation, the rest of Gearbox Builder works entirely with Rust types.
+After evaluation, the rest of Gearbox works entirely with Rust types.
 
 Conceptually:
 
@@ -804,7 +808,7 @@ work. Adding `#[toolkit::consumes]` to a gear both declares the edge to the reso
 the client it will need once the edge is cut.
 
 **No Rust is generated into a gear crate.** Generated glue exists only in the composition crates
-Gearbox Builder owns end to end — a generated application crate's `main.rs` and `registered_gears.rs`.
+Gearbox owns end to end — a generated application crate's `main.rs` and `registered_gears.rs`.
 See ADR `cpt-gearbox-adr-macro-projected-catalogue`.
 
 ---
@@ -976,7 +980,7 @@ A future registry can add semver resolution without changing the core product mo
 
 One of the strongest ideas from earlier exploration is:
 
-> **Gearbox Builder should behave like “Cargo for products”.**
+> **Gearbox should behave like “Cargo for products”.**
 
 The central resolved artifact is:
 
@@ -1102,7 +1106,7 @@ self-hosted
 kubernetes
 ```
 
-Gearbox Builder should model these as explicit finite choices.
+Gearbox should model these as explicit finite choices.
 
 Use the term:
 
@@ -1164,7 +1168,7 @@ This is neither:
 - a DeploymentProfile;
 - nor a product preset.
 
-In Gearbox Builder’s IR/UI, a clearer semantic name may be:
+In Gearbox’s IR/UI, a clearer semantic name may be:
 
 ```text
 ClusterScope
@@ -1389,7 +1393,7 @@ imply topology constraints.
 
 For example, a local-only extension contract cannot cross process boundaries.
 
-Gearbox Builder should detect this statically.
+Gearbox should detect this statically.
 
 Example diagnostic:
 
@@ -1425,7 +1429,7 @@ remote dependencies resolve asynchronously
 critical dependencies gate readiness
 ```
 
-Gearbox Builder may derive:
+Gearbox may derive:
 
 ```text
 binding = remote
@@ -1574,7 +1578,7 @@ PrefixWatch
 
 Providers expose capabilities.
 
-Gearbox Builder should resolve:
+Gearbox should resolve:
 
 ```text
 Requirement -> Provider capabilities
@@ -1886,7 +1890,7 @@ A major obstacle to “Gear = application/pod” is not necessarily runtime supp
 
 It is the burden of manually creating and maintaining many application crates.
 
-Gearbox Builder can generate them.
+Gearbox can generate them.
 
 Example:
 
@@ -2271,7 +2275,7 @@ This is useful in SSH/CI/platform-engineering environments.
 
 Current direction:
 
-> **Do not embed an LLM chat as a core Gearbox Builder feature.**
+> **Do not embed an LLM chat as a core Gearbox feature.**
 
 Reasons:
 
@@ -2288,7 +2292,7 @@ duplicate UX with existing developer agents
 
 Developers already work inside AI-enabled editors and agents.
 
-Gearbox Builder should expose the engine to those agents instead.
+Gearbox should expose the engine to those agents instead.
 
 ## 63.1 Amended 2026-09-13: narrowed, not reversed
 
@@ -2326,7 +2330,7 @@ chat only reads it aloud.
 
 # 64. MCP Is the Agent Interface
 
-Gearbox Builder should expose a first-class MCP adapter over the Rust engine.
+Gearbox should expose a first-class MCP adapter over the Rust engine.
 
 Architecture:
 
@@ -2672,7 +2676,7 @@ handwritten registration code
 
 There is no `gear.toml`; that file does not exist in the repository.
 
-Adopting Gearbox Builder is **additive**. No attribute is migrated away from, rewritten, or
+Adopting Gearbox is **additive**. No attribute is migrated away from, rewritten, or
 deleted. The attributes keep every fact they already carry, and `gear.gdl` is added beside the crate
 carrying only the facts they do not:
 
@@ -2762,7 +2766,7 @@ resolver that reasons over "how sure are we" is not explainable.
 The end state is binary:
 
 ```text
-Gear participating in Gearbox Builder
+Gear participating in Gearbox
     =>
 #[toolkit::gear] present (it always is -- that is what makes it a gear)
     AND
@@ -3463,7 +3467,7 @@ Mitigation:
 
 ```text
 Cargo owns Rust package/build semantics
-Gearbox Builder owns product composition
+Gearbox owns product composition
 product.lock pins exact product resolution
 ```
 
@@ -3476,7 +3480,7 @@ Questions 1-3 are **answered**, in ADR `cpt-gearbox-adr-macro-projected-catalogu
 1. *What exact data belongs in `gear.gdl`?* — exactly the facts no Rust attribute carries: display
    name, description, category, visibility, `package` (including the `lib` ident, which is
    undeclared in Rust), cluster requirements, transport choices, endpoints, criticality.
-2. *Which current Rust macros can be generated from GDL?* — **none.** Gearbox Builder generates Rust
+2. *Which current Rust macros can be generated from GDL?* — **none.** Gearbox generates Rust
    only into the composition crates it owns.
 3. *Which must remain because they are compile-time language semantics?* — **all of them.**
    `#[toolkit::gear]` alone emits capability assertions, link-time dependency re-exports, the
@@ -3506,7 +3510,7 @@ The detailed repository-aware design should still answer:
 
 # 119. Pitch: What Changes for a Developer
 
-Without Gearbox Builder:
+Without Gearbox:
 
 ```text
 clone monorepo
@@ -3522,7 +3526,7 @@ choose cluster providers
 debug runtime mismatches
 ```
 
-With Gearbox Builder:
+With Gearbox:
 
 ```text
 describe Gear once
@@ -3591,7 +3595,7 @@ developer memory
 
 # 122. Strategic Value
 
-Gearbox Builder would move Gears from:
+Gearbox would move Gears from:
 
 ```text
 a modular Rust framework
@@ -3633,7 +3637,7 @@ Developers will increasingly ask agents:
 
 Without a typed product model, an LLM can only manipulate files heuristically.
 
-With Gearbox Builder:
+With Gearbox:
 
 ```text
 natural language
@@ -3662,7 +3666,7 @@ That is why MCP is a better AI integration than an embedded chat.
 
 The proposed direction can be summarized as:
 
-> **Gearbox Builder is the product composition and resolution layer for Gears.**
+> **Gearbox is the product composition and resolution layer for Gears.**
 >
 > **Rust attributes remain authoritative for what they already declare; `gear.gdl` adds the product
 > metadata and composition semantics they cannot express.**
@@ -3688,7 +3692,7 @@ The proposed direction can be summarized as:
 # 126. One-Slide Version
 
 ```text
-GEARBOX BUILDER
+GEARBOX
 
 “Cargo for Gears products”
 

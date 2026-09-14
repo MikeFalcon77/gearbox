@@ -14,7 +14,7 @@ decision-makers: Mike Yastrebtsov
 ## Context and Problem Statement
 
 Gear metadata in `gears-rust` lives only in attribute macros — `#[toolkit::gear]`,
-`#[toolkit::contract]`, `#[toolkit::consumes]` — and Gearbox Builder introduces `gear.gdl` as a
+`#[toolkit::contract]`, `#[toolkit::consumes]` — and Gearbox introduces `gear.gdl` as a
 second place where gear facts are written down. The vision document reads as though GDL is meant to
 supersede those annotations over time (§8, §17, §75), while §118 Q2/Q3 leave the question formally
 open: which macros can be generated from GDL, and which must remain because they are compile-time

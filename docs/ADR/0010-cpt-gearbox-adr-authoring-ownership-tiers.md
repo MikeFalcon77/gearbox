@@ -73,7 +73,7 @@ IDE itself. Stated as a rule:
 
 Mapped onto this project:
 
-| Tier | Owner | Gearbox Builder |
+| Tier | Owner | Gearbox |
 |---|---|---|
 | 0. New files | tool writes once, then hands over | **Permitted** — a new gear or plugin crate |
 | 1. Tool metadata | tool, entirely | **Permitted** — `product.lock`, and it is marked read-only in the editor. Built: `ReadOnlyLockEditorProvider` rebinds Theia's `MonacoEditorProvider`, which is the only hook that can say "this file" rather than "this URI scheme". |
@@ -106,7 +106,7 @@ author, which is the property ADR `cpt-gearbox-adr-macro-projected-catalogue` pr
 
 ### Scope and boundary
 
-This decision governs what Gearbox Builder may write, in any client — CLI, RPC, Studio. It does not
+This decision governs what Gearbox may write, in any client — CLI, RPC, Studio. It does not
 change what GDL may express, what the resolver decides, or where generated composition output goes.
 It says nothing about the *content* of the templates; that is a separate question, and PRD §13's open
 question about which templates an integrator needs remains open in that narrower form.

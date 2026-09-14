@@ -1,4 +1,4 @@
-# Gearbox Builder
+# Gearbox
 #
 # Target names and semantics follow gears-rust's Makefile so the two repos are
 # driven the same way. Note the convention that trips people up: `fmt` and

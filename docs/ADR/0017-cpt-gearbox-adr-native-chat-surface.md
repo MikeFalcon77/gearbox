@@ -14,7 +14,7 @@ decision-makers: Mike Yastrebtsov
 ## Context and Problem Statement
 
 Vision §63 is titled *"Do Not Put an AI Chat Into GUI/TUI"* and says, without
-qualification, **"Do not embed an LLM chat as a core Gearbox Builder feature."**
+qualification, **"Do not embed an LLM chat as a core Gearbox feature."**
 §64 says MCP is the agent interface. §111 lists `embedded AI chat` among the
 explicit non-goals for V1. `cpt-gearbox-nfr-explainability` sets a threshold of
 *"zero language-model involvement in the correctness or explanation path"*.
