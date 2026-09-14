@@ -9,11 +9,11 @@ import type { SpawnSpec } from "./SpawnSpec";
 import type { WorkerServe } from "./WorkerServe";
 
 /**
- * One process in the resolved topology.
+ * One application in the resolved topology.
  */
 export type ResolvedApplication = { name: ApplicationId, kind: ApplicationKind, 
 /**
- * The gear whose co-location closure defines this process.
+ * The gear whose co-location closure defines this application.
  *
  * For a worker this is also its directory identity, verbatim: the runtime
  * takes that name from a field fixed in the binary, with no configuration
@@ -23,7 +23,7 @@ anchor: GearId,
 /**
  * The gears in this binary, in dependency order.
  *
- * **May overlap other processes.** A gear reached by two closures is linked
+ * **May overlap other applications.** A gear reached by two closures is linked
  * into both binaries; that is a consequence of co-location being a closure
  * rather than a partition, not a mistake.
  */
@@ -37,19 +37,19 @@ bin_name: string,
  */
 crate_name: string, listens?: Array<ResolvedEndpoint>, 
 /**
- * The single REST host gear, if this process has one.
+ * The single REST host gear, if this application has one.
  */
 rest_host?: GearId | null, 
 /**
- * The single gRPC hub gear, if this process has one.
+ * The single gRPC hub gear, if this application has one.
  */
 grpc_hub?: GearId | null, needs_db: boolean, cargo_features?: Array<string>, 
 /**
- * Workers this process starts. Only a host has any.
+ * Workers this application starts. Only a host has any.
  */
 spawns?: Array<SpawnSpec>, 
 /**
- * How this process serves, when it is a worker. Only a worker has one.
+ * How this application serves, when it is a worker. Only a worker has one.
  */
 serve?: WorkerServe | null, 
 /**
@@ -62,7 +62,7 @@ image?: ImageRef | null,
 /**
  * The chart subdirectory, when the profile generates a chart.
  *
- * Equal to the process name. Helm looks for subcharts under `charts/`.
+ * Equal to the application name. Helm looks for subcharts under `charts/`.
  */
 subchart?: string | null, 
 /**

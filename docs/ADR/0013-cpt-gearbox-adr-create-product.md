@@ -157,7 +157,7 @@ Until now the configurator showed the GDL that would be written and said the res
 "appears after Add" — that is, the only way to learn the consequences was to accept them.
 
 Section 6 is now **What changes**: the gears that join the closure and what pulled each one in, the
-processes that appear, vanish or gain a gear, the bindings that are new or whose `mode`/`transport`
+applications that appear, vanish or gain a gear, the bindings that are new or whose `mode`/`transport`
 change, and the diagnostics the product does not have today. Section 7 is the text diff, unchanged.
 The two answer different questions and neither replaces the other.
 

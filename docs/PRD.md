@@ -543,7 +543,7 @@ crate at most once per load.
 
 The system **MUST** enforce the structural constraints of the selected deployment profile,
 including single-application composition for `embedded`, the presence of the directory and gRPC hub
-gears when directory discovery is used, at most one REST host and one gRPC hub per process, and a
+gears when directory discovery is used, at most one REST host and one gRPC hub per application, and a
 resolvable executable path for each spawned worker.
 
 - **Rationale**: These mirror invariants the runtime enforces at startup or not at all.

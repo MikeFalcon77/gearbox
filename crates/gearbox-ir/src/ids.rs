@@ -206,7 +206,7 @@ id_newtype! {
 }
 
 id_newtype! {
-    /// A resolved process.
+    /// A resolved application.
     ///
     /// Derived from the anchor gear's id, suffixed `-2`, `-3`, ... on collision.
     ApplicationId, kind = "application id", validate = validate_kebab

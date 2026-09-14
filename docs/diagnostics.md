@@ -327,7 +327,7 @@ Co-location dependencies form a cycle.
 
 **more than one REST host in an application**
 
-A process contains more than one REST host gear.
+An application contains more than one REST host gear.
 
 The runtime registry permits exactly one, and says so before any gear
 starts: the build phase stops with `RegistryError::MultipleRestHosts`.
@@ -340,7 +340,7 @@ starts: the build phase stops with `RegistryError::MultipleRestHosts`.
 
 **more than one gRPC hub in an application**
 
-A process contains more than one gRPC hub gear.
+An application contains more than one gRPC hub gear.
 
 The same rule as [`TopologyMultipleRestHost`] and the same enforcement:
 the registry refuses the build with `RegistryError::MultipleGrpcHubs`.
@@ -401,13 +401,13 @@ A worker process has no resolvable executable path.
 
 **gear placed in no application**
 
-A gear in the closure was not placed in any process.
+A gear in the closure was not placed in any application.
 
 ### GBX0312
 
 **REST host in a worker application**
 
-A worker process contains a REST host gear.
+A worker application contains a REST host gear.
 
 A worker serves over its own out-of-process HTTP router, not through the
 API gateway, so a REST host there would never receive traffic.
@@ -420,7 +420,7 @@ API gateway, so a REST host there would never receive traffic.
 
 A `self_hosted` profile produced workers but no host to spawn them.
 
-Spawn specs are attached to the host process. Without one they are
+Spawn specs are attached to the host application. Without one they are
 dropped, and the workers the lock named never start.
 
 ### GBX0314
@@ -792,7 +792,7 @@ A plugin is selected but no selected gear expects its extension point.
 
 **plugin and host are in different applications**
 
-A plugin and its host were placed in different processes.
+A plugin and its host were placed in different applications.
 
 A plugin registers itself with `register_scoped` into the process-local
 `ClientHub`, and `get_scoped` has no remote path, so the host can only

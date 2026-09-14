@@ -4,7 +4,7 @@ GDL (Gears Description Language) is the declarative DSL a `gear.gdl` and a `prod
 written in. A file states facts; the resolver decides.
 
 **The reference moved.** It now lives at `docs/gdl.md` in the **`gears-rust`** checkout, beside
-the gears it describes and the people who write them — grammar, lexicon, namespaces, every
+the gears it describes and the people who write them: grammar, lexicon, namespaces, every
 parameter signature, the curated diagnostics table, and the two worked examples.
 
 Those examples are still executed from here:

@@ -63,7 +63,7 @@ Verified against `gears-rust` (all claims spot-checked in source):
 | The gear attribute's location is not uniform: 34 of 44 at `src/gear.rs`, 8 at `src/module.rs`, 2 nested; and `gears/mini-chat/mini-chat` declares **three** gears in one crate | `grep -rln '#\[toolkit::gear('` over `gears/` + `examples/` | projection needs a locator: scan `src/` by default, optional `cargo(attr = …)` to narrow, exactly-one-match required (`cpt-gearbox-fr-attribute-location`) |
 | `capabilities` is a **closed set of 7**: `db, rest, rest_host, stateful, system, grpc_hub, grpc` | same, `Capability` enum | GDL exposes exactly these, nothing more |
 | **`deps` means link-time co-location** — the macro emits `pub use ::crate as _gear_dep_x` to keep `inventory::submit!` alive | same | must be named so it can't be confused with contract consumption |
-| **Missing deps are a hard error**, so co-location is a *downward closure, not a partition* — `types-registry` is linked into every application whose closure names it, and two anchors sharing a dep do **not** merge | `RegistryError::MissingDeps`, `libs/toolkit/src/registry.rs:589` | processes **overlap**; the resolver must model that, and `deps` edges are **never cuttable** |
+| **Missing deps are a hard error**, so co-location is a *downward closure, not a partition* — `types-registry` is linked into every application whose closure names it, and two anchors sharing a dep do **not** merge | `RegistryError::MissingDeps`, `libs/toolkit/src/registry.rs:589` | applications **overlap**; the resolver must model that, and `deps` edges are **never cuttable** |
 | Contract kind is the **trait-name suffix**: `…Api` / `…Embedded` / `…Backend` / `…Extension`; only `Api`\|`Backend` are remote-capable | `libs/toolkit-contract/src/descriptor.rs` | placement constraint is derivable statically |
 | Contract version is real: `#[toolkit::contract(gear, version)]`, trailing major on the name must agree, parallel majors coexist | `toolkit-contract-macros/src/parse.rs:80-97` | version-mismatch check works without cargo metadata |
 | **`#[toolkit::consumes]` emits a REST resolving client only** — `{Contract}RestResolvingClient` is hardcoded, no gRPC branch | `consumes.rs:166` | `transport = grpc` on a cut edge is **unsupported** |
@@ -686,7 +686,7 @@ requirement.
 | Output | Mechanism | Golden reference |
 |---|---|---|
 | Generated workspace + `rust-toolchain.toml` | serde | `gears-rust/rust-toolchain.toml` |
-| `processes/<p>/Cargo.toml` | serde | `examples/oop-gears/calculator/calculator/Cargo.toml` |
+| `apps/<p>/Cargo.toml` | serde | `examples/oop-gears/calculator/calculator/Cargo.toml` |
 | Host `src/main.rs` | minijinja `{{ }}` | `examples/toolkit/users-info/users-info-server/src/main.rs` |
 | Worker `src/main.rs` | minijinja | `examples/oop-gears/calculator/calculator/src/main.rs` |
 | `src/registered_gears.rs` | minijinja | `apps/cf-gears-example-server/src/registered_gears.rs` |

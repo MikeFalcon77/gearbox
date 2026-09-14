@@ -132,8 +132,8 @@ guard is here so that it is not forgotten when it can.
 #### What a referenced gear contributes, and what it does not
 
 It satisfies contracts and occupies the catalogue. It produces **no crate, no
-process, no chart**. `InclusionReason` gains a variant for it, and
-`generate/mod.rs`, which iterates every process with no filter, gains the
+application, no chart**. `InclusionReason` gains a variant for it, and
+`generate/mod.rs`, which iterates every application with no filter, gains the
 `skipped` list its own header says should return "the moment something can
 genuinely be skipped, with a producer". This is that producer.
 
@@ -277,7 +277,7 @@ precedent — `exposes` is already ours — it has to be agreed rather than assu
 > and not just the one being resolved.
 
 *Scoping a choice to a profile* is a language change: `use_gear` takes no
-`profiles`, and only `plugin`, `bind`, `cluster_profile` and `process` are
+`profiles`, and only `plugin`, `bind`, `cluster_profile` and `application` are
 scopable. ADR-0014 closes the shortcut in advance — `kind()` "feeds the lock
 header, CLI text and Studio labels — and never a selection" — so scoping stays
 an enumeration of ids, with the same weakness the reference matching inherits.
@@ -306,7 +306,7 @@ an enumeration of ids, with the same weakness the reference matching inherits.
 * The greenfield claim is the existing suite, unchanged: 162 claims, and a
   product declaring no reference must generate what it generates today.
 * The joining claim needs the second product: referenced gears produce no crate,
-  no process and no Service, and a consumer still resolves.
+  no application and no Service, and a consumer still resolves.
 * The version-skew refusal is checked on a fixture, since the corpus has one
   product and no version disagreement to find.
 * In-process-only is confirmed by a test that isolating `grpc-hub` into a worker

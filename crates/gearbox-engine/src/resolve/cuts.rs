@@ -504,7 +504,7 @@ fn in_process_only(
             contract.id
         ),
         "only the remote-capable contract kinds may cross a process boundary; the others are \
-         in-process by definition of their kind, so this pair must stay in one process",
+         in-process by definition of their kind, so this pair must stay in one application",
     )
     .at(Location::file(uri.to_owned()))
 }

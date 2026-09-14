@@ -1,10 +1,10 @@
-// The co-location graph: what pulls what into the same process.
+// The co-location graph: what pulls what into the same application.
 //
 // This is the view that makes the project's most consequential finding visible.
 // `deps` edges are link-time -- the gear macro emits a hidden re-export per
 // entry, and the registry treats a missing one as a hard failure -- so they can
-// never be severed. The set of gears reachable from a process entry point is a
-// *closure*, not a partition, and processes therefore overlap. Clicking a node
+// never be severed. The set of gears reachable from an application's entry point
+// is a *closure*, not a partition, and applications therefore overlap. Clicking a node
 // paints exactly that closure, because a picture of "these three go together"
 // is what the fact means in practice.
 //
@@ -65,14 +65,14 @@ export function DepsView({ gears, focus, onToggleFocus }: DepsViewProps): React.
     <>
       <div className="gbx-header">
         An arrow is <strong>link-time</strong> co-location: the resolver can never
-        sever it, so every process reaching a gear contains everything the arrows
-        lead to. Click a gear to paint its closure -- that is the set no process
-        boundary can split.
+        sever it, so every application reaching a gear contains everything the
+        arrows lead to. Click a gear to paint its closure -- that is the set no
+        application boundary can split.
         {isolatedCount > 0 && (
           <>
             {" "}
             {isolatedCount} gears below the rule have no co-location at all, so each
-            one can stand alone in a process.
+            one can stand alone in an application.
           </>
         )}
       </div>
@@ -150,8 +150,8 @@ export function DepsView({ gears, focus, onToggleFocus }: DepsViewProps): React.
       </svg>
       {closure && (
         <div className="gbx-footer">
-          <code>{focus}</code> co-locates {closure.size - 1} other gears; any process
-          containing it contains all of them.
+          <code>{focus}</code> co-locates {closure.size - 1} other gears; any
+          application containing it contains all of them.
         </div>
       )}
     </>

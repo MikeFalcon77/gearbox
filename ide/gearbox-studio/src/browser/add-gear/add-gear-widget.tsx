@@ -1399,7 +1399,7 @@ export class AddGearWidget extends ReactWidget implements OwnedWidget {
               impact.applicationsRemoved.length > 0 ||
               impact.moved.length > 0) && (
               <div className="gbx-impact-group" data-add-gear-impact-applications>
-                <div className="gbx-impact-title">Processes</div>
+                <div className="gbx-impact-title">Applications</div>
                 {impact.applicationsAdded.map((name) => (
                   <div className="gbx-kv" key={`+${name}`} data-impact-application-added={name}>
                     <span>new</span>

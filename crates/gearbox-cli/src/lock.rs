@@ -46,8 +46,12 @@ pub enum LockQuery {
         with_deps: bool,
     },
 
-    /// List the processes the lock resolved to.
-    Processes {
+    /// List the applications the lock resolved to.
+    ///
+    /// `processes` stays as an alias: it was the published spelling before
+    /// ADR-0016 renamed the level, and a command name is an interface.
+    #[command(alias = "processes")]
+    Applications {
         #[arg(long, value_name = "FILE")]
         lock: Option<PathBuf>,
 
@@ -86,7 +90,7 @@ pub fn run(query: &LockQuery) -> anyhow::Result<ExitCode> {
             order,
             with_deps,
         } => gears(lock.as_deref(), application, *order, *with_deps),
-        LockQuery::Processes { lock, format } => applications(lock.as_deref(), *format),
+        LockQuery::Applications { lock, format } => applications(lock.as_deref(), *format),
     }
 }
 

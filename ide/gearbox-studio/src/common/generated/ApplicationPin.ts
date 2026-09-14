@@ -4,13 +4,13 @@ import type { GearId } from "./GearId";
 import type { ProfileId } from "./ProfileId";
 
 /**
- * An explicitly requested process.
+ * An explicitly requested application.
  *
- * Only needed to name or replicate a process; the resolver derives the partition
+ * Only needed to name or replicate an application; the resolver derives the partition
  * on its own otherwise.
  */
 export type ApplicationPin = { name: ApplicationId, 
 /**
- * The gear whose co-location closure this process is built from.
+ * The gear whose co-location closure this application is built from.
  */
 anchor: GearId, replicas: number, profiles?: Array<ProfileId>, };

@@ -1,19 +1,20 @@
-// The process graph: what ends up in which binary.
+// The application graph: what ends up in which binary.
 //
 // Boxes, not a node-link drawing, and a gear that two closures reach is drawn
 // **inside both boxes**. That repetition is the entire content of the view. Every
 // other way of showing a topology -- a partition, a tree, one chip per gear with
-// an owner label -- implies that a gear belongs to one process, and the resolver's
-// central finding is that it does not: `deps` is link-time, so a process is the
-// closure of its anchor and closures overlap. `ResolvedApplication.gears` says so in
-// its own doc comment: "**May overlap other processes.** A gear reached by two
+// an owner label -- implies that a gear belongs to one application, and the
+// resolver's central finding is that it does not: `deps` is link-time, so an
+// application is the closure of its anchor and closures overlap.
+// `ResolvedApplication.gears` says so in its own doc comment: "**May overlap other
+// applications.** A gear reached by two
 // closures is linked into both binaries; that is a consequence of co-location
 // being a closure rather than a partition, not a mistake."
 //
 // Where there is no overlap, the view says so in words instead of leaving the
 // reader to infer it from the absence of a repeat. **On this corpus that is every
 // profile**, and the reason is worth knowing before reading the drawing: `dev`
-// resolves to a single process of eight gears, and `prod` resolves to three --
+// resolves to a single application of eight gears, and `prod` resolves to three --
 // six, one and one -- whose extra anchors, `api-contracts` and
 // `api-contracts-consumer`, declare no `deps`. Their closures are singletons, so
 // there is nothing to share and this split happens to be a partition. That is a property of the
@@ -37,9 +38,9 @@ export function ApplicationsView({ applications, profile }: ApplicationsViewProp
   if (applications.length === 0) {
     return (
       <div className="gbx-empty">
-        This profile resolved no applications. A process comes from a
-        <code> process(...)</code> entry in the description, or from the single host
-        the profile implies.
+        This profile resolved no applications. An application comes from an
+        <code> application(...)</code> entry in the description, or from the single
+        host the profile implies.
       </div>
     );
   }
@@ -62,8 +63,8 @@ export function ApplicationsView({ applications, profile }: ApplicationsViewProp
           <>
             No gear appears in more than one box here, so this profile happens to
             look like a partition. That is a property of this topology, not of the
-            model: a second process anchored on a gear inside an existing closure
-            would put shared gears in both boxes.
+            model: a second application anchored on a gear inside an existing
+            closure would put shared gears in both boxes.
           </>
         ) : (
           <>
@@ -114,7 +115,7 @@ export function ApplicationsView({ applications, profile }: ApplicationsViewProp
                       data-shared={shared.has(gear) ? "true" : "false"}
                       title={
                         gear === process.anchor
-                          ? `${gear}: the anchor whose closure defines this process`
+                          ? `${gear}: the anchor whose closure defines this application`
                           : shared.has(gear)
                             ? `${gear}: also linked into another binary`
                             : gear
@@ -140,7 +141,7 @@ export function ApplicationsView({ applications, profile }: ApplicationsViewProp
 }
 
 /**
- * Gears that more than one process links in.
+ * Gears that more than one application links in.
  *
  * The classes here are `gbx-binary*` and the attribute is `data-binary`, not
  * `gbx-application*`/`data-application`: the Product tree already owns those, and the
@@ -151,7 +152,7 @@ export function ApplicationsView({ applications, profile }: ApplicationsViewProp
 function sharedGears(applications: readonly ResolvedApplication[]): Set<string> {
   const seen = new Map<string, number>();
   for (const process of applications) {
-    // Over a de-duplicated set per process: a gear listed twice inside one
+    // Over a de-duplicated set per application: a gear listed twice inside one
     // `gears` array would otherwise count as shared with itself, which would
     // report an overlap that does not exist.
     for (const gear of new Set(process.gears)) {

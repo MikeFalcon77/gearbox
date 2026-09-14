@@ -503,7 +503,7 @@ before that scaffold lands — a fake fourth Home action is worse than two hones
 **Product `onActivate` must open the Product view.** Home already calls `openView` for Start. Product
 must do the same through `ProductViewContribution.openView({ activate: true, reveal: true })`, not
 `shell.activateWidget` alone. Activating a widget that was never built leaves the centre empty —
-silent success with nothing to see. The Inspector follows selection: choosing a gear, process or
+silent success with nothing to see. The Inspector follows selection: choosing a gear, application or
 binding opens it; the person should not have to hunt View for the panel that explains what they
 clicked.
 

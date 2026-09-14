@@ -540,14 +540,14 @@ diagnostic_codes! {
     TopologyDepsCycle = "GBX0302", Topology, Error, false, "co-location dependency cycle",
         prevents = Prevents::error("cf-gears-toolkit", "RegistryError", "CycleDetected");
 
-    /// A process contains more than one REST host gear.
+    /// An application contains more than one REST host gear.
     ///
     /// The runtime registry permits exactly one, and says so before any gear
     /// starts: the build phase stops with `RegistryError::MultipleRestHosts`.
     TopologyMultipleRestHost = "GBX0303", Topology, Error, true, "more than one REST host in an application",
         prevents = Prevents::error("cf-gears-toolkit", "RegistryError", "MultipleRestHosts");
 
-    /// A process contains more than one gRPC hub gear.
+    /// An application contains more than one gRPC hub gear.
     ///
     /// The same rule as [`TopologyMultipleRestHost`] and the same enforcement:
     /// the registry refuses the build with `RegistryError::MultipleGrpcHubs`.
@@ -581,10 +581,10 @@ diagnostic_codes! {
     /// A worker process has no resolvable executable path.
     TopologyNoTargetDir = "GBX0310", Topology, Error, false, "worker has no resolvable executable path";
 
-    /// A gear in the closure was not placed in any process.
+    /// A gear in the closure was not placed in any application.
     TopologyOrphanGear = "GBX0311", Topology, Error, false, "gear placed in no application";
 
-    /// A worker process contains a REST host gear.
+    /// A worker application contains a REST host gear.
     ///
     /// A worker serves over its own out-of-process HTTP router, not through the
     /// API gateway, so a REST host there would never receive traffic.
@@ -592,7 +592,7 @@ diagnostic_codes! {
 
     /// A `self_hosted` profile produced workers but no host to spawn them.
     ///
-    /// Spawn specs are attached to the host process. Without one they are
+    /// Spawn specs are attached to the host application. Without one they are
     /// dropped, and the workers the lock named never start.
     TopologyNoHost = "GBX0313", Topology, Error, false, "workers have no host application to spawn them";
 
@@ -821,7 +821,7 @@ diagnostic_codes! {
     /// A plugin is selected but no selected gear expects its extension point.
     PluginHostNotSelected = "GBX0513", Cluster, Error, false, "plugin selected without its host";
 
-    /// A plugin and its host were placed in different processes.
+    /// A plugin and its host were placed in different applications.
     ///
     /// A plugin registers itself with `register_scoped` into the process-local
     /// `ClientHub`, and `get_scoped` has no remote path, so the host can only

@@ -234,15 +234,15 @@ carrying that name into Gearbox:
    stating a runtime gap, not a refusal — the multi-node variant is simply
    unreachable, so the name's other half describes nothing.
 2. **It describes the wrong picture.** Measured on the demo's `local` profile:
-   the process `gateway` (`kind: host`) holds nine gears and spawns exactly one
+   the application `gateway` (`kind: host`) holds nine gears and spawns exactly one
    worker (`api-contracts`). "Host + Workers" reads as a host plus a fleet of
-   workers; the reality is a product in one process from which some gears have
+   workers; the reality is a product in one application from which some gears have
    been pushed out.
 
 **What the rename must not touch:** the role asymmetry is real and load-bearing.
-`host = "gateway"` (`intent.rs:135`) names which process is the host, and
+`host = "gateway"` (`intent.rs:135`) names which application is the host, and
 `bind_host` / `allows_loopback` (`resolve/partition.rs:240-249`) and the spawn
-table (`write_spawns`, host processes only) depend on it. The roles stay; only
+table (`write_spawns`, host applications only) depend on it. The roles stay; only
 the target's name changes.
 
 `self_hosted` is chosen because the source ADR justifies Profile 2 through
@@ -357,7 +357,7 @@ all are deliberately left alone here.
    (`crates/gearbox-gdl/src/product.rs:6`,
    `docs/gearbox-builder-vision.md:864-865`,
    `docs/plans/gearbox-builder-prototype.md:356-357`) list `bind`,
-   `cluster_profile` and `process` — but `plugin(...)` also takes `profiles`
+   `cluster_profile` and `application` — but `plugin(...)` also takes `profiles`
    (`product.rs:307-319`), and the demo relies on it
    (`products/payments-demo/product.gdl:52-55`).
 4. **Three copies of the `applies` predicate** — `intent.rs:574-581`,

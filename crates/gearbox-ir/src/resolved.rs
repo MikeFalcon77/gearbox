@@ -103,7 +103,7 @@ impl<T> Selected<T> {
     }
 }
 
-/// Whether a process hosts others or is hosted.
+/// Whether an application hosts others or is hosted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ApplicationKind {
@@ -298,13 +298,13 @@ pub enum InclusionReason {
     PluginOf { host: GearId, profile: ProfileId },
 }
 
-/// One process in the resolved topology.
+/// One application in the resolved topology.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ResolvedApplication {
     pub name: ApplicationId,
     pub kind: ApplicationKind,
 
-    /// The gear whose co-location closure defines this process.
+    /// The gear whose co-location closure defines this application.
     ///
     /// For a worker this is also its directory identity, verbatim: the runtime
     /// takes that name from a field fixed in the binary, with no configuration
@@ -313,7 +313,7 @@ pub struct ResolvedApplication {
 
     /// The gears in this binary, in dependency order.
     ///
-    /// **May overlap other processes.** A gear reached by two closures is linked
+    /// **May overlap other applications.** A gear reached by two closures is linked
     /// into both binaries; that is a consequence of co-location being a closure
     /// rather than a partition, not a mistake.
     pub gears: Vec<GearId>,
@@ -331,11 +331,11 @@ pub struct ResolvedApplication {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub listens: Vec<ResolvedEndpoint>,
 
-    /// The single REST host gear, if this process has one.
+    /// The single REST host gear, if this application has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rest_host: Option<GearId>,
 
-    /// The single gRPC hub gear, if this process has one.
+    /// The single gRPC hub gear, if this application has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grpc_hub: Option<GearId>,
 
@@ -345,11 +345,11 @@ pub struct ResolvedApplication {
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub cargo_features: BTreeSet<String>,
 
-    /// Workers this process starts. Only a host has any.
+    /// Workers this application starts. Only a host has any.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub spawns: Vec<SpawnSpec>,
 
-    /// How this process serves, when it is a worker. Only a worker has one.
+    /// How this application serves, when it is a worker. Only a worker has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serve: Option<WorkerServe>,
 
@@ -362,7 +362,7 @@ pub struct ResolvedApplication {
 
     /// The chart subdirectory, when the profile generates a chart.
     ///
-    /// Equal to the process name. Helm looks for subcharts under `charts/`.
+    /// Equal to the application name. Helm looks for subcharts under `charts/`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subchart: Option<String>,
 

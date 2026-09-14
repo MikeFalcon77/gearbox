@@ -834,7 +834,7 @@ export class ProductWidget extends ReactWidget {
         {this.renderBranch(
           "applications",
           "server-process",
-          "Processes",
+          "Applications",
           product.applications.length,
           <>{product.applications.map((application) => this.renderApplication(application))}</>,
         )}

@@ -474,15 +474,15 @@ impl ClusterScopeIntent {
     }
 }
 
-/// An explicitly requested process.
+/// An explicitly requested application.
 ///
-/// Only needed to name or replicate a process; the resolver derives the partition
+/// Only needed to name or replicate an application; the resolver derives the partition
 /// on its own otherwise.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ApplicationPin {
     pub name: ApplicationId,
 
-    /// The gear whose co-location closure this process is built from.
+    /// The gear whose co-location closure this application is built from.
     pub anchor: GearId,
 
     #[serde(default = "one")]
