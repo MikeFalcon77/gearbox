@@ -277,3 +277,65 @@ fn the_real_provider_offers_less_than_the_contract_allows() {
         "the provider does not wire gRPC, whatever the contract allows"
     );
 }
+
+fn consumes(src: &str) -> Vec<crate::contract::ProjectedConsume> {
+    let file = syn::parse_file(src).expect("fixture parses");
+    let attrs = match file.items.first().expect("one item") {
+        syn::Item::Struct(s) => s.attrs.clone(),
+        other => panic!("expected a struct, got {other:?}"),
+    };
+    crate::contract::project_consumes(&attrs).expect("attributes parse")
+}
+
+#[test]
+fn a_consumers_from_is_read_verbatim_and_the_attributes_stack() {
+    // Both spellings the corpus actually carries, on one struct: the consumer
+    // example declares two majors of one family from the same gear.
+    let got = consumes(
+        r#"
+        #[toolkit::gear(name = "api-contracts-consumer", capabilities = [rest])]
+        #[toolkit::consumes(contract = api_contracts_sdk::PaymentApi, from = "api-contracts")]
+        #[toolkit::consumes(contract = api_contracts_sdk::PaymentApiV2, from = "api-contracts")]
+        pub struct ApiContractsConsumer;
+        "#,
+    );
+    assert_eq!(got.len(), 2);
+    assert_eq!(got[0].contract_ident, "PaymentApi");
+    assert_eq!(got[1].contract_ident, "PaymentApiV2");
+    // Verbatim: this is a directory lookup key and normalising it would make
+    // the generated override key miss the one the runtime reads.
+    assert!(got.iter().all(|c| c.from == "api-contracts"));
+    assert!(got.iter().all(|c| c.resolving_client.is_none()));
+}
+
+#[test]
+fn the_third_argument_is_projected_rather_than_dropped() {
+    let got = consumes(
+        r#"
+        #[consumes(
+            contract = sdk::ThingApi,
+            from = "provider",
+            resolving_client = sdk::rest::ThingApiRestResolvingClient,
+        )]
+        pub struct G;
+        "#,
+    );
+    assert_eq!(
+        got[0].resolving_client.as_deref(),
+        Some("sdk::rest::ThingApiRestResolvingClient")
+    );
+}
+
+#[test]
+fn a_consumes_with_no_from_is_a_parse_error_rather_than_a_guess() {
+    // The macro requires `from`, so a crate without it does not build; reading
+    // it as absent would invent a consumption pointing nowhere.
+    let file = syn::parse_file("#[toolkit::consumes(contract = sdk::ThingApi)] pub struct G;")
+        .expect("fixture parses");
+    let attrs = match file.items.first().expect("one item") {
+        syn::Item::Struct(s) => s.attrs.clone(),
+        other => panic!("expected a struct, got {other:?}"),
+    };
+    let err = crate::contract::project_consumes(&attrs).unwrap_err();
+    assert!(err.to_string().contains("from"), "{err}");
+}

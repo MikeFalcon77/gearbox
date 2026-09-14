@@ -156,10 +156,10 @@ export const DIAGNOSTIC_CATALOGUE: {
   },
   GBX0206: {
     code: "GBX0206",
-    title: "gear name is not kebab-case of its struct identifier",
+    title: "the consumer_wiring override key does not match the one the macro emits",
     severity: "error",
     domain: "validate",
-    docs: "The gear's name is not the kebab-case form of the annotated struct's\nidentifier.\n\n`#[toolkit::consumes]` derives the owner gear from the struct identifier,\nnot from `#[toolkit::gear(name = ...)]`, and uses it as the configuration\nkey for the static endpoint override. A mismatch means that override key\nnever resolves, and the runtime only warns.",
+    docs: "The `consumer_wiring` override key does not match the one the macro\nemits.\n\nThe runtime's static endpoint resolver reads\n`gears.{owner_gear}.config.consumer_wiring.{dep_gear}`, and\n`#[toolkit::consumes]` fills both segments out of Rust:\n\n* `owner_gear` from the kebab-case of the annotated struct's identifier,\n  *not* from `#[toolkit::gear(name = ...)]` -- a separate attribute\n  cannot read that argument;\n* `dep_gear` verbatim from `from = \"...\"`, which the macro crate's own\n  test pins with the comment \"`from` is a directory lookup key and must\n  survive untouched\".\n\nEither segment disagreeing makes the override key unreachable: the\ngenerator writes it under one name, the runtime looks for it under\nanother, and the runtime only warns. A description that declares a\nconsumption with no attribute behind it is the third shape of the same\nfailure -- no registration is emitted, so the edge is never wired at all.\n\nThree conditions, one code, because the outcome is one outcome and the\nremedy is one family: make the two spellings agree.\n\nThe description's `consume(from_ = ...)` is itself a restatement of the\nattribute's `from` -- the class of second copy that ADR\n`cpt-gearbox-adr-macro-projected-catalogue` retired GBX0201-GBX0205 for.\nProjecting it away would be the consistent fix, and it is unavailable\nonly because this repository reads `gears-rust` and never writes it, so\nthe corpus's descriptions cannot be edited to drop the argument. Until\nthey can, the copy is checked rather than trusted.",
     requiresEvidence: true,
   },
   GBX0208: {

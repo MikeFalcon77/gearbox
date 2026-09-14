@@ -55,6 +55,13 @@ pub struct ProjectedGear {
     /// by the contract's projection traits: the traits say what is *possible*,
     /// this says what this gear actually offers.
     pub provides: Vec<crate::contract::ProjectedProvide>,
+
+    /// Every `#[toolkit::consumes]` on the gear item.
+    ///
+    /// The half of the `consumer_wiring` key the runtime actually reads. The
+    /// description restates it as `consume(from_ = ...)`, and until this field
+    /// existed nothing could tell the two apart.
+    pub consumes: Vec<crate::contract::ProjectedConsume>,
 }
 
 /// A `lifecycle(...)` clause: a bare flag, or `key = value` pairs.
@@ -205,6 +212,7 @@ pub fn project_gear(site: &crate::attribute::AttributeSite<'_>) -> syn::Result<P
     let mut projected: ProjectedGear = site.attr.parse_args::<GearArgs>()?.0;
     projected.struct_ident.clone_from(&site.struct_ident);
     projected.provides = crate::contract::project_provides(site.item_attrs)?;
+    projected.consumes = crate::contract::project_consumes(site.item_attrs)?;
     // `AttributeSite` carries the item's whole attribute list -- the same list
     // `provides` is read from -- so the cfg is here to be read. It used to be
     // left `false` for a caller to fill in, which made the primary projection

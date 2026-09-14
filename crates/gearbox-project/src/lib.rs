@@ -38,7 +38,10 @@ pub use cluster::{
     project_provider_name, project_provider_registry, project_sdk_defaults,
 };
 pub use config::{ConfigField, ConfigRootError, project_config_fields, project_config_root};
-pub use contract::{ProjectedContract, ProjectedProvide, project_contracts, project_provides};
+pub use contract::{
+    ProjectedConsume, ProjectedContract, ProjectedProvide, project_consumes, project_contracts,
+    project_provides,
+};
 pub use error_enum::{ProjectedErrorEnum, ProjectedErrorVariant, project_error_enums};
 pub use gear::{ProjectedGear, ProjectedLifecycle, project_gear};
 pub use gts::{GtsError, GtsType, gts_type_from_schema, project_gts_types};

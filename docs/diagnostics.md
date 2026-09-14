@@ -198,7 +198,7 @@ The author has to take it out, and the help says what to write instead.
 
 | Code | Severity | Summary |
 |---|---|---|
-| [GBX0206](#gbx0206) | error | gear name is not kebab-case of its struct identifier |
+| [GBX0206](#gbx0206) | error | the consumer_wiring override key does not match the one the macro emits |
 | [GBX0208](#gbx0208) | error | gear has no gear.gdl |
 | [GBX0209](#gbx0209) | error | declared library identifier does not match the crate |
 | [GBX0210](#gbx0210) | error | description restates a projected fact |
@@ -208,15 +208,38 @@ The author has to take it out, and the help says what to write instead.
 
 ### GBX0206
 
-**gear name is not kebab-case of its struct identifier**
+**the consumer_wiring override key does not match the one the macro emits**
 
-The gear's name is not the kebab-case form of the annotated struct's
-identifier.
+The `consumer_wiring` override key does not match the one the macro
+emits.
 
-`#[toolkit::consumes]` derives the owner gear from the struct identifier,
-not from `#[toolkit::gear(name = ...)]`, and uses it as the configuration
-key for the static endpoint override. A mismatch means that override key
-never resolves, and the runtime only warns.
+The runtime's static endpoint resolver reads
+`gears.{owner_gear}.config.consumer_wiring.{dep_gear}`, and
+`#[toolkit::consumes]` fills both segments out of Rust:
+
+* `owner_gear` from the kebab-case of the annotated struct's identifier,
+  *not* from `#[toolkit::gear(name = ...)]` -- a separate attribute
+  cannot read that argument;
+* `dep_gear` verbatim from `from = "..."`, which the macro crate's own
+  test pins with the comment "`from` is a directory lookup key and must
+  survive untouched".
+
+Either segment disagreeing makes the override key unreachable: the
+generator writes it under one name, the runtime looks for it under
+another, and the runtime only warns. A description that declares a
+consumption with no attribute behind it is the third shape of the same
+failure -- no registration is emitted, so the edge is never wired at all.
+
+Three conditions, one code, because the outcome is one outcome and the
+remedy is one family: make the two spellings agree.
+
+The description's `consume(from_ = ...)` is itself a restatement of the
+attribute's `from` -- the class of second copy that ADR
+`cpt-gearbox-adr-macro-projected-catalogue` retired GBX0201-GBX0205 for.
+Projecting it away would be the consistent fix, and it is unavailable
+only because this repository reads `gears-rust` and never writes it, so
+the corpus's descriptions cannot be edited to drop the argument. Until
+they can, the copy is checked rather than trusted.
 
 *Asserts a limitation of the runtime, so every occurrence cites the source that proves it.*
 

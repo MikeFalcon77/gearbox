@@ -178,6 +178,105 @@ pub fn project_provides(attrs: &[syn::Attribute]) -> syn::Result<Vec<ProjectedPr
     Ok(out)
 }
 
+/// What one `#[toolkit::consumes]` states.
+///
+/// The mirror of [`ProjectedProvide`], and new: the engine had never read this
+/// attribute at all. `ProjectedGear` carried no `consumes`, so the only
+/// statement of which gear a consumption points at was the description's
+/// `consume(from_ = ...)`, and nothing compared the two -- while the runtime
+/// reads the attribute's spelling and only the attribute's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectedConsume {
+    /// The contract trait's ident, from the `contract = path::Trait` argument.
+    /// The join key against [`ProjectedContract::trait_ident`], exactly as
+    /// [`ProjectedProvide::contract_ident`] is.
+    pub contract_ident: String,
+    /// `from = "..."`, verbatim. The macro emits this as `dep_gear` and the
+    /// runtime uses it as a directory lookup key, so it must not be normalised
+    /// on the way through.
+    pub from: String,
+    /// `resolving_client = path::Type`, the attribute's third and last
+    /// argument.
+    ///
+    /// Projected because there are exactly three, and a projection modelling
+    /// two of them would silently drop the one it does not know about. Nothing
+    /// joins on it yet.
+    pub resolving_client: Option<String>,
+}
+
+/// Whether an attribute path is `consumes` or `toolkit::consumes`.
+fn is_consumes_attribute(attr: &syn::Attribute) -> bool {
+    let segments: Vec<String> = attr
+        .path()
+        .segments
+        .iter()
+        .map(|s| s.ident.to_string())
+        .collect();
+    match segments.as_slice() {
+        [one] => one == "consumes",
+        [first, second] => (first == "toolkit" || first == "gears_toolkit") && second == "consumes",
+        _ => false,
+    }
+}
+
+/// Every `#[toolkit::consumes]` on one gear item.
+///
+/// Stacks the same way `#[toolkit::provides]` does: a gear consuming two
+/// contracts carries one per contract.
+///
+/// A `#[cfg(...)]`-gated attribute is read as unconditional, the same
+/// limitation [`project_provides`] has and `ProjectedGear::conditional` records
+/// for the gear attribute itself. No corpus gear does it.
+///
+/// # Errors
+/// Returns the parse error rather than skipping an attribute it cannot read,
+/// for the reason [`project_provides`] does: a shape this cannot parse means
+/// the crate compiles and Gearbox does not understand it.
+pub fn project_consumes(attrs: &[syn::Attribute]) -> syn::Result<Vec<ProjectedConsume>> {
+    let mut out = Vec::new();
+    for attr in attrs.iter().filter(|a| is_consumes_attribute(a)) {
+        let mut contract_ident = None;
+        let mut from = None;
+        let mut resolving_client = None;
+
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("contract") {
+                let path: syn::Path = meta.value()?.parse()?;
+                contract_ident = path.segments.last().map(|s| s.ident.to_string());
+            } else if meta.path.is_ident("from") {
+                from = Some(meta.value()?.parse::<syn::LitStr>()?.value());
+            } else if meta.path.is_ident("resolving_client") {
+                let path: syn::Path = meta.value()?.parse()?;
+                resolving_client = Some(
+                    path.segments
+                        .iter()
+                        .map(|s| s.ident.to_string())
+                        .collect::<Vec<_>>()
+                        .join("::"),
+                );
+            } else if let Ok(value) = meta.value() {
+                // Anything added later: consumed so the walk continues.
+                value.parse::<syn::Expr>()?;
+            }
+            Ok(())
+        })?;
+
+        let contract_ident = contract_ident.ok_or_else(|| {
+            syn::Error::new_spanned(attr, "#[toolkit::consumes] with no `contract = ...`")
+        })?;
+        // The macro requires it, so its absence means the crate does not build.
+        let from = from.ok_or_else(|| {
+            syn::Error::new_spanned(attr, "#[toolkit::consumes] with no `from = ...`")
+        })?;
+        out.push(ProjectedConsume {
+            contract_ident,
+            from,
+            resolving_client,
+        });
+    }
+    Ok(out)
+}
+
 /// Whether an attribute path is `contract` or `toolkit::contract`.
 fn is_contract_attribute(attr: &syn::Attribute) -> bool {
     let segments: Vec<String> = attr

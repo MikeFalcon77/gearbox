@@ -132,7 +132,7 @@ pub fn merge(
         if derived != projected.name {
             diagnostics.push(
                 Diagnostic::error(
-                    DiagnosticCode::ValidateOwnerGearMismatch,
+                    DiagnosticCode::ValidateConsumerWiringMismatch,
                     format!(
                         "gear `{id}` declares contract consumption, but kebab-case of its struct \
                          `{}` is `{derived}`, not `{}`. #[toolkit::consumes] derives the \
@@ -229,6 +229,14 @@ pub fn merge(
         else {
             continue;
         };
+        report_consumer_wiring_dep(
+            uri,
+            &id,
+            record,
+            &projected_contract.trait_ident,
+            projected,
+            diagnostics,
+        );
         if let Some((requirement, contract)) = build_consumer(
             uri,
             &id,
@@ -339,6 +347,71 @@ pub fn merge(
         provided: provided_contracts,
         consumed: consumed_contracts,
     })
+}
+
+/// The `dep_gear` half of the `consumer_wiring` key, checked against the macro.
+///
+/// `#[toolkit::consumes(from = "...")]` is what the runtime reads;
+/// `consume(from_ = "...")` is the description's restatement of it, and it is
+/// what `Requirement::declared_provider` carries into the resolver. So a
+/// disagreement is two failures at once: the emitted override key names the
+/// wrong gear, and every resolver decision keyed on the declared provider is
+/// made against a gear the runtime will never ask for.
+fn report_consumer_wiring_dep(
+    uri: &str,
+    id: &GearId,
+    record: &gearbox_gdl::records::ConsumeRecord,
+    trait_ident: &str,
+    projected: &ProjectedGear,
+    diagnostics: &mut Diagnostics,
+) {
+    let evidence = "libs/toolkit-contract-macros/src/consumes.rs \
+                    (ConsumesAttr.from, emitted verbatim as dep_gear)";
+    match projected
+        .consumes
+        .iter()
+        .find(|c| c.contract_ident == trait_ident)
+    {
+        Some(consumed) if consumed.from == record.from => {}
+        Some(consumed) => diagnostics.push(
+            Diagnostic::error(
+                DiagnosticCode::ValidateConsumerWiringMismatch,
+                format!(
+                    "gear `{id}` declares `consume(contract = \"{trait_ident}\", from_ = \"{}\")`, \
+                     but `#[toolkit::consumes]` for that contract names `{}`. The macro emits its \
+                     own spelling as `dep_gear`, so the override key the generator writes is not \
+                     the one the runtime reads.",
+                    record.from, consumed.from
+                ),
+                format!(
+                    "make the two agree: write `from_ = \"{}\"` in the description, or change \
+                     the attribute's `from` to `\"{}\"`. The attribute is the authority -- it is \
+                     what the runtime reads.",
+                    consumed.from, record.from
+                ),
+            )
+            .at(Location::file(uri.to_owned()))
+            .with_evidence(evidence),
+        ),
+        None => diagnostics.push(
+            Diagnostic::error(
+                DiagnosticCode::ValidateConsumerWiringMismatch,
+                format!(
+                    "gear `{id}` declares `consume(contract = \"{trait_ident}\")`, and its Rust \
+                     carries no `#[toolkit::consumes]` for that contract. No registration is \
+                     emitted, so there is nothing for the wiring phase to replay and the edge is \
+                     never established."
+                ),
+                format!(
+                    "add `#[toolkit::consumes(contract = {}, from = \"{}\")]` beside the gear \
+                     attribute, or remove the `consume(...)` record",
+                    record.rust, record.from
+                ),
+            )
+            .at(Location::file(uri.to_owned()))
+            .with_evidence(evidence),
+        ),
+    }
 }
 
 /// Find the projected contract a `provide`/`consume` joins to by trait name.
