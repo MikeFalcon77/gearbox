@@ -52,6 +52,29 @@ pods reached over REST contracts through the `DirectoryService`. Link-time
 coupling stays inside a binary; contract edges cross the pod boundary. Two
 designs, arrived at separately, cutting in the same place.
 
+**And the platform says it in its own vocabulary.**
+`docs/arch/toolkit-oop/READINESS.md` sweeps every declared gear and records, per
+gear, the blocker keeping it out of its own pod. The first two entries in its
+shorthand are this decision, stated from the other side:
+
+* `hard-dep` — *"compile-time `deps=[...]` / Rust crate link forcing
+  co-location"*
+* `no-contract` — *"other gears need it but it exposes no
+  `#[toolkit::contract]`"*
+
+Those are the two halves of "only a contract edge may cross": you cannot leave
+if you are linked, and you cannot be reached if you offer no contract. The rest
+of its vocabulary — `trust-coupled`, `db-coupled`, `plumbing`, `no-oop-bin`,
+`no-chart` — names reasons a gear *could* be referenced in principle and is not
+ready to be, which is a readiness question rather than a model one and is
+therefore the platform's to answer, not this ADR's.
+
+`platform-host` is also, in Gearbox's exact sense, **an application**: a
+co-location closure plus plugin selections, whose
+`apps/platform-host/src/registered_gears.rs` is hand-written and is *literally
+the file this tool generates* — `use <lib> as _;` per linked gear. See the
+Consequences.
+
 ### Where ADR-0016 has to be corrected
 
 ADR-0016 says "already deployed" is expressed as **a reference to another
@@ -90,19 +113,36 @@ Verified by reading, not inferred:
 
 ## Decision Outcome
 
-### 1. An installation is declared. A lock is not required.
+### 1. An installation names its gears. A lock is not required.
 
 ```
 installation(
     id = "platform",
     at = "http://platform-host:50051",
-    provides = ["api-contracts/PaymentApi@v1", "types-registry/TypesApi@v1"],
+    gears = ["gear-orchestrator", "grpc-hub", "types-registry", "authn-resolver"],
 )
 ```
 
+> **Corrected 2026-09-14.** The first version of this decision declared the
+> contract surface by hand — `provides = ["Contract@v1", …]` — and accepted
+> drift as its cost. It does not have to be paid. An installation is **an
+> application of required gears**, so what it provides is *projected* from those
+> gears' `provides` in the catalogue, which is ADR-0002's rule and makes drift
+> impossible. The earlier wording is recorded here rather than deleted because a
+> reader who saw it is owed the correction.
+
 `at` is the `DirectoryService` the referenced side registers with — the PR's
-`directoryEndpoint`. `provides` names the contracts it serves, **with versions**,
-which is what makes skew refusable without a lock.
+`directoryEndpoint`. **It is an address, not a binding, and that is why it is
+declared rather than derived**: everything resolves *through* the directory over
+a raw `DirectoryGrpcClient`, not through `#[toolkit::consumes]`
+(`READINESS.md`, the `gear-orchestrator` row). There is no contract edge to
+carry it.
+
+`gears` is what the installation runs. Gearbox already knows two of them are
+mandatory: `resolve/structural.rs` holds `DIRECTORY_SERVER = "gear-orchestrator"`
+and `GRPC_HUB = "grpc-hub"` as constants and `check_discovery` requires the
+first in the host application. That those are hard-coded in the tool rather than
+declared by the platform is a seam this decision leans on and does not fix.
 
 This supersedes ADR-0016's lock-path reference *as the mechanism*. Reading a
 lock, where one exists, stays available as a later refinement that could derive
@@ -114,7 +154,24 @@ this ADR settles.
 no installation resolves, generates and behaves exactly as today. That is a
 constraint on the implementation, not an aspiration.
 
-### 2. Only a contract edge may cross the boundary
+### 2. A gear the catalogue does not describe is GBX0208, not silence
+
+Projection is only as good as the catalogue's coverage, and today it is
+incomplete in a way worth naming precisely. Four of `platform-host`'s ten gears
+have **no `gear.gdl`** — `account-management`, `authz-resolver`,
+`resource-group` (all under `gears/system/`) and `credstore` (under `gears/`).
+The crates exist; the descriptions do not.
+
+So an installation naming one of them has an unknowable contract surface, and
+that must be reported. **No new code is needed**: `GBX0208`
+(`ValidateMissingDescription`, "gear has no gear.gdl") is exactly this, and
+`undescribed::find` already locates a Rust gear with no description. What
+changes is that an installation is a second place it applies.
+
+This is the whole cross-repo dependency, and it is four files rather than
+"describe the platform".
+
+### 3. Only a contract edge may cross the boundary
 
 A gear claimed by an installation that is *also* reached from a local gear's
 `colocated_deps` is a contradiction: the local gear cannot link it and reference
@@ -123,7 +180,7 @@ the depending gear**, not silently linked and not silently referenced.
 
 This is the ADR's central constraint. Everything below is a consequence.
 
-### 3. What a referenced gear contributes
+### 4. What a referenced gear contributes
 
 It occupies the catalogue and satisfies contracts. It produces **no crate, no
 application, no image, no chart** — so `generate`'s Docker and Helm paths, which
@@ -145,16 +202,37 @@ What must change:
   gains a node. That is the one place where this is a design question rather
   than a mechanical addition.
 
-### 4. `check_grpc_without_hub` must learn about the installation
+**And a third category, which is neither placed-once nor referenced.**
+`authn-resolver` is, in the platform's own words, *"Embedded by design in every
+OoP pod … Never extracted — the requirement is 'embed it', not 'pod it'"*, and
+it is `hard-dep` on `types-registry`. Those two are **replicated into every
+application** — which is precisely what Gearbox's "closure, not partition"
+already produces, since a gear reached by two closures is linked into both
+binaries. Nothing has to be built for this.
 
-`resolve/structural.rs`'s `check_grpc_without_hub` raises `GBX0314` when an
-application holds gRPC-registering gears and no hub. Under an installation the
-hub is `platform-host`'s, so the first real use of this feature would produce a
-red herring error. The check becomes: *no hub here and none reachable through an
-installation*. `GBX0315`'s counterpart — a host with nothing to host — has the
-mirror-image problem and the same answer.
+It is written down so that nobody later mistakes it for waste and "optimises" it
+into a reference. Referencing `authn-resolver` would take the tenant-plane authn
+stack out of every pod that authenticates, which is the one thing the platform
+says must never happen.
 
-### 5. The generated tree's deployment artefacts live under `deploy/`
+### 5. The reachability checks must learn about the installation
+
+Three checks ask "is it here?" and must come to ask "is it here **or**
+reachable through an installation?". All three are errors today, so the first
+real use of this feature would fail on red herrings:
+
+* `check_grpc_without_hub` raises `GBX0314` when an application holds
+  gRPC-registering gears and no hub — and under an installation the hub is
+  `platform-host`'s.
+* `check_discovery` raises `GBX0308` when a directory-discovery profile has no
+  `gear-orchestrator` in the host, and `GBX0309` when it has no `grpc-hub`.
+  These are the two constants from decision 1: the check already encodes
+  "required", it just assumes required means *local*.
+
+`GBX0315` — a host with nothing to host — has the mirror-image problem and the
+same answer, and is a warning rather than an error.
+
+### 6. The generated tree's deployment artefacts live under `deploy/`
 
 `deploy/helm/...` and `deploy/docker/...`, rather than `helm/` and `docker/`
 beside `apps/`. This matches the platform's own convention, which is the whole
@@ -165,7 +243,7 @@ names where the *crates* go and defaults to `apps/`; it must not move the
 deployment artefacts as a side effect. A product that sets `layout = "processes"`
 for an existing checkout still writes `deploy/`.
 
-### 6. A referenced gear's `deploy/` is read for wiring, and for nothing else
+### 7. A referenced gear's `deploy/` is read for wiring, and for nothing else
 
 A consumer needs the Service name and port to reach a referenced provider. Those
 come from the referenced gear's own `deploy/`, not from `cluster_dns`, which
@@ -175,7 +253,7 @@ an address for something it does not deploy.
 Gearbox never renders, copies or validates a foreign chart. It reads two facts
 out of it.
 
-### 7. Version skew across the boundary is its own refusal
+### 8. Version skew across the boundary is its own refusal
 
 The installation declares `PaymentApi@v1`; a new gear consumes `@v2`. Inside a
 closure that is `GBX0405`, whose remedy is "select the provider" — useless here,
@@ -187,7 +265,7 @@ This is the one place ADR-0013's "errors warn, they do not block" does not
 reach — generating against a contract the other side does not serve produces a
 binary that starts and then fails.
 
-### 8. `GBX0411` is retired only after (3)
+### 9. `GBX0411` is retired only after (4)
 
 `resolve/bindings.rs`'s `report_unhonoured_endpoints` refuses every
 `bind(endpoint = ...)` and its help text already promises this decision:
@@ -204,30 +282,54 @@ happened, and that claim is corrected there.
   the *first* observable case is cheaper than it looked: a product that
   references the platform and builds one gear of its own. That does not need a
   second Gearbox product at all, only an installation declaration.
-* **`provides` is restated, not derived**, and can therefore drift from what the
-  installation actually serves. That is the price of not requiring a lock. The
-  mitigation is that drift surfaces as a runtime failure the diagnostic in (7)
-  cannot predict — and saying so is better than implying the declaration is
-  checked.
+* **An installation's surface is only as good as the catalogue's coverage of
+  it.** Projection removes drift, and replaces it with a dependency: four of
+  `platform-host`'s gears have no description, so an installation naming them
+  reports `GBX0208` and cannot say what they provide. That is a better failure
+  than a hand-written list that silently goes stale, and it is actionable by
+  four files rather than by vigilance.
+
+* **`platform-host` is a candidate for generation, and this ADR does not decide
+  it.** The platform hand-writes `registered_gears.rs`, a per-gear chart of
+  five one-line templates, and a `config/platform-host.yaml` — all three of
+  which Gearbox emits from a description. If it were described as a product, the
+  installation a consumer references would be generated rather than maintained
+  by hand. Four of its gears are undescribed and gears-rust#4663 is unmerged, so
+  naming the possibility is as far as this goes.
+
+* **Plugin selection is expressed twice.** `platform-host` picks its authn,
+  authz, tenant and credstore plugins by **Cargo feature**; Gearbox expresses
+  the same choice as `plugin(...)` scoped by profile, and now also has
+  `cargo_features` with deployment-kind scoping. Two vocabularies for one
+  decision is a seam worth watching, and it is not resolved here.
 * **The explanation graph gains a node kind**, so "why is this gear here" gains
   the answer "it is not; it is already running over there".
 * **Two umbrella charts exist** — the platform's `toolkit-platform` and
   Gearbox's generated one. This ADR does not settle which deploys a product's
   gears, and that question is real.
-* `LOCK_SCHEMA_VERSION` moves when (3) lands.
+* `LOCK_SCHEMA_VERSION` moves when (4) lands.
 
 ## Confirmation
 
 * The greenfield claim is the existing suite, unchanged: a product declaring no
   installation must generate byte-for-byte what it generates today.
-* The `deps`-crossing refusal in (2) is confirmed on a fixture, because the
+* The `deps`-crossing refusal in (3) is confirmed on a fixture, because the
   corpus has no such contradiction to find.
 * The referenced-gear claim is confirmed by resolving a product that references
   the platform and asserting: no application for the referenced gear, no crate,
   no chart, and a consumer wired to the Service name read from its `deploy/`.
-* `GBX0314`'s exemption is confirmed by the case that would otherwise be a false
-  positive: a local gRPC gear whose hub is in the installation.
-* The skew refusal in (7) is confirmed on a fixture, since the corpus has no
+* **Projection is confirmed against the corpus, not a fixture**: an
+  installation naming `gear-orchestrator`, `grpc-hub`, `types-registry` and
+  `authn-resolver` must offer exactly the contracts those four declare, and one
+  naming `credstore` must report `GBX0208` rather than an empty surface.
+* The reachability exemptions are confirmed by the three cases that are false
+  positives today: a local gRPC gear whose hub is in the installation
+  (`GBX0314`), and a directory-discovery profile whose `gear-orchestrator`
+  (`GBX0308`) and `grpc-hub` (`GBX0309`) are in the installation.
+* The embed-in-every-application category needs **no** new confirmation, and
+  saying so is the point: the existing closure claims already assert that a gear
+  reached by two closures is linked into both.
+* The skew refusal in (8) is confirmed on a fixture, since the corpus has no
   version disagreement.
 
 ## Traceability
@@ -239,11 +341,16 @@ happened, and that claim is corrected there.
   `report_orphans`) — future tense, deliberately.
 * **Will retire** `GBX0411` (`resolve/bindings.rs`), after and not before the
   provider index admits referenced providers.
-* Extends ADR-0002: what is read out of an installation is projected, never
-  restated — which is exactly why `provides` restating contract versions is
-  called out above as a cost rather than presented as a design.
+* **Applies ADR-0002 rather than bending it.** What an installation provides is
+  projected from the gears it names; the first draft of decision 1 restated it
+  by hand and was corrected. What stays declared is `at` — an address no
+  contract edge carries — and `gears`, which is the operator's choice of what
+  the installation runs.
 * Respects ADR-0010: `gears-rust` is read, never written. A gear's `deploy/` is
-  read for two facts.
+  read for two facts, and the four missing `gear.gdl` files are named as work
+  for that repository rather than done from here.
+* Reuses `GBX0208` (`ValidateMissingDescription`) and `undescribed::find` rather
+  than adding a code for an undescribed installation gear.
 * Depends on gears-rust#4663 for the shape it integrates with. That PR is open,
   and our corpus branch has no `deploy/` at all, so this ADR records the
   contract the two sides must share — Service name, port, config path,
