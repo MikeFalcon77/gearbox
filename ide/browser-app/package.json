@@ -1,6 +1,6 @@
 {
   "private": true,
-  "name": "gearbox-browser-app",
+  "name": "gearbox-studio-app",
   "version": "0.1.0",
   "dependencies": {
     "@theia/ai-anthropic": "1.75.0",

@@ -1,6 +1,6 @@
 {
   "private": true,
-  "name": "gearbox-ide",
+  "name": "gearbox-studio-root",
   "engines": {
     "node": "^24 || >=26"
   },
