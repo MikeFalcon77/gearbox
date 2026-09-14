@@ -330,6 +330,7 @@ nothing pointing back at the description.
 | [GBX0315](#gbx0315) | warning | registration host with nothing to host |
 | [GBX0316](#gbx0316) | error | a selected Cargo feature does not belong to this deployment kind |
 | [GBX0317](#gbx0317) | error | contract owner is not a name the catalogue declares |
+| [GBX0318](#gbx0318) | warning | a gear's roles cannot all be deployed |
 
 ### GBX0301
 
@@ -549,6 +550,28 @@ directory name, and a contract answering to that role names it here. So
 the question is whether the owner is any name the catalogue answers to --
 a gear id, or a declared role's `directory_name` -- rather than whether
 it is a gear id.
+
+### GBX0318
+
+**a gear's roles cannot all be deployed**
+
+A selected gear declares roles, and a product can deploy at most one of
+them.
+
+A role registers under its own directory name, so a role-split gear is
+several named workloads built from one binary. This tool builds one
+application per anchor gear -- the worker anchors are a set, and a pin
+is looked up rather than filtered for -- so a second role has nowhere
+to be.
+
+The limitation is here rather than in the runtime, which takes whatever
+directory name it is given. Reported at resolution rather than at load
+because it is a statement about a product: a gear whose roles nobody
+selects costs nothing.
+
+A warning, because the description is not wrong -- it describes a shape
+this tool does not build yet (ADR
+`cpt-gearbox-adr-role-qualified-names`).
 
 ## `GBX04xx` — Contract bindings and severability
 
@@ -956,34 +979,30 @@ depends on the server the operator will point at.
 
 | Code | Severity | Summary |
 |---|---|---|
-| [GBX0601](#gbx0601) | warning | roles are not supported by the runtime |
-| [GBX0602](#gbx0602) | warning | sharding and per-instance addressing are not supported |
+| [GBX0602](#gbx0602) | warning | sharding and per-instance addressing are not generated |
 | [GBX0603](#gbx0603) | warning | no cluster-native endpoint resolver exists |
 | [GBX0604](#gbx0604) | warning | only local process spawning is implemented |
 | [GBX0606](#gbx0606) | hint | deployment profile is not a runtime type |
 | [GBX0607](#gbx0607) | hint | `deps = [cluster]` pins a consumer that no longer needs pinning |
 
-### GBX0601
-
-**roles are not supported by the runtime**
-
-Roles were declared. The runtime has no role concept.
-
-A worker's directory identity is a single name fixed in its binary, with
-no configuration override, which is exactly what role-qualified
-registration would require.
-
-*Asserts a limitation of the runtime, so every occurrence cites the source that proves it.*
-
 ### GBX0602
 
-**sharding and per-instance addressing are not supported**
+**sharding and per-instance addressing are not generated**
 
-Sharding or per-instance addressability was declared and cannot be
-realized.
+Sharding or per-instance addressing was declared, and this tool cannot
+emit it.
 
-Instance labels exist only on the out-of-process path, selection is
-equality-only, and in-process gears carry no labels at all.
+**Not a runtime limitation any more, for two of the three profiles.**
+The directory carries instance labels, `LabelSelector` filters on them,
+and `oop_http.labels` is a first-class config field with environment
+sourcing -- so an out-of-process instance can be addressed individually
+today. What is missing is on this side: a resolved worker carries no
+labels and the generated `oop_http` section writes three keys, none of
+them a label, so a declaration here has no field to reach.
+
+The surviving runtime half is the embedded profile, where one process
+cannot host two instances of a name at all -- and the platform's own ADR
+states that as a coverage gap in its voice rather than a defect.
 
 *Asserts a limitation of the runtime, so every occurrence cites the source that proves it.*
 

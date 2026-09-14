@@ -289,7 +289,7 @@ gdl_record! {
     /// Parsed for forward compatibility and excluded from resolution: the
     /// runtime has no role concept, and a worker's directory identity is a
     /// single name fixed in its binary with no configuration override. Carries
-    /// GBX0601/GBX0602.
+    /// GBX0318 at resolution, and GBX0602 when it asks for labels.
     RoleRecord as "gdl_role" {
         pub name: String,
         pub directory_name: Option<String>,

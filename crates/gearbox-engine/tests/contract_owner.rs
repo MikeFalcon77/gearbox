@@ -185,8 +185,9 @@ fn a_declared_role_directory_name_satisfies_the_check() {
         !found.contains(&DiagnosticCode::TopologyUnknownContractOwner),
         "a role's directory name is a name the catalogue answers to: {found:?}"
     );
-    // And the role is still reported as unrealizable, which is a separate fact.
-    assert!(found.contains(&DiagnosticCode::GapRoles), "{found:?}");
+    // And the role costs nothing at load: whether a product can deploy it is
+    // GBX0318, which only a resolution knows.
+    assert!(found.is_empty(), "{found:?}");
 }
 
 #[test]

@@ -1061,7 +1061,7 @@ The exact serialization format is a detailed-design question.
 The conceptual role is not.
 
 Two corrections to the list, both from things the resolver settled later. **Roles and shards are not
-in the lock** -- the runtime has no role concept, and declaring one earns `GBX0601` instead (§33.1);
+in the lock** -- one application per anchor gear, so declaring several earns `GBX0318` instead (§33.1);
 the entry has been removed rather than left to be discovered. And `selected vs resolved` is narrower
 than it reads: it is `Selected<T>` sitting next to the resolved value on the same record, carrying
 the request and the `downgraded_by` code when the two differ -- not a parallel copy of the product.
@@ -1444,7 +1444,7 @@ but the runtime remains responsible for eventual readiness.
 # 33. Roles and Shards
 
 > **The runtime has no role concept, so this section describes an intent rather than a capability.**
-> `gear()` still accepts `roles`, and the resolver answers with `GBX0601 -- roles are not supported
+> `gear()` still accepts `roles`, and the resolver answers with `GBX0318 -- a gear's roles cannot all be deployed
 > by the runtime`. §33.1 says why, with the evidence.
 
 Role and shard semantics were expected to be first-class product metadata.
@@ -1491,7 +1491,7 @@ field fixed in the binary, with no configuration override
 under exactly one name, and "dispatcher -> event-broker, ingest -> event-broker-ingest" would need
 three.
 
-So declaring roles is accepted and then reported: **`GBX0601`, a `RuntimeGap` warning** -- "roles are
+So declaring roles is accepted, and a product that selects a gear with several is told only one is built: **`GBX0318`, a `Topology` warning** -- "roles are
 not supported by the runtime". A warning rather than an error, because the description is not wrong
 about what it wants; it is wrong about what exists. And a `RuntimeGap` code is one of those required
 to cite the `file:line` in `gears-rust` that substantiates the claim

@@ -371,6 +371,21 @@ pub fn kubernetes(gears: &[&str], discovery: gearbox_ir::Discovery) -> ProductIn
     intent
 }
 
+/// A gear declaring two roles, which one product cannot deploy both of.
+pub fn gear_with_roles(id: &str, roles: &[&str]) -> GearDescriptor {
+    let mut gear = gear_with_caps(id, &[], &[]);
+    gear.declared_roles = roles
+        .iter()
+        .map(|name| gearbox_ir::DeclaredRole {
+            name: (*name).to_owned(),
+            directory_name: Some(format!("{id}-{name}")),
+            sharded: false,
+            instance_addressable: false,
+        })
+        .collect();
+    gear
+}
+
 /// Force a second process by pinning a gear to one.
 pub fn pin(intent: &mut ProductIntent, name: &str, anchor: &str, replicas: u32) {
     intent.application_pins.push(gearbox_ir::ApplicationPin {

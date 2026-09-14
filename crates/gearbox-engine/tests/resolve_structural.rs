@@ -415,3 +415,50 @@ fn target_dir_is_only_needed_when_something_moved() {
 
 #[path = "support/resolve_fixtures.rs"]
 mod support;
+
+#[test]
+fn a_gear_with_two_roles_is_told_only_one_is_deployed() {
+    // The claim GBX0601 used to make at load time and blame the runtime for.
+    // It is a product fact: one application per anchor gear, so the second
+    // role has nowhere to be -- and a gear whose roles nobody selects says
+    // nothing at all, which is why this moved out of the catalogue.
+    let cat = support::catalogue_of(vec![
+        support::gear_with_caps("host", &[], &[]),
+        support::gear_with_roles("broker", &["ingest", "delivery"]),
+    ]);
+    let intent = support::self_hosted(&["host", "broker"], Discovery::Static, Some("t"));
+    let r = resolve(&cat, &intent, &pid("local"));
+
+    let d = r
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::TopologyRolesNotDeployable)
+        .expect("GBX0318");
+    assert!(
+        d.message.contains("broker") && d.message.contains("2 roles"),
+        "{}",
+        d.message
+    );
+    assert!(
+        d.help.as_deref().unwrap_or_default().contains("this tool"),
+        "the help says where the limitation is: {:?}",
+        d.help
+    );
+}
+
+#[test]
+fn one_role_is_deployable_and_says_nothing() {
+    let cat = support::catalogue_of(vec![
+        support::gear_with_caps("host", &[], &[]),
+        support::gear_with_roles("broker", &["ingest"]),
+    ]);
+    let intent = support::self_hosted(&["host", "broker"], Discovery::Static, Some("t"));
+    let r = resolve(&cat, &intent, &pid("local"));
+
+    assert!(
+        !r.diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::TopologyRolesNotDeployable),
+        "one role is one application"
+    );
+}

@@ -352,6 +352,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     docs: "A contract's owner is not a name the catalogue answers to.\n\n`#[toolkit::contract(gear = \"...\")]` is a free string that flows verbatim\ninto the descriptor's owner and into the contract's own id, which is\n`{owner}/{base}@{version}`. Both paths that build it guard only against a\n*malformed* id -- one falls back to the declaring gear on a parse failure,\nthe other diagnoses one -- so any valid kebab name passes and the owner\ncan name a gear nothing describes. The catalogue then holds a contract\nwhose identity nothing else can match.\n\nTwo causes, both actionable: a typo in the attribute, and a description\nthat was never written.\n\n**Deliberately not `TopologyUnknownGear`, which would otherwise be the\ncode for this.** That one carries a claim about a registry failure at\nstartup, and it earns it: it is raised for `use_gear`, for a plugin under\na host and for a `deps` entry, all of which the runtime tries to link.\nNothing tries to link a contract owner, so the claim does not transfer.\n\n**A role's directory name satisfies this.** Under ADR\n`cpt-gearbox-adr-role-qualified-names` a role registers under its own\ndirectory name, and a contract answering to that role names it here. So\nthe question is whether the owner is any name the catalogue answers to --\na gear id, or a declared role's `directory_name` -- rather than whether\nit is a gear id.",
     requiresEvidence: false,
   },
+  GBX0318: {
+    code: "GBX0318",
+    title: "a gear's roles cannot all be deployed",
+    severity: "warning",
+    domain: "topology",
+    docs: "A selected gear declares roles, and a product can deploy at most one of\nthem.\n\nA role registers under its own directory name, so a role-split gear is\nseveral named workloads built from one binary. This tool builds one\napplication per anchor gear -- the worker anchors are a set, and a pin\nis looked up rather than filtered for -- so a second role has nowhere\nto be.\n\nThe limitation is here rather than in the runtime, which takes whatever\ndirectory name it is given. Reported at resolution rather than at load\nbecause it is a statement about a product: a gear whose roles nobody\nselects costs nothing.\n\nA warning, because the description is not wrong -- it describes a shape\nthis tool does not build yet (ADR\n`cpt-gearbox-adr-role-qualified-names`).",
+    requiresEvidence: false,
+  },
   GBX0401: {
     code: "GBX0401",
     title: "edge would be severable if declared",
@@ -605,20 +613,12 @@ export const DIAGNOSTIC_CATALOGUE: {
     docs: "A cluster backend decides a capability at run time, so none is claimed\nfor it at composition time.\n\nNot a defect and not a gap in the projection: the backend genuinely has\nno answer to give yet. The redis cache reads its consistency off the\nserver it connects to -- single node and cluster mode differ -- so\n`consistency()` returns a field its startup preflight set, and\n`features()` computes prefix-watch the same way. Nothing in Rust states\nthe value, so nothing can be projected as if it did.\n\nWhat follows is exactly right and worth saying out loud: such a provider\ncan be named and configured like any other, answers the primitives it\nregisters for, and satisfies **only a requirement that asks for no\ncapability**. A `requires = [cluster.cache(capabilities = [...])]` is\nrefused against it, because at composition time nobody can promise what\ndepends on the server the operator will point at.",
     requiresEvidence: true,
   },
-  GBX0601: {
-    code: "GBX0601",
-    title: "roles are not supported by the runtime",
-    severity: "warning",
-    domain: "runtime-gap",
-    docs: "Roles were declared. The runtime has no role concept.\n\nA worker's directory identity is a single name fixed in its binary, with\nno configuration override, which is exactly what role-qualified\nregistration would require.",
-    requiresEvidence: true,
-  },
   GBX0602: {
     code: "GBX0602",
-    title: "sharding and per-instance addressing are not supported",
+    title: "sharding and per-instance addressing are not generated",
     severity: "warning",
     domain: "runtime-gap",
-    docs: "Sharding or per-instance addressability was declared and cannot be\nrealized.\n\nInstance labels exist only on the out-of-process path, selection is\nequality-only, and in-process gears carry no labels at all.",
+    docs: "Sharding or per-instance addressing was declared, and this tool cannot\nemit it.\n\n**Not a runtime limitation any more, for two of the three profiles.**\nThe directory carries instance labels, `LabelSelector` filters on them,\nand `oop_http.labels` is a first-class config field with environment\nsourcing -- so an out-of-process instance can be addressed individually\ntoday. What is missing is on this side: a resolved worker carries no\nlabels and the generated `oop_http` section writes three keys, none of\nthem a label, so a declaration here has no field to reach.\n\nThe surviving runtime half is the embedded profile, where one process\ncannot host two instances of a name at all -- and the platform's own ADR\nstates that as a coverage gap in its voice rather than a defect.",
     requiresEvidence: true,
   },
   GBX0603: {

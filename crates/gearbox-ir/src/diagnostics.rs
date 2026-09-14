@@ -703,6 +703,25 @@ diagnostic_codes! {
     /// it is a gear id.
     TopologyUnknownContractOwner = "GBX0317", Topology, Error, false, "contract owner is not a name the catalogue declares";
 
+    /// A selected gear declares roles, and a product can deploy at most one of
+    /// them.
+    ///
+    /// A role registers under its own directory name, so a role-split gear is
+    /// several named workloads built from one binary. This tool builds one
+    /// application per anchor gear -- the worker anchors are a set, and a pin
+    /// is looked up rather than filtered for -- so a second role has nowhere
+    /// to be.
+    ///
+    /// The limitation is here rather than in the runtime, which takes whatever
+    /// directory name it is given. Reported at resolution rather than at load
+    /// because it is a statement about a product: a gear whose roles nobody
+    /// selects costs nothing.
+    ///
+    /// A warning, because the description is not wrong -- it describes a shape
+    /// this tool does not build yet (ADR
+    /// `cpt-gearbox-adr-role-qualified-names`).
+    TopologyRolesNotDeployable = "GBX0318", Topology, Warning, false, "a gear's roles cannot all be deployed";
+
     // ---------------------------------------------------------------- GBX04xx
     /// This consumer and provider could be placed in separate processes, but the
     /// dependency between them is not declared as a contract consumption.
@@ -953,19 +972,36 @@ diagnostic_codes! {
     ClusterCapabilityRuntimeDetermined = "GBX0520", Cluster, Info, true, "cluster backend decides a capability at run time";
 
     // ---------------------------------------------------------------- GBX06xx
-    /// Roles were declared. The runtime has no role concept.
-    ///
-    /// A worker's directory identity is a single name fixed in its binary, with
-    /// no configuration override, which is exactly what role-qualified
-    /// registration would require.
-    GapRoles = "GBX0601", RuntimeGap, Warning, true, "roles are not supported by the runtime";
+    // GBX0601 is deliberately absent. It said roles were "not supported by the
+    // runtime" and cited `OopRunOptions.gear_name` for it. Both halves were
+    // checkable and the citation did not support the claim: that field is a
+    // plain `String` the runtime accepts as given, and the literal in it is
+    // written by this tool, from `generate::rust` into `worker_main.rs`.
+    //
+    // What cannot express a role is the model here -- one application per
+    // anchor gear -- so the claim belongs in the topology range, where its
+    // evidence is our own source. A runtime-gap code may not cite that, which
+    // is what made the misclassification findable at all. Replaced by GBX0318
+    // (ADR `cpt-gearbox-adr-role-qualified-names`).
+    //
+    // The code is not reused: a lock or a transcript naming GBX0601 should stay
+    // findable rather than silently meaning something else.
 
-    /// Sharding or per-instance addressability was declared and cannot be
-    /// realized.
+    /// Sharding or per-instance addressing was declared, and this tool cannot
+    /// emit it.
     ///
-    /// Instance labels exist only on the out-of-process path, selection is
-    /// equality-only, and in-process gears carry no labels at all.
-    GapShards = "GBX0602", RuntimeGap, Warning, true, "sharding and per-instance addressing are not supported";
+    /// **Not a runtime limitation any more, for two of the three profiles.**
+    /// The directory carries instance labels, `LabelSelector` filters on them,
+    /// and `oop_http.labels` is a first-class config field with environment
+    /// sourcing -- so an out-of-process instance can be addressed individually
+    /// today. What is missing is on this side: a resolved worker carries no
+    /// labels and the generated `oop_http` section writes three keys, none of
+    /// them a label, so a declaration here has no field to reach.
+    ///
+    /// The surviving runtime half is the embedded profile, where one process
+    /// cannot host two instances of a name at all -- and the platform's own ADR
+    /// states that as a coverage gap in its voice rather than a defect.
+    GapShards = "GBX0602", RuntimeGap, Warning, true, "sharding and per-instance addressing are not generated";
 
     /// The Kubernetes profile resolves endpoints statically because no
     /// cluster-native endpoint resolver exists.

@@ -38,9 +38,14 @@ fn retired_codes_are_not_reused() {
     // nothing could fetch a published gear, and `gearbox_engine::registry` now
     // resolves one like any other source. A code with no firing site is a claim
     // the tool no longer makes.
+    //
+    // GBX0601 went for a fourth: the claim was about the wrong repository. It
+    // said roles were unsupported by the runtime and cited a field the runtime
+    // accepts as given -- what cannot express a role is this tool, so the code
+    // moved to the topology range as GBX0318.
     let live: Vec<&str> = DiagnosticCode::ALL.iter().map(|c| c.as_str()).collect();
     for retired in [
-        "GBX0201", "GBX0202", "GBX0203", "GBX0204", "GBX0205", "GBX0207", "GBX0605",
+        "GBX0201", "GBX0202", "GBX0203", "GBX0204", "GBX0205", "GBX0207", "GBX0601", "GBX0605",
     ] {
         assert!(
             !live.contains(&retired),
@@ -321,7 +326,10 @@ fn collections_sort_canonically_and_drop_duplicates() {
     };
 
     let mut set = Diagnostics::new();
-    set.push(Diagnostic::new(DiagnosticCode::GapRoles, "roles ignored").with_evidence("x:1"));
+    set.push(
+        Diagnostic::new(DiagnosticCode::GapNoRemoteSpawnBackend, "remote spawn")
+            .with_evidence("x:1"),
+    );
     set.push(dup());
     set.push(Diagnostic::new(DiagnosticCode::GdlParse, "bad syntax"));
     set.push(dup());
@@ -330,7 +338,7 @@ fn collections_sort_canonically_and_drop_duplicates() {
     let codes: Vec<&str> = set.iter().map(|d| d.code.as_str()).collect();
     assert_eq!(
         codes,
-        ["GBX0101", "GBX0407", "GBX0601"],
+        ["GBX0101", "GBX0407", "GBX0604"],
         "expected code order and one deduplicated entry"
     );
     assert!(set.has_errors(), "GBX0101 is an error");

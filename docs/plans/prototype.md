@@ -217,7 +217,7 @@ contain assignments only.
 
 | Construct | Verdict | Behaviour |
 |---|---|---|
-| `role(...)`, `sharded`, `instance_addressable` | **Downgraded** | parsed into `declared_roles` for forward-compat, **excluded from resolution**; GBX0601/0602 `Warning` citing `bootstrap/oop.rs` |
+| `role(...)`, `sharded`, `instance_addressable` | **Downgraded** | parsed into `declared_roles`, **excluded from resolution**; GBX0318 `Warning` when a selected gear declares several, GBX0602 `Warning` when one asks for labels |
 | `provider("redis"\|"k8s-lease"\|"etcd"\|"nats")` | **Rejected** | GBX0505 `Error` listing the actual registry contents |
 | `registry(package, version)` source | **Rejected, later shipped** | was GBX0605; cargo now fetches the package and its Cargo closure, and the code is retired |
 | `transport.grpc` on a cut edge | **Downgraded** | GBX0402 `Warning`, forced to `rest` |
@@ -443,7 +443,7 @@ a scoped one, one cluster scope bound twice, and a duplicate profile id. Disjoin
 
 `GBX0107` (`GdlDowngraded`, "accepted for forward compatibility but excluded from resolution") has no
 honest firing site at evaluation time: every case it was meant to cover has a more specific code —
-`GBX0601`/`GBX0602` for roles and shards. It also carries
+`GBX0318`/`GBX0602` for roles and shards. It also carries
 `requires_evidence = true`, so firing it would mean citing a runtime limitation it does not name.
 Either it belongs to the resolver (M4) or it should be retired the way `GBX0201`-`GBX0205` were; not
 invented a use for in the meantime.
@@ -2560,7 +2560,7 @@ narrative; Generate shows 0 conflicts, and after hand-editing `values.yaml` a re
    optionally `POD_IP` from the downward API.
 3. **gRPC across a process boundary via declared contracts.** `#[toolkit::consumes]` emits a REST
    client only; GBX0402 downgrades rather than emitting config that silently does nothing.
-4. **Roles, shards, per-instance addressing.** GBX0601/0602 refuse to pretend; `declared_roles` is
+4. **Roles, shards, per-instance addressing.** GBX0318/0602 refuse to pretend; `declared_roles` is
    stored for forward-compat and contributes nothing to the lock.
 5. **Cluster coordination beyond `standalone` + `postgres`.** `redis` registers a cache and a lock
    now, but declares no capability: it reads its consistency off the server it connects to, so

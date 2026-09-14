@@ -86,6 +86,7 @@ pub fn partition(
         scoped,
         ..
     } = *input;
+    report_undeployable_roles(catalogue, closure, uri, diagnostics);
     let mut used_names: BTreeSet<String> = BTreeSet::new();
     let mut applications = Vec::new();
 
@@ -486,6 +487,49 @@ fn pick_anchor(catalogue: &Catalogue, gears: &[GearId]) -> Option<GearId> {
         .find(|g| has_cap(catalogue, g, RuntimeCap::RestHost))
         .or_else(|| gears.last())
         .cloned()
+}
+
+/// Report a selected gear whose roles cannot all be deployed.
+///
+/// A role registers under its own directory name, so a role-split gear is
+/// several named workloads built from one binary. An application here is the
+/// co-location closure of an anchor gear and there is one per anchor, so the
+/// second role has nowhere to be.
+///
+/// Reported from resolution rather than from the load, because it is a claim
+/// about a product: a gear whose roles nobody selects costs nothing, and the
+/// catalogue cannot know which those are.
+fn report_undeployable_roles(
+    catalogue: &Catalogue,
+    closure: &Closure,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    for gear in closure.members.keys() {
+        let Some(descriptor) = catalogue.gears.get(gear) else {
+            continue;
+        };
+        let roles = &descriptor.declared_roles;
+        if roles.len() < 2 {
+            continue;
+        }
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TopologyRolesNotDeployable,
+                format!(
+                    "`{gear}` declares {} roles, and a product builds one application per \
+                     anchor gear -- so at most one of them is deployed",
+                    roles.len()
+                ),
+            )
+            .at(Location::file(uri.to_owned()))
+            .with_help(
+                "the runtime takes whichever directory name it is given; what cannot express \
+                 the second workload is this tool. Keep the roles knowing only one is built, \
+                 or split the gear",
+            ),
+        );
+    }
 }
 
 /// Complaints an embedded profile owes the operator.

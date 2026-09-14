@@ -1,12 +1,13 @@
 //! Roles reach the catalogue, and the tool says what it cannot do with them.
 //!
-//! Both gap codes have been raised since roles were parsed and neither has
-//! ever been asserted to fire. `gearbox-gdl`'s own role test ends by asserting
-//! that *nothing* is raised and defers with "Gap diagnostics are asserted in
-//! gearbox-engine" -- where, until this file, they were not. That matters more
-//! than usual here: ADR `cpt-gearbox-adr-role-qualified-names` corrects what
-//! GBX0601 claims, and a claim nothing tests can be changed without anyone
-//! noticing which way it went.
+//! Two claims, and they are about different things. Whether a role's labels
+//! can be *written* is a fact about the gear and its generated configuration,
+//! knowable when the description is read -- GBX0602, here. Whether a role can
+//! be *deployed* is a fact about a product, because a gear whose roles nobody
+//! selects costs nothing -- GBX0318, asserted in the resolver's own tests.
+//!
+//! GBX0601 said the second one at load time and blamed the runtime for it.
+//! These tests were written before it moved, so the move is visible.
 
 #![allow(
     clippy::unwrap_used,
@@ -75,46 +76,41 @@ fn codes(catalogue: &Catalogue) -> Vec<DiagnosticCode> {
 }
 
 #[test]
-fn a_declared_role_is_reported_with_its_evidence() {
+fn a_plain_role_is_recorded_and_says_nothing_at_load() {
+    // It used to warn here that the runtime could not support it. The runtime
+    // takes whatever directory name it is given; whether a *product* can
+    // deploy two of them is GBX0318, and only a resolution knows.
     let catalogue = catalogue(r#"roles = [role(name = "ingest")],"#);
-    let d = catalogue
-        .diagnostics
-        .iter()
-        .find(|d| d.code == DiagnosticCode::GapRoles)
-        .expect("GBX0601");
-
-    assert_eq!(d.severity, Severity::Warning);
-    assert!(d.message.contains("1 role"), "{}", d.message);
-    // The runtime-gap contract demands the column; this demands a value at the
-    // one site that fills it.
     assert!(
-        d.evidence.as_deref().unwrap_or_default().contains("oop.rs"),
-        "{:?}",
-        d.evidence
+        codes(&catalogue).is_empty(),
+        "a role is a fact, not a complaint: {:?}",
+        codes(&catalogue)
     );
-    assert!(d.help.is_some());
-    assert!(
-        !codes(&catalogue).contains(&DiagnosticCode::GapShards),
-        "a plain role asks for no sharding"
-    );
+    assert_eq!(demo(&catalogue).declared_roles.len(), 1);
 }
 
 #[test]
-fn sharding_and_instance_addressing_are_reported_separately() {
+fn sharding_is_reported_because_nothing_generated_can_carry_it() {
     for declared in [
         r#"roles = [role(name = "ingest", sharded = True)],"#,
         r#"roles = [role(name = "ingest", instance_addressable = True)],"#,
     ] {
-        let found = codes(&catalogue(declared));
-        assert!(found.contains(&DiagnosticCode::GapRoles), "{found:?}");
-        assert!(found.contains(&DiagnosticCode::GapShards), "{found:?}");
+        let catalogue = catalogue(declared);
+        let d = catalogue
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::GapShards)
+            .expect("GBX0602");
+        assert_eq!(d.severity, Severity::Warning);
+        // The runtime-gap contract demands the column; this demands a value.
+        assert!(d.evidence.is_some(), "{d:?}");
+        assert!(d.help.is_some());
     }
 }
 
 #[test]
-fn a_gear_with_no_roles_raises_neither() {
+fn a_gear_with_no_roles_is_silent() {
     let found = codes(&catalogue(r#"visibility = "internal","#));
-    assert!(!found.contains(&DiagnosticCode::GapRoles), "{found:?}");
     assert!(!found.contains(&DiagnosticCode::GapShards), "{found:?}");
 }
 

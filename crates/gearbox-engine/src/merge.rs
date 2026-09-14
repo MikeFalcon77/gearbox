@@ -728,36 +728,35 @@ fn cluster_requirement(
     })
 }
 
-/// Roles are recorded for forward compatibility and refused, with evidence.
+/// Report what a declared role asks for and this tool cannot emit.
+///
+/// Only the labels half lives here. Whether a role can be *deployed* is a
+/// statement about a product -- one application per anchor gear, so at most
+/// one role -- and is reported at resolution as `GBX0318`. Whether its labels
+/// can be written is a statement about the gear and its generated
+/// configuration, which is knowable the moment the description is read.
 fn report_role_gaps(uri: &str, id: &GearId, roles: &[DeclaredRole], diagnostics: &mut Diagnostics) {
-    if roles.is_empty() {
+    if !roles.iter().any(|r| r.sharded || r.instance_addressable) {
         return;
     }
     diagnostics.push(
         Diagnostic::new(
-            DiagnosticCode::GapRoles,
+            DiagnosticCode::GapShards,
             format!(
-                "gear `{id}` declares {} role(s), recorded but excluded from resolution: the \
-                 runtime takes a worker's directory identity from a name fixed in its binary, \
-                 with no configuration override",
-                roles.len()
+                "gear `{id}` requests sharding or per-instance addressing, and nothing \
+                 generated from this description can carry it"
             ),
         )
         .at(Location::file(uri.to_owned()))
-        .with_evidence("libs/toolkit/src/bootstrap/oop.rs (OopRunOptions.gear_name)")
-        .with_help("remove the roles, or keep them knowing they do nothing today"),
+        .with_evidence(
+            "libs/toolkit/src/bootstrap/config/mod.rs \
+             (oop_http.labels exists; the embedded profile has no instance to label)",
+        )
+        .with_help(
+            "drop `sharded`/`instance_addressable`, or keep them knowing the generated \
+             `oop_http` section has no label field to write them into",
+        ),
     );
-    if roles.iter().any(|r| r.sharded || r.instance_addressable) {
-        diagnostics.push(
-            Diagnostic::new(
-                DiagnosticCode::GapShards,
-                format!("gear `{id}` requests sharding or per-instance addressing, which the runtime cannot express"),
-            )
-            .at(Location::file(uri.to_owned()))
-            .with_evidence("libs/system-sdks/sdks/directory/src/labels.rs (equality-only selectors; in-process gears carry no labels)")
-            .with_help("drop `sharded`/`instance_addressable`"),
-        );
-    }
 }
 
 /// Warn when a gear's category is not one the platform uses.
