@@ -207,7 +207,8 @@ gear(package = cargo(crate_name = "c", lib = "c"),
     assert_eq!(decl.declared_roles.len(), 1);
     assert!(decl.declared_roles[0].sharded);
     // The refusal happens at merge, so nothing here yet; the declaration simply
-    // survives. (Gap diagnostics are asserted in gearbox-engine.)
+    // survives. The gap diagnostics themselves are asserted in
+    // `gearbox-engine/tests/roles.rs`, which is where they are raised.
     assert!(codes.is_empty(), "{codes:?}");
 }
 
