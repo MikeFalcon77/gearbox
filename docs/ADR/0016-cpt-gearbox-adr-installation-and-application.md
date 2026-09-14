@@ -257,6 +257,14 @@ string `default`. **This is a cross-repo commitment**: all fourteen `gear.gdl`
 files live in `gears-rust`, on its `feature/gearbox` branch, and while there is
 precedent — `exposes` is already ours — it has to be agreed rather than assumed.
 
+> **Decision 1's mechanism is superseded by ADR-0018.** "Already deployed" is
+> declared with `installation(...)` rather than read out of another product's
+> lock: `platform-host` — the installation that matters most — is deployed by the
+> platform's own chart and has no Gearbox lock to point at. The reasoning below
+> was sound; the ground moved. ADR-0018 also states the rule this ADR is missing,
+> that only a gear reached across a *contract* edge can be referenced at all,
+> because `deps` are link-time.
+
 > **Both halves landed, and the second did not need the language change.**
 > `gear(cargo_features = [...])` carries the curation *and* the scope:
 > `feature("k8s-auth", kinds = ["kubernetes"])`. The cross-repo agreement was
