@@ -6,7 +6,7 @@
 //   - a workspace has to be open, because the VS Code git extension finds
 //     repositories by walking workspace folders;
 //   - it has to be **multi-root**, because the two repositories that matter are
-//     siblings -- `gearbox-builder` and `gears-rust` -- so no single folder
+//     siblings -- `gearbox` and `gears-rust` -- so no single folder
 //     contains both.
 //
 // The second is the reason this is not just "open a folder". A single-folder
@@ -58,7 +58,7 @@ test.describe("the workspace Studio opens for itself", () => {
     // The multi-root claim, stated as the two names: `gears-rust` is a sibling of
     // the builder repository, so its presence is the whole reason the workspace
     // is multi-root rather than one folder.
-    expect(roots).toContain("gearbox-builder");
+    expect(roots).toContain("gearbox");
     expect(roots).toContain("gears-rust");
   });
 
@@ -90,7 +90,7 @@ test.describe("Git, from the VS Code extension", () => {
       .locator(".theia-scm-repository-name")
       .allTextContents()
       .then((names) => names.map((name) => name.trim()));
-    expect(repos).toContain("gearbox-builder");
+    expect(repos).toContain("gearbox");
     expect(repos).toContain("gears-rust");
   });
 
@@ -120,7 +120,7 @@ test.describe("Git, from the VS Code extension", () => {
     // anyway, and is 257x22 whatever the branch is called. `index.css` fixes the
     // squeeze itself; this makes the claim independent of it.
     await studio.page
-      .locator('.theia-scm-repository-item[title$="/gearbox-builder"]')
+      .locator('.theia-scm-repository-item[title$="/gearbox"]')
       .click();
 
     // The *count*, not the probe's row. The change list is virtualized, so a row
@@ -168,7 +168,7 @@ test.describe("Git, from the VS Code extension", () => {
       // tree has no letters to find, and after a perspective switch Theia may have
       // restored a snapshot with the folders closed. Expanding by naming the probe
       // file itself also waits for the tree to have noticed it.
-      await revealInExplorer(studio.page, "gearbox-builder", "ide", marker);
+      await revealInExplorer(studio.page, "gearbox", "ide", marker);
       await expect
         .poll(async () =>
           studio.page.evaluate(() =>
@@ -198,7 +198,7 @@ test.describe("what the workspace makes checkable", () => {
     // in the expanded one.
     const lock = await revealInExplorer(
       studio.page,
-      "gearbox-builder",
+      "gearbox",
       [".gearbox", "payments-demo", "dev"],
       "product.lock",
     );

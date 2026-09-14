@@ -25,7 +25,7 @@ The prototype proves the vision's central promise end to end: **one gear source,
 topologies, zero changes to business code** — and it produces the artefacts that make "gear = pod"
 possible at all (generated application crates), which is the real blocker today, not runtime support.
 
-Repo state: `gearbox-builder` is `cargo new` plus the vision doc. `gears-rust` and `cargo-gears`
+Repo state: `gearbox` is `cargo new` plus the vision doc. `gears-rust` and `cargo-gears`
 exist locally and were surveyed; `cargo-gears/design/ideas/gears-product-configurator-OLD.md` is
 the repo-grounded predecessor and its conclusions are folded in below.
 
@@ -36,7 +36,7 @@ the repo-grounded predecessor and its conclusions are folded in below.
   umbrella + `values.schema.json`.
 - **Slice:** real gears from `gears-rust` + one new custom gear (vision §81's canonical acceptance test).
 - **Theia:** a runnable Gearbox Studio in this repo — extension + `browser-app` + `electron-app`.
-- **Layout:** engine lives in `gearbox-builder`; `gear.gdl` files are added to `gears-rust` next to
+- **Layout:** engine lives in `gearbox`; `gear.gdl` files are added to `gears-rust` next to
   the real gears (additive only).
 - **Build clean:** no dependency on `cargo-gears` crates; port templates by hand.
 - **The catalogue is a merge, not a mirror** (ADR 0002): every fact a Rust attribute already carries
@@ -45,7 +45,7 @@ the repo-grounded predecessor and its conclusions are folded in below.
 - **CLI is a standalone `gearbox` binary**, not `cargo gears` (departs from vision §4/§97–99;
   matches the decision already recorded for the ConstructorFabric deck).
 - **Spec artefacts:** a short **PRD now** (before code), the prototype as the spike, then a
-  **DESIGN + ADRs grounded in what actually worked** — see §14. All in `gearbox-builder/docs/`,
+  **DESIGN + ADRs grounded in what actually worked** — see §14. All in `gearbox/docs/`,
   following the `gears-rust/docs/spec-templates/gears-sdlc/` templates.
 - No CI.
 
@@ -96,7 +96,7 @@ Replace the single-package `Cargo.toml` with a virtual workspace. Add `rust-tool
 pinning `1.97.0` to match `gears-rust` (local is 1.96.0 — `rustup toolchain install 1.97.0` first).
 
 ```
-gearbox-builder/
+gearbox/
   Cargo.toml              # [workspace] members = ["crates/*"]
   rust-toolchain.toml     # 1.97.0
   crates/
@@ -363,7 +363,7 @@ the crate root — `gdl_path` is already a `RelPath`, so the IR needs nothing ne
 
 ### 3.5 `product.gdl`
 
-`gearbox-builder/products/payments-demo/product.gdl` — all three profiles declared as **data**,
+`gearbox/products/payments-demo/product.gdl` — all three profiles declared as **data**,
 selected by `gearbox resolve --profile <id>`. No `if` anywhere; profile-scoping is a
 `profiles = [...]` list field on `bind`/`cluster_profile`/`application`.
 
@@ -2354,7 +2354,7 @@ leaked its private representation into the YAML. The evidence is `readiness: dep
 | **M7** — **done** | Docker + Helm + `values.schema.json` | acceptance §12 step 4 minus `kubeconform`/`kind` (neither is installed); `helm lint`/`helm template`, schema `--set` rejection, GBX0603, ConfigMap `api-contracts` | M6 |
 | **M8a** — **done** | JSON-RPC + TS types | `node ide/scripts/rpc-smoke.mjs` drives initialize → catalogue over real framing, 15/15; `cargo test -p gearbox-rpc`; stdout carries nothing but JSON-RPC | from M1 |
 | **M8b** — **partly done** (§9.1) | Theia Studio | Catalogue, Inspector, Graph, Product, Conflicts, Lock, Generate, Start, the product header and the two working contexts are built and checked headlessly: `cd ide && npm run verify`. Conformance against the documents is generated into `docs/conformance.md`. Electron is still open | after M4 + M8a |
-| **M9** | **DESIGN + ADRs** (§14) — written *after* the prototype runs | reviewed against `docs/checklists/{DESIGN,ADR}.md`; every claim cites either a `gearbox-builder` symbol or a `gears-rust` `file:line`; every §13 gap has a home | — |
+| **M9** | **DESIGN + ADRs** (§14) — written *after* the prototype runs | reviewed against `docs/checklists/{DESIGN,ADR}.md`; every claim cites either a `gearbox` symbol or a `gears-rust` `file:line`; every §13 gap has a home | — |
 
 **What M6 found by running, and could not have found any other way.**
 
@@ -2601,7 +2601,7 @@ trusting the tool.
 
 ## 14. Spec artefacts — PRD now, DESIGN after
 
-Both live in `gearbox-builder/docs/` and follow `gears-rust/docs/spec-templates/gears-sdlc/`
+Both live in `gearbox/docs/` and follow `gears-rust/docs/spec-templates/gears-sdlc/`
 verbatim, so a Gears reviewer needs no context switch. `system` slug = **`gearbox`**, giving IDs
 `cpt-gearbox-fr-…`, `-nfr-…`, `-actor-…`, `-usecase-…`, `-design-…`, `-adr-…`. Priority tiers are
 `p1`/`p2`/`p3` (the templates forbid SHOULD/MAY — use a tier instead), requirement text uses

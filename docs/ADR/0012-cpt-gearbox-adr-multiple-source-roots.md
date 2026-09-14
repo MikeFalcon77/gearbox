@@ -103,7 +103,7 @@ made, `source = ` in a `use_gear` is documentation.
 
 ### 3. Overlapping and nested roots are permitted, and the case is real
 
-`products/payments-demo` lives inside the `gearbox-builder` checkout while the corpus is its sibling,
+`products/payments-demo` lives inside the `gearbox` checkout while the corpus is its sibling,
 so a product opened from one tree points at a root outside it. Nothing prevents two roots from nesting
 either.
 

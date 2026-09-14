@@ -52,7 +52,7 @@ struct WorkspaceTable {
 ///
 /// A `[workspace]` table is not optional here, and not for tidiness: the output
 /// root sits inside this repository, so without one Cargo would walk up, find
-/// `gearbox-builder`'s root manifest, and refuse the package as "believes it's
+/// `gearbox`'s root manifest, and refuse the package as "believes it's
 /// in a workspace when it's not". Declaring the workspace is what stops that
 /// walk.
 ///

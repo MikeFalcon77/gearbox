@@ -17,7 +17,7 @@
 //     so Source Control stays empty however well the plugin host works.
 //
 // **Multi-root is not a preference here, it is forced by the layout.** The two
-// repositories are siblings -- `gearbox-builder` and `gears-rust` -- so no single
+// repositories are siblings -- `gearbox` and `gears-rust` -- so no single
 // folder contains both, and a single-folder workspace would silently cover only
 // half the tree a person edits.
 

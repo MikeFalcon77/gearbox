@@ -160,7 +160,7 @@ export interface GearboxService {
    * Why a workspace at all: the Explorer needs one to show anything, an opened
    * `product.lock` needs one to be openable, and the VS Code git extension finds
    * repositories by walking workspace folders. The two that matter here --
-   * `gearbox-builder` and `gears-rust` -- are *siblings*, so one folder cannot
+   * `gearbox` and `gears-rust` -- are *siblings*, so one folder cannot
    * cover both and the workspace has to be multi-root.
    */
   workspaceRoots(): Promise<string[]>;

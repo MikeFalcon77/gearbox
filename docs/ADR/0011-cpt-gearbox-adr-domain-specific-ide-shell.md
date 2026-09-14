@@ -163,7 +163,7 @@ RPC surface.
 
 * **Git needs a workspace, and the workspace has to be multi-root.** The extension finds
   repositories by walking workspace folders, so with none open Source Control stays empty however
-  well the plugin host works. And the two repositories are *siblings* -- `gearbox-builder` and
+  well the plugin host works. And the two repositories are *siblings* -- `gearbox` and
   `gears-rust` -- so one folder cannot contain both. `DomainWorkspace` therefore opens the
   directories the engine already reports, which is this ADR's "make the workspace root a domain
   object" one step earlier than it was written: not deriving a folder from an opened file, but
