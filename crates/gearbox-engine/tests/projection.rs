@@ -181,6 +181,23 @@ fn the_client_trait_is_projected() {
 }
 
 #[test]
+fn every_contract_owner_in_the_corpus_is_a_name_the_catalogue_declares() {
+    // The inertness guard for GBX0317. The check that owner names resolve is
+    // only worth having if it stays quiet on the tree it will actually see, and
+    // the three owners here -- `api-contracts`, `authz-resolver`, `cluster` --
+    // are all described. A red here means either a real dangling owner or a
+    // check that over-reaches.
+    let catalogue = require_tree!();
+    let unknown: Vec<&str> = catalogue
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == gearbox_ir::DiagnosticCode::TopologyUnknownContractOwner)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert!(unknown.is_empty(), "{unknown:?}");
+}
+
+#[test]
 fn contract_identity_is_projected_from_the_contract_attribute() {
     // No gear.gdl states a version or a kind; every major came from
     // #[toolkit::contract(gear, version)] plus the trait-name suffix.

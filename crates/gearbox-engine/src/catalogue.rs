@@ -314,6 +314,12 @@ pub fn load_catalogue_staged(
         }
     }
 
+    // The whole gear set is known only here. Inside the loop above,
+    // `catalogue.gears` holds only what `discover()`'s sorted order has reached,
+    // so an owner described later than the description that pulls its contract
+    // in would look absent.
+    report_unknown_contract_owners(&catalogue, roots, &mut diagnostics);
+
     diagnostics.finish();
     catalogue.diagnostics = diagnostics;
     CatalogueScan {
@@ -585,6 +591,96 @@ fn project_and_merge(
         },
         diagnostics,
     )
+}
+
+/// Report every contract whose owner names nothing the catalogue holds.
+///
+/// `#[toolkit::contract(gear = "...")]` is a free string, and the two places
+/// that turn it into an id both guard a *malformed* one -- `build_provider`
+/// falls back to the declaring gear, `build_consumer` diagnoses and gives up.
+/// Neither asks whether the parsed id names anything, because neither can: the
+/// catalogue is still being built around them.
+fn report_unknown_contract_owners(
+    catalogue: &Catalogue,
+    roots: &[SourceRoot],
+    diagnostics: &mut Diagnostics,
+) {
+    let registered = registered_names(catalogue);
+    for (id, contract) in &catalogue.contracts {
+        if registered.contains(contract.owner.as_str()) {
+            continue;
+        }
+        let mut diagnostic = Diagnostic::error(
+            DiagnosticCode::TopologyUnknownContractOwner,
+            format!(
+                "contract `{id}` names owner `{}`, which is neither a gear in the catalogue \
+                 nor a declared role's directory name",
+                contract.owner
+            ),
+            format!(
+                "the owner comes from `#[toolkit::contract(gear = \"{}\")]` in `{}`; write a \
+                 `gear.gdl` for it, open the source root that holds one, declare it as a \
+                 `role(directory_name = \"{}\")` on the gear that serves it, or fix the \
+                 attribute. {}",
+                contract.owner,
+                contract.sdk.crate_name,
+                contract.owner,
+                crate::validate::nearest_hint(catalogue.gears.keys(), contract.owner.as_str()),
+            ),
+        );
+        if let Some(uri) = first_referrer(catalogue, id).and_then(|g| description_uri(roots, g)) {
+            diagnostic = diagnostic.at(Location::file(uri));
+        }
+        diagnostics.push(diagnostic);
+    }
+}
+
+/// Every name the catalogue answers to: a gear's id, and each declared role's
+/// directory name.
+///
+/// The role half reads `directory_name` verbatim rather than deriving
+/// `<gear-id>-<name>`, which is what keeps this from being rewritten when ADR
+/// `cpt-gearbox-adr-role-qualified-names` gives that field a default. A default
+/// belongs where the role is declared; this goes on reading one field either
+/// way.
+fn registered_names(catalogue: &Catalogue) -> std::collections::BTreeSet<&str> {
+    let mut names: std::collections::BTreeSet<&str> =
+        catalogue.gears.keys().map(GearId::as_str).collect();
+    for gear in catalogue.gears.values() {
+        names.extend(
+            gear.declared_roles
+                .iter()
+                .filter_map(|role| role.directory_name.as_deref()),
+        );
+    }
+    names
+}
+
+/// A description that referenced this contract, for a location.
+///
+/// First in map order, so the choice is deterministic. Several gears may
+/// reference one contract and one diagnostic per contract is the right
+/// cardinality: the mistake is in the attribute, not in each `gear.gdl`.
+fn first_referrer<'a>(catalogue: &'a Catalogue, id: &ContractId) -> Option<&'a GearDescriptor> {
+    catalogue.gears.values().find(|gear| {
+        gear.provides.iter().any(|p| p.contract == *id)
+            || gear
+                .consumes
+                .iter()
+                .chain(&gear.requires)
+                .any(|r| r.contract() == Some(id))
+    })
+}
+
+/// The `file://` URI of a gear's own description.
+///
+/// `gdl_path` is relative to its source root, so the root has to be looked back
+/// up: a URI built from the relative path alone is one no editor can open.
+fn description_uri(roots: &[SourceRoot], gear: &GearDescriptor) -> Option<String> {
+    let root = roots.iter().find(|r| r.id == gear.source)?;
+    Some(gearbox_ir::file_uri(
+        &root.root.join(gear.gdl_path.as_str()),
+    ))
 }
 
 /// Insert contracts, letting the owner's description win.

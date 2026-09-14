@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 81, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 82, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -343,6 +343,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     domain: "topology",
     docs: "A selected Cargo feature belongs to a deployment kind this profile is not.\n\n`cargo_features` lets a gear say where a feature belongs, and `k8s-auth`\nis why: it wires authentication to a Kubernetes service account, so a\nKubernetes deployment needs it and an embedded or self-hosted one must\nnot have it. Selecting it anyway produces a binary that looks for a token\npath that does not exist, and it fails at startup rather than at build\ntime -- which is exactly the class of mistake the projected feature list\nwas introduced to stop.\n\nAn error, because the remedy is always available and always the same:\ndrop the feature, or resolve for the profile it belongs to.",
     requiresEvidence: true,
+  },
+  GBX0317: {
+    code: "GBX0317",
+    title: "contract owner is not a name the catalogue declares",
+    severity: "error",
+    domain: "topology",
+    docs: "A contract's owner is not a name the catalogue answers to.\n\n`#[toolkit::contract(gear = \"...\")]` is a free string that flows verbatim\ninto the descriptor's owner and into the contract's own id, which is\n`{owner}/{base}@{version}`. Both paths that build it guard only against a\n*malformed* id -- one falls back to the declaring gear on a parse failure,\nthe other diagnoses one -- so any valid kebab name passes and the owner\ncan name a gear nothing describes. The catalogue then holds a contract\nwhose identity nothing else can match.\n\nTwo causes, both actionable: a typo in the attribute, and a description\nthat was never written.\n\n**Deliberately not `TopologyUnknownGear`, which would otherwise be the\ncode for this.** That one carries a claim about a registry failure at\nstartup, and it earns it: it is raised for `use_gear`, for a plugin under\na host and for a `deps` entry, all of which the runtime tries to link.\nNothing tries to link a contract owner, so the claim does not transfer.\n\n**A role's directory name satisfies this.** Under ADR\n`cpt-gearbox-adr-role-qualified-names` a role registers under its own\ndirectory name, and a contract answering to that role names it here. So\nthe question is whether the owner is any name the catalogue answers to --\na gear id, or a declared role's `directory_name` -- rather than whether\nit is a gear id.",
+    requiresEvidence: false,
   },
   GBX0401: {
     code: "GBX0401",

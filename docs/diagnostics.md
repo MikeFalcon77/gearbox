@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **81**.
+Codes: **82**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -306,6 +306,7 @@ nothing pointing back at the description.
 | [GBX0314](#gbx0314) | error | gRPC gears with no gRPC hub |
 | [GBX0315](#gbx0315) | warning | registration host with nothing to host |
 | [GBX0316](#gbx0316) | error | a selected Cargo feature does not belong to this deployment kind |
+| [GBX0317](#gbx0317) | error | contract owner is not a name the catalogue declares |
 
 ### GBX0301
 
@@ -495,6 +496,36 @@ An error, because the remedy is always available and always the same:
 drop the feature, or resolve for the profile it belongs to.
 
 *Asserts a limitation of the runtime, so every occurrence cites the source that proves it.*
+
+### GBX0317
+
+**contract owner is not a name the catalogue declares**
+
+A contract's owner is not a name the catalogue answers to.
+
+`#[toolkit::contract(gear = "...")]` is a free string that flows verbatim
+into the descriptor's owner and into the contract's own id, which is
+`{owner}/{base}@{version}`. Both paths that build it guard only against a
+*malformed* id -- one falls back to the declaring gear on a parse failure,
+the other diagnoses one -- so any valid kebab name passes and the owner
+can name a gear nothing describes. The catalogue then holds a contract
+whose identity nothing else can match.
+
+Two causes, both actionable: a typo in the attribute, and a description
+that was never written.
+
+**Deliberately not `TopologyUnknownGear`, which would otherwise be the
+code for this.** That one carries a claim about a registry failure at
+startup, and it earns it: it is raised for `use_gear`, for a plugin under
+a host and for a `deps` entry, all of which the runtime tries to link.
+Nothing tries to link a contract owner, so the claim does not transfer.
+
+**A role's directory name satisfies this.** Under ADR
+`cpt-gearbox-adr-role-qualified-names` a role registers under its own
+directory name, and a contract answering to that role names it here. So
+the question is whether the owner is any name the catalogue answers to --
+a gear id, or a declared role's `directory_name` -- rather than whether
+it is a gear id.
 
 ## `GBX04xx` — Contract bindings and severability
 
