@@ -136,9 +136,11 @@ fn malformed_toml_says_so() {
 
 #[test]
 fn the_real_tree_agrees_with_what_the_descriptions_declare() {
-    // The baseline: 25 `cargo(...)` blocks across 14 descriptions, all correct.
-    // This asserts the projection reproduces the two cases the tree contains --
-    // explicit `[lib]` for the platform gears, derived for the examples.
+    // Every `cargo(...)` block in the corpus is correct, and this asserts the
+    // projection reproduces what the tree contains. **What the tree contains
+    // changed**: `gears-rust` made the target section mandatory (RUST-DEP-001,
+    // enforced by its `check_packaging_metadata.py`), so the derived case is
+    // gone from the corpus and every crate there names its own library.
     let Some(base) = crate::test_corpus::corpus_root() else {
         eprintln!("skipping: ../gears-rust not present");
         return;
@@ -152,11 +154,21 @@ fn the_real_tree_agrees_with_what_the_descriptions_declare() {
     let example =
         project_manifest(&base.join("examples/toolkit/api-contracts/api-contracts")).unwrap();
     assert_eq!(example.package_name, "cf-api-contracts");
+    // Still `cf_api_contracts`, which is the point: the section added upstream
+    // spells out the name Cargo was already deriving, so nothing linked
+    // differently before and after.
     assert_eq!(example.lib_ident, "cf_api_contracts");
     assert!(
-        !example.lib_is_explicit,
-        "this is the crate the whole check exists for: no [lib] section, so the \
-         identifier is cf_api_contracts and a reader guessing api_contracts \
-         would emit a link line that does not compile"
+        example.lib_is_explicit,
+        "this crate used to be the corpus's one derived case -- no `[lib]`, \
+         identifier `cf_api_contracts`, and a reader guessing `api_contracts` \
+         emitting a link line that does not compile. It declares the section \
+         now. If this fails, the rule was reverted upstream and the trap is \
+         back in the tree"
     );
+    // The derivation itself is therefore witnessed only by
+    // `no_lib_section_means_the_package_name_with_underscores` above, and it
+    // still has to be right: a product's own crates and any third-party crate
+    // are outside `gears-rust`'s rule. Said here so the missing corpus case
+    // reads as a decision rather than as coverage that quietly vanished.
 }
