@@ -47,9 +47,10 @@ fn a_gear_that_says_nothing_is_not_one_per_installation() {
 
 #[test]
 fn an_argument_this_parser_does_not_model_is_recorded_as_a_gap() {
-    // The fallthrough's purpose, pinned. Worth knowing: `unmodelled` is
-    // written here and read by nobody, so a gap is *recorded* rather than
-    // surfaced -- the field's own doc claims more than the tool does.
+    // The fallthrough's purpose, pinned. This used to be where the comment
+    // said `unmodelled` was "written here and read by nobody, so a gap is
+    // *recorded* rather than surfaced". It is surfaced now, as `GBX0608` from
+    // `merge`, which is asserted where it is raised.
     let projected = parse(&parse_quote!(name = "x", something_new = "value"));
     assert_eq!(projected.unmodelled, ["something_new"]);
 }

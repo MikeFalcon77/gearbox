@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **90**.
+Codes: **91**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -1128,6 +1128,7 @@ depends on the server the operator will point at.
 | [GBX0604](#gbx0604) | warning | only local process spawning is implemented |
 | [GBX0606](#gbx0606) | hint | deployment profile is not a runtime type |
 | [GBX0607](#gbx0607) | hint | `deps = [cluster]` pins a consumer that no longer needs pinning |
+| [GBX0608](#gbx0608) | warning | a gear attribute argument is not modelled by this tool |
 
 ### GBX0602
 
@@ -1203,6 +1204,34 @@ by declaring the edge.
 *Asserts a limitation of the runtime, so every occurrence cites the source that proves it.*
 
 *Prevents `RegistryError::UnknownDependency` in `cf-gears-toolkit`. The reference is resolved against the `gears-rust` checkout by `gearbox-project`'s corpus test.*
+
+### GBX0608
+
+**a gear attribute argument is not modelled by this tool**
+
+A gear attribute argument the platform accepts and this tool does not
+model.
+
+**A field promised this and showed it to nobody.**
+`ProjectedGear::unmodelled` says it records unknown arguments "so a
+future macro argument surfaces as a known gap instead of a silent
+omission", and it had one writer and no reader outside its own unit test,
+which said as much in a comment.
+
+It is non-empty only in a skew window, and that window is real rather
+than theoretical: `#[toolkit::gear]` refuses an argument it does not
+know, so the platform necessarily lands a new one first and this parser
+catches up after. That is exactly how `one_per_installation` arrived --
+ADR `cpt-gearbox-adr-one-per-installation` leans on this field by name
+while doing it.
+
+In this range rather than `Validate` because it is not the description
+author's mistake: it is a claim about another repository -- that its
+macro takes an argument this tool drops -- and the range exists for
+claims of that kind, which is why every code in it must cite what it is
+reading.
+
+*Asserts a limitation of the runtime, so every occurrence cites the source that proves it.*
 
 ## `GBX07xx` — Artifact generation
 

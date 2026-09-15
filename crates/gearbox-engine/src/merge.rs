@@ -263,6 +263,7 @@ pub fn merge(
     }
     crate::cluster::check_profiles(uri, &id, &requires, cluster, diagnostics);
     report_cluster_colocation(uri, &id, &requires, projected, diagnostics);
+    report_unmodelled_arguments(uri, &id, projected, diagnostics);
 
     // The default is applied here rather than in the constructor because it
     // needs the gear's id, which is projected from Rust and invisible to GDL.
@@ -775,6 +776,60 @@ fn report_front_doors(
             ),
         )
         .at(Location::file(uri.to_owned())),
+    );
+}
+
+/// Say what the gear's attribute declares and this tool threw away.
+///
+/// **`ProjectedGear::unmodelled` promised this and showed it to nobody.** Its
+/// doc says unknown arguments are recorded "so a future macro argument surfaces
+/// as a known gap instead of a silent omission", and it had one writer, no
+/// reader outside its own unit test, and no diagnostic code. The projection
+/// dropped the field on the floor at exactly the point a report belongs.
+///
+/// Non-empty only in a skew window, which is the ordinary way a fact arrives:
+/// `#[toolkit::gear]` refuses an argument it does not know, so the platform
+/// lands one first and this parser catches up afterwards. `one_per_installation`
+/// came that way, and ADR `cpt-gearbox-adr-one-per-installation` cites this
+/// field by name while describing it.
+fn report_unmodelled_arguments(
+    uri: &str,
+    id: &GearId,
+    projected: &ProjectedGear,
+    diagnostics: &mut Diagnostics,
+) {
+    if projected.unmodelled.is_empty() {
+        return;
+    }
+    let named = projected
+        .unmodelled
+        .iter()
+        .map(|arg| format!("`{arg}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::GapUnmodelledGearArgument,
+            format!(
+                "gear `{id}` declares {named} on its `#[toolkit::gear]` attribute, and this \
+                 tool does not read {}",
+                if projected.unmodelled.len() == 1 {
+                    "it"
+                } else {
+                    "them"
+                }
+            ),
+        )
+        .at(Location::file(uri.to_owned()))
+        .with_evidence(
+            "libs/toolkit-macros/src/lib.rs:429 (`unknown attribute parameter` -- the \
+             macro refuses what it does not know, so a name reaching here is one it took)",
+        )
+        .with_help(
+            "the platform knows something about this gear that the catalogue does not, so \
+             anything resolved from it decides without that fact. Nothing here is wrong -- \
+             this tool is behind",
+        ),
     );
 }
 

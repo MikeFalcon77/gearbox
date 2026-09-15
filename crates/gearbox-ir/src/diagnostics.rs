@@ -1172,6 +1172,29 @@ diagnostic_codes! {
     GapClusterNotDeployable = "GBX0607", RuntimeGap, Hint, true, "`deps = [cluster]` pins a consumer that no longer needs pinning",
         prevents = Prevents::error("cf-gears-toolkit", "RegistryError", "UnknownDependency");
 
+    /// A gear attribute argument the platform accepts and this tool does not
+    /// model.
+    ///
+    /// **A field promised this and showed it to nobody.**
+    /// `ProjectedGear::unmodelled` says it records unknown arguments "so a
+    /// future macro argument surfaces as a known gap instead of a silent
+    /// omission", and it had one writer and no reader outside its own unit test,
+    /// which said as much in a comment.
+    ///
+    /// It is non-empty only in a skew window, and that window is real rather
+    /// than theoretical: `#[toolkit::gear]` refuses an argument it does not
+    /// know, so the platform necessarily lands a new one first and this parser
+    /// catches up after. That is exactly how `one_per_installation` arrived --
+    /// ADR `cpt-gearbox-adr-one-per-installation` leans on this field by name
+    /// while doing it.
+    ///
+    /// In this range rather than `Validate` because it is not the description
+    /// author's mistake: it is a claim about another repository -- that its
+    /// macro takes an argument this tool drops -- and the range exists for
+    /// claims of that kind, which is why every code in it must cite what it is
+    /// reading.
+    GapUnmodelledGearArgument = "GBX0608", RuntimeGap, Warning, true, "a gear attribute argument is not modelled by this tool";
+
     // ---------------------------------------------------------------- GBX07xx
     /// Generation would overwrite an operator-owned file whose edits cannot be
     /// merged.

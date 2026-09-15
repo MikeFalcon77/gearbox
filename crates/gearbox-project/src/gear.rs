@@ -44,7 +44,13 @@ pub struct ProjectedGear {
     /// Arguments the macro accepts but this parser does not model.
     ///
     /// Recorded rather than dropped so a future macro argument surfaces as a
-    /// known gap instead of a silent omission.
+    /// known gap instead of a silent omission. It is `merge` that surfaces it,
+    /// as `GBX0608`; for a long while nothing did, and the claim in this comment
+    /// was the only place the promise existed.
+    ///
+    /// Non-empty only in a skew window, because `#[toolkit::gear]` refuses an
+    /// argument it does not know -- so the platform lands one first and this
+    /// parser catches up afterwards. `one_per_installation` arrived that way.
     pub unmodelled: Vec<String>,
     /// True when the attribute sits under a `#[cfg(...)]` this crate cannot
     /// evaluate, so its presence in a build is conditional.

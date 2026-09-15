@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 90, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 91, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -701,6 +701,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     docs: "A cluster consumer declares `deps = [cluster]`, which now only pins it.\n\n**The premise this code was written on has been withdrawn.** It read\n\"cluster has no remote surface, so its consumers must be co-located\",\nand that was true while cluster was an in-process library. It is not\nnow: the gear is deployable out of process, `RemoteClusterClient`\nimplements the backend traits over gRPC, and a consumer resolves through\nthe process's single `dyn ClusterClient` on either side of a boundary.\n\nSo the dep buys nothing and still costs: `deps` is a hard topo-sort\nedge, so declaring it pins the gear into cluster's process and makes an\nout-of-process build fail outright with\n`RegistryError::UnknownDependency`.\n\nKept as a hint, not raised to a warning: staying co-located is a\nlegitimate choice, and a gear that will never be spawned loses nothing\nby declaring the edge.",
     requiresEvidence: true,
     prevents: "RegistryError::UnknownDependency in cf-gears-toolkit",
+  },
+  GBX0608: {
+    code: "GBX0608",
+    title: "a gear attribute argument is not modelled by this tool",
+    severity: "warning",
+    domain: "runtime-gap",
+    docs: "A gear attribute argument the platform accepts and this tool does not\nmodel.\n\n**A field promised this and showed it to nobody.**\n`ProjectedGear::unmodelled` says it records unknown arguments \"so a\nfuture macro argument surfaces as a known gap instead of a silent\nomission\", and it had one writer and no reader outside its own unit test,\nwhich said as much in a comment.\n\nIt is non-empty only in a skew window, and that window is real rather\nthan theoretical: `#[toolkit::gear]` refuses an argument it does not\nknow, so the platform necessarily lands a new one first and this parser\ncatches up after. That is exactly how `one_per_installation` arrived --\nADR `cpt-gearbox-adr-one-per-installation` leans on this field by name\nwhile doing it.\n\nIn this range rather than `Validate` because it is not the description\nauthor's mistake: it is a claim about another repository -- that its\nmacro takes an argument this tool drops -- and the range exists for\nclaims of that kind, which is why every code in it must cite what it is\nreading.",
+    requiresEvidence: true,
   },
   GBX0701: {
     code: "GBX0701",
