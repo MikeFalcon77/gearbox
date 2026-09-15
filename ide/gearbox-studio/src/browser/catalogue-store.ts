@@ -196,6 +196,28 @@ export class CatalogueStore implements GearboxClient {
     return [...this.rootsById.values()];
   }
 
+  /**
+   * The id the engine calls this root, or `undefined` if it does not know it.
+   *
+   * The reverse of [`rootPaths`], and it exists because two things named the
+   * same root differently. The engine names every root after its own directory
+   * (`gearbox_engine::default_source_ids`), and that is the id
+   * `GearDescriptor::source` carries and the id `add_gear` writes into a
+   * description. The Create wizard invented `source-1`, `source-2` instead, so
+   * a scaffolded product declared sources under one set of names while every
+   * gear added to it referred to another -- a description that could not load.
+   *
+   * Absent rather than guessed when the catalogue has not initialized yet: the
+   * caller has a correct fallback (the directory's own name, which is the rule
+   * the engine applies), and a wrong id here would be written into a file.
+   */
+  sourceIdOf(path: string): string | undefined {
+    for (const [id, root] of this.rootsById) {
+      if (root === path) return id;
+    }
+    return undefined;
+  }
+
   /** One row by key, for a widget that resolves a selection rather than holding one. */
   row(key: string): Row | undefined {
     return this.rowsByKey.get(key);

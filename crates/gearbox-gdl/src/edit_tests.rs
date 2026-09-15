@@ -1042,3 +1042,59 @@ fn set_gear_plugins_writes_plugin_list() {
         Edit::Unchanged
     );
 }
+
+/// A product that declares its sources, which is what the wizard now writes.
+const WITH_SOURCES: &str = r#"product(
+    id = "new-product",
+    sources = [source(id = "gears-rust", at = path("../../../gears-rust"))],
+    gears = [],
+)
+"#;
+
+#[test]
+fn a_source_the_product_does_not_declare_is_refused() {
+    // The join that used to break in silence. The wizard minted `source-1`
+    // while the catalogue called the same root `gears-rust`, so Add Gear wrote
+    // an id nothing declared -- a file that saved and then would not load, with
+    // the refusal naming the description rather than this edit.
+    let refusal = add_gear(URI, WITH_SOURCES, "gear-orchestrator", "source-1")
+        .expect_err("an undeclared source is refused");
+    let first = refusal.iter().next().expect("one diagnostic");
+    assert_eq!(first.code, DiagnosticCode::GdlEval);
+    assert!(
+        first.message.contains("source-1") && first.message.contains("`gears-rust`"),
+        "the refusal should name both what was asked for and what is declared: {}",
+        first.message
+    );
+}
+
+#[test]
+fn a_declared_source_is_accepted() {
+    // The other half, and the one that says the check is not simply a refusal
+    // of everything: the same product, the id it actually declares.
+    let edited = add_gear(URI, WITH_SOURCES, "gear-orchestrator", "gears-rust")
+        .expect("editable")
+        .changed()
+        .expect("changed")
+        .to_owned();
+    assert!(
+        edited.contains(r#"use_gear("gear-orchestrator", source = "gears-rust")"#),
+        "{edited}"
+    );
+}
+
+#[test]
+fn a_product_with_no_sources_list_is_still_editable() {
+    // Absent is not empty. A description that declares no `sources` at all is
+    // the loader's business, and refusing here would turn a missing argument
+    // into a failed edit -- which is what every other test in this file would
+    // have hit, since none of their fixtures declares one.
+    let source = "product(gears = [])\n";
+    assert!(
+        add_gear(URI, source, "a", "anything")
+            .expect("editable")
+            .changed()
+            .is_some(),
+        "a product with no sources list must still accept an edit"
+    );
+}

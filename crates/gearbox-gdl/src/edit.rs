@@ -74,6 +74,7 @@ impl Edit {
 /// a literal list this can insert into.
 pub fn add_gear(uri: &str, source: &str, gear: &str, source_id: &str) -> Result<Edit, Diagnostics> {
     let list = gears_list(uri, source)?;
+    refuse_undeclared_source(uri, source, source_id)?;
 
     if list
         .entries
@@ -91,6 +92,57 @@ pub fn add_gear(uri: &str, source: &str, gear: &str, source_id: &str) -> Result<
     Ok(Edit::Changed {
         source: insert_entry(source, &list, &entry),
     })
+}
+
+/// Refuse a `source =` the product does not declare.
+///
+/// The check belongs here, where the entry is written, rather than one layer
+/// down where the description is loaded. A source id is a join: `sources`
+/// declares it and every `use_gear` refers to it. Writing an id nothing declares
+/// produces a file that parses, saves, and then refuses to load -- and the
+/// refusal names the description rather than the edit that put it there. That is
+/// how a scaffolded product ended up with `sources = [source(id = "source-1")]`
+/// and `use_gear("gear-orchestrator", source = "gears-rust")` in the same file.
+///
+/// Silent when the product has no `sources` list to read. Absent is not the same
+/// answer as empty, and a description that declares none is the loader's
+/// business -- refusing here would turn a missing argument into a failed edit.
+fn refuse_undeclared_source(uri: &str, source: &str, source_id: &str) -> Result<(), Diagnostics> {
+    let Ok(sources) = named_list_literal(uri, source, "sources") else {
+        return Ok(());
+    };
+    let declared: BTreeSet<String> = sources
+        .entries
+        .iter()
+        .filter_map(|entry| edit_call::entry_id(source, *entry))
+        .collect();
+    if declared.contains(source_id) {
+        return Ok(());
+    }
+    let known = if declared.is_empty() {
+        "it declares none".to_owned()
+    } else {
+        format!(
+            "it declares {}",
+            declared
+                .iter()
+                .map(|id| format!("`{id}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    // `GdlEval`, the same code the loader raises for this exact mistake
+    // (`product_intent`'s "names source `x`, which is not declared"), rather
+    // than the module's generic `refuse`. One claim, one code, said at whichever
+    // end notices first -- and `GdlCardinality` is about the number of top-level
+    // declarations, which this is not.
+    Err(refuse_with(
+        uri,
+        DiagnosticCode::GdlEval,
+        &format!("this product declares no source `{source_id}`; {known}"),
+        "add the source to the description first, or name one it already declares -- \
+         a `use_gear` pointing at an undeclared source makes the file unloadable",
+    ))
 }
 
 /// Remove every `use_gear` naming `gear` from a product's `gears` list.

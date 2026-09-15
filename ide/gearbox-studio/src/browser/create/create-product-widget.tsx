@@ -16,6 +16,7 @@ import { FileDialogService } from "@theia/filesystem/lib/browser";
 import { WorkspaceService } from "@theia/workspace/lib/browser/workspace-service";
 
 import { GearboxService, type CloneCandidate } from "../../common/protocol";
+import { CatalogueStore } from "../catalogue-store";
 import { ProductEditService } from "../product-edit-service";
 import { EngineConnectionService } from "../shell/engine-connection-service";
 import { ProductSessionService } from "../shell/product-session-service";
@@ -78,6 +79,7 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
   @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
   @inject(FileDialogService) protected readonly fileDialog!: FileDialogService;
+  @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
 
   protected mode: CreateMode = "blank";
   protected productId = "new-product";
@@ -255,11 +257,41 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
     this.previewTimer = setTimeout(() => void this.refreshPreview(), 200);
   }
 
+  /**
+   * What the engine calls this root, because that is the only name that works.
+   *
+   * A source id is a join: `sources` declares it and every `use_gear(source =
+   * ...)` refers to it, and the ids on the other side of that join are the
+   * engine's -- it names each root after its own directory, and that is what
+   * `GearDescriptor::source` carries and what Add Gear writes. This used to
+   * mint `source-1`, `source-2`, so a scaffolded product declared two names
+   * nothing else in the application used: adding any gear to it produced
+   * `use_gear("x", source = "gears-rust")` against `sources = [source(id =
+   * "source-1")]`, which the loader refuses. It matched for `payments-demo`
+   * only because that file was written by hand as `source(id = "gears-rust")`.
+   *
+   * The catalogue knows the id when it has initialized; when it has not, the
+   * directory's own name lowercased is not a guess but the same rule
+   * (`gearbox_engine::default_source_id`). Neither branch invents a spelling.
+   */
+  protected sourceIdFor(at: string): string {
+    const known = this.catalogue.sourceIdOf(at);
+    if (known !== undefined) return known;
+    const name = at
+      .replace(/\\/g, "/")
+      .replace(/\/+$/, "")
+      .split("/")
+      .pop();
+    // `local` is the engine's own last resort for a path with no final
+    // component, and matching it keeps the two from disagreeing about `/`.
+    return name === undefined || name === "" ? "local" : name.toLowerCase();
+  }
+
   protected createParams(cloneFrom: string | undefined, dryRun: boolean) {
     const sources =
       this.mode === "blank"
-        ? [...this.selectedRoots].map((at, index) => ({
-            id: `source-${index + 1}`,
+        ? [...this.selectedRoots].map((at) => ({
+            id: this.sourceIdFor(at),
             at: this.relativeSource(at),
           }))
         : [];
