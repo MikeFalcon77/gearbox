@@ -176,3 +176,66 @@ fn every_role_being_internal_is_allowed() {
         codes(&catalogue)
     );
 }
+
+#[test]
+fn a_directory_name_that_is_not_kebab_is_refused() {
+    // The rule every other identifier obeys, applied to the one that escaped
+    // it. `directory_name` names an entry in the same directory a `GearId`
+    // names, and it was a plain `String` checked by nobody.
+    let catalogue =
+        catalogue(r#"roles = [role(name = "ingest", directory_name = "demo_ingest")],"#);
+    let d = catalogue
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::GdlRoleNameNotKebab)
+        .expect("GBX0118");
+    assert_eq!(d.severity, Severity::Error);
+    assert!(d.message.contains("demo_ingest"), "{}", d.message);
+    assert!(
+        d.help.as_deref().is_some_and(|h| h.contains("Rename it")),
+        "an explicit name is renamed, not defaulted: {:?}",
+        d.help
+    );
+}
+
+#[test]
+fn the_default_directory_name_is_refused_when_the_role_name_is_snake_case() {
+    // The case that actually occurs, and the reason this check exists. A role
+    // name is a config enum variant -- `cluster_ingest` -- so the default
+    // `<gear-id>-<role-name>` splices a kebab id onto a snake_case value. The
+    // corpus produced `event-broker-cluster_ingest` this way, which is neither
+    // the name ADR-0009 tabulates nor a name a Kubernetes Service can carry.
+    let catalogue = catalogue(r#"roles = [role(name = "cluster_ingest")],"#);
+    let d = catalogue
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::GdlRoleNameNotKebab)
+        .expect("GBX0118");
+    assert!(
+        d.message.contains("demo-cluster_ingest"),
+        "the message must show the derived name: {}",
+        d.message
+    );
+    assert!(
+        d.help
+            .as_deref()
+            .is_some_and(|h| h.contains("explicit `directory_name`")),
+        "a derived name is fixed by declaring one, not by renaming the role: {:?}",
+        d.help
+    );
+}
+
+#[test]
+fn a_snake_case_role_name_with_a_kebab_directory_name_is_fine() {
+    // The two halves are different namespaces and only one has the rule. The
+    // role name is a serde variant spelling and stays snake_case; what is held
+    // to kebab is the name it registers under. This is exactly what
+    // `event-broker`'s description now writes.
+    let catalogue =
+        catalogue(r#"roles = [role(name = "cluster_ingest", directory_name = "demo-ingest")],"#);
+    assert!(
+        !codes(&catalogue).contains(&DiagnosticCode::GdlRoleNameNotKebab),
+        "{:?}",
+        codes(&catalogue)
+    );
+}

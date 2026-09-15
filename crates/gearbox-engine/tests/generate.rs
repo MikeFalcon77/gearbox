@@ -2299,3 +2299,69 @@ fn a_role_reaches_the_binary_as_an_input_rather_than_a_literal() {
         );
     }
 }
+
+#[test]
+fn a_role_does_not_rename_the_service_the_lock_dials() {
+    // Written because the opposite was attempted. `ApplicationRole`'s doc
+    // claimed "the chart names the Service after the directory name", and the
+    // template holds a `service_name` key separate from `name`, which reads
+    // like an unfilled seam. It is not one: a `directory_name` is an entry in
+    // the gears directory, while a Service name is what cluster DNS resolves,
+    // and every static endpoint in the lock is built from the *subchart*
+    // (`resolve::partition::cluster_dns`). Naming it after the role points
+    // every consumer at a name that answers nothing.
+    //
+    // The demo caught it on the first run: `registers_as()` falls back to the
+    // anchor, and `audit` is anchored on `api-contracts-consumer`, so a chart
+    // named `audit` got a Service named `api-contracts-consumer` -- an
+    // application with no role at all, broken by a change about roles.
+    let Some((mut lock, source_roots)) = resolve("prod") else {
+        return;
+    };
+    let product = lock.product.id.as_str().to_owned();
+
+    let worker = lock
+        .applications
+        .iter_mut()
+        .find(|a| a.is_worker())
+        .expect("the kubernetes profile has a worker");
+    let sub = worker
+        .subchart
+        .clone()
+        .unwrap_or_else(|| worker.name.as_str().to_owned());
+    worker.role = Some(gearbox_ir::ApplicationRole {
+        name: "cluster_ingest".to_owned(),
+        directory_name: "api-contracts-ingest".to_owned(),
+    });
+
+    let files = generate_tree(&lock, &source_roots, &out_root());
+    let service = text(
+        &files.files,
+        &format!("helm/{product}/charts/{sub}/templates/service.yaml"),
+    );
+    assert!(
+        service.contains(&format!("name: {sub}")),
+        "the Service keeps the subchart's name:\n{service}"
+    );
+    assert!(
+        !service.contains("api-contracts-ingest"),
+        "the role's directory name is not a DNS name:\n{service}"
+    );
+
+    // And every application's Service agrees with what the lock dials, role or
+    // no role -- which is the invariant the two keys exist to keep.
+    for application in &lock.applications {
+        let sub = application
+            .subchart
+            .as_deref()
+            .unwrap_or(application.name.as_str());
+        let service = text(
+            &files.files,
+            &format!("helm/{product}/charts/{sub}/templates/service.yaml"),
+        );
+        assert!(
+            service.contains(&format!("name: {sub}")),
+            "{sub}'s Service must be reachable at the name the lock wrote:\n{service}"
+        );
+    }
+}

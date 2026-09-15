@@ -279,6 +279,7 @@ pub fn merge(
         })
         .collect();
     report_front_doors(uri, &id, &declared_roles, diagnostics);
+    report_role_names(uri, &id, &decl.declared_roles, &declared_roles, diagnostics);
     report_role_gaps(uri, &id, &declared_roles, diagnostics);
 
     let category = decl.category.clone();
@@ -774,6 +775,62 @@ fn report_front_doors(
         )
         .at(Location::file(uri.to_owned())),
     );
+}
+
+/// Refuse a registration name the rest of the system cannot express.
+///
+/// `directory_name` names an entry in the same directory a `GearId` names, and
+/// every other identifier in this codebase is held to one kebab rule -- the one
+/// `#[toolkit::gear]` enforces on its own `name`. This one was a plain `String`
+/// and was checked by nobody, so `GearId::new` is the validator here: not a
+/// second spelling of the rule, but the rule itself, applied to a name that
+/// lives in the namespace it governs.
+///
+/// **The default is the case that matters.** A role name is a serde variant
+/// spelling, so leaving `directory_name` out splices a kebab gear id onto a
+/// `snake_case` value: `event-broker` plus `cluster_ingest` is
+/// `event-broker-cluster_ingest`. The remedy therefore differs by which half
+/// produced the name, and the message says which.
+fn report_role_names(
+    uri: &str,
+    id: &GearId,
+    records: &[gearbox_gdl::records::RoleRecord],
+    roles: &[DeclaredRole],
+    diagnostics: &mut Diagnostics,
+) {
+    // Zipped rather than looked up: `roles` is built by mapping `records` just
+    // above, so the two are the same length in the same order.
+    for (record, role) in records.iter().zip(roles) {
+        if GearId::new(role.directory_name.clone()).is_ok() {
+            continue;
+        }
+        let help = if record.directory_name.is_some() {
+            format!(
+                "`directory_name` names a directory entry, so it follows the rule every \
+                 gear id follows: lowercase letters, digits and single hyphens, starting \
+                 with a letter. Rename it, or leave it out and take the default \
+                 `{id}-<name>`"
+            )
+        } else {
+            format!(
+                "this is the default `{id}-<name>`, and `{}` is a config enum variant \
+                 rather than a kebab name. Give the role an explicit `directory_name`",
+                role.name
+            )
+        };
+        diagnostics.push(
+            Diagnostic::error(
+                DiagnosticCode::GdlRoleNameNotKebab,
+                format!(
+                    "role `{}` of gear `{id}` registers as `{}`, which is not a name the \
+                     directory -- or a Kubernetes `Service` -- can carry",
+                    role.name, role.directory_name
+                ),
+                help,
+            )
+            .at(Location::file(uri.to_owned())),
+        );
+    }
 }
 
 /// Report what a declared role asks for and this tool cannot emit.

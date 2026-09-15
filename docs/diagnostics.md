@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **87**.
+Codes: **88**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -38,6 +38,7 @@ Codes: **87**.
 | [GBX0115](#gbx0115) | error | config key is not declared by the gear |
 | [GBX0116](#gbx0116) | error | a credential is written into the description |
 | [GBX0117](#gbx0117) | error | two roles claim the gear's own name |
+| [GBX0118](#gbx0118) | error | a role's directory name is not kebab-case |
 
 ### GBX0101
 
@@ -211,6 +212,30 @@ services.
 
 Zero is allowed and ordinary: a gear whose roles are all internal has no
 front door, which is a shape the platform's model permits.
+
+### GBX0118
+
+**a role's directory name is not kebab-case**
+
+A role's directory registration name is not kebab-case.
+
+**The one identifier in the system that was not held to the rule every
+other one obeys.** `GearId`, `ApplicationId`, `SourceId` and `ProfileId`
+all go through the same validator -- lowercase, digits, single interior
+hyphens, no `_` -- because it is the rule `#[toolkit::gear]` itself
+enforces. `directory_name` was a plain `String`, checked by nobody, and
+it names the same thing a `GearId` names: an entry in the directory that
+a bare-name lookup resolves.
+
+The default is where this actually bites. Left out, a role's
+registration name is `<gear-id>-<role-name>`, and a role name is a
+*serde variant spelling* -- `cluster_ingest` -- so the default splices a
+kebab id onto a `snake_case` value and yields `event-broker-cluster_ingest`.
+That is not the `event-broker-ingest` the platform's own ADR tabulates,
+and it is not a name a Kubernetes `Service` can carry.
+
+An error, because the remedy is one field and the alternative is a
+workload registered under a name the rest of the system cannot express.
 
 ## `GBX02xx` — Cross-checking a description against Rust
 

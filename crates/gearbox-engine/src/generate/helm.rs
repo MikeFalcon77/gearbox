@@ -872,6 +872,16 @@ fn subchart_templates(
         input.templates.get("helm/service.yaml")?,
         context! {
             name => name,
+            // The subchart's name, and it must stay that even for a role-bearing
+            // application. A role's `directory_name` is what an instance
+            // registers under in the *gears* directory; this is what Kubernetes
+            // DNS resolves, and `resolve::partition::cluster_dns` builds every
+            // static endpoint in the lock as
+            // `http://{subchart}.{namespace}.svc.cluster.local`. Naming the
+            // Service after the role would therefore point every consumer at a
+            // name that answers nothing -- which `ServiceValues` above says in
+            // so many words, and which is why the two are separate keys rather
+            // than one.
             service_name => name,
             ports => &ports,
             cluster_service => cluster_service,

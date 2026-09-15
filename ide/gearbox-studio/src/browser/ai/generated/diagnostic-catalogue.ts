@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 87, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 88, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -160,6 +160,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "error",
     domain: "gdl",
     docs: "Two roles claim the gear's own id as their directory name.\n\nA role registers under its own name, and the one that registers under\nthe gear's bare id is the front door: a bare-name lookup reaches it and\nonly it. That guarantee is structural rather than a filter -- an\ninternal role is unreachable by the bare name because it was never\nregistered under one -- and it holds only while exactly one role claims\nit. Two, and a bare-name lookup round-robins over two different\nservices.\n\nZero is allowed and ordinary: a gear whose roles are all internal has no\nfront door, which is a shape the platform's model permits.",
+    requiresEvidence: false,
+  },
+  GBX0118: {
+    code: "GBX0118",
+    title: "a role's directory name is not kebab-case",
+    severity: "error",
+    domain: "gdl",
+    docs: "A role's directory registration name is not kebab-case.\n\n**The one identifier in the system that was not held to the rule every\nother one obeys.** `GearId`, `ApplicationId`, `SourceId` and `ProfileId`\nall go through the same validator -- lowercase, digits, single interior\nhyphens, no `_` -- because it is the rule `#[toolkit::gear]` itself\nenforces. `directory_name` was a plain `String`, checked by nobody, and\nit names the same thing a `GearId` names: an entry in the directory that\na bare-name lookup resolves.\n\nThe default is where this actually bites. Left out, a role's\nregistration name is `<gear-id>-<role-name>`, and a role name is a\n*serde variant spelling* -- `cluster_ingest` -- so the default splices a\nkebab id onto a `snake_case` value and yields `event-broker-cluster_ingest`.\nThat is not the `event-broker-ingest` the platform's own ADR tabulates,\nand it is not a name a Kubernetes `Service` can carry.\n\nAn error, because the remedy is one field and the alternative is a\nworkload registered under a name the rest of the system cannot express.",
     requiresEvidence: false,
   },
   GBX0206: {

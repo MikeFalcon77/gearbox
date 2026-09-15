@@ -3,10 +3,21 @@
 /**
  * A role an application is started in, and the name that role registers under.
  *
- * Both halves travel together because every consumer wants both: the
- * generated deployment passes the role, the chart names the Service after the
- * directory name, and the explanation graph says which is which. Deriving one
- * from the other at each reader would be the same lookup three times.
+ * Both halves travel together because every consumer wants both: the generated
+ * worker takes `--role <name>` at startup and registers under
+ * `directory_name`, and the explanation graph says which is which. Deriving one
+ * from the other at each reader would be the same lookup twice.
+ *
+ * **It does not name the Kubernetes Service, and the doc here used to say it
+ * did.** Those are two different lookups. `directory_name` is an entry in the
+ * gears directory, which is what a bare-name resolve reaches. A Service name is
+ * what cluster DNS resolves, and every static endpoint in the lock is built by
+ * `resolve::partition::cluster_dns` as
+ * `http://{subchart}.{namespace}.svc.cluster.local` -- so the chart is named
+ * after the subchart and nothing else, or consumers dial a name that answers
+ * nothing. Acting on the old claim broke the demo's `audit` chart on the first
+ * run, because `registers_as()` falls back to the *anchor* and `audit` is
+ * anchored on `api-contracts-consumer`.
  */
 export type ApplicationRole = { 
 /**
@@ -14,6 +25,7 @@ export type ApplicationRole = {
  */
 name: string, 
 /**
- * What an instance started in this role registers under.
+ * What an instance started in this role registers under, in the gears
+ * directory. Not a DNS name; see the type's own documentation.
  */
 directory_name: string, };

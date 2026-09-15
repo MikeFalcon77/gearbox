@@ -452,6 +452,27 @@ diagnostic_codes! {
     /// front door, which is a shape the platform's model permits.
     GdlDuplicateFrontDoor = "GBX0117", Gdl, Error, false, "two roles claim the gear's own name";
 
+    /// A role's directory registration name is not kebab-case.
+    ///
+    /// **The one identifier in the system that was not held to the rule every
+    /// other one obeys.** `GearId`, `ApplicationId`, `SourceId` and `ProfileId`
+    /// all go through the same validator -- lowercase, digits, single interior
+    /// hyphens, no `_` -- because it is the rule `#[toolkit::gear]` itself
+    /// enforces. `directory_name` was a plain `String`, checked by nobody, and
+    /// it names the same thing a `GearId` names: an entry in the directory that
+    /// a bare-name lookup resolves.
+    ///
+    /// The default is where this actually bites. Left out, a role's
+    /// registration name is `<gear-id>-<role-name>`, and a role name is a
+    /// *serde variant spelling* -- `cluster_ingest` -- so the default splices a
+    /// kebab id onto a `snake_case` value and yields `event-broker-cluster_ingest`.
+    /// That is not the `event-broker-ingest` the platform's own ADR tabulates,
+    /// and it is not a name a Kubernetes `Service` can carry.
+    ///
+    /// An error, because the remedy is one field and the alternative is a
+    /// workload registered under a name the rest of the system cannot express.
+    GdlRoleNameNotKebab = "GBX0118", Gdl, Error, false, "a role's directory name is not kebab-case";
+
     // ---------------------------------------------------------------- GBX02xx
     // GBX0201-GBX0205 are deliberately absent. They compared a `gear.gdl`
     // restatement of the gear id, co-location dependencies, runtime
