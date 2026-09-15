@@ -14,9 +14,9 @@
 // it -- that is what the per-test hook is for -- but it says the run did it, in the
 // run that did it, and it leaves the tree as it found it.
 
-import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
+import { productsDiff, productsStatus, restoreProducts } from "./fixtures/products-tree";
 import {
   flushWriteTraces,
   formatWriteTraces,
@@ -27,10 +27,7 @@ import {
 export default async function globalTeardown(): Promise<void> {
   const repo = join(__dirname, "../..");
   await flushWriteTraces();
-  const dirty = execFileSync("git", ["status", "--porcelain", "--", "products"], {
-    cwd: repo,
-    encoding: "utf8",
-  }).trim();
+  const dirty = productsStatus(repo);
   const traces = readWriteTraces();
   const traceBlock = formatWriteTraces(traces);
   resetWriteTraces();
@@ -49,13 +46,10 @@ export default async function globalTeardown(): Promise<void> {
     );
   }
 
-  const diff = execFileSync("git", ["diff", "--", "products"], {
-    cwd: repo,
-    encoding: "utf8",
-  });
-  execFileSync("git", ["checkout", "--", "products"], { cwd: repo });
+  const diff = productsDiff(repo, dirty);
+  restoreProducts(repo);
   throw new Error(
-    `The run left a product description changed after the last test finished:\n` +
+    `The run left the product descriptions changed after the last test finished:\n` +
       `${dirty}\n\n${diff}\n\n` +
       traceBlock +
       `The tree has been restored. No test was blamed because none was still running: ` +

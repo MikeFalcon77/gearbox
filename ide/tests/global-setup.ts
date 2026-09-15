@@ -12,6 +12,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import { productsStatus, restoreCommand } from "./fixtures/products-tree";
 import { resetWriteTraces } from "./fixtures/write-traces";
 
 /** The newest mtime under a directory tree. */
@@ -80,17 +81,18 @@ export default function globalSetup(): void {
   // `cwd` is the repository, not `ide`: `products/` is its sibling, and a
   // pathspec git cannot find matches nothing and reports clean -- which is how
   // this guard silently passed the first time it was written.
-  const dirty = execFileSync("git", ["status", "--porcelain", "--", "products"], {
-    cwd: join(IDE, ".."),
-    encoding: "utf8",
-  }).trim();
+  const dirty = productsStatus(join(IDE, ".."));
   if (dirty !== "") {
     throw new Error(
       `The product descriptions differ from HEAD:\n${dirty}\n\n` +
         `Two claims edit \`products/payments-demo/product.gdl\` and restore it, and others assert ` +
         `on the resolution it produces, so a modified description fails claims that have nothing ` +
         `to do with the change.\n` +
-        `Commit the edit, or run \`git checkout -- products\` if it is a leftover.`,
+        // The remedy is computed, not fixed. This guard spent a while refusing
+        // every run over an untracked `products/new-product/` left by the Create
+        // wizard while telling the reader to run `git checkout`, which cannot
+        // remove one.
+        `Commit the edit, or run \`${restoreCommand(dirty)}\` if it is a leftover.`,
     );
   }
 

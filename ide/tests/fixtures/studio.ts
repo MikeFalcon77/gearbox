@@ -17,6 +17,7 @@ import { join } from "node:path";
 
 import { expect, test as base, type Browser, type Locator, type Page } from "@playwright/test";
 
+import { productsDiff, productsStatus, restoreProducts } from "./products-tree";
 import {
   appendWriteTrace,
   flushWriteTraces,
@@ -496,13 +497,9 @@ async function revealView(page: Page, command: string, selector: string): Promis
 // would instantiate the shared session for them. Write stacks are also appended
 // to the trace file from `open()`, so the file is enough for this guard.
 base.afterEach(async ({}, testInfo) => {
-  const { execFileSync } = await import("node:child_process");
   const repo = join(__dirname, "../..");
   await flushWriteTraces();
-  const dirty = execFileSync("git", ["status", "--porcelain", "--", "products"], {
-    cwd: repo,
-    encoding: "utf8",
-  }).trim();
+  const dirty = productsStatus(repo);
   const traces = readWriteTraces();
   const traceBlock = formatWriteTraces(traces);
   if (dirty === "") {
@@ -510,14 +507,11 @@ base.afterEach(async ({}, testInfo) => {
     return;
   }
 
-  const diff = execFileSync("git", ["diff", "--", "products"], {
-    cwd: repo,
-    encoding: "utf8",
-  });
-  execFileSync("git", ["checkout", "--", "products"], { cwd: repo });
+  const diff = productsDiff(repo, dirty);
+  restoreProducts(repo);
   resetWriteTraces();
   throw new Error(
-    `"${testInfo.title}" left a product description changed:\n${dirty}\n\n${diff}\n\n` +
+    `"${testInfo.title}" left the product descriptions changed:\n${dirty}\n\n${diff}\n\n` +
       traceBlock +
       `The tree has been restored. Two claims edit a description on purpose and put ` +
       `it back; anything else writing there is the defect this guard exists to name.`,
