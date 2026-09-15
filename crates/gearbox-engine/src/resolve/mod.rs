@@ -159,8 +159,14 @@ pub fn resolve_at(
         isolates: &isolates,
     };
     let partition = if let Some(declaration) = intent.profiles.get(profile) {
-        let partition =
-            partition::partition(&input, declaration, &intent.version, &uri, &mut diagnostics);
+        let partition = partition::partition(
+            &input,
+            declaration,
+            &intent.id,
+            &intent.version,
+            &uri,
+            &mut diagnostics,
+        );
         // Step 5 -- what the runtime will refuse, said before a binary exists.
         structural::check(catalogue, &partition, declaration, &uri, &mut diagnostics);
         partition

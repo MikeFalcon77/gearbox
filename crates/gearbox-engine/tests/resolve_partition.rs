@@ -456,3 +456,40 @@ fn a_pin_naming_a_role_the_anchor_does_not_declare_is_refused() {
         d.message
     );
 }
+
+#[test]
+fn the_embedded_application_is_named_after_the_product() {
+    // One application that *is* the product, so it carries the product's name
+    // rather than its anchor's. The anchor is still recorded, so nothing about
+    // which gear owns the router is lost.
+    let cat = support::catalogue_of(vec![
+        support::gear_with_caps("host", &[gearbox_ir::RuntimeCap::RestHost], &[]),
+        support::gear_with_caps("other", &[], &[]),
+    ]);
+    let intent = support::intent(&["host", "other"]);
+
+    let r = resolve(&cat, &intent, &pid("dev"));
+    let application = &r.partition.applications[0];
+    assert_eq!(application.name.as_str(), "fixture", "the product's id");
+    assert_eq!(application.anchor.as_str(), "host", "the anchor is kept");
+    // And the crate follows the name, because that is what it is derived from.
+    assert_eq!(application.crate_name, "gbx-fixture");
+}
+
+#[test]
+fn a_product_id_that_is_not_an_application_name_falls_back_to_the_anchor() {
+    // `ApplicationId` is kebab and a product id is a free string, so the two
+    // can disagree. An honest degradation rather than a resolution that stops:
+    // the same reason `derive_name` returns an `Option` at all.
+    let cat = support::catalogue_of(vec![support::gear_with_caps(
+        "host",
+        &[gearbox_ir::RuntimeCap::RestHost],
+        &[],
+    )]);
+    let mut intent = support::intent(&["host"]);
+    intent.id = "Payments Demo".to_owned();
+
+    let r = resolve(&cat, &intent, &pid("dev"));
+    assert_eq!(r.partition.applications.len(), 1);
+    assert_eq!(r.partition.applications[0].name.as_str(), "host");
+}

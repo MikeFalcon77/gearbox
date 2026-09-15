@@ -75,6 +75,7 @@ pub struct Inputs<'a> {
 pub fn partition(
     input: &Inputs<'_>,
     declaration: &DeploymentProfileDecl,
+    product_id: &str,
     product_version: &str,
     uri: &str,
     diagnostics: &mut Diagnostics,
@@ -99,19 +100,37 @@ pub fn partition(
             // single-process profile there is nowhere else for it to be.
             let all: Vec<GearId> = closure.members.keys().cloned().collect();
             let gears = topo_sort(catalogue, closure, &all);
-            if let Some(anchor) = pick_anchor(catalogue, &gears)
-                && let Some(name) = derive_name(&anchor, &used_names)
-            {
-                applications.push(build(
-                    catalogue,
-                    anchor,
-                    gears,
-                    ApplicationKind::Host,
-                    name,
-                    None,
-                    None,
-                    &mut used_names,
-                ));
+            if let Some(anchor) = pick_anchor(catalogue, &gears) {
+                // Named after the product, and only here.
+                //
+                // Every other profile has several applications, so one name
+                // could not serve them; this profile has exactly one and it
+                // *is* the product. Naming it after its anchor said "the
+                // api-gateway binary" about a binary holding nine gears --
+                // and `pick_anchor` is explicit that the name is free, since
+                // the anchor it picks "affects nothing but the name". The
+                // anchor stays on the application either way, so nothing is
+                // lost by not spelling it here.
+                //
+                // Falls back to the anchor for the reason `derive_name`
+                // returns an `Option` at all: a product id that is not a valid
+                // application name should degrade rather than stop the
+                // resolution.
+                let name = ApplicationId::new(product_id)
+                    .ok()
+                    .or_else(|| derive_name(&anchor, &used_names));
+                if let Some(name) = name {
+                    applications.push(build(
+                        catalogue,
+                        anchor,
+                        gears,
+                        ApplicationKind::Host,
+                        name,
+                        None,
+                        None,
+                        &mut used_names,
+                    ));
+                }
             }
         }
         DeploymentProfileDecl::SelfHosted { host, .. } => {

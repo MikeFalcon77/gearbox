@@ -129,10 +129,10 @@ fn the_embedded_profile_generates_the_documented_output_set() {
         paths,
         [
             "Cargo.toml",
-            "apps/api-gateway/Cargo.toml",
-            "apps/api-gateway/src/main.rs",
-            "apps/api-gateway/src/registered_gears.rs",
-            "config/api-gateway.yaml",
+            "apps/payments-demo/Cargo.toml",
+            "apps/payments-demo/src/main.rs",
+            "apps/payments-demo/src/registered_gears.rs",
+            "config/payments-demo.yaml",
             "product.lock",
             "rust-toolchain.toml",
         ],
@@ -181,7 +181,7 @@ fn no_generated_manifest_inherits_from_a_workspace() {
         );
     }
 
-    let manifest = text(&files.files, "apps/api-gateway/Cargo.toml");
+    let manifest = text(&files.files, "apps/payments-demo/Cargo.toml");
     assert!(manifest.contains("edition = \"2024\""));
     assert!(manifest.contains("rust-version = \"1.95.0\""));
 }
@@ -196,11 +196,11 @@ fn the_manifest_and_the_link_file_agree() {
     let Some((lock, files)) = generated("dev") else {
         return;
     };
-    let manifest = text(&files.files, "apps/api-gateway/Cargo.toml");
-    let links = text(&files.files, "apps/api-gateway/src/registered_gears.rs");
+    let manifest = text(&files.files, "apps/payments-demo/Cargo.toml");
+    let links = text(&files.files, "apps/payments-demo/src/registered_gears.rs");
 
     let application = lock
-        .application(&gearbox_ir::ApplicationId::new("api-gateway").unwrap())
+        .application(&gearbox_ir::ApplicationId::new("payments-demo").unwrap())
         .expect("the embedded profile resolves one application");
 
     for id in &application.gears {
@@ -235,9 +235,9 @@ fn the_config_carries_every_resolved_socket() {
     let Some((lock, files)) = generated("dev") else {
         return;
     };
-    let config = text(&files.files, "config/api-gateway.yaml");
+    let config = text(&files.files, "config/payments-demo.yaml");
     let application = lock
-        .application(&gearbox_ir::ApplicationId::new("api-gateway").unwrap())
+        .application(&gearbox_ir::ApplicationId::new("payments-demo").unwrap())
         .unwrap();
 
     assert!(
@@ -632,7 +632,7 @@ fn a_products_config_reaches_the_generated_configuration() {
         .collect();
     let files = generate_tree(&lock, &roots, &out_root()).files;
 
-    let yaml = text(&files, "config/api-gateway.yaml");
+    let yaml = text(&files, "config/payments-demo.yaml");
     // A real boolean, not the string the wire used to force.
     assert!(yaml.contains("enable_docs: true"), "{yaml}");
     assert!(yaml.contains("prefix_path: /cf"), "{yaml}");
@@ -820,7 +820,7 @@ fn a_product_template_overrides_the_builtin() {
         catalogue: None,
     })
     .expect("generation succeeds with an overlay");
-    let main = text(&generated.files, "apps/api-gateway/src/main.rs");
+    let main = text(&generated.files, "apps/payments-demo/src/main.rs");
     assert!(
         main.contains("/* product-local */"),
         "the overlay did not win:\n{main}"
@@ -1305,7 +1305,7 @@ fn a_secret_config_field_becomes_an_env_placeholder() {
         catalogue: Some(&catalogue),
     })
     .expect("generation succeeds");
-    let config = text(&generated.files, "config/api-gateway.yaml");
+    let config = text(&generated.files, "config/payments-demo.yaml");
     assert!(
         config.contains("${API_GATEWAY_PASSWORD}"),
         "the secret field must become an env placeholder:\n{config}"
