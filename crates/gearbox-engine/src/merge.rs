@@ -280,6 +280,7 @@ pub fn merge(
         .collect();
     report_front_doors(uri, &id, &declared_roles, diagnostics);
     report_role_names(uri, &id, &decl.declared_roles, &declared_roles, diagnostics);
+    report_role_modes(uri, &id, &declared_roles, config.as_ref(), diagnostics);
     report_role_gaps(uri, &id, &declared_roles, diagnostics);
 
     let category = decl.category.clone();
@@ -827,6 +828,69 @@ fn report_role_names(
                     role.name, role.directory_name
                 ),
                 help,
+            )
+            .at(Location::file(uri.to_owned())),
+        );
+    }
+}
+
+/// Refuse a role naming a mode the gear's own configuration will not accept.
+///
+/// **The check three doc comments promised and none performed.** `role(name =
+/// ...)` is defined in `gear_globals`, in `DeclaredRole` and in
+/// `ApplicationRole` as the value the gear's own mode selector accepts, "the
+/// only spelling checkable against a projected enum" -- and the join between
+/// the description's half and Rust's half was a string nobody compared. The
+/// comparison itself is the one `config_check` already makes for a value a
+/// product sets, against the same projected variants.
+///
+/// **Silent when there is nothing to check against.** A gear whose description
+/// exposes no enum field may still read its mode from a field it does not put
+/// in front of an integrator, so an absent enum is an absent answer rather than
+/// a wrong name. Any enum field accepting the spelling is enough: which field is
+/// the selector is not something the description says, and inventing a rule for
+/// picking one would be this tool deciding a fact the gear owns.
+fn report_role_modes(
+    uri: &str,
+    id: &GearId,
+    roles: &[DeclaredRole],
+    config: Option<&gearbox_ir::ConfigSchema>,
+    diagnostics: &mut Diagnostics,
+) {
+    let variants: Vec<&str> = config
+        .map(|schema| schema.fields.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|field| match &field.ty {
+            gearbox_ir::ConfigFieldType::Enum { variants } => Some(variants),
+            _ => None,
+        })
+        .flat_map(|variants| variants.iter().map(String::as_str))
+        .collect();
+    if variants.is_empty() {
+        return;
+    }
+    for role in roles {
+        if variants.contains(&role.name.as_str()) {
+            continue;
+        }
+        diagnostics.push(
+            Diagnostic::error(
+                DiagnosticCode::GdlRoleNotAMode,
+                format!(
+                    "gear `{id}` declares role `{}`, and no configuration value it exposes \
+                     accepts that spelling",
+                    role.name
+                ),
+                format!(
+                    "a role's `name` is the value the gear's own mode selector takes. \
+                     The spellings this gear accepts are {}",
+                    variants
+                        .iter()
+                        .map(|v| format!("`{v}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
             )
             .at(Location::file(uri.to_owned())),
         );

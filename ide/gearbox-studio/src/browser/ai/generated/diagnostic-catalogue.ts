@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 88, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 89, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -168,6 +168,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "error",
     domain: "gdl",
     docs: "A role's directory registration name is not kebab-case.\n\n**The one identifier in the system that was not held to the rule every\nother one obeys.** `GearId`, `ApplicationId`, `SourceId` and `ProfileId`\nall go through the same validator -- lowercase, digits, single interior\nhyphens, no `_` -- because it is the rule `#[toolkit::gear]` itself\nenforces. `directory_name` was a plain `String`, checked by nobody, and\nit names the same thing a `GearId` names: an entry in the directory that\na bare-name lookup resolves.\n\nThe default is where this actually bites. Left out, a role's\nregistration name is `<gear-id>-<role-name>`, and a role name is a\n*serde variant spelling* -- `cluster_ingest` -- so the default splices a\nkebab id onto a `snake_case` value and yields `event-broker-cluster_ingest`.\nThat is not the `event-broker-ingest` the platform's own ADR tabulates,\nand it is not a name a Kubernetes `Service` can carry.\n\nAn error, because the remedy is one field and the alternative is a\nworkload registered under a name the rest of the system cannot express.",
+    requiresEvidence: false,
+  },
+  GBX0119: {
+    code: "GBX0119",
+    title: "a role names a value the gear's config enum does not accept",
+    severity: "error",
+    domain: "gdl",
+    docs: "A role names a value the gear's own configuration enum does not accept.\n\n**The check three doc comments promised and none performed.** `role(name\n= ...)` is defined -- in `gear_globals`, in `DeclaredRole` and in\n`ApplicationRole` -- as \"the value the gear's own mode selector accepts,\nwhich is the only spelling checkable against a projected enum\". Nothing\nchecked it, so a role could name a mode the gear would refuse at startup,\nand the join between the description's half and Rust's half was a string\nnobody compared.\n\nIt is the same comparison `GBX0113` already makes for a config value a\nproduct sets, against the same projected `Enum` variants, so the rule is\nnot new -- only its second caller.\n\n**Silent when there is nothing to check against**, which is the honest\nanswer rather than a guess: a gear that exposes no enum field may still\nselect its mode from a field its description does not put in front of an\nintegrator, and refusing on that would refuse descriptions that are\ncorrect. Reported only when an enum field exists and no enum field\naccepts the name.",
     requiresEvidence: false,
   },
   GBX0206: {

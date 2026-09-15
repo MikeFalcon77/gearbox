@@ -473,6 +473,28 @@ diagnostic_codes! {
     /// workload registered under a name the rest of the system cannot express.
     GdlRoleNameNotKebab = "GBX0118", Gdl, Error, false, "a role's directory name is not kebab-case";
 
+    /// A role names a value the gear's own configuration enum does not accept.
+    ///
+    /// **The check three doc comments promised and none performed.** `role(name
+    /// = ...)` is defined -- in `gear_globals`, in `DeclaredRole` and in
+    /// `ApplicationRole` -- as "the value the gear's own mode selector accepts,
+    /// which is the only spelling checkable against a projected enum". Nothing
+    /// checked it, so a role could name a mode the gear would refuse at startup,
+    /// and the join between the description's half and Rust's half was a string
+    /// nobody compared.
+    ///
+    /// It is the same comparison `GBX0113` already makes for a config value a
+    /// product sets, against the same projected `Enum` variants, so the rule is
+    /// not new -- only its second caller.
+    ///
+    /// **Silent when there is nothing to check against**, which is the honest
+    /// answer rather than a guess: a gear that exposes no enum field may still
+    /// select its mode from a field its description does not put in front of an
+    /// integrator, and refusing on that would refuse descriptions that are
+    /// correct. Reported only when an enum field exists and no enum field
+    /// accepts the name.
+    GdlRoleNotAMode = "GBX0119", Gdl, Error, false, "a role names a value the gear's config enum does not accept";
+
     // ---------------------------------------------------------------- GBX02xx
     // GBX0201-GBX0205 are deliberately absent. They compared a `gear.gdl`
     // restatement of the gear id, co-location dependencies, runtime

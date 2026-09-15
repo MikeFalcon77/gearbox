@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **88**.
+Codes: **89**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -39,6 +39,7 @@ Codes: **88**.
 | [GBX0116](#gbx0116) | error | a credential is written into the description |
 | [GBX0117](#gbx0117) | error | two roles claim the gear's own name |
 | [GBX0118](#gbx0118) | error | a role's directory name is not kebab-case |
+| [GBX0119](#gbx0119) | error | a role names a value the gear's config enum does not accept |
 
 ### GBX0101
 
@@ -236,6 +237,31 @@ and it is not a name a Kubernetes `Service` can carry.
 
 An error, because the remedy is one field and the alternative is a
 workload registered under a name the rest of the system cannot express.
+
+### GBX0119
+
+**a role names a value the gear's config enum does not accept**
+
+A role names a value the gear's own configuration enum does not accept.
+
+**The check three doc comments promised and none performed.** `role(name
+= ...)` is defined -- in `gear_globals`, in `DeclaredRole` and in
+`ApplicationRole` -- as "the value the gear's own mode selector accepts,
+which is the only spelling checkable against a projected enum". Nothing
+checked it, so a role could name a mode the gear would refuse at startup,
+and the join between the description's half and Rust's half was a string
+nobody compared.
+
+It is the same comparison `GBX0113` already makes for a config value a
+product sets, against the same projected `Enum` variants, so the rule is
+not new -- only its second caller.
+
+**Silent when there is nothing to check against**, which is the honest
+answer rather than a guess: a gear that exposes no enum field may still
+select its mode from a field its description does not put in front of an
+integrator, and refusing on that would refuse descriptions that are
+correct. Reported only when an enum field exists and no enum field
+accepts the name.
 
 ## `GBX02xx` — Cross-checking a description against Rust
 

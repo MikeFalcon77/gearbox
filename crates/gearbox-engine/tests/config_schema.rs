@@ -248,3 +248,64 @@ fn gears_rust() -> Option<PathBuf> {
         dir = dir.parent()?;
     }
 }
+
+#[test]
+fn a_role_must_name_a_value_the_exposed_enum_accepts() {
+    // The join three doc comments describe and nothing checked. `role(name =
+    // ...)` is defined as the value the gear's own mode selector takes, "the
+    // only spelling checkable against a projected enum" -- so this is the enum,
+    // and this is the check.
+    let good = catalogue(
+        r#"config_schema = config(exposes = ["mode"]),
+           roles = [role(name = "accept_all", directory_name = "demo")],"#,
+    );
+    assert!(
+        !codes(&good).contains(&DiagnosticCode::GdlRoleNotAMode),
+        "`accept_all` is an `AuthNMode` variant: {:?}",
+        codes(&good)
+    );
+
+    let bad = catalogue(
+        r#"config_schema = config(exposes = ["mode"]),
+           roles = [role(name = "accept_alll", directory_name = "demo")],"#,
+    );
+    let d = bad
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::GdlRoleNotAMode)
+        .expect("GBX0119");
+    assert!(d.message.contains("accept_alll"), "{}", d.message);
+    assert!(
+        d.help
+            .as_deref()
+            .is_some_and(|h| h.contains("accept_all") && h.contains("static_tokens")),
+        "the help must list the spellings the gear accepts: {:?}",
+        d.help
+    );
+}
+
+#[test]
+fn a_role_is_not_checked_against_an_enum_the_description_does_not_expose() {
+    // Silence is the honest answer, not a guess. A gear may select its mode
+    // from a field its description does not put in front of an integrator, and
+    // refusing on that would refuse descriptions that are correct. `vendor` is
+    // a string, so exposing only it leaves nothing to check against.
+    let unexposed = catalogue(
+        r#"config_schema = config(exposes = ["vendor"]),
+           roles = [role(name = "cluster_ingest", directory_name = "demo-ingest")],"#,
+    );
+    assert!(
+        !codes(&unexposed).contains(&DiagnosticCode::GdlRoleNotAMode),
+        "{:?}",
+        codes(&unexposed)
+    );
+
+    // And a gear that declares no `config_schema` at all is likewise silent.
+    let none =
+        catalogue(r#"roles = [role(name = "cluster_ingest", directory_name = "demo-ingest")],"#);
+    assert!(
+        !codes(&none).contains(&DiagnosticCode::GdlRoleNotAMode),
+        "{:?}",
+        codes(&none)
+    );
+}
