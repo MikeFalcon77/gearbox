@@ -273,13 +273,13 @@ fn stopping_midway_through_projection_keeps_what_is_done() {
         "the gears not reached are still pending, not lost"
     );
     // The invariant, not the number: nothing discovered is lost on a stop. The
-    // total is the corpus's description count -- eighteen since the four
-    // `platform-host` members were described -- and it is written out rather
-    // than read from the scan so that a gear vanishing between discovery and
-    // projection cannot satisfy both sides of the equation at once.
+    // total is the corpus's description count -- nineteen since `event-broker`
+    // was described -- and it is written out rather than read from the scan so
+    // that a gear vanishing between discovery and projection cannot satisfy
+    // both sides of the equation at once.
     assert_eq!(
         scan.catalogue.gears.len() + scan.pending.len(),
-        18,
+        19,
         "every discovered gear is either projected or pending"
     );
 }

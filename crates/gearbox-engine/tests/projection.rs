@@ -68,14 +68,15 @@ fn the_slice_loads_without_diagnostics() {
     );
     // Eight original gears, plus tenant-resolver and the five plugin gears
     // that make the extension-point projection testable on real code, plus the
-    // four `platform-host` members described later: account-management,
-    // authz-resolver, resource-group, credstore.
+    // four `platform-host` members described later -- account-management,
+    // authz-resolver, resource-group, credstore -- plus `event-broker`, the
+    // corpus's one role-split gear.
     //
-    // The assertion above is the one that matters -- eighteen descriptions and
+    // The assertion above is the one that matters -- nineteen descriptions and
     // not one diagnostic between them. The count is here so that a corpus
     // moving underneath the suite is found in one place rather than inferred
     // from a stranger failure elsewhere.
-    assert_eq!(catalogue.gears.len(), 18, "the slice gears");
+    assert_eq!(catalogue.gears.len(), 19, "the slice gears");
 }
 
 #[test]

@@ -168,7 +168,7 @@ fn an_openapi_spec_is_claimed_only_by_the_gears_that_have_one() {
         .collect();
     assert_eq!(
         claimed,
-        ["credstore", "resource-group"],
+        ["credstore", "event-broker", "resource-group"],
         "openapi claims moved"
     );
 }

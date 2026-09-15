@@ -155,7 +155,7 @@ fn the_slice_projects_cleanly() {
     // error list below is -- but a corpus that grows or shrinks under the suite
     // changes what every other corpus test means, and finding that out here is
     // cheaper than reading it as a failure somewhere else.
-    assert_eq!(catalogue.gears.len(), 18);
+    assert_eq!(catalogue.gears.len(), 19);
     let errors: Vec<String> = catalogue
         .diagnostics
         .iter()
