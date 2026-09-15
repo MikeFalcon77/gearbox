@@ -152,7 +152,72 @@ pub fn check(
             );
         }
 
+        report_unset_required(gear, schema, selection, uri, diagnostics);
+
         check_plugin_secrets(catalogue, selection, uri, diagnostics);
+    }
+}
+
+/// Say when a required field has nothing to supply it.
+///
+/// **The code the Studio's configurator already told the reader to expect.** Its
+/// `valueMissing` marks a required field with nothing set and its comment says
+/// what that buys: "`required` is visible before a GBX code explains it from the
+/// other side of the screen". There was no code. `required` was projected out of
+/// the gear's struct and read by a marker in a panel and by nothing else.
+///
+/// The cost is not hypothetical. `EventBrokerConfig.mode` is required with no
+/// default, and the runtime's loader is strict, so a product selecting that gear
+/// without setting `mode` generates a file the gear refuses at `init` with
+/// `missing field`. Nothing between the description and that failure said
+/// anything.
+///
+/// **A key some `serves` endpoint derives is not counted.**
+/// `ApiGatewayConfig.bind_addr` is required, has no default, and is written from
+/// the port the resolver assigned -- so counting it would turn every product in
+/// the corpus red on a field that is always supplied. The set comes from the
+/// gear's own `serves` declarations, the same set `GBX0114` refuses a value for
+/// just above.
+///
+/// A warning, because a value can still arrive from a profile or from an
+/// operator editing the generated file. What this can say is that the
+/// description does not supply it.
+fn report_unset_required(
+    gear: &gearbox_ir::GearDescriptor,
+    schema: &gearbox_ir::ConfigSchema,
+    selection: &GearSelection,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    let derived: std::collections::BTreeSet<&str> = gear
+        .serves
+        .iter()
+        .filter_map(|endpoint| endpoint.config_key.as_deref())
+        .collect();
+
+    for field in &schema.fields {
+        if !field.required || field.default.is_some() {
+            continue;
+        }
+        if derived.contains(field.name.as_str()) || selection.config.contains_key(&field.name) {
+            continue;
+        }
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::GdlRequiredConfigUnset,
+                format!(
+                    "`{}` requires `{}` and `{}` declares no default for it, and this \
+                     description sets no value",
+                    selection.gear, field.name, schema.rust
+                ),
+            )
+            .with_help(format!(
+                "set `{}` in this gear's `config = {{...}}`, or the generated file will be \
+                 missing a field the gear's loader refuses at startup",
+                field.name
+            ))
+            .at(location(selection, uri)),
+        );
     }
 }
 

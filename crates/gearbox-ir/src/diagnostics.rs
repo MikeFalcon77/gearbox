@@ -495,6 +495,32 @@ diagnostic_codes! {
     /// accepts the name.
     GdlRoleNotAMode = "GBX0119", Gdl, Error, false, "a role names a value the gear's config enum does not accept";
 
+    /// A required configuration field has no value and no default.
+    ///
+    /// **The code the Studio's own configurator already promised.** Its
+    /// `valueMissing` says of a required field with nothing set that "what it
+    /// buys is that `required` is visible before a GBX code explains it from the
+    /// other side of the screen" -- and there was no such code. `required` is
+    /// projected from the gear's config struct and reached exactly one reader,
+    /// a marker in a panel.
+    ///
+    /// What it costs is measurable. `EventBrokerConfig.mode` is required with no
+    /// default and the runtime's loader is strict, so a product selecting that
+    /// gear without setting `mode` generates a file the gear refuses at `init`
+    /// with `missing field`. Nothing between the description and that failure
+    /// said a word.
+    ///
+    /// **Derived keys are excluded, and that exclusion is load-bearing.**
+    /// `ApiGatewayConfig.bind_addr` is required, has no default, and is written
+    /// by the generator from the port the resolver assigned -- so a rule that
+    /// counted it would fire on every product in the corpus. The keys a gear's
+    /// `serves` declares are the same set `GBX0114` already refuses a value for.
+    ///
+    /// A warning rather than an error: a value may still arrive from a profile,
+    /// or from an operator editing the generated file, and this cannot see
+    /// either. What it can say is that nothing in the description supplies it.
+    GdlRequiredConfigUnset = "GBX0120", Gdl, Warning, false, "a required config field has no value and no default";
+
     // ---------------------------------------------------------------- GBX02xx
     // GBX0201-GBX0205 are deliberately absent. They compared a `gear.gdl`
     // restatement of the gear id, co-location dependencies, runtime

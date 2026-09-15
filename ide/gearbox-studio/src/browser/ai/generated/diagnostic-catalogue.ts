@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 89, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 90, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -176,6 +176,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "error",
     domain: "gdl",
     docs: "A role names a value the gear's own configuration enum does not accept.\n\n**The check three doc comments promised and none performed.** `role(name\n= ...)` is defined -- in `gear_globals`, in `DeclaredRole` and in\n`ApplicationRole` -- as \"the value the gear's own mode selector accepts,\nwhich is the only spelling checkable against a projected enum\". Nothing\nchecked it, so a role could name a mode the gear would refuse at startup,\nand the join between the description's half and Rust's half was a string\nnobody compared.\n\nIt is the same comparison `GBX0113` already makes for a config value a\nproduct sets, against the same projected `Enum` variants, so the rule is\nnot new -- only its second caller.\n\n**Silent when there is nothing to check against**, which is the honest\nanswer rather than a guess: a gear that exposes no enum field may still\nselect its mode from a field its description does not put in front of an\nintegrator, and refusing on that would refuse descriptions that are\ncorrect. Reported only when an enum field exists and no enum field\naccepts the name.",
+    requiresEvidence: false,
+  },
+  GBX0120: {
+    code: "GBX0120",
+    title: "a required config field has no value and no default",
+    severity: "warning",
+    domain: "gdl",
+    docs: "A required configuration field has no value and no default.\n\n**The code the Studio's own configurator already promised.** Its\n`valueMissing` says of a required field with nothing set that \"what it\nbuys is that `required` is visible before a GBX code explains it from the\nother side of the screen\" -- and there was no such code. `required` is\nprojected from the gear's config struct and reached exactly one reader,\na marker in a panel.\n\nWhat it costs is measurable. `EventBrokerConfig.mode` is required with no\ndefault and the runtime's loader is strict, so a product selecting that\ngear without setting `mode` generates a file the gear refuses at `init`\nwith `missing field`. Nothing between the description and that failure\nsaid a word.\n\n**Derived keys are excluded, and that exclusion is load-bearing.**\n`ApiGatewayConfig.bind_addr` is required, has no default, and is written\nby the generator from the port the resolver assigned -- so a rule that\ncounted it would fire on every product in the corpus. The keys a gear's\n`serves` declares are the same set `GBX0114` already refuses a value for.\n\nA warning rather than an error: a value may still arrive from a profile,\nor from an operator editing the generated file, and this cannot see\neither. What it can say is that nothing in the description supplies it.",
     requiresEvidence: false,
   },
   GBX0206: {

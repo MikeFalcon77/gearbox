@@ -393,3 +393,130 @@ fn a_credential_on_a_plugin_is_refused_as_well() {
         vec![DiagnosticCode::GdlLiteralSecret]
     );
 }
+
+/// A required field with no default and no value is said out loud.
+///
+/// The Studio's configurator has been marking this state and telling the
+/// reader a GBX code would explain it. There was no code, and the cost is
+/// concrete: `EventBrokerConfig.mode` is required with no default and the
+/// runtime's loader is strict, so the generated file is one the gear refuses
+/// at `init`.
+#[test]
+fn a_required_field_with_no_default_and_no_value_is_reported() {
+    let mut catalogue = catalogue();
+    let gear = catalogue
+        .gears
+        .get_mut(&GearId::new("demo").unwrap())
+        .unwrap();
+    let schema = gear.config_schema.as_mut().unwrap();
+    for f in &mut schema.fields {
+        if f.name == "mode" {
+            f.required = true;
+        }
+    }
+
+    // The description sets something else, so `mode` is genuinely unsupplied.
+    let mut diagnostics = Diagnostics::default();
+    check(
+        &catalogue,
+        &intent("enable_docs", serde_json::json!(true)),
+        "file:///p.gdl",
+        &mut diagnostics,
+    );
+    let reported: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::GdlRequiredConfigUnset)
+        .collect();
+    assert_eq!(reported.len(), 1, "{diagnostics:#?}");
+    assert_eq!(reported[0].severity, gearbox_ir::Severity::Warning);
+    assert!(reported[0].message.contains("mode"), "{:?}", reported[0]);
+
+    // And setting it is the remedy the help names.
+    let mut diagnostics = Diagnostics::default();
+    check(
+        &catalogue,
+        &intent("mode", serde_json::json!("accept_all")),
+        "file:///p.gdl",
+        &mut diagnostics,
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::GdlRequiredConfigUnset),
+        "{diagnostics:#?}"
+    );
+}
+
+/// A required field the generator supplies is not unset, and this exclusion is
+/// what keeps the corpus out of the red.
+///
+/// `ApiGatewayConfig.bind_addr` is required, declares no default, and is
+/// written from the port the resolver assigned. A rule that counted it would
+/// fire on every product in the tree.
+#[test]
+fn a_required_field_the_generator_derives_is_not_reported() {
+    let mut catalogue = catalogue();
+    let gear = catalogue
+        .gears
+        .get_mut(&GearId::new("demo").unwrap())
+        .unwrap();
+    gear.serves = vec![gearbox_ir::EndpointDecl {
+        name: "rest".to_owned(),
+        config_key: Some("bind_addr".to_owned()),
+        default_port: Some(8087),
+        via: None,
+    }];
+    let schema = gear.config_schema.as_mut().unwrap();
+    for f in &mut schema.fields {
+        if f.name == "bind_addr" {
+            f.required = true;
+        }
+    }
+
+    let mut diagnostics = Diagnostics::default();
+    check(
+        &catalogue,
+        &intent("enable_docs", serde_json::json!(true)),
+        "file:///p.gdl",
+        &mut diagnostics,
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::GdlRequiredConfigUnset),
+        "a derived key is supplied by generation, not by the description: {diagnostics:#?}"
+    );
+}
+
+/// A required field that declares a default is supplied by Rust.
+#[test]
+fn a_required_field_with_a_compiled_in_default_is_not_reported() {
+    let mut catalogue = catalogue();
+    let schema = catalogue
+        .gears
+        .get_mut(&GearId::new("demo").unwrap())
+        .unwrap()
+        .config_schema
+        .as_mut()
+        .unwrap();
+    for f in &mut schema.fields {
+        if f.name == "mode" {
+            f.required = true;
+            f.default = Some(serde_json::json!("accept_all"));
+        }
+    }
+
+    let mut diagnostics = Diagnostics::default();
+    check(
+        &catalogue,
+        &intent("enable_docs", serde_json::json!(true)),
+        "file:///p.gdl",
+        &mut diagnostics,
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::GdlRequiredConfigUnset),
+        "{diagnostics:#?}"
+    );
+}
