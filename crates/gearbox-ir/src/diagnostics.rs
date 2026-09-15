@@ -749,6 +749,30 @@ diagnostic_codes! {
     /// lowers `product.gdl` does not have one.
     TopologyUnknownRole = "GBX0319", Topology, Error, false, "an application names a role its anchor does not declare";
 
+    /// Two applications register the same name in the directory.
+    ///
+    /// A worker registers one name -- its own, or its role's. A host registers
+    /// one per REST provider it contains, plus one per gRPC provider, each
+    /// under that gear's own name. So the same name can be registered twice:
+    /// by a host that reaches a gear through its closure, and by a worker
+    /// anchored on that same gear because a description forced it out. A
+    /// consumer resolving the name then round-robins between two endpoints
+    /// with nothing marking either as the one meant.
+    ///
+    /// **Not about linking.** A gear compiled into several binaries is expected
+    /// and correct -- co-location is a closure, not a partition -- and produces
+    /// no second registration by itself: a gear linked into a worker anchored
+    /// on something else is not registered there at all. Linked, serving
+    /// routes, and registered under a name are three different sets, and only
+    /// the third can collide.
+    ///
+    /// **A warning ordinarily and an error for a gear declared
+    /// `one_per_installation`.** Round-robin between two copies of a stateless
+    /// service is load balancing; between two that own disjoint state it is
+    /// corruption, and only the gear can say which it is
+    /// (ADR `cpt-gearbox-adr-one-per-installation`).
+    TopologyDuplicateRegistration = "GBX0320", Topology, Warning, false, "two applications register the same directory name";
+
     // ---------------------------------------------------------------- GBX04xx
     /// This consumer and provider could be placed in separate processes, but the
     /// dependency between them is not declared as a contract consumption.

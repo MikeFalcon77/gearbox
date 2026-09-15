@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **85**.
+Codes: **86**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -350,6 +350,7 @@ nothing pointing back at the description.
 | [GBX0317](#gbx0317) | error | contract owner is not a name the catalogue declares |
 | [GBX0318](#gbx0318) | warning | a gear's roles cannot all be deployed |
 | [GBX0319](#gbx0319) | error | an application names a role its anchor does not declare |
+| [GBX0320](#gbx0320) | warning | two applications register the same directory name |
 
 ### GBX0301
 
@@ -607,6 +608,33 @@ alternative is a workload nobody can reach.
 Reported at resolution rather than when the description is read: whether
 a gear declares a role is a fact about the catalogue, and the layer that
 lowers `product.gdl` does not have one.
+
+### GBX0320
+
+**two applications register the same directory name**
+
+Two applications register the same name in the directory.
+
+A worker registers one name -- its own, or its role's. A host registers
+one per REST provider it contains, plus one per gRPC provider, each
+under that gear's own name. So the same name can be registered twice:
+by a host that reaches a gear through its closure, and by a worker
+anchored on that same gear because a description forced it out. A
+consumer resolving the name then round-robins between two endpoints
+with nothing marking either as the one meant.
+
+**Not about linking.** A gear compiled into several binaries is expected
+and correct -- co-location is a closure, not a partition -- and produces
+no second registration by itself: a gear linked into a worker anchored
+on something else is not registered there at all. Linked, serving
+routes, and registered under a name are three different sets, and only
+the third can collide.
+
+**A warning ordinarily and an error for a gear declared
+`one_per_installation`.** Round-robin between two copies of a stateless
+service is load balancing; between two that own disjoint state it is
+corruption, and only the gear can say which it is
+(ADR `cpt-gearbox-adr-one-per-installation`).
 
 ## `GBX04xx` — Contract bindings and severability
 

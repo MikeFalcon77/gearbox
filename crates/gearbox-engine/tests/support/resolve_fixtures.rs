@@ -294,6 +294,27 @@ pub fn catalogue_with_overlap() -> Catalogue {
     catalogue
 }
 
+/// A gear the host reaches *and* a pin forces out, so both register it.
+///
+/// The shape that produces a duplicate directory registration, and the only
+/// one: `shared` is a co-location dependency of `host`, so the host's closure
+/// holds it and -- carrying the REST capability -- registers it under its own
+/// name; a pin makes it a worker anchor as well, and the worker registers the
+/// same name. Linking alone would not do this, which is the point.
+pub fn catalogue_with_registered_overlap(one_per_installation: bool) -> Catalogue {
+    let mut catalogue = Catalogue::default();
+
+    let mut host = gear_with_caps("host", &[RuntimeCap::RestHost], &["shared"]);
+    host.one_per_installation = false;
+    catalogue.gears.insert(gid("host"), host);
+
+    let mut shared = gear_with_caps("shared", &[RuntimeCap::Rest], &[]);
+    shared.one_per_installation = one_per_installation;
+    catalogue.gears.insert(gid("shared"), shared);
+
+    catalogue
+}
+
 /// `intent`, but for a profile that can hold several processes.
 pub fn self_hosted_intent(gears: &[&str]) -> ProductIntent {
     let mut intent = intent(gears);

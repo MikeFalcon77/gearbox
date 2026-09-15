@@ -13,9 +13,11 @@
 //! produces a host that hangs at startup, which is the least debuggable failure
 //! this resolver can prevent.
 
+use std::collections::BTreeMap;
+
 use gearbox_ir::{
-    ApplicationKind, Catalogue, DeploymentProfileDecl, Diagnostic, DiagnosticCode, Diagnostics,
-    Discovery, GearId, ResolvedApplication, RuntimeCap,
+    ApplicationId, ApplicationKind, Catalogue, DeploymentProfileDecl, Diagnostic, DiagnosticCode,
+    Diagnostics, Discovery, GearId, ResolvedApplication, RuntimeCap,
 };
 
 use super::partition::Partition;
@@ -39,10 +41,158 @@ pub fn check(
         check_rest_without_host(catalogue, application, uri, diagnostics);
         check_grpc_without_hub(catalogue, application, uri, diagnostics);
         check_host_with_nothing_to_host(catalogue, application, uri, diagnostics);
+        check_replicated_singletons(catalogue, application, uri, diagnostics);
     }
+    check_duplicate_registrations(catalogue, partition, uri, diagnostics);
     check_discovery(partition, declaration, uri, diagnostics);
     check_worker_paths(partition, declaration, uri, diagnostics);
     report_spawn_gap(partition, declaration, uri, diagnostics);
+}
+
+/// Replicas of a gear only one of which may run in an installation.
+///
+/// A replica is another process registering the same name from its own pod, so
+/// replicating such a gear is the same defect as pinning it out twice, reached
+/// by the other road. Reported under the same code for that reason.
+///
+/// An error rather than the warning an embedded `replicas > 1` gets
+/// (`GBX0307`, where the product is still buildable as one process): here the
+/// topology resolves, builds, starts, reports healthy, and answers wrongly.
+fn check_replicated_singletons(
+    catalogue: &Catalogue,
+    application: &ResolvedApplication,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    if application.replicas < 2 {
+        return;
+    }
+    for gear in &application.gears {
+        if !catalogue
+            .gears
+            .get(gear)
+            .is_some_and(|g| g.one_per_installation)
+        {
+            continue;
+        }
+        diagnostics.push(
+            Diagnostic::error(
+                DiagnosticCode::TopologyDuplicateRegistration,
+                format!(
+                    "`{}` runs {} replicas and holds `{gear}`, of which only one may run in an \
+                     installation",
+                    application.name, application.replicas
+                ),
+                format!(
+                    "every replica registers `{gear}` from its own process, so a consumer \
+                     resolving it would round-robin between copies that own separate state. Run \
+                     one replica, or move `{gear}` to an application that is not replicated"
+                ),
+            )
+            .at(Location(uri)),
+        );
+    }
+}
+
+/// Names registered in the directory by two applications at once.
+///
+/// **Counted on registration, not on linking**, and the difference is the whole
+/// check. A worker registers one name -- `registers_as()`, its anchor's or its
+/// role's -- and nothing else it contains. A host registers one per REST
+/// provider it holds, plus one per gRPC provider, each under that gear's own
+/// name. So a gear compiled into several binaries produces no second
+/// registration by itself; what does is a gear the host's closure reaches
+/// *and* a description forces out, which `split` keeps as a worker anchor
+/// while the host still holds it.
+///
+/// A consumer resolving that name then round-robins between two endpoints.
+/// Ordinarily that is load balancing and this says so once; for a gear the
+/// platform declared `one_per_installation` the two endpoints own disjoint
+/// state and it is a refusal.
+///
+/// Outside the per-application loop because the count is a property of the
+/// partition. Under an embedded profile there is one application, so this
+/// cannot fire.
+fn check_duplicate_registrations(
+    catalogue: &Catalogue,
+    partition: &Partition,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    // name -> the applications registering it, in partition order.
+    let mut by_name: BTreeMap<&str, Vec<&ApplicationId>> = BTreeMap::new();
+    for application in &partition.applications {
+        for name in registered_names(catalogue, application) {
+            by_name.entry(name).or_default().push(&application.name);
+        }
+    }
+
+    for (name, applications) in by_name {
+        if applications.len() < 2 {
+            continue;
+        }
+        let where_ = applications
+            .iter()
+            .map(|a| format!("`{a}`"))
+            .collect::<Vec<_>>()
+            .join(" and ");
+        let one_per_installation = GearId::new(name)
+            .ok()
+            .and_then(|id| catalogue.gears.get(&id))
+            .is_some_and(|gear| gear.one_per_installation);
+
+        let mut diagnostic = if one_per_installation {
+            Diagnostic::error(
+                DiagnosticCode::TopologyDuplicateRegistration,
+                format!(
+                    "{where_} both register `{name}` in the directory, and only one of it may \
+                     run in an installation"
+                ),
+                format!(
+                    "a consumer resolving `{name}` would round-robin between two endpoints that \
+                     own separate state. Drop the `application(...)` pin or the `prefer.isolate` \
+                     that forces it out, so it is registered once"
+                ),
+            )
+        } else {
+            Diagnostic::new(
+                DiagnosticCode::TopologyDuplicateRegistration,
+                format!("{where_} both register `{name}` in the directory"),
+            )
+            .with_help(format!(
+                "a consumer resolving `{name}` will round-robin between them, which is load \
+                 balancing if the two are interchangeable and a split if they are not. Drop the \
+                 pin or the `prefer.isolate` to register it once"
+            ))
+        };
+        diagnostic = diagnostic.at(Location(uri));
+        diagnostics.push(diagnostic);
+    }
+}
+
+/// The names one application registers in the directory.
+///
+/// A worker: one, `registers_as()`. A host: every REST provider it holds --
+/// which the runtime spells as the REST capability minus the host itself,
+/// because the gateway registers the others rather than itself -- plus every
+/// gRPC provider, which the hub registers the same way.
+fn registered_names<'a>(
+    catalogue: &Catalogue,
+    application: &'a ResolvedApplication,
+) -> Vec<&'a str> {
+    if application.is_worker() {
+        return vec![application.registers_as()];
+    }
+    application
+        .gears
+        .iter()
+        .filter(|g| {
+            (has_cap(catalogue, g, RuntimeCap::Rest)
+                && !has_cap(catalogue, g, RuntimeCap::RestHost))
+                || has_cap(catalogue, g, RuntimeCap::Grpc)
+        })
+        .map(GearId::as_str)
+        .collect()
 }
 
 /// At most one REST host and one gRPC hub per process.

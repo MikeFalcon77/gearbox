@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 85, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 86, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -374,6 +374,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "error",
     domain: "topology",
     docs: "An `application(...)` names a role its anchor does not declare.\n\nThe product's half of the join is a string, and the gear's half is the\nlist of roles it declares -- so a typo names a role nothing answers to,\nand the application would be built under a directory name no instance\never registers. An error, because the remedy is a spelling and the\nalternative is a workload nobody can reach.\n\nReported at resolution rather than when the description is read: whether\na gear declares a role is a fact about the catalogue, and the layer that\nlowers `product.gdl` does not have one.",
+    requiresEvidence: false,
+  },
+  GBX0320: {
+    code: "GBX0320",
+    title: "two applications register the same directory name",
+    severity: "warning",
+    domain: "topology",
+    docs: "Two applications register the same name in the directory.\n\nA worker registers one name -- its own, or its role's. A host registers\none per REST provider it contains, plus one per gRPC provider, each\nunder that gear's own name. So the same name can be registered twice:\nby a host that reaches a gear through its closure, and by a worker\nanchored on that same gear because a description forced it out. A\nconsumer resolving the name then round-robins between two endpoints\nwith nothing marking either as the one meant.\n\n**Not about linking.** A gear compiled into several binaries is expected\nand correct -- co-location is a closure, not a partition -- and produces\nno second registration by itself: a gear linked into a worker anchored\non something else is not registered there at all. Linked, serving\nroutes, and registered under a name are three different sets, and only\nthe third can collide.\n\n**A warning ordinarily and an error for a gear declared\n`one_per_installation`.** Round-robin between two copies of a stateless\nservice is load balancing; between two that own disjoint state it is\ncorruption, and only the gear can say which it is\n(ADR `cpt-gearbox-adr-one-per-installation`).",
     requiresEvidence: false,
   },
   GBX0401: {

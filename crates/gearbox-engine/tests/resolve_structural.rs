@@ -462,3 +462,99 @@ fn one_role_is_deployable_and_says_nothing() {
         "one role is one application"
     );
 }
+
+#[test]
+fn a_gear_the_host_reaches_and_a_pin_forces_out_is_registered_twice() {
+    // Counted on registration, not on linking. `shared` is in the host's
+    // closure and registers there as a REST provider; the pin makes it a
+    // worker anchor, and the worker registers the same name. A consumer
+    // resolving it round-robins between two endpoints.
+    let cat = support::catalogue_with_registered_overlap(false);
+    let mut intent = support::self_hosted(&["host", "shared"], Discovery::Static, Some("t"));
+    support::pin(&mut intent, "shared-out", "shared", 1);
+
+    let r = resolve(&cat, &intent, &pid("local"));
+    let d = r
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::TopologyDuplicateRegistration)
+        .expect("GBX0320");
+
+    // A warning while nothing says the two are not interchangeable: this is
+    // load balancing until a gear says otherwise.
+    assert_eq!(d.severity, gearbox_ir::Severity::Warning);
+    assert!(
+        d.message.contains("shared") && d.message.contains("shared-out"),
+        "both applications belong in the message: {}",
+        d.message
+    );
+}
+
+#[test]
+fn the_same_collision_is_refused_when_only_one_of_the_gear_may_run() {
+    // The same topology, and now the two endpoints own separate state.
+    let cat = support::catalogue_with_registered_overlap(true);
+    let mut intent = support::self_hosted(&["host", "shared"], Discovery::Static, Some("t"));
+    support::pin(&mut intent, "shared-out", "shared", 1);
+
+    let r = resolve(&cat, &intent, &pid("local"));
+    let d = r
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::TopologyDuplicateRegistration)
+        .expect("GBX0320");
+    assert_eq!(d.severity, gearbox_ir::Severity::Error);
+    assert!(
+        d.message.contains("only one of it may run"),
+        "{}",
+        d.message
+    );
+}
+
+#[test]
+fn replicating_such_a_gear_is_the_same_defect_by_another_road() {
+    // Every replica registers the name from its own process, so this needs no
+    // second application at all.
+    let cat = support::catalogue_with_registered_overlap(true);
+    let mut intent = support::self_hosted(&["host", "shared"], Discovery::Static, Some("t"));
+    support::pin(&mut intent, "shared-out", "shared", 3);
+
+    let r = resolve(&cat, &intent, &pid("local"));
+    let d = r
+        .diagnostics
+        .iter()
+        .find(|d| {
+            d.code == DiagnosticCode::TopologyDuplicateRegistration
+                && d.message.contains("replicas")
+        })
+        .expect("the replica refusal");
+    assert_eq!(d.severity, gearbox_ir::Severity::Error);
+    assert!(d.message.contains("3 replicas"), "{}", d.message);
+}
+
+#[test]
+fn under_an_embedded_profile_none_of_this_can_fire() {
+    // One application by definition, so there is nowhere for a second
+    // registration to come from. The pin is refused as GBX0307 instead, and
+    // that is the whole answer.
+    let cat = support::catalogue_with_registered_overlap(true);
+    let mut intent = support::intent(&["host", "shared"]);
+    support::pin(&mut intent, "shared-out", "shared", 3);
+
+    let r = resolve(&cat, &intent, &pid("dev"));
+    assert_eq!(
+        r.partition.applications.len(),
+        1,
+        "embedded is one application"
+    );
+    assert!(
+        !codes(&r).contains(&DiagnosticCode::TopologyDuplicateRegistration),
+        "{:?}",
+        codes(&r)
+    );
+    assert!(
+        codes(&r).contains(&DiagnosticCode::TopologyEmbeddedViolation),
+        "the pin is what is reported instead: {:?}",
+        codes(&r)
+    );
+}
