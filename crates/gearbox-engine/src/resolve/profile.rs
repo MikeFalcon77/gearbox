@@ -87,6 +87,21 @@ pub fn scope<'a>(
         &uri,
         diagnostics,
     );
+    // Keyed on the anchor *and* the role, because both halves are the pin's
+    // identity and the anchor is the load-bearing half: it decides the
+    // application's contents. Two pins naming one anchor and no role describe
+    // one process twice, and the name check above cannot see it -- they differ
+    // by name, which is exactly what makes them look distinct. Differing by
+    // role is the one way two pins on one anchor are not a contradiction.
+    report_duplicates(
+        application_pins
+            .iter()
+            .map(|p| format!("{}/{}", p.anchor, p.role.as_deref().unwrap_or(""))),
+        "application anchor",
+        profile,
+        &uri,
+        diagnostics,
+    );
 
     ProfileScoped {
         bindings,

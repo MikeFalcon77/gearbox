@@ -736,6 +736,19 @@ diagnostic_codes! {
     /// `cpt-gearbox-adr-role-qualified-names`).
     TopologyRolesNotDeployable = "GBX0318", Topology, Warning, false, "a gear's roles cannot all be deployed";
 
+    /// An `application(...)` names a role its anchor does not declare.
+    ///
+    /// The product's half of the join is a string, and the gear's half is the
+    /// list of roles it declares -- so a typo names a role nothing answers to,
+    /// and the application would be built under a directory name no instance
+    /// ever registers. An error, because the remedy is a spelling and the
+    /// alternative is a workload nobody can reach.
+    ///
+    /// Reported at resolution rather than when the description is read: whether
+    /// a gear declares a role is a fact about the catalogue, and the layer that
+    /// lowers `product.gdl` does not have one.
+    TopologyUnknownRole = "GBX0319", Topology, Error, false, "an application names a role its anchor does not declare";
+
     // ---------------------------------------------------------------- GBX04xx
     /// This consumer and provider could be placed in separate processes, but the
     /// dependency between them is not declared as a contract consumption.

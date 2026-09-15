@@ -485,6 +485,14 @@ pub struct ApplicationPin {
     /// The gear whose co-location closure this application is built from.
     pub anchor: GearId,
 
+    /// Which of the anchor's declared roles this application runs as.
+    ///
+    /// Not a `GearId`: a role's *name* is the value the gear's own mode
+    /// selector accepts, and its directory name is a separate field on the
+    /// declaration. Absent means the gear is deployed undifferentiated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+
     #[serde(default = "one")]
     pub replicas: u32,
 

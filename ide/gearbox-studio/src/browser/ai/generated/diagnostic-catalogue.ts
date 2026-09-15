@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 84, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 85, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -366,6 +366,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "warning",
     domain: "topology",
     docs: "A selected gear declares roles, and a product can deploy at most one of\nthem.\n\nA role registers under its own directory name, so a role-split gear is\nseveral named workloads built from one binary. This tool builds one\napplication per anchor gear -- the worker anchors are a set, and a pin\nis looked up rather than filtered for -- so a second role has nowhere\nto be.\n\nThe limitation is here rather than in the runtime, which takes whatever\ndirectory name it is given. Reported at resolution rather than at load\nbecause it is a statement about a product: a gear whose roles nobody\nselects costs nothing.\n\nA warning, because the description is not wrong -- it describes a shape\nthis tool does not build yet (ADR\n`cpt-gearbox-adr-role-qualified-names`).",
+    requiresEvidence: false,
+  },
+  GBX0319: {
+    code: "GBX0319",
+    title: "an application names a role its anchor does not declare",
+    severity: "error",
+    domain: "topology",
+    docs: "An `application(...)` names a role its anchor does not declare.\n\nThe product's half of the join is a string, and the gear's half is the\nlist of roles it declares -- so a typo names a role nothing answers to,\nand the application would be built under a directory name no instance\never registers. An error, because the remedy is a spelling and the\nalternative is a workload nobody can reach.\n\nReported at resolution rather than when the description is read: whether\na gear declares a role is a fact about the catalogue, and the layer that\nlowers `product.gdl` does not have one.",
     requiresEvidence: false,
   },
   GBX0401: {

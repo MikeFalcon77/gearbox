@@ -13,4 +13,12 @@ export type ApplicationPin = { name: ApplicationId,
 /**
  * The gear whose co-location closure this application is built from.
  */
-anchor: GearId, replicas: number, profiles?: Array<ProfileId>, };
+anchor: GearId, 
+/**
+ * Which of the anchor's declared roles this application runs as.
+ *
+ * Not a `GearId`: a role's *name* is the value the gear's own mode
+ * selector accepts, and its directory name is a separate field on the
+ * declaration. Absent means the gear is deployed undifferentiated.
+ */
+role?: string | null, replicas: number, profiles?: Array<ProfileId>, };

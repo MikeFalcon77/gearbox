@@ -87,6 +87,7 @@ pub fn partition(
         ..
     } = *input;
     report_undeployable_roles(catalogue, closure, uri, diagnostics);
+    report_unknown_roles(catalogue, scoped, uri, diagnostics);
     let mut used_names: BTreeSet<String> = BTreeSet::new();
     let mut applications = Vec::new();
 
@@ -487,6 +488,53 @@ fn pick_anchor(catalogue: &Catalogue, gears: &[GearId]) -> Option<GearId> {
         .find(|g| has_cap(catalogue, g, RuntimeCap::RestHost))
         .or_else(|| gears.last())
         .cloned()
+}
+
+/// Refuse an `application(...)` naming a role its anchor does not declare.
+///
+/// Both halves of the join are strings, so a typo is silent: the application
+/// would be built under a directory name no instance ever registers. Reported
+/// here rather than where `product.gdl` is lowered, because that layer has no
+/// catalogue to ask.
+fn report_unknown_roles(
+    catalogue: &Catalogue,
+    scoped: &ProfileScoped<'_>,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    for pin in &scoped.application_pins {
+        let Some(role) = pin.role.as_deref() else {
+            continue;
+        };
+        let Some(descriptor) = catalogue.gears.get(&pin.anchor) else {
+            continue;
+        };
+        if descriptor.declared_roles.iter().any(|r| r.name == role) {
+            continue;
+        }
+        let declared: Vec<&str> = descriptor
+            .declared_roles
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect();
+        let help = if declared.is_empty() {
+            format!("`{}` declares no roles at all", pin.anchor)
+        } else {
+            format!("`{}` declares {}", pin.anchor, declared.join(", "))
+        };
+        diagnostics.push(
+            Diagnostic::error(
+                DiagnosticCode::TopologyUnknownRole,
+                format!(
+                    "`application(\"{}\")` names role `{role}` on `{}`, which declares no such \
+                     role",
+                    pin.name, pin.anchor
+                ),
+                help,
+            )
+            .at(Location::file(uri.to_owned())),
+        );
+    }
 }
 
 /// Report a selected gear whose roles cannot all be deployed.

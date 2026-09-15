@@ -359,3 +359,100 @@ fn kubernetes_fills_the_chart_fields_and_binds_every_interface() {
 
 #[path = "support/resolve_fixtures.rs"]
 mod support;
+
+#[test]
+fn two_pins_on_one_anchor_are_a_duplicate() {
+    // An application is the co-location closure of its anchor, and there is one
+    // per anchor: the worker anchors are a set and a pin is looked up rather
+    // than filtered for. So a second pin on one anchor describes one process
+    // twice, and until now it vanished without a word -- `report_duplicates`
+    // keys on the pin's *name*, which these two do not share.
+    let cat = support::catalogue_of(vec![
+        support::gear_with_caps("host", &[], &[]),
+        support::gear_with_caps("moved", &[], &[]),
+    ]);
+    let mut intent =
+        support::self_hosted(&["host", "moved"], gearbox_ir::Discovery::Static, Some("t"));
+    support::pin(&mut intent, "first", "moved", 1);
+    support::pin(&mut intent, "second", "moved", 4);
+
+    let r = resolve(&cat, &intent, &pid("local"));
+
+    let d = r
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::GdlDuplicateProfileScoped)
+        .expect("GBX0110");
+    assert!(
+        d.message.contains("moved"),
+        "the message names the anchor they collide on: {}",
+        d.message
+    );
+
+    // And the surviving behaviour, named so a later change to it is visible:
+    // one anchor yields one application, the first pin's name and replicas win,
+    // and `second`'s `replicas = 4` is dropped.
+    let workers: Vec<_> = r
+        .partition
+        .applications
+        .iter()
+        .filter(|a| a.kind == gearbox_ir::ApplicationKind::Worker)
+        .collect();
+    assert_eq!(workers.len(), 1, "one anchor, one application");
+    assert_eq!(workers[0].name.as_str(), "first");
+    assert_eq!(workers[0].replicas, 1, "the second pin's replicas vanish");
+}
+
+#[test]
+fn two_pins_differing_by_role_are_not_a_duplicate() {
+    // The one way two pins on one anchor are not a contradiction: they name
+    // different roles, which is what a role-split gear is for.
+    let cat = support::catalogue_of(vec![
+        support::gear_with_caps("host", &[], &[]),
+        support::gear_with_roles("broker", &["ingest", "delivery"]),
+    ]);
+    let mut intent = support::self_hosted(
+        &["host", "broker"],
+        gearbox_ir::Discovery::Static,
+        Some("t"),
+    );
+    support::pin_role(&mut intent, "ingest", "broker", Some("ingest"), 1);
+    support::pin_role(&mut intent, "delivery", "broker", Some("delivery"), 1);
+
+    let r = resolve(&cat, &intent, &pid("local"));
+    assert!(
+        !r.diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::GdlDuplicateProfileScoped),
+        "{:?}",
+        r.diagnostics.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn a_pin_naming_a_role_the_anchor_does_not_declare_is_refused() {
+    // The check cannot live in GDL lowering: whether a gear declares a role is
+    // a fact about the catalogue, which that layer does not have.
+    let cat = support::catalogue_of(vec![
+        support::gear_with_caps("host", &[], &[]),
+        support::gear_with_roles("broker", &["ingest"]),
+    ]);
+    let mut intent = support::self_hosted(
+        &["host", "broker"],
+        gearbox_ir::Discovery::Static,
+        Some("t"),
+    );
+    support::pin_role(&mut intent, "typo", "broker", Some("ingset"), 1);
+
+    let r = resolve(&cat, &intent, &pid("local"));
+    let d = r
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::TopologyUnknownRole)
+        .expect("a refusal");
+    assert!(
+        d.message.contains("ingset") && d.message.contains("broker"),
+        "{}",
+        d.message
+    );
+}

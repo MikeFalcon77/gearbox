@@ -387,9 +387,21 @@ pub fn gear_with_roles(id: &str, roles: &[&str]) -> GearDescriptor {
 
 /// Force a second process by pinning a gear to one.
 pub fn pin(intent: &mut ProductIntent, name: &str, anchor: &str, replicas: u32) {
+    pin_role(intent, name, anchor, None, replicas);
+}
+
+/// The same, naming which of the anchor's roles it deploys.
+pub fn pin_role(
+    intent: &mut ProductIntent,
+    name: &str,
+    anchor: &str,
+    role: Option<&str>,
+    replicas: u32,
+) {
     intent.application_pins.push(gearbox_ir::ApplicationPin {
         name: gearbox_ir::ApplicationId::new(name).unwrap(),
         anchor: gid(anchor),
+        role: role.map(str::to_owned),
         replicas,
         profiles: BTreeSet::new(),
     });

@@ -520,6 +520,9 @@ fn build_application_pins(
         pins.push(ApplicationPin {
             name,
             anchor,
+            // Not checked here: whether the anchor declares this role is a
+            // question for the catalogue, which this layer does not have.
+            role: record.role.clone(),
             replicas: record.replicas,
             profiles: scoped,
         });

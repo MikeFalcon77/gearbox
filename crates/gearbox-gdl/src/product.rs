@@ -416,6 +416,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     fn application(
         #[starlark(require = pos)] name: &str,
         #[starlark(require = named)] anchor: &str,
+        #[starlark(require = named)] role: Option<&str>,
         #[starlark(require = named, default = 1)] replicas: u32,
         #[starlark(require = named)] profiles: Option<UnpackList<String>>,
     ) -> anyhow::Result<ApplicationRecord> {
@@ -427,6 +428,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         Ok(ApplicationRecord {
             name: name.to_owned(),
             anchor: anchor.to_owned(),
+            role: role.map(str::to_owned),
             replicas,
             profiles: strings(profiles),
         })

@@ -426,6 +426,11 @@ gdl_record! {
     ApplicationRecord as "gdl_application" {
         pub name: String,
         pub anchor: String,
+        /// Which of the anchor's declared roles this application runs as.
+        ///
+        /// The product's half of the join: the gear says which roles exist, the
+        /// product says which of them it deploys and how many copies of each.
+        pub role: Option<String>,
         pub replicas: u32,
         pub profiles: Vec<String>,
     }
