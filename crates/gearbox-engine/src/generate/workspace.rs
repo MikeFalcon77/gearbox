@@ -158,9 +158,18 @@ pub fn target_dir(input: &GenerateInput<'_>) -> String {
     let profile = cargo_profile_dir(input);
     match shared_target_dir(input) {
         Some(shared) => format!("{shared}/{profile}"),
-        None => format!("target/{profile}"),
+        None => format!("{CARGO_TARGET_DIR}/{profile}"),
     }
 }
+
+/// Cargo's own default output directory, named once.
+///
+/// Read by `target_dir` above and by `apply`'s orphan walk, which must not
+/// descend into it -- the demo's `dev` profile has thirteen thousand files
+/// under it, none of them this tool's. A profile that declares `target_dir`
+/// puts the directory outside the output root entirely, so there is nothing
+/// there to skip.
+pub const CARGO_TARGET_DIR: &str = "target";
 
 /// The declared shared target directory, expressed from this tree.
 ///

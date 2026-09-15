@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 86, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 87, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -724,6 +724,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "warning",
     domain: "generator",
     docs: "A generated crate directory survives that this run does not write.\n\n**A warning with a named remedy, because the generator cannot delete.**\nEvery fate `apply` has is create, update, keep or conflict, so an\napplication removed from the description -- or a `layout` changed --\nleaves its old crate directory behind while the rewritten root\n`Cargo.toml` stops listing it. That is a package inside a workspace that\nneither includes nor excludes it, which `cargo metadata` and\nrust-analyzer refuse and a root `cargo build` does not, so nothing fails\nuntil someone opens the tree in an editor.\n\nReported rather than pruned: the directory is the operator's, this build\nhas no delete path worth trusting with a recursive remove, and a tree\ngenerated once under a different layout may hold work nobody wants gone.",
+    requiresEvidence: false,
+  },
+  GBX0707: {
+    code: "GBX0707",
+    title: "a generated file is no longer part of the product",
+    severity: "warning",
+    domain: "generator",
+    docs: "A generated file survives that this run does not write.\n\n**The sibling claim to `GBX0706`, and it had to be one rather than a\nrewording.** That code is about a crate directory, and everything about\nit is crate-shaped: it compares the paths a run plans by stripping\n`/Cargo.toml`, looks for a manifest on disk, and says what `cargo\nmetadata` will refuse. An application renamed under a Kubernetes profile\nleaves four other things behind -- its configuration file, its\nDockerfile, and a Helm subchart of nine files -- and a `subchart = \"...\"`\nrenamed on its own leaves the subchart with no crate having moved at all.\nNone of that is a crate, and none of it was reported.\n\nMarker-gated exactly as `GBX0706` is, and that gate is what keeps it\nhonest: a file is reported only when it carries this tool's own\ngenerated header, so an operator's file in the output root is never\nnamed, and neither is `values.yaml` -- the one file generation hands\nover, which deliberately does not carry the marker.\n\nA warning with the same remedy and for the same reason: `apply` has no\ndelete path, and a file in a tree someone has been working in is theirs\nto remove.",
     requiresEvidence: false,
   },
 };

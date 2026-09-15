@@ -1139,6 +1139,29 @@ diagnostic_codes! {
     /// has no delete path worth trusting with a recursive remove, and a tree
     /// generated once under a different layout may hold work nobody wants gone.
     GenOrphanedCrate = "GBX0706", Generator, Warning, false, "a generated crate directory is no longer part of the product";
+
+    /// A generated file survives that this run does not write.
+    ///
+    /// **The sibling claim to `GBX0706`, and it had to be one rather than a
+    /// rewording.** That code is about a crate directory, and everything about
+    /// it is crate-shaped: it compares the paths a run plans by stripping
+    /// `/Cargo.toml`, looks for a manifest on disk, and says what `cargo
+    /// metadata` will refuse. An application renamed under a Kubernetes profile
+    /// leaves four other things behind -- its configuration file, its
+    /// Dockerfile, and a Helm subchart of nine files -- and a `subchart = "..."`
+    /// renamed on its own leaves the subchart with no crate having moved at all.
+    /// None of that is a crate, and none of it was reported.
+    ///
+    /// Marker-gated exactly as `GBX0706` is, and that gate is what keeps it
+    /// honest: a file is reported only when it carries this tool's own
+    /// generated header, so an operator's file in the output root is never
+    /// named, and neither is `values.yaml` -- the one file generation hands
+    /// over, which deliberately does not carry the marker.
+    ///
+    /// A warning with the same remedy and for the same reason: `apply` has no
+    /// delete path, and a file in a tree someone has been working in is theirs
+    /// to remove.
+    GenOrphanedFile = "GBX0707", Generator, Warning, false, "a generated file is no longer part of the product";
 }
 
 /// A diagnostic code string that this build does not know.

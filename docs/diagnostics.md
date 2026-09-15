@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **86**.
+Codes: **87**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -1133,6 +1133,7 @@ by declaring the edge.
 | [GBX0704](#gbx0704) | error | could not read package metadata |
 | [GBX0705](#gbx0705) | warning | the lock carries a credential, which generation replaced |
 | [GBX0706](#gbx0706) | warning | a generated crate directory is no longer part of the product |
+| [GBX0707](#gbx0707) | warning | a generated file is no longer part of the product |
 
 ### GBX0701
 
@@ -1187,4 +1188,30 @@ until someone opens the tree in an editor.
 Reported rather than pruned: the directory is the operator's, this build
 has no delete path worth trusting with a recursive remove, and a tree
 generated once under a different layout may hold work nobody wants gone.
+
+### GBX0707
+
+**a generated file is no longer part of the product**
+
+A generated file survives that this run does not write.
+
+**The sibling claim to `GBX0706`, and it had to be one rather than a
+rewording.** That code is about a crate directory, and everything about
+it is crate-shaped: it compares the paths a run plans by stripping
+`/Cargo.toml`, looks for a manifest on disk, and says what `cargo
+metadata` will refuse. An application renamed under a Kubernetes profile
+leaves four other things behind -- its configuration file, its
+Dockerfile, and a Helm subchart of nine files -- and a `subchart = "..."`
+renamed on its own leaves the subchart with no crate having moved at all.
+None of that is a crate, and none of it was reported.
+
+Marker-gated exactly as `GBX0706` is, and that gate is what keeps it
+honest: a file is reported only when it carries this tool's own
+generated header, so an operator's file in the output root is never
+named, and neither is `values.yaml` -- the one file generation hands
+over, which deliberately does not carry the marker.
+
+A warning with the same remedy and for the same reason: `apply` has no
+delete path, and a file in a tree someone has been working in is theirs
+to remove.
 

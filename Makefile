@@ -35,7 +35,7 @@ define check_rustup_component
 endef
 
 .PHONY: help setup build fmt fmt-check dev-fmt clippy dev-clippy lint deny test dev-test \
-        ts ts-check grammar grammar-check check dev clean
+        ts ts-check grammar grammar-check diagnostics diagnostics-check check dev clean
 
 help:
 	@echo "build      compile the workspace"
@@ -48,7 +48,9 @@ help:
 	@echo "ts-check   verify those bindings are up to date"
 	@echo "grammar    regenerate the editor's .gdl grammar vocabulary"
 	@echo "grammar-check  verify that vocabulary is up to date"
-	@echo "check      fmt + clippy + lint + deny + test + ts-check + grammar-check"
+	@echo "diagnostics  regenerate the diagnostics reference and its TS catalogue"
+	@echo "diagnostics-check  verify those are up to date"
+	@echo "check      fmt + clippy + lint + deny + test + ts-check + grammar-check + diagnostics-check"
 	@echo "dev        dev-fmt + dev-clippy + test"
 	@echo "setup      install the tools the above targets need"
 
