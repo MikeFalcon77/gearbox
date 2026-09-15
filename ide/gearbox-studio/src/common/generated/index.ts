@@ -4,6 +4,7 @@ export * from "./AddProfileParams";
 export * from "./ApplicationId";
 export * from "./ApplicationKind";
 export * from "./ApplicationPin";
+export * from "./ApplicationRole";
 export * from "./ApplyEditsParams";
 export * from "./BindingIntent";
 export * from "./BindingMechanism";

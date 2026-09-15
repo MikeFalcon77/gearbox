@@ -298,6 +298,20 @@ pub enum InclusionReason {
     PluginOf { host: GearId, profile: ProfileId },
 }
 
+/// A role an application is started in, and the name that role registers under.
+///
+/// Both halves travel together because every consumer wants both: the
+/// generated deployment passes the role, the chart names the Service after the
+/// directory name, and the explanation graph says which is which. Deriving one
+/// from the other at each reader would be the same lookup three times.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ApplicationRole {
+    /// The value the gear's own mode selector accepts, and what `--role` takes.
+    pub name: String,
+    /// What an instance started in this role registers under.
+    pub directory_name: String,
+}
+
 /// One application in the resolved topology.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ResolvedApplication {
@@ -306,18 +320,25 @@ pub struct ResolvedApplication {
 
     /// The gear whose co-location closure defines this application.
     ///
-    /// For a worker this is also its directory identity, verbatim -- and the
-    /// reason is here rather than in the runtime. `generate::rust` writes this
-    /// name into `worker_main.rs` as a literal, and `OopRunOptions::gear_name`
-    /// is a plain `String` that takes whatever it is given. The name is fixed in
-    /// the binary because we fixed it.
-    ///
-    /// What roles need is a second application for the same anchor, and `split`
-    /// in `resolve::partition` finds a pin rather than filtering for all of
-    /// them: one gear yields one application, so one gear yields one directory
-    /// name. That is the limitation, and it is ours
-    /// (ADR `cpt-gearbox-adr-role-qualified-names`).
+    /// The closure key, and only that. It used to double as the worker's
+    /// directory identity, which is why roles had nowhere to go; `role` and
+    /// `registers_as()` carry that now.
     pub anchor: GearId,
+
+    /// Which of the anchor's declared roles this application runs as.
+    ///
+    /// Absent for every application that deploys a gear undifferentiated,
+    /// which keeps a lock written today byte-identical to one written before
+    /// the field existed.
+    ///
+    /// **A role is an input to the process, not a property of the binary.** One
+    /// gear is one crate and one binary whichever roles it runs in, and the
+    /// role arrives at startup -- `--role` on the command line, defaulted to
+    /// what this application was resolved for. So this field says which role
+    /// the generated deployment *starts* it in, and the binary can be started
+    /// in any of them (ADR `cpt-gearbox-adr-role-qualified-names`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<ApplicationRole>,
 
     /// The gears in this binary, in dependency order.
     ///
@@ -389,6 +410,19 @@ impl ResolvedApplication {
     #[must_use]
     pub fn contains(&self, gear: &GearId) -> bool {
         self.gears.contains(gear)
+    }
+
+    /// The name this application registers under when started as resolved.
+    ///
+    /// One accessor rather than the rule at each reader: no role means the
+    /// anchor's own id, which is what an undifferentiated deployment answers
+    /// to. A process started in another role answers to that role's name
+    /// instead -- the binary takes it at startup.
+    #[must_use]
+    pub fn registers_as(&self) -> &str {
+        self.role
+            .as_ref()
+            .map_or_else(|| self.anchor.as_str(), |r| r.directory_name.as_str())
     }
 
     #[must_use]

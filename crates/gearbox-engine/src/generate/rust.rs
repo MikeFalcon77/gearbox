@@ -42,6 +42,37 @@ pub fn host_main(
     ))
 }
 
+/// The roles the anchor gear declares, for the table the worker compiles in.
+///
+/// Read from the catalogue rather than from the lock: the lock records which
+/// role a deployment *starts* in, and the binary needs every role it could be
+/// started in. Empty when the catalogue is out of scope, which is the ordinary
+/// case for a generation driven from a lock alone -- and then `--role` refuses
+/// everything, which is the right answer for a binary that cannot say what its
+/// roles are.
+fn roles_of(input: &GenerateInput<'_>, application: &ResolvedApplication) -> Vec<RoleContext> {
+    input
+        .catalogue
+        .and_then(|c| c.gears.get(&application.anchor))
+        .map(|gear| {
+            gear.declared_roles
+                .iter()
+                .map(|r| RoleContext {
+                    name: r.name.clone(),
+                    directory_name: r.directory_name.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// One row of the worker's compiled-in role table.
+#[derive(serde::Serialize)]
+struct RoleContext {
+    name: String,
+    directory_name: String,
+}
+
 /// `<layout>/<w>/src/main.rs` for a worker.
 ///
 /// A second function rather than a branch inside [`host_main`]: this module's
@@ -63,7 +94,8 @@ pub fn worker_main(
             application => application.name.as_str(),
             bin_name => application.bin_name.as_str(),
             gear_count => application.gears.len(),
-            gear_name => application.anchor.as_str(),
+            gear_name => application.registers_as(),
+            roles => roles_of(input, application),
             version => input.lock.product.version.as_str(),
         },
     )?;

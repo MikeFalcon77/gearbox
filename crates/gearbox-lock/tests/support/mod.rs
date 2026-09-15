@@ -117,6 +117,7 @@ fn gears() -> BTreeMap<GearId, ResolvedGear> {
 
 fn gateway_process() -> ResolvedApplication {
     ResolvedApplication {
+        role: None,
         name: pid("gateway"),
         kind: ApplicationKind::Host,
         anchor: gid("api-gateway"),
@@ -160,6 +161,7 @@ fn gateway_process() -> ResolvedApplication {
 
 fn payments_audit_process() -> ResolvedApplication {
     ResolvedApplication {
+        role: None,
         name: pid("payments-audit"),
         kind: ApplicationKind::Worker,
         anchor: gid("payments-audit"),

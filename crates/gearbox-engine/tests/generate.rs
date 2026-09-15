@@ -687,9 +687,21 @@ fn a_self_hosted_profile_generates_both_applications() {
         worker_main.contains("run_oop_with_options"),
         "{worker_main}"
     );
-    // Its directory identity, taken from the anchor verbatim.
+    // Its directory identity: the default this deployment was generated for,
+    // and a resolution at startup rather than a literal in the option struct --
+    // one gear is one binary whichever role it runs in.
     assert!(
-        worker_main.contains(r#"gear_name: "api-contracts".to_owned()"#),
+        worker_main.contains(r#"const DEFAULT_GEAR_NAME: &str = "api-contracts";"#),
+        "{worker_main}"
+    );
+    assert!(
+        worker_main.contains("gear_name: directory_name(cli.role.as_deref())?"),
+        "{worker_main}"
+    );
+    // A gear declaring no roles compiles an empty table, so `--role` refuses
+    // everything -- the right answer for a binary that has none.
+    assert!(
+        worker_main.contains("const ROLES: &[(&str, &str)] = &[\n];"),
         "{worker_main}"
     );
     // The line that keeps `TOOLKIT_DIRECTORY_ENDPOINT` working.
@@ -1998,4 +2010,54 @@ fn a_hand_written_crate_in_the_output_root_is_not_an_orphan() {
         "{:#?}",
         outcome.diagnostics
     );
+}
+
+#[test]
+fn a_role_reaches_the_binary_as_an_input_rather_than_a_literal() {
+    // One gear is one binary whichever role it runs in, so the role is passed
+    // at startup. The lock says which role this deployment starts in; the
+    // binary carries every role it *could* be started in and refuses the rest.
+    let Some((mut lock, source_roots)) = resolve("prod") else {
+        return;
+    };
+    let worker = lock
+        .applications
+        .iter_mut()
+        .find(|a| a.is_worker())
+        .expect("the kubernetes profile has a worker");
+    let name = worker.name.clone();
+    worker.role = Some(gearbox_ir::ApplicationRole {
+        name: "cluster_ingest".to_owned(),
+        directory_name: "api-contracts-ingest".to_owned(),
+    });
+
+    let files = generate_tree(&lock, &source_roots, &out_root());
+    let main = text(&files.files, &format!("apps/{name}/src/main.rs"));
+
+    // The default is what this deployment was resolved for.
+    assert!(
+        main.contains(r#"const DEFAULT_GEAR_NAME: &str = "api-contracts-ingest";"#),
+        "{main}"
+    );
+    // And nothing else moved: the crate, the path and the binary are still the
+    // application's, because a role is a registration name and not a crate.
+    assert!(main.contains("run_oop_with_options"), "{main}");
+
+    // The host spawns it with the role named, so the argument list says which
+    // of the gear's roles this process is being started in.
+    let host = lock
+        .applications
+        .iter()
+        .find(|a| !a.is_worker())
+        .expect("a host");
+    if let Some(spawn) = host.spawns.first() {
+        assert!(
+            spawn
+                .args
+                .windows(2)
+                .any(|w| w == ["--role", "cluster_ingest"]),
+            "{:?}",
+            spawn.args
+        );
+    }
 }

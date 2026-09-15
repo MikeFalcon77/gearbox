@@ -43,7 +43,7 @@
 //! may name:
 //!
 //! - `main.rs`: `header`, `process`, `bin_name`, `gear_count`
-//! - `worker_main.rs`: those plus `gear_name`, `version`
+//! - `worker_main.rs`: those plus `gear_name`, `roles`, `version`
 //! - `registered_gears.rs`: `header`, `idents`
 //! - `docker/Dockerfile`: `header`, `rust_channel`, `crate_name`, `bin_name`,
 //!   `process`, `out_rel`, `uid`, `ports`

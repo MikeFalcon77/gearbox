@@ -26,6 +26,15 @@ struct Cli {
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
 
+    /// Which of the gear's declared roles this process runs as.
+    ///
+    /// A role is a directory registration name, and one gear is one binary
+    /// whichever role it runs in -- so this is an input at startup rather than
+    /// a property of the build. Omitted, the process runs as the role this
+    /// deployment was generated for.
+    #[arg(long)]
+    role: Option<String>,
+
     /// List the gears actually linked into this binary and exit.
     ///
     /// The same oracle the host carries, and a worker needs it more: placement
@@ -33,6 +42,39 @@ struct Cli {
     /// question that says whether the split happened at all.
     #[arg(long)]
     list_registered_gears: bool,
+}
+
+/// Every role the anchor gear declares, and the name each registers under.
+///
+/// Compiled in so a role this gear does not declare is refused rather than
+/// registered: a typo would otherwise put the process in the directory under a
+/// name nothing ever looks up, and nothing would say so.
+const ROLES: &[(&str, &str)] = &[
+{%- for role in roles %}
+    ("{{ role.name }}", "{{ role.directory_name }}"),
+{%- endfor %}
+];
+
+/// What this deployment registers under when `--role` is not given.
+const DEFAULT_GEAR_NAME: &str = "{{ gear_name }}";
+
+/// Resolve the directory name this process registers under.
+fn directory_name(requested: Option<&str>) -> Result<String> {
+    let Some(role) = requested else {
+        return Ok(DEFAULT_GEAR_NAME.to_owned());
+    };
+    if let Some((_, name)) = ROLES.iter().find(|(declared, _)| *declared == role) {
+        return Ok((*name).to_owned());
+    }
+    let declared: Vec<&str> = ROLES.iter().map(|(name, _)| *name).collect();
+    anyhow::bail!(
+        "--role {role} is not a role this gear declares{}",
+        if declared.is_empty() {
+            "; it declares none".to_owned()
+        } else {
+            format!("; it declares {}", declared.join(", "))
+        }
+    )
 }
 
 /// Print the registry's own inventory, in the order it resolved.
@@ -65,10 +107,10 @@ async fn main() -> Result<()> {
     // it spawns this process -- so listing every field explicitly would silently
     // lose the directory and leave every remote binding unresolvable.
     let options = OopRunOptions {
-        // The directory identity, verbatim. The runtime takes it from this field
-        // with no configuration override, which is why the lock records the
-        // anchor rather than deriving a name here.
-        gear_name: "{{ gear_name }}".to_owned(),
+        // The directory identity. The runtime takes this field as given, so the
+        // name is decided here -- from `--role` when a role is asked for, and
+        // otherwise from what this deployment was generated for.
+        gear_name: directory_name(cli.role.as_deref())?,
         verbose: cli.verbose,
         config_path: cli.config,
         version: Some("{{ version }}".to_owned()),

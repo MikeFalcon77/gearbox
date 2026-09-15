@@ -47,8 +47,8 @@ pub use requirement::{
     Capability, ClusterPrimitive, ClusterProviderDecl, Requirement, RequirementKind, capabilities,
 };
 pub use resolved::{
-    ApplicationKind, BindingMechanism, BindingRequest, Choice, ClusterResolution, CutBlocker,
-    CutCandidate, CutSavings, DEFAULT_LAYOUT, Entrypoint, ImageRef, InclusionReason,
+    ApplicationKind, ApplicationRole, BindingMechanism, BindingRequest, Choice, ClusterResolution,
+    CutBlocker, CutCandidate, CutSavings, DEFAULT_LAYOUT, Entrypoint, ImageRef, InclusionReason,
     KubernetesSettings, LOCK_SCHEMA_VERSION, ResolvedApplication, ResolvedBinding,
     ResolvedBindingMode, ResolvedClusterBinding, ResolvedEndpoint, ResolvedGear, ResolvedProduct,
     ResolvedProductHeader, Selected, SelfHostedSettings, SpawnSpec, WorkerServe, is_valid_layout,

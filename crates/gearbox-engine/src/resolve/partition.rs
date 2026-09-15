@@ -17,9 +17,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use gearbox_ir::{
-    ApplicationId, ApplicationKind, Catalogue, DeploymentProfileDecl, Diagnostic, DiagnosticCode,
-    Diagnostics, Entrypoint, GearId, ImageRef, Location, ResolvedApplication, ResolvedEndpoint,
-    RuntimeCap, SpawnSpec, WorkerServe,
+    ApplicationId, ApplicationKind, ApplicationRole, Catalogue, DeploymentProfileDecl, Diagnostic,
+    DiagnosticCode, Diagnostics, Entrypoint, GearId, ImageRef, Location, ResolvedApplication,
+    ResolvedEndpoint, RuntimeCap, SpawnSpec, WorkerServe,
 };
 
 use super::closure::Closure;
@@ -109,6 +109,7 @@ pub fn partition(
                     ApplicationKind::Host,
                     name,
                     None,
+                    None,
                     &mut used_names,
                 ));
             }
@@ -196,12 +197,25 @@ fn assign_spawns(
             spawns.push(SpawnSpec {
                 gear: applications[index].anchor.clone(),
                 bin_name: applications[index].bin_name.clone(),
-                // `--config` is the only channel that works: the runtime reads
-                // `TOOLKIT_CONFIG_PATH` but nothing ever sets it.
-                args: vec![
-                    "--config".to_owned(),
-                    format!("config/{}.yaml", applications[index].name),
-                ],
+                // `--config` is the only channel that works for the file: the
+                // runtime reads `TOOLKIT_CONFIG_PATH` but nothing ever sets it.
+                //
+                // `--role` is passed only when there is one, so an
+                // undifferentiated deployment keeps the argument list it had --
+                // and a role-bearing one says at the spawn which of the gear's
+                // roles this process is being started in, rather than relying on
+                // a name baked into the binary.
+                args: {
+                    let mut args = vec![
+                        "--config".to_owned(),
+                        format!("config/{}.yaml", applications[index].name),
+                    ];
+                    if let Some(role) = &applications[index].role {
+                        args.push("--role".to_owned());
+                        args.push(role.name.clone());
+                    }
+                    args
+                },
                 working_directory: None,
                 // Deliberately empty. The host injects `TOOLKIT_DIRECTORY_ENDPOINT`
                 // and `TOOLKIT_MODULE_CONFIG` itself at spawn time, and the
@@ -448,6 +462,7 @@ fn split(
                 ApplicationKind::Host,
                 name,
                 None,
+                None,
                 used_names,
             ));
         }
@@ -466,11 +481,32 @@ fn split(
                 ApplicationKind::Worker,
                 name,
                 pin.map(|p| p.replicas),
+                pin.and_then(|p| role_of(catalogue, p)),
                 used_names,
             ));
         }
     }
     applications
+}
+
+/// The role a pin deploys, with the name it registers under.
+///
+/// `None` when the pin names no role -- every application that deploys a gear
+/// undifferentiated -- and then the anchor's own id is what it answers to. A
+/// role the anchor does not declare is refused separately by
+/// `report_unknown_roles`, so a miss here needs no second complaint.
+fn role_of(catalogue: &Catalogue, pin: &gearbox_ir::ApplicationPin) -> Option<ApplicationRole> {
+    let name = pin.role.as_deref()?;
+    catalogue
+        .gears
+        .get(&pin.anchor)?
+        .declared_roles
+        .iter()
+        .find(|r| r.name == name)
+        .map(|r| ApplicationRole {
+            name: r.name.clone(),
+            directory_name: r.directory_name.clone(),
+        })
 }
 
 fn is_forced_out(scoped: &ProfileScoped<'_>, isolates: &BTreeSet<GearId>, gear: &GearId) -> bool {
@@ -623,6 +659,11 @@ fn report_embedded_violations(
 }
 
 /// Build one process from its gear set.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is a distinct fact the application records; a bundle would be named after \
+              this function and explain nothing"
+)]
 fn build(
     catalogue: &Catalogue,
     anchor: GearId,
@@ -630,11 +671,13 @@ fn build(
     kind: ApplicationKind,
     name: ApplicationId,
     replicas: Option<u32>,
+    role: Option<ApplicationRole>,
     used_names: &mut BTreeSet<String>,
 ) -> ResolvedApplication {
     used_names.insert(name.to_string());
 
     ResolvedApplication {
+        role,
         rest_host: gears
             .iter()
             .find(|g| has_cap(catalogue, g, RuntimeCap::RestHost))
