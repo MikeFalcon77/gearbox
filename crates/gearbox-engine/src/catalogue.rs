@@ -653,7 +653,7 @@ fn registered_names(catalogue: &Catalogue) -> std::collections::BTreeSet<&str> {
         names.extend(
             gear.declared_roles
                 .iter()
-                .filter_map(|role| role.directory_name.as_deref()),
+                .map(|role| role.directory_name.as_str()),
         );
     }
     names

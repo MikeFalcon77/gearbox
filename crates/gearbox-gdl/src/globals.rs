@@ -312,19 +312,28 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         })
     }
 
-    /// `role(...)` -- accepted for forward compatibility, excluded from
-    /// resolution. The runtime has no role concept.
-    fn role(
+    /// `role(name, directory_name?, labels = [])` -- one differentiated shape
+    /// this gear runs in.
+    ///
+    /// `name` is the value the gear's own mode selector accepts, which is the
+    /// only spelling checkable against a projected enum. `directory_name` is
+    /// what an instance of this role registers under; left out, it defaults to
+    /// `<gear-id>-<name>` at lowering, where the gear's id is known -- the id
+    /// is projected from Rust and nothing here can see it.
+    ///
+    /// `labels` are the label *keys* an instance registers under, not values:
+    /// a value is per-instance and belongs to the deployment, which the runtime
+    /// sources from configuration or the environment. A key is a fact about the
+    /// gear.
+    fn role<'v>(
         #[starlark(require = named)] name: &str,
         #[starlark(require = named)] directory_name: Option<&str>,
-        #[starlark(require = named, default = false)] sharded: bool,
-        #[starlark(require = named, default = false)] instance_addressable: bool,
+        #[starlark(require = named)] labels: Option<UnpackList<String>>,
     ) -> anyhow::Result<RoleRecord> {
         Ok(RoleRecord {
             name: name.to_owned(),
             directory_name: directory_name.map(str::to_owned),
-            sharded,
-            instance_addressable,
+            labels: labels.map(|l| l.items).unwrap_or_default(),
         })
     }
 

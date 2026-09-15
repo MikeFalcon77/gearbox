@@ -264,16 +264,21 @@ pub fn merge(
     crate::cluster::check_profiles(uri, &id, &requires, cluster, diagnostics);
     report_cluster_colocation(uri, &id, &requires, projected, diagnostics);
 
+    // The default is applied here rather than in the constructor because it
+    // needs the gear's id, which is projected from Rust and invisible to GDL.
     let declared_roles: Vec<DeclaredRole> = decl
         .declared_roles
         .iter()
         .map(|r| DeclaredRole {
             name: r.name.clone(),
-            directory_name: r.directory_name.clone(),
-            sharded: r.sharded,
-            instance_addressable: r.instance_addressable,
+            directory_name: r
+                .directory_name
+                .clone()
+                .unwrap_or_else(|| format!("{id}-{}", r.name)),
+            labels: r.labels.iter().cloned().collect(),
         })
         .collect();
+    report_front_doors(uri, &id, &declared_roles, diagnostics);
     report_role_gaps(uri, &id, &declared_roles, diagnostics);
 
     let category = decl.category.clone();
@@ -728,6 +733,48 @@ fn cluster_requirement(
     })
 }
 
+/// Refuse a second role claiming the gear's own name.
+///
+/// The front door is the role registered under the bare gear id, and a
+/// bare-name lookup reaching it *and only it* is what makes an internal role
+/// unreachable by accident rather than by a filter someone could misconfigure.
+/// Two claimants and the guarantee is gone: the lookup round-robins over two
+/// services that were split apart on purpose.
+fn report_front_doors(
+    uri: &str,
+    id: &GearId,
+    roles: &[DeclaredRole],
+    diagnostics: &mut Diagnostics,
+) {
+    let claimants: Vec<&str> = roles
+        .iter()
+        .filter(|r| r.directory_name == id.as_str())
+        .map(|r| r.name.as_str())
+        .collect();
+    if claimants.len() < 2 {
+        return;
+    }
+    diagnostics.push(
+        Diagnostic::error(
+            DiagnosticCode::GdlDuplicateFrontDoor,
+            format!(
+                "roles {} all register `{id}`, and a bare-name lookup reaches whichever \
+                 answers first",
+                claimants
+                    .iter()
+                    .map(|n| format!("`{n}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            format!(
+                "exactly one role may be the front door. Give the others their own \
+                 `directory_name`, or leave it out and take the default `{id}-<name>`"
+            ),
+        )
+        .at(Location::file(uri.to_owned())),
+    );
+}
+
 /// Report what a declared role asks for and this tool cannot emit.
 ///
 /// Only the labels half lives here. Whether a role can be *deployed* is a
@@ -736,15 +783,15 @@ fn cluster_requirement(
 /// can be written is a statement about the gear and its generated
 /// configuration, which is knowable the moment the description is read.
 fn report_role_gaps(uri: &str, id: &GearId, roles: &[DeclaredRole], diagnostics: &mut Diagnostics) {
-    if !roles.iter().any(|r| r.sharded || r.instance_addressable) {
+    if !roles.iter().any(|r| !r.labels.is_empty()) {
         return;
     }
     diagnostics.push(
         Diagnostic::new(
             DiagnosticCode::GapShards,
             format!(
-                "gear `{id}` requests sharding or per-instance addressing, and nothing \
-                 generated from this description can carry it"
+                "gear `{id}` registers roles under labels, and nothing generated from this \
+                 description can carry one"
             ),
         )
         .at(Location::file(uri.to_owned()))
@@ -753,8 +800,8 @@ fn report_role_gaps(uri: &str, id: &GearId, roles: &[DeclaredRole], diagnostics:
              (oop_http.labels exists; the embedded profile has no instance to label)",
         )
         .with_help(
-            "drop `sharded`/`instance_addressable`, or keep them knowing the generated \
-             `oop_http` section has no label field to write them into",
+            "drop the `labels`, or keep them knowing the generated `oop_http` section has \
+             no label field to write them into",
         ),
     );
 }

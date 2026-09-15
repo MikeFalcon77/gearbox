@@ -196,19 +196,27 @@ gear(package = cargo(crate_name = "c", lib = "c"),
 }
 
 #[test]
-fn roles_are_recorded_but_refused_with_cited_evidence() {
+fn a_role_records_its_name_its_directory_name_and_its_label_keys() {
     let src = r#"
 gear(package = cargo(crate_name = "c", lib = "c"),
-     roles = [role(name = "ingest", sharded = True, instance_addressable = True)])
+     roles = [
+         role(name = "dispatcher", directory_name = "event-broker"),
+         role(name = "ingest", labels = ["shard"]),
+     ])
 "#;
     let (value, codes) = eval(src);
-    // Roles must not prevent evaluation -- they are carried forward.
     let decl = value.expect("a declaration");
-    assert_eq!(decl.declared_roles.len(), 1);
-    assert!(decl.declared_roles[0].sharded);
-    // The refusal happens at merge, so nothing here yet; the declaration simply
-    // survives. The gap diagnostics themselves are asserted in
-    // `gearbox-engine/tests/roles.rs`, which is where they are raised.
+    assert_eq!(decl.declared_roles.len(), 2);
+    assert_eq!(
+        decl.declared_roles[0].directory_name.as_deref(),
+        Some("event-broker")
+    );
+    // Left out here: the default needs the gear's id, which is projected from
+    // Rust and invisible to this layer, so lowering fills it in.
+    assert_eq!(decl.declared_roles[1].directory_name, None);
+    assert_eq!(decl.declared_roles[1].labels, ["shard"]);
+    // Nothing is refused at evaluation; the gap and front-door diagnostics are
+    // asserted in `gearbox-engine`, which is where they are raised.
     assert!(codes.is_empty(), "{codes:?}");
 }
 

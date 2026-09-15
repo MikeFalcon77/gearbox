@@ -293,8 +293,7 @@ gdl_record! {
     RoleRecord as "gdl_role" {
         pub name: String,
         pub directory_name: Option<String>,
-        pub sharded: bool,
-        pub instance_addressable: bool,
+        pub labels: Vec<String>,
     }
 }
 

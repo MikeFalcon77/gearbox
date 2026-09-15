@@ -438,6 +438,20 @@ diagnostic_codes! {
     /// The author has to take it out, and the help says what to write instead.
     GdlLiteralSecret = "GBX0116", Gdl, Error, false, "a credential is written into the description";
 
+    /// Two roles claim the gear's own id as their directory name.
+    ///
+    /// A role registers under its own name, and the one that registers under
+    /// the gear's bare id is the front door: a bare-name lookup reaches it and
+    /// only it. That guarantee is structural rather than a filter -- an
+    /// internal role is unreachable by the bare name because it was never
+    /// registered under one -- and it holds only while exactly one role claims
+    /// it. Two, and a bare-name lookup round-robins over two different
+    /// services.
+    ///
+    /// Zero is allowed and ordinary: a gear whose roles are all internal has no
+    /// front door, which is a shape the platform's model permits.
+    GdlDuplicateFrontDoor = "GBX0117", Gdl, Error, false, "two roles claim the gear's own name";
+
     // ---------------------------------------------------------------- GBX02xx
     // GBX0201-GBX0205 are deliberately absent. They compared a `gear.gdl`
     // restatement of the gear id, co-location dependencies, runtime

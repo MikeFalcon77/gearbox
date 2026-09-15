@@ -90,10 +90,10 @@ fn a_plain_role_is_recorded_and_says_nothing_at_load() {
 }
 
 #[test]
-fn sharding_is_reported_because_nothing_generated_can_carry_it() {
+fn a_label_is_reported_because_nothing_generated_can_carry_it() {
     for declared in [
-        r#"roles = [role(name = "ingest", sharded = True)],"#,
-        r#"roles = [role(name = "ingest", instance_addressable = True)],"#,
+        r#"roles = [role(name = "ingest", labels = ["shard"])],"#,
+        r#"roles = [role(name = "ingest", labels = ["shard", "zone"])],"#,
     ] {
         let catalogue = catalogue(declared);
         let d = catalogue
@@ -123,5 +123,56 @@ fn a_roles_directory_name_reaches_the_descriptor() {
         catalogue(r#"roles = [role(name = "ingest", directory_name = "demo-ingest")],"#);
     let roles = &demo(&catalogue).declared_roles;
     assert_eq!(roles.len(), 1);
-    assert_eq!(roles[0].directory_name.as_deref(), Some("demo-ingest"));
+    assert_eq!(roles[0].directory_name, "demo-ingest");
+}
+
+#[test]
+fn a_directory_name_left_out_defaults_to_the_gear_and_the_role() {
+    // The default needs the gear's id, which is projected from Rust, so it
+    // cannot live in the constructor -- and every reader wants the resolved
+    // name rather than a rule for deriving one.
+    let catalogue = catalogue(r#"roles = [role(name = "ingest")],"#);
+    let roles = &demo(&catalogue).declared_roles;
+    assert_eq!(roles[0].directory_name, "demo-ingest");
+}
+
+#[test]
+fn one_role_may_be_the_front_door_and_two_may_not() {
+    // The bare name reaching exactly one role is what makes an internal role
+    // unreachable structurally rather than by a filter.
+    let one = catalogue(r#"roles = [role(name = "dispatcher", directory_name = "demo")],"#);
+    assert!(
+        !codes(&one).contains(&DiagnosticCode::GdlDuplicateFrontDoor),
+        "{:?}",
+        codes(&one)
+    );
+
+    let two = catalogue(
+        r#"roles = [
+               role(name = "dispatcher", directory_name = "demo"),
+               role(name = "other", directory_name = "demo"),
+           ],"#,
+    );
+    let d = two
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::GdlDuplicateFrontDoor)
+        .expect("GBX0117");
+    assert!(
+        d.message.contains("dispatcher") && d.message.contains("other"),
+        "{}",
+        d.message
+    );
+}
+
+#[test]
+fn every_role_being_internal_is_allowed() {
+    // A gear with no front door is a shape the platform's model permits: not
+    // every role-split gear has a public face.
+    let catalogue = catalogue(r#"roles = [role(name = "ingest"), role(name = "delivery")],"#);
+    assert!(
+        !codes(&catalogue).contains(&DiagnosticCode::GdlDuplicateFrontDoor),
+        "{:?}",
+        codes(&catalogue)
+    );
 }

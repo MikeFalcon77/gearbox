@@ -162,24 +162,33 @@ impl EndpointDecl {
     }
 }
 
-/// A role declared in a description but not resolvable.
+/// One differentiated shape a gear runs in, and the name it registers under.
 ///
-/// Kept so a description written for a future runtime survives round-tripping,
-/// and excluded from resolution entirely. A worker's directory identity is a
-/// single name fixed in its binary with no configuration override, which is
-/// exactly what role-qualified registration would need.
+/// A role is a directory registration name: instances of one role answer to it
+/// and a bare-name lookup reaches only whichever role claims the gear's own id.
+/// That is the platform's model (ADR `cpt-cf-adr-instance-addressable-discovery`),
+/// and `gear.gdl` is the manifest it asks for and never defines
+/// (ADR `cpt-gearbox-adr-role-qualified-names`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct DeclaredRole {
+    /// The value the gear's own mode selector accepts.
     pub name: String,
 
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub directory_name: Option<String>,
+    /// What an instance of this role registers under.
+    ///
+    /// Always present by the time it reaches here: the description may leave it
+    /// out, and lowering fills in `<gear-id>-<name>`. Resolved rather than
+    /// optional because every reader wants the name, and deriving it in each of
+    /// them is one derivation too many.
+    pub directory_name: String,
 
-    #[serde(default)]
-    pub sharded: bool,
-
-    #[serde(default)]
-    pub instance_addressable: bool,
+    /// The label *keys* an instance of this role registers under.
+    ///
+    /// Keys, not values: a value is per-instance -- a `StatefulSet` ordinal, a
+    /// topic pattern -- and belongs to the deployment. The key is a fact about
+    /// the gear.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub labels: BTreeSet<String>,
 }
 
 /// The shape of one configuration value, to the precision a control needs.
@@ -702,12 +711,13 @@ impl GearDescriptor {
         !self.declared_roles.is_empty()
     }
 
-    /// Whether any declared role asks for sharding or per-instance addressing.
+    /// Whether any declared role registers under a label.
+    ///
+    /// Which is per-instance addressing by another name: a label is how one
+    /// instance of a role is told apart from its peers.
     #[must_use]
-    pub fn declares_shards(&self) -> bool {
-        self.declared_roles
-            .iter()
-            .any(|r| r.sharded || r.instance_addressable)
+    pub fn declares_labels(&self) -> bool {
+        self.declared_roles.iter().any(|r| !r.labels.is_empty())
     }
 }
 

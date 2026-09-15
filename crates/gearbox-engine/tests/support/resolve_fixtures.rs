@@ -378,9 +378,8 @@ pub fn gear_with_roles(id: &str, roles: &[&str]) -> GearDescriptor {
         .iter()
         .map(|name| gearbox_ir::DeclaredRole {
             name: (*name).to_owned(),
-            directory_name: Some(format!("{id}-{name}")),
-            sharded: false,
-            instance_addressable: false,
+            directory_name: format!("{id}-{name}"),
+            labels: std::collections::BTreeSet::new(),
         })
         .collect();
     gear

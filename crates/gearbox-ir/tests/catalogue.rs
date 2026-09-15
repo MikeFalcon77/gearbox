@@ -409,21 +409,29 @@ fn endpoints_distinguish_binding_from_being_mounted() {
 }
 
 #[test]
-fn declared_roles_are_carried_but_flagged() {
+fn declared_roles_are_carried_and_a_label_is_flagged() {
     let mut g = gear("event-broker", &[], &[]);
     assert!(!g.declares_unsupported());
+    assert!(!g.declares_labels());
+
+    g.declared_roles.push(DeclaredRole {
+        name: "dispatcher".to_owned(),
+        directory_name: "event-broker".to_owned(),
+        labels: BTreeSet::new(),
+    });
+
+    // A role on its own asks for nothing this tool cannot write: it is a name.
+    assert!(g.declares_unsupported());
+    assert!(!g.declares_labels());
 
     g.declared_roles.push(DeclaredRole {
         name: "ingest".to_owned(),
-        directory_name: Some("event-broker-ingest".to_owned()),
-        sharded: true,
-        instance_addressable: true,
+        directory_name: "event-broker-ingest".to_owned(),
+        labels: BTreeSet::from(["shard".to_owned()]),
     });
 
-    // Carried for forward compatibility, and flagged so the refusal diagnostics
-    // attach. Resolution ignores them entirely.
-    assert!(g.declares_unsupported());
-    assert!(g.declares_shards());
+    // A label is what the generated `oop_http` section has no field for.
+    assert!(g.declares_labels());
 
     let round: GearDescriptor = serde_json::from_str(&serde_json::to_string(&g).unwrap()).unwrap();
     assert_eq!(round.declared_roles, g.declared_roles);

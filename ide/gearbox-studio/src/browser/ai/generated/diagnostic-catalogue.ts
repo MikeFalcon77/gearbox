@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 83, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 84, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -152,6 +152,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "error",
     domain: "gdl",
     docs: "A credential written into the description, where it would be committed.\n\nAn error rather than a rewrite: replacing the value would leave the\noriginal in the `.gdl` file, which is the place the requirement names.\nThe author has to take it out, and the help says what to write instead.",
+    requiresEvidence: false,
+  },
+  GBX0117: {
+    code: "GBX0117",
+    title: "two roles claim the gear's own name",
+    severity: "error",
+    domain: "gdl",
+    docs: "Two roles claim the gear's own id as their directory name.\n\nA role registers under its own name, and the one that registers under\nthe gear's bare id is the front door: a bare-name lookup reaches it and\nonly it. That guarantee is structural rather than a filter -- an\ninternal role is unreachable by the bare name because it was never\nregistered under one -- and it holds only while exactly one role claims\nit. Two, and a bare-name lookup round-robins over two different\nservices.\n\nZero is allowed and ordinary: a gear whose roles are all internal has no\nfront door, which is a shape the platform's model permits.",
     requiresEvidence: false,
   },
   GBX0206: {

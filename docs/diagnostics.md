@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **83**.
+Codes: **84**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -37,6 +37,7 @@ Codes: **83**.
 | [GBX0114](#gbx0114) | warning | config key is derived from the topology and cannot be set here |
 | [GBX0115](#gbx0115) | error | config key is not declared by the gear |
 | [GBX0116](#gbx0116) | error | a credential is written into the description |
+| [GBX0117](#gbx0117) | error | two roles claim the gear's own name |
 
 ### GBX0101
 
@@ -193,6 +194,23 @@ A credential written into the description, where it would be committed.
 An error rather than a rewrite: replacing the value would leave the
 original in the `.gdl` file, which is the place the requirement names.
 The author has to take it out, and the help says what to write instead.
+
+### GBX0117
+
+**two roles claim the gear's own name**
+
+Two roles claim the gear's own id as their directory name.
+
+A role registers under its own name, and the one that registers under
+the gear's bare id is the front door: a bare-name lookup reaches it and
+only it. That guarantee is structural rather than a filter -- an
+internal role is unreachable by the bare name because it was never
+registered under one -- and it holds only while exactly one role claims
+it. Two, and a bare-name lookup round-robins over two different
+services.
+
+Zero is allowed and ordinary: a gear whose roles are all internal has no
+front door, which is a shape the platform's model permits.
 
 ## `GBX02xx` — Cross-checking a description against Rust
 
