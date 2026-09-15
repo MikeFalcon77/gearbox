@@ -46,6 +46,7 @@ fn source_id() -> SourceId {
 fn gear(id: &str, deps: &[&str], caps: &[RuntimeCap]) -> GearDescriptor {
     let ident = id.replace('-', "_");
     GearDescriptor {
+        one_per_installation: false,
         id: gid(id),
         display_name: id.to_owned(),
         description: None,

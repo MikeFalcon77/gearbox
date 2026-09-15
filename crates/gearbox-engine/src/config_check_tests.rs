@@ -26,6 +26,7 @@ fn field(name: &str, ty: ConfigFieldType) -> ConfigFieldDecl {
 /// A catalogue of one gear exposing three fields of different shapes.
 fn catalogue() -> Catalogue {
     let mut gear = GearDescriptor {
+        one_per_installation: false,
         config_schema: Some(ConfigSchema {
             rust: "DemoConfig".to_owned(),
             fields: vec![
@@ -53,6 +54,7 @@ fn catalogue() -> Catalogue {
 
 fn demo_descriptor() -> GearDescriptor {
     GearDescriptor {
+        one_per_installation: false,
         id: GearId::new("demo").unwrap(),
         display_name: "Demo".to_owned(),
         description: None,

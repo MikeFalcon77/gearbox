@@ -91,6 +91,15 @@ vendor_selector?: string | null,
  */
 declared_roles?: Array<DeclaredRole>, 
 /**
+ * Whether only one of this gear may run in an installation.
+ *
+ * Projected from `#[toolkit::gear(one_per_installation = ...)]`. The
+ * runtime cannot enforce it -- a process refuses a second `rest_host`
+ * because it sees its own gears, and no process sees another -- so the
+ * refusal is this tool's (ADR `cpt-gearbox-adr-one-per-installation`).
+ */
+one_per_installation?: boolean, 
+/**
  * The Cargo features the gear's own crate declares.
  *
  * Projected from its `Cargo.toml`, because `use_gear(..., features = [...])`

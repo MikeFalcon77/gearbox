@@ -35,6 +35,7 @@ pub fn source() -> SourceId {
 /// case rather than inherited from a fixture.
 pub fn descriptor(id: &str) -> GearDescriptor {
     GearDescriptor {
+        one_per_installation: false,
         id: gid(id),
         display_name: id.to_owned(),
         description: None,

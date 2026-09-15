@@ -338,6 +338,7 @@ pub fn merge(
         fills: plugin.fills.clone(),
         vendor_selector: plugin.vendor_selector.clone(),
         declared_roles,
+        one_per_installation: projected.one_per_installation,
         // Projected from the crate's own `Cargo.toml`, uncurated, beside the
         // description's curation of it; see `features.rs` for why both are kept.
         available_features,

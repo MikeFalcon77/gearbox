@@ -62,6 +62,18 @@ pub struct ProjectedGear {
     /// description restates it as `consume(from_ = ...)`, and until this field
     /// existed nothing could tell the two apart.
     pub consumes: Vec<crate::contract::ProjectedConsume>,
+
+    /// Whether only one of this gear may run in an installation.
+    ///
+    /// A fact about the gear with no capability behind it: the closed set of
+    /// seven each stands for a trait the macro asserts, and there is no trait
+    /// behind "one of me". Nor is it the per-process rule `RestHost` and
+    /// `GrpcHub` carry -- a process can refuse a second of those because it
+    /// sees its own gears, and no process sees another.
+    ///
+    /// So the runtime cannot enforce it and this tool must
+    /// (ADR `cpt-gearbox-adr-one-per-installation`).
+    pub one_per_installation: bool,
 }
 
 /// A `lifecycle(...)` clause: a bare flag, or `key = value` pairs.
@@ -143,6 +155,10 @@ impl Parse for GearArgs {
                     out.client_trait = Some(path_to_string(&path));
                 }
 
+                "one_per_installation" => {
+                    out.one_per_installation = input.parse::<syn::LitBool>()?.value;
+                }
+
                 // Read and discarded: an arbitrary Rust expression with no
                 // product meaning.
                 "ctor" => {
@@ -220,3 +236,7 @@ pub fn project_gear(site: &crate::attribute::AttributeSite<'_>) -> syn::Result<P
     projected.conditional = has_cfg(site.item_attrs);
     Ok(projected)
 }
+
+#[cfg(test)]
+#[path = "gear_tests.rs"]
+mod gear_tests;
