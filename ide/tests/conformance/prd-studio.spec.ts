@@ -76,8 +76,14 @@ async function acceptEdit(page: import("@playwright/test").Page): Promise<void> 
  * gigabytes of `target/`; a suite that wipes it costs a rebuild every run. One
  * file is also the stronger assertion -- it proves the plan is accurate per file
  * rather than merely non-empty.
+ *
+ * Named after the *application*, which under `dev` is the product: the embedded
+ * profile builds exactly one application and it is the whole product, so it
+ * carries the product's name. This said `api-gateway` -- the anchor gear -- for
+ * a while after that changed, and nothing caught it, because this suite had not
+ * run in thirty-one commits and a Playwright spec is typechecked by nothing.
  */
-const REGENERABLE = "config/api-gateway.yaml";
+const REGENERABLE = "config/payments-demo.yaml";
 
 const STUDIO_SRC = join(__dirname, "../../gearbox-studio/src");
 

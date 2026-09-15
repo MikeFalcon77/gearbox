@@ -258,8 +258,11 @@ test.describe("what the tool may write", () => {
     // was a place in the UI to open one.
     await openProduct(studio.page, "dev");
     await openGenerate(studio.page);
+    // `payments-demo`, not `api-gateway`: under `dev` there is one application
+    // and it is the whole product, so it is named after the product rather than
+    // after its anchor gear.
     await studio.page
-      .locator('[data-plan-path="apps/api-gateway/src/registered_gears.rs"]')
+      .locator('[data-plan-path="apps/payments-demo/src/registered_gears.rs"]')
       .click();
     // The preview is a diff editor, so `.monaco-editor` matches three hosts
     // (gutter, original, modified). The header lives on the proposed side.
