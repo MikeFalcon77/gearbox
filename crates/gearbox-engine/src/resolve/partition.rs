@@ -109,6 +109,7 @@ pub fn partition(
                     ApplicationKind::Host,
                     name,
                     None,
+                    None,
                     &mut used_names,
                 ));
             }
@@ -448,6 +449,7 @@ fn split(
                 ApplicationKind::Host,
                 name,
                 None,
+                None,
                 used_names,
             ));
         }
@@ -466,11 +468,29 @@ fn split(
                 ApplicationKind::Worker,
                 name,
                 pin.map(|p| p.replicas),
+                pin.and_then(|p| directory_name_of(catalogue, p)),
                 used_names,
             ));
         }
     }
     applications
+}
+
+/// The directory name a pinned role registers under.
+///
+/// `None` when the pin names no role, which is every application that deploys
+/// a gear undifferentiated -- and then the anchor's own id is what it
+/// registers as. A role the anchor does not declare is refused separately
+/// (`report_unknown_roles`), so a miss here needs no second complaint.
+fn directory_name_of(catalogue: &Catalogue, pin: &gearbox_ir::ApplicationPin) -> Option<String> {
+    let role = pin.role.as_deref()?;
+    catalogue
+        .gears
+        .get(&pin.anchor)?
+        .declared_roles
+        .iter()
+        .find(|r| r.name == role)
+        .map(|r| r.directory_name.clone())
 }
 
 fn is_forced_out(scoped: &ProfileScoped<'_>, isolates: &BTreeSet<GearId>, gear: &GearId) -> bool {
@@ -623,6 +643,11 @@ fn report_embedded_violations(
 }
 
 /// Build one process from its gear set.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is a distinct fact the application records; a bundle would be named after \
+              this function and explain nothing"
+)]
 fn build(
     catalogue: &Catalogue,
     anchor: GearId,
@@ -630,11 +655,13 @@ fn build(
     kind: ApplicationKind,
     name: ApplicationId,
     replicas: Option<u32>,
+    directory_name: Option<String>,
     used_names: &mut BTreeSet<String>,
 ) -> ResolvedApplication {
     used_names.insert(name.to_string());
 
     ResolvedApplication {
+        directory_name,
         rest_host: gears
             .iter()
             .find(|g| has_cap(catalogue, g, RuntimeCap::RestHost))

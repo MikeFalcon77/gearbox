@@ -306,18 +306,24 @@ pub struct ResolvedApplication {
 
     /// The gear whose co-location closure defines this application.
     ///
-    /// For a worker this is also its directory identity, verbatim -- and the
-    /// reason is here rather than in the runtime. `generate::rust` writes this
-    /// name into `worker_main.rs` as a literal, and `OopRunOptions::gear_name`
-    /// is a plain `String` that takes whatever it is given. The name is fixed in
-    /// the binary because we fixed it.
-    ///
-    /// What roles need is a second application for the same anchor, and `split`
-    /// in `resolve::partition` finds a pin rather than filtering for all of
-    /// them: one gear yields one application, so one gear yields one directory
-    /// name. That is the limitation, and it is ours
-    /// (ADR `cpt-gearbox-adr-role-qualified-names`).
+    /// The closure key, and only that. It used to double as the worker's
+    /// directory identity, which is why roles had nowhere to go; `directory_name`
+    /// carries that fact now.
     pub anchor: GearId,
+
+    /// What a worker registers under in the directory.
+    ///
+    /// Absent means the anchor's own id, which is every application that
+    /// deploys no role -- so a lock without roles is byte-identical to one
+    /// written before this field existed. Present when a role was pinned, and
+    /// then it is that role's `directory_name`.
+    ///
+    /// `generate::rust` writes it into `worker_main.rs` as a literal and
+    /// `OopRunOptions::gear_name` takes whatever it is given, so this is the
+    /// one place the name is decided (ADR
+    /// `cpt-gearbox-adr-role-qualified-names`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory_name: Option<String>,
 
     /// The gears in this binary, in dependency order.
     ///
@@ -389,6 +395,18 @@ impl ResolvedApplication {
     #[must_use]
     pub fn contains(&self, gear: &GearId) -> bool {
         self.gears.contains(gear)
+    }
+
+    /// The name this application registers under.
+    ///
+    /// One accessor rather than the rule repeated at each reader: absent means
+    /// the anchor's own id, which is what every application that deploys no
+    /// role registers under.
+    #[must_use]
+    pub fn registers_as(&self) -> &str {
+        self.directory_name
+            .as_deref()
+            .unwrap_or_else(|| self.anchor.as_str())
     }
 
     #[must_use]
