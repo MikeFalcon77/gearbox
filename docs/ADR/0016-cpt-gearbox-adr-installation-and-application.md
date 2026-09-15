@@ -243,6 +243,19 @@ taste: extend the macro when the corpus produces a case that is **not**
 derivable from caps. It has not. Plugins are covered by GBX0514, and
 `types-registry` is ubiquitous by frequency rather than by constraint.
 
+> **Amendment 2026-09-15: the condition above has been met, and the macro is
+> extended.** A gear that may exist only once in an installation --
+> `gear-orchestrator`, whose directory is one process's in-memory map -- is not
+> derivable from capabilities. The set is closed at seven, each backed by a
+> trait the gear macro asserts, so an eighth would need a trait invented for it;
+> and the property is about the installation rather than the process, which is a
+> different quantifier from `is_process_singleton`. So
+> `#[toolkit::gear(one_per_installation = true)]` is added and projected, exactly
+> as this decision said should happen in this case. See ADR
+> `cpt-gearbox-adr-one-per-installation`, which also records why the intuitive
+> form of the constraint -- "linked into at most one application" -- is the wrong
+> question.
+
 **Features are two problems and the order matters.** They were being discarded
 entirely — `GearSelection.features` was read by nothing — which is fixed, and
 had to be first, because scoping a value that is thrown away would be scoping
