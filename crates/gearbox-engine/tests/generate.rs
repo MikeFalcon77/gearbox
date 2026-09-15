@@ -1999,32 +1999,3 @@ fn a_hand_written_crate_in_the_output_root_is_not_an_orphan() {
         outcome.diagnostics
     );
 }
-
-#[test]
-fn a_role_qualified_directory_name_reaches_the_binary() {
-    // The one reader of `ResolvedApplication` that wants the directory identity
-    // rather than the closure key. The runtime takes this field as given, so
-    // this literal is where the name is decided -- and it is a role's name, not
-    // the anchor's, whenever a role was deployed.
-    let Some((mut lock, source_roots)) = resolve("prod") else {
-        return;
-    };
-    let worker = lock
-        .applications
-        .iter_mut()
-        .find(|a| a.is_worker())
-        .expect("the kubernetes profile has a worker");
-    let name = worker.name.clone();
-    worker.directory_name = Some("api-contracts-ingest".to_owned());
-
-    let files = generate_tree(&lock, &source_roots, &out_root());
-
-    let main = text(&files.files, &format!("apps/{name}/src/main.rs"));
-    assert!(
-        main.contains(r#"gear_name: "api-contracts-ingest".to_owned()"#),
-        "the role's directory name, verbatim: {main}"
-    );
-    // And nothing else moved: the crate, the path and the binary are still the
-    // application's, because a role is a registration name and not a crate.
-    assert!(main.contains("run_oop_with_options"), "{main}");
-}

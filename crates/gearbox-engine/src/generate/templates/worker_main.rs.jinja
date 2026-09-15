@@ -66,9 +66,8 @@ async fn main() -> Result<()> {
     // lose the directory and leave every remote binding unresolvable.
     let options = OopRunOptions {
         // The directory identity, verbatim. The runtime takes it from this field
-        // with no configuration override, so the name is decided where the lock
-        // is written -- the anchor's own id, or a role's directory name when a
-        // role was deployed.
+        // with no configuration override, which is why the lock records the
+        // anchor rather than deriving a name here.
         gear_name: "{{ gear_name }}".to_owned(),
         verbose: cli.verbose,
         config_path: cli.config,

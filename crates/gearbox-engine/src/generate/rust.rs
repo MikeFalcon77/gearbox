@@ -63,7 +63,7 @@ pub fn worker_main(
             application => application.name.as_str(),
             bin_name => application.bin_name.as_str(),
             gear_count => application.gears.len(),
-            gear_name => application.registers_as(),
+            gear_name => application.anchor.as_str(),
             version => input.lock.product.version.as_str(),
         },
     )?;
