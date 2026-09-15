@@ -101,6 +101,41 @@ checkable and the citation does not support the conclusion.
 > **One gear → N role-named workloads is unexpressible because Gearbox builds
 > one application per anchor gear, not because the runtime refuses a name.**
 
+> **Amendment 2026-09-16: the cardinality rule is not only in the resolver, and
+> that is worth knowing before anyone relaxes it.** Two places downstream also
+> hold one-per-anchor, and neither would fail loudly:
+>
+> * `generate::config::write_spawns` builds the host's spawn table as
+>   `gears.entry(spawn.gear.to_string())` -- a map keyed by gear id, because the
+>   runtime's configuration shape is one `gears.<id>.runtime` section per gear. A
+>   second application on the same anchor would find the existing entry and
+>   **silently overwrite** its `executable_path` and `args`. One worker would be
+>   started instead of two, with no diagnostic anywhere. This is a limit of the
+>   platform's config format, not of this tool, so relaxing the resolver first
+>   would produce a lock that describes two workloads and a host that starts one.
+> * `gearbox-lock`'s `canonical` sorts spawns by `.gear` alone. `sort_by` is
+>   stable, so two spawns with equal keys leave the lock's bytes dependent on the
+>   resolver's push order -- exactly the determinism risk this ADR's Confirmation
+>   section names, located.
+>
+> Half of the relaxation has landed meanwhile: `resolve::profile` keys the
+> duplicate-pin check on `(anchor, role)`, so two role-bearing pins on one anchor
+> are no longer `GBX0110`. `split` still builds one of them, and `GBX0318` says
+> so rather than pretending otherwise.
+>
+> **The `mode` half needs no new mechanism and is not a gap.** This decision
+> assigns the writing of a gear's mode to the product, through `use_gear(config =
+> {...})`, and that works for as long as one role is deployable. A generator
+> layer becomes necessary only with the cardinality change, because
+> `ResolvedGear.config` is keyed per gear rather than per application
+> (`resolve::product`) -- so two role applications of one gear would receive the
+> same value from the description and could not differ. When that layer is
+> needed it goes into `gears.<anchor>.config.<key>` as a fifth writer after
+> `write_spawns`, and the key it writes is findable without a new declaration:
+> the exposed `ConfigFieldType::Enum` field whose variants cover every declared
+> role name. GBX0119 now checks that correspondence in the other direction, so
+> the two halves of the join are already held together.
+
 ADR-0009 requires the opposite for Kubernetes — *"each role-name maps to its own
 Service"* — so the requirement and the limitation are both ours to reconcile.
 
@@ -328,16 +363,56 @@ affected, and the order between them is load-bearing.
   ADR-0010 tier 0 raises the cost of the first one: *a preview is not optional*,
   so a role the scaffold can write must be visible in the file plan before
   anything is written. The Inspector and a conformance claim follow.
+
+  > **Amendment 2026-09-16: the first two steps of §5's ordering are done.** That
+  > order is *this ADR, then `gear_globals`, then the scaffold hint, then the
+  > Inspector*, and the signature it was waiting on has settled: `role(name,
+  > directory_name?, labels)`, with `name` now checked against the gear's
+  > projected config enum (GBX0119) and `directory_name` against the kebab rule
+  > every other identifier obeys (GBX0118). So the remaining two are unblocked
+  > and are features rather than debt. Nothing has to be typed for them: the
+  > generated bindings already carry `ApplicationRole`, `DeclaredRole`,
+  > `ResolvedApplication.role` and `GearDescriptor.declared_roles`, and the
+  > frontend reads none of the four -- every `role` in its hand-written
+  > TypeScript is an ARIA attribute.
 * **`ResolvedApplication.anchor` stops being two facts.** Either a
   `directory_name` joins it or `anchor` is documented as the closure key alone.
   Either way `LOCK_SCHEMA_VERSION` moves, every `lock_hash` moves, and
   `gearbox-lock`'s structural diff gains a field. The doc comment is wrong *now*,
   before any of that.
+
+  > **Amendment 2026-09-16: done, and the schema did not have to move.** `anchor`
+  > is documented as the closure key alone, `role: Option<ApplicationRole>` joins
+  > it, and `registers_as()` is the one place that answers "what does this
+  > register as". Because the field is `skip_serializing_if = "Option::is_none"`,
+  > a lock with no roles serializes byte-identically to a pre-role lock -- so
+  > `LOCK_SCHEMA_VERSION` stayed where it was and no `lock_hash` moved. The third
+  > prediction in this bullet was simply wrong, and cheaply so.
+  >
+  > **One correction this ADR has to make about itself.** It also said "the chart
+  > names the Service after the directory name", and that claim reached
+  > `ApplicationRole`'s doc comment, where it survived until someone acted on it.
+  > It is false. A `directory_name` is an entry in the gears directory; a Service
+  > name is what cluster DNS resolves, and every static endpoint in a lock is
+  > built from the *subchart* by `resolve::partition::cluster_dns` as
+  > `http://{subchart}.{namespace}.svc.cluster.local`. Naming the Service after
+  > the role points every consumer at a name that answers nothing. The demo said
+  > so on the first run: `registers_as()` falls back to the anchor, so `audit` --
+  > an application with no role at all -- got a Service named
+  > `api-contracts-consumer`. `service_name` and `name` are two template keys
+  > because they are two lookups, not because one is unfinished.
 * **Application naming does a plausible wrong thing under roles.** `derive_name`
   names an application after its anchor and `unique` resolves a collision by
   appending `-2`, so two unpinned roles of one gear produce `event-broker` and
   `event-broker-2` — names that look right and are not the ones ADR-0009
   requires. The dedup path must be unreachable for roles.
+
+  > **Amendment 2026-09-16: unreachable today, and not because it was made so.**
+  > `partition::split` still builds one application per anchor -- `worker_anchors`
+  > is a set and the pin is looked up rather than filtered for -- so a second role
+  > has no application to be named. The hazard arrives with the cardinality
+  > change, not before it, and this bullet is a prerequisite of that work rather
+  > than an outstanding defect.
 * **Relaxing the cardinality rule relaxes a check that catches a real mistake.**
   ADR-0014's groundwork records that `ApplicationPin` does not go through
   `claim()` and duplicates surface only after narrowing. Two pins on one anchor
