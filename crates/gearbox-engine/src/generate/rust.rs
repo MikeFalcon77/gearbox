@@ -95,6 +95,13 @@ pub fn worker_main(
             bin_name => application.bin_name.as_str(),
             gear_count => application.gears.len(),
             gear_name => application.registers_as(),
+            // The anchor's own id, and deliberately not `registers_as()`. A role
+            // changes the name an instance registers under, not the section the
+            // gear reads its configuration from -- `GearCtx::config()` keys that
+            // by the `#[toolkit::gear(name = ...)]` attribute. Passing one string
+            // for both filed the host's rendered config under a key the gear
+            // never looks up.
+            config_gear_name => application.anchor.as_str(),
             roles => roles_of(input, application),
             version => input.lock.product.version.as_str(),
         },

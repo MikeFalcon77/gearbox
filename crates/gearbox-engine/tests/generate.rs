@@ -2365,3 +2365,58 @@ fn a_role_does_not_rename_the_service_the_lock_dials() {
         );
     }
 }
+
+#[test]
+fn the_generated_worker_separates_what_it_registers_as_from_what_it_reads_by() {
+    // Two identities, and they were one string. An instance registers under its
+    // role's directory name; the gear reads `gears.<gear-id>.config`, because
+    // that key comes from the `#[toolkit::gear(name = ...)]` attribute. With one
+    // field for both, the host's rendered configuration was filed under the
+    // role's name while the gear read its own -- so `TOOLKIT_MODULE_CONFIG` was
+    // inert under any role and nothing said so.
+    let Some((mut lock, source_roots)) = resolve("prod") else {
+        return;
+    };
+    let worker = lock
+        .applications
+        .iter_mut()
+        .find(|a| a.is_worker())
+        .expect("the kubernetes profile has a worker");
+    let name = worker.name.clone();
+    let anchor = worker.anchor.as_str().to_owned();
+
+    // Without a role the two agree, and the generated file says so explicitly
+    // rather than leaving one to a default.
+    let plain = generate_tree(&lock, &source_roots, &out_root());
+    let main = text(&plain.files, &format!("apps/{name}/src/main.rs"));
+    assert!(
+        main.contains(&format!(r#"const DEFAULT_GEAR_NAME: &str = "{anchor}";"#))
+            && main.contains(&format!(r#"const CONFIG_GEAR_NAME: &str = "{anchor}";"#)),
+        "{main}"
+    );
+
+    // With one they differ, and the config key is the anchor's own id.
+    let worker = lock
+        .applications
+        .iter_mut()
+        .find(|a| a.is_worker())
+        .expect("the worker");
+    worker.role = Some(gearbox_ir::ApplicationRole {
+        name: "cluster_ingest".to_owned(),
+        directory_name: "api-contracts-ingest".to_owned(),
+    });
+    let files = generate_tree(&lock, &source_roots, &out_root());
+    let main = text(&files.files, &format!("apps/{name}/src/main.rs"));
+    assert!(
+        main.contains(r#"const DEFAULT_GEAR_NAME: &str = "api-contracts-ingest";"#),
+        "the registration name follows the role:\n{main}"
+    );
+    assert!(
+        main.contains(&format!(r#"const CONFIG_GEAR_NAME: &str = "{anchor}";"#)),
+        "the config key stays the anchor's own id:\n{main}"
+    );
+    assert!(
+        main.contains("config_gear_name: Some(CONFIG_GEAR_NAME.to_owned())"),
+        "and it is passed, not left to follow the registration name:\n{main}"
+    );
+}

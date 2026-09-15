@@ -58,6 +58,15 @@ const ROLES: &[(&str, &str)] = &[
 /// What this deployment registers under when `--role` is not given.
 const DEFAULT_GEAR_NAME: &str = "{{ gear_name }}";
 
+/// The `gears.<key>` section this process reads its configuration from.
+///
+/// The anchor gear's own id, and not the name above. Those are the same string
+/// for a gear that runs in one shape, and they are not for a role: an instance
+/// registers as its role's directory name while the gear still reads
+/// `gears.<gear-id>.config`, because that is the key `GearCtx::config()` uses
+/// and it comes from the `#[toolkit::gear(name = ...)]` attribute.
+const CONFIG_GEAR_NAME: &str = "{{ config_gear_name }}";
+
 /// Resolve the directory name this process registers under.
 fn directory_name(requested: Option<&str>) -> Result<String> {
     let Some(role) = requested else {
@@ -111,6 +120,12 @@ async fn main() -> Result<()> {
         // name is decided here -- from `--role` when a role is asked for, and
         // otherwise from what this deployment was generated for.
         gear_name: directory_name(cli.role.as_deref())?,
+        // And the configuration identity, which is a different one. Left to
+        // default it follows `gear_name`, which is wrong the moment a role makes
+        // the two differ: the host's rendered config would be filed under the
+        // role's name and the gear would read its own, so the override would
+        // silently not arrive.
+        config_gear_name: Some(CONFIG_GEAR_NAME.to_owned()),
         verbose: cli.verbose,
         config_path: cli.config,
         version: Some("{{ version }}".to_owned()),
