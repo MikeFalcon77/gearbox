@@ -967,6 +967,29 @@ fn create_product(state: &mut State, id: RequestId, params: &CreateProductParams
         );
     }
 
+    // **The ids, before anything touches the filesystem.** This function stamped
+    // whatever arrived: an empty box wrote `id = ""` and a destination of
+    // `products//product.gdl`, and a single space wrote `id = " "` into a product
+    // that then resolved clean with no diagnostics -- a product whose identity is
+    // a space, and nothing on the way in said no. `SourceId::new` is built
+    // eighty lines below for the literal `"product"`, so the validator was
+    // already here for a value that could not be wrong, and absent for the two
+    // that come from a person.
+    if let Err(refusal) = gearbox_ir::ProductId::new(params.id.trim()) {
+        return error(
+            id,
+            error_code::EDIT_REFUSED,
+            &format!("{refusal}; a product id looks like `payments-demo`"),
+        );
+    }
+    if let Err(refusal) = gearbox_ir::ProfileId::new(params.profile_id.trim()) {
+        return error(
+            id,
+            error_code::EDIT_REFUSED,
+            &format!("{refusal}; a profile id looks like `dev`"),
+        );
+    }
+
     let requested = PathBuf::from(&params.path);
     let parent_input = requested
         .parent()

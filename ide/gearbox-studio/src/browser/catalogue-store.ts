@@ -300,6 +300,31 @@ export class CatalogueStore implements GearboxClient {
   }
 
   /**
+   * Forget the product session and put the engine back on its boot roots.
+   *
+   * **Because closing a product used to leave its roots in force for the rest of
+   * the session.** `initialize` is what sets the engine's source roots and its
+   * write boundary, and nothing called it again when a product closed -- so a
+   * product that declared this checkout as a source left the checkout a source
+   * root permanently, and every later `create` under `<checkout>/products/...`
+   * was refused with "is inside a source root". The first create in a session
+   * worked and the second did not, and the only cure anyone found was to open a
+   * different product whose sources happened to exclude the checkout.
+   *
+   * ADR-0013 says start-screen create "runs against the repository workspace the
+   * engine already knows from boot ... not against an open product session".
+   * This is the call that makes closing return to that state.
+   *
+   * `undefined` rather than a constructed session: `initialize` reads an absent
+   * session -- and an empty `roots` -- as "use the CLI defaults", which is
+   * exactly the boot state and saves this from restating what those defaults are.
+   */
+  async resetToBootSession(): Promise<void> {
+    this.session = undefined;
+    return this.queued(() => this.doLoad(undefined));
+  }
+
+  /**
    * Re-read the source roots **without restarting the engine**.
    *
    * `load()` respawns, because `initialize` is what changes the roots and the

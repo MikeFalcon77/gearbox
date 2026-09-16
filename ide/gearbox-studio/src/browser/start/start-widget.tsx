@@ -240,12 +240,40 @@ export class StartWidget extends ReactWidget {
     );
   }
 
+  /**
+   * Prefill the wizard to clone this product.
+   *
+   * **From the folder name, not from the label.** `ProductRef.label` is a
+   * repository-relative *path* by that field's own contract, and this built the
+   * id out of it by replacing spaces -- so cloning `payments-demo` from Home
+   * offered the id `products/payments-demo/product.gdl-copy`, the name
+   * `products/payments-demo/product.gdl copy`, and a destination of
+   * `.../products/products/payments-demo/product.gdl-copy/product.gdl`. Three
+   * wrong defaults from one field read as though it were a name.
+   *
+   * The ref carries no id or name -- it is `{path, label}` and nothing else --
+   * so the folder the description sits in is the best identity available here,
+   * and it is the one discovery itself uses to find products. Sanitised to the
+   * id rule the wizard and the engine both apply, and left for the person to
+   * correct: the wizard now refuses to create on a bad id rather than stamping
+   * it.
+   */
   protected openClone(ref: ProductRef): void {
-    const base = ref.label.replace(/\s+/g, "-").toLowerCase();
+    const folder = ref.path
+      .replace(/\\/g, "/")
+      .replace(/\/product\.gdl$/i, "")
+      .split("/")
+      .filter((part) => part !== "")
+      .pop();
+    const base = (folder ?? "product")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    const id = base === "" ? "product" : base;
     this.pending.state = {
       cloneFrom: ref.path,
-      id: `${base}-copy`,
-      name: `${ref.label} copy`,
+      id: `${id}-copy`,
+      name: `${id} copy`,
     };
     void this.commands.executeCommand(NEW_PRODUCT.id);
   }

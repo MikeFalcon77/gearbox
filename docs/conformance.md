@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **174** — 169 built, 1 not built, 0 broken, 4 not observed.
+Claims: **177** — 172 built, 1 not built, 0 broken, 4 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -127,9 +127,12 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Claim | Source | Status | Note |
 |---|---|---|---|
 | Create shows preview text, Cancel writes nothing, Create opens the product | `ADR-0013 §Confirmation` | ✅ built |  |
+| a second product can be created after the first is closed | `ADR-0013 §Where the file is created` | ✅ built |  |
 | Clone Git reviews the checkout before it creates anything | `ADR-0013 §Amendment: clone review` | ✅ built |  |
 | mode selector is visible on New Product from Start | `ADR-0013 amendment` | ✅ built |  |
 | the destination is choosable, and sources are relative to it | `ADR-0013 §Amendment: destination picker` | ✅ built |  |
+| a root containing the destination is not offered as a source | `ADR-0013 §Where the file is created` | ✅ built |  |
+| a blank or malformed product id is refused before the preview | `ADR-0013 §Confirmation` | ✅ built |  |
 | Clone Local stamps version into the preview | `ADR-0013 amendment` | ✅ built |  |
 | Clone keeps the source comment line count | `ADR-0013 §Confirmation` | ✅ built |  |
 | Create Gear declares its folder as a source and adds the gear | `ADR-0013 §Amendment: create for a product` | ✅ built |  |

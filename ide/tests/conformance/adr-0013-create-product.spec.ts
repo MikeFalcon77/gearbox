@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import {
   expect,
+  expectContext,
   openAdvancedKeys,
   openProduct,
   revealCatalogue,
@@ -37,6 +38,27 @@ async function acceptPreview(page: import("@playwright/test").Page): Promise<voi
   });
   await expect(dialog).toBeVisible();
   await dialog.locator(".theia-button.main").click();
+}
+
+/**
+ * Take the destination the wizard suggests, explicitly.
+ *
+ * The field opens empty with the suggestion as its placeholder -- ADR-0013 says
+ * the destination "must not silently take the first workspace root", and it used
+ * to be pre-filled with exactly that. Every flow that does not care *where* the
+ * product goes still has to say so, which is the point.
+ *
+ * **Call this after setting the id.** The suggestion contains the id, and filling
+ * the field marks it chosen -- so calling this first pins the destination to
+ * `products/new-product/` and a later id change does not move it. Which is how
+ * this helper first left a `products/new-product` behind while the test's own
+ * cleanup removed a directory of a different name.
+ */
+async function chooseSuggestedDestination(page: import("@playwright/test").Page): Promise<void> {
+  const destination = page.locator("[data-create-destination]");
+  const suggested = await destination.getAttribute("placeholder");
+  expect(suggested ?? "", "the wizard must suggest a destination").not.toBe("");
+  await destination.fill(suggested ?? "");
 }
 
 function removeProductDir(id: string): void {
@@ -74,9 +96,13 @@ test.describe("create and clone a product", () => {
 
     await openCreateWizard(page);
     await expect(page.locator('[data-create-modes] [data-create-mode="blank"]')).toBeVisible();
-    await expect(page.locator(".gbx-create-preview")).toContainText("product(");
+    // The destination is chosen, not assumed, so there is nothing to preview
+    // until one is -- see the destination-picker claim below.
+    await expect(page.locator(".gbx-create-preview")).toContainText("Choose a destination");
     await page.locator("[data-create-id]").fill(id);
     await page.locator("[data-create-name]").fill("Conformance Create");
+    await chooseSuggestedDestination(page);
+    await expect(page.locator(".gbx-create-preview")).toContainText("product(");
     await expect(page.locator(".gbx-create-preview")).toContainText(`id = "${id}"`, {
       timeout: 10_000,
     });
@@ -88,6 +114,7 @@ test.describe("create and clone a product", () => {
     await openCreateWizard(page);
     await page.locator("[data-create-id]").fill(id);
     await page.locator("[data-create-name]").fill("Conformance Create");
+    await chooseSuggestedDestination(page);
     await expect(page.locator(".gbx-create-preview")).toContainText(`id = "${id}"`, {
       timeout: 10_000,
     });
@@ -96,6 +123,66 @@ test.describe("create and clone a product", () => {
 
     await expect(page.locator("[data-resolved-profile]")).toBeVisible({ timeout: 60_000 });
     expect(existsSync(join(REPO, "products", id, "product.gdl"))).toBe(true);
+  });
+
+  /**
+   * Creating, closing, and creating again all work in one session.
+   *
+   * **The reported symptom was that the second create is impossible.** A Blank
+   * product created with the wizard's default source selection declared this
+   * checkout as one of its sources -- the wizard checked every workspace root,
+   * and the first is the checkout that contains `products/`. Creating it
+   * succeeded, because at boot the engine's roots are the corpus only. It then
+   * opened the product, and opening re-initialises the engine with the roots the
+   * description declares, so the checkout became a source root. Closing never
+   * re-initialised, so it stayed one: every later create under
+   * `<checkout>/products/...` was refused with "is inside a source root",
+   * unchecking the box in the next wizard changed nothing, and the only cure was
+   * opening some other product whose sources happened to exclude the checkout.
+   *
+   * ADR-0013: "Start-screen create runs against the repository workspace the
+   * engine already knows from boot -- not against an open product session."
+   * Two halves make that true, and this claim fails if either regresses: the
+   * wizard no longer offers a root that contains the destination, and
+   * `ProductSessionService.close` returns the engine to its boot roots.
+   */
+  test("a second product can be created after the first is closed [ADR-0013 §Where the file is created]", async ({
+    freshStudio,
+  }) => {
+    const first = "conformance-first";
+    const second = "conformance-second";
+    const { page } = freshStudio;
+
+    try {
+      await settled(page);
+
+      for (const productId of [first, second]) {
+        await openCreateWizard(page);
+        await page.locator("[data-create-id]").fill(productId);
+        await page.locator("[data-create-name]").fill(productId);
+        await chooseSuggestedDestination(page);
+        await expect(page.locator(".gbx-create-preview")).toContainText(`id = "${productId}"`, {
+          timeout: 15_000,
+        });
+
+        // The refusal this claim is about was raised by the dry run, so it would
+        // be in the pane instead of a product.
+        await expect(page.locator(".gbx-create-preview")).not.toContainText(
+          "inside a source root",
+        );
+
+        await page.locator("[data-create-submit]").click();
+        await acceptPreview(page);
+        await expect(page.locator("[data-resolved-profile]")).toBeVisible({ timeout: 60_000 });
+        expect(existsSync(join(REPO, "products", productId, "product.gdl"))).toBe(true);
+
+        await runCommand(page, "Close Product");
+        await expectContext(page, "home");
+      }
+    } finally {
+      removeProductDir(first);
+      removeProductDir(second);
+    }
   });
 
   test(
@@ -137,6 +224,16 @@ test.describe("create and clone a product", () => {
         const create = page.locator("[data-create-submit]");
         await expect(create).toBeDisabled();
 
+        // **The other gates satisfied up front, so that what follows is about
+        // the review and nothing else.** Create needs an id and a destination
+        // too -- the destination because ADR-0013 forbids assuming one -- and a
+        // claim about the review has to hold those constant or it cannot tell
+        // which gate it is observing.
+        await page.locator("[data-create-id]").fill(cloned);
+        await page.locator("[data-create-name]").fill("Cloned From Git");
+        await chooseSuggestedDestination(page);
+        await expect(create, "an id and a destination are not a checkout").toBeDisabled();
+
         await page.locator("[data-clone-git-url]").fill(origin);
         await expect(review).toBeEnabled();
         // Still nothing to create from: a URL is a thing a person typed, and a
@@ -176,8 +273,6 @@ test.describe("create and clone a product", () => {
         // workspace and every source root -- correctly -- and Create failed
         // after a clone that had worked. A review step that does not end in a
         // product is a review of nothing.
-        await page.locator("[data-create-id]").fill(cloned);
-        await page.locator("[data-create-name]").fill("Cloned From Git");
         await expect(page.locator(".gbx-create-preview")).toContainText(`id = "${cloned}"`, {
           timeout: 30_000,
         });
@@ -227,6 +322,20 @@ test.describe("create and clone a product", () => {
     await expect(browse).toBeVisible();
     await expect(browse).toBeEnabled();
 
+    // **Nothing is chosen yet, and the wizard says so rather than guessing.**
+    // The ADR's sentence is "It must not silently take the first workspace
+    // root", and the field used to open pre-filled with exactly that, computed
+    // by index -- so Create could be pressed without anybody choosing a folder.
+    // The suggestion is a placeholder now, which keeps it visible and one click
+    // from `Choose…` without letting it stand in for a decision.
+    const destination = page.locator("[data-create-destination]");
+    await expect(destination).toHaveValue("");
+    await expect(destination).toHaveAttribute("placeholder", /\/products\/.*\/product\.gdl$/);
+    await expect(
+      page.locator("[data-create-submit]"),
+      "a create with no destination is a create against the first workspace root",
+    ).toBeDisabled();
+
     // What the picker is *for*, asserted without opening a modal this suite would
     // then have to close: the description's own directory decides how `sources`
     // are written. `relativeSource` used to rebuild the default path and measure
@@ -236,6 +345,11 @@ test.describe("create and clone a product", () => {
       const preview = await page.locator(".gbx-create-preview").innerText();
       return /at = path\("([^"]+)"\)/.exec(preview)?.[1] ?? "";
     };
+    const chosen = (await destination.getAttribute("placeholder")) ?? "";
+    expect(chosen, "the wizard must suggest somewhere").not.toBe("");
+    await destination.fill(chosen);
+    await expect(page.locator("[data-create-submit]")).toBeEnabled();
+
     await expect
       .poll(async () => (await sourceAt()).length, { timeout: 15_000 })
       .toBeGreaterThan(0);
@@ -249,13 +363,80 @@ test.describe("create and clone a product", () => {
       /^\//,
     );
 
-    const destination = page.locator("[data-create-destination]");
-    const original = await destination.inputValue();
-    await destination.fill(original.replace(/\/product\.gdl$/, "/deeper/product.gdl"));
+    await destination.fill(chosen.replace(/\/product\.gdl$/, "/deeper/product.gdl"));
 
     // One directory further down is one `../` further up. Equality would mean the
     // destination is decoration.
     await expect.poll(async () => await sourceAt(), { timeout: 15_000 }).toBe(`../${shallow}`);
+  });
+
+  /**
+   * The root the product lands in is not offered as one of its sources.
+   *
+   * **This is where the "blocked forever" bug started.** The wizard pre-checked
+   * every workspace root, and the first of them is this checkout, which contains
+   * `products/`. A product declaring its own home as a source cannot be written
+   * -- `writable_out_root` refuses any path inside a source root -- but the first
+   * create in a session succeeded anyway, because at boot the engine's roots are
+   * the corpus only. It then *opened* the new product, which re-initialised the
+   * engine with the roots that product declared, and from then on every create
+   * under `<checkout>/products/...` was refused with "is inside a source root".
+   */
+  test("a root containing the destination is not offered as a source [ADR-0013 §Where the file is created]", async ({
+    freshStudio,
+  }) => {
+    const { page } = freshStudio;
+    await settled(page);
+    await openCreateWizard(page);
+
+    const destination = page.locator("[data-create-destination]");
+    const inside = (await destination.getAttribute("placeholder")) ?? "";
+    expect(inside).not.toBe("");
+    await destination.fill(inside);
+
+    // The checkout contains the suggested destination, so it must be refused as
+    // a source; the corpus is a sibling and must still be offered.
+    const unusable = page.locator("[data-create-source][data-source-unusable='true']");
+    await expect(unusable).toHaveCount(1);
+    await expect(unusable.locator("input")).toBeDisabled();
+    await expect(unusable.locator("input")).not.toBeChecked();
+
+    const usable = page.locator("[data-create-source]:not([data-source-unusable='true'])");
+    expect(await usable.count(), "the corpus is a sibling and stays selectable").toBeGreaterThan(0);
+    await expect(usable.first().locator("input")).toBeEnabled();
+  });
+
+  test("a blank or malformed product id is refused before the preview [ADR-0013 §Confirmation]", async ({
+    freshStudio,
+  }) => {
+    const { page } = freshStudio;
+    await settled(page);
+    await openCreateWizard(page);
+
+    const destination = page.locator("[data-create-destination]");
+    await destination.fill((await destination.getAttribute("placeholder")) ?? "");
+
+    const id = page.locator("[data-create-id]");
+    const submit = page.locator("[data-create-submit]");
+    const preview = page.locator(".gbx-create-preview");
+
+    // A single space used to be written as `id = " "`, and the product it made
+    // opened and resolved with no diagnostics at all.
+    // Two refusals, worded for what is wrong: nothing there at all, or something
+    // there that is not an id.
+    await id.fill(" ");
+    await expect(submit).toBeDisabled();
+    await expect(preview).toContainText("needs an id", { timeout: 15_000 });
+
+    for (const bad of ["Demo", "demo_product", "de--mo"]) {
+      await id.fill(bad);
+      await expect(submit).toBeDisabled();
+      await expect(preview).toContainText("is not a product id", { timeout: 15_000 });
+    }
+
+    await id.fill("conformance-id-ok");
+    await expect(submit).toBeEnabled();
+    await expect(preview).toContainText("conformance-id-ok", { timeout: 15_000 });
   });
 
   test("Clone Local stamps version into the preview [ADR-0013 amendment]", async ({
@@ -267,6 +448,7 @@ test.describe("create and clone a product", () => {
     await openCreateWizard(page);
     await page.locator('[data-create-modes] [data-create-mode="clone-local"]').click();
     await page.locator("[data-clone-path]").fill(DEMO);
+    await chooseSuggestedDestination(page);
     await page.locator("[data-create-version]").fill("9.9.9");
     await expect(page.locator(".gbx-create-preview")).toContainText(`version = "9.9.9"`, {
       timeout: 15_000,
@@ -285,6 +467,7 @@ test.describe("create and clone a product", () => {
     await openCreateWizard(page);
     await page.locator('[data-create-modes] [data-create-mode="clone-local"]').click();
     await page.locator("[data-clone-path]").fill(DEMO);
+    await chooseSuggestedDestination(page);
     await expect
       .poll(async () => commentLines(await page.locator(".gbx-create-preview").innerText()), {
         timeout: 15_000,

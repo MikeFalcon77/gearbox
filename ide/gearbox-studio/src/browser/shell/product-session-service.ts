@@ -295,6 +295,21 @@ export class ProductSessionService {
     // answer. `ProductStore.clear` drops the resolution, the diagnostics, the
     // lock, the selection and the profile together.
     this.products.clear();
+
+    // **And the engine, which the store cannot clear.** The product's declared
+    // source roots are the engine's roots until something calls `initialize`
+    // again, and closing never did -- so a product that named this checkout as a
+    // source made the whole checkout a source root for the rest of the session,
+    // and `create` under `<checkout>/products/...` was refused from then on.
+    // ADR-0013 puts start-screen create against the boot workspace; this is what
+    // returns to it.
+    //
+    // Not awaited before returning `true`: the close itself has happened, the
+    // reset is a background restoration, and making the Close button wait on an
+    // engine respawn would trade a real delay for a state nobody is looking at
+    // yet. Failures land on the catalogue's own status, which is where every
+    // other load failure is reported.
+    void this.catalogue.resetToBootSession();
     return true;
   }
 

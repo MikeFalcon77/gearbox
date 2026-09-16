@@ -147,17 +147,14 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
     if (state?.id !== undefined) this.productId = state.id;
     if (state?.name !== undefined) this.name = state.name;
     this.destinationTouched = false;
-    this.destination = this.defaultProductPath();
+    this.destination = "";
     void this.refreshPreview();
     this.update();
   }
 
   protected async refreshRoots(): Promise<void> {
     this.roots = this.workspace.tryGetRoots().map((r) => r.resource.path.fsPath());
-    this.selectedRoots = new Set(this.roots);
-    if (!this.destinationTouched) {
-      this.destination = this.defaultProductPath();
-    }
+    this.selectedRoots = new Set(this.selectableRoots());
     await this.refreshPreview();
     this.update();
   }
@@ -166,14 +163,79 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
     return this.workspace.tryGetRoots()[0]?.resource.path.fsPath() ?? "";
   }
 
-  protected defaultProductPath(): string {
+  /**
+   * Where the product would go, shown as a hint and never installed as a value.
+   *
+   * **ADR-0013: "The wizard asks for a destination folder. It must not silently
+   * take the first workspace root."** It did: this string was written into the
+   * field on open, on every root refresh, and on every keystroke in the id box,
+   * and `productPath()` fell back to it when the field was blank -- so a person
+   * could finish a create without ever choosing a folder, and what they got was
+   * `tryGetRoots()[0]`, chosen by index. It is a placeholder now, so the
+   * suggestion is still visible and one click away via `Choose…`, and pressing
+   * Create without a destination is not possible.
+   */
+  protected suggestedProductPath(): string {
     const root = this.workspaceRoot();
-    return `${root}/products/${this.productId}/product.gdl`.replace(/\\/g, "/");
+    const id = this.productId.trim() === "" ? "new-product" : this.productId.trim();
+    return `${root}/products/${id}/product.gdl`.replace(/\\/g, "/");
   }
 
+  /** The chosen path, or `""` when nothing has been chosen. Never a guess. */
   protected productPath(): string {
-    const trimmed = this.destination.trim();
-    return trimmed === "" ? this.defaultProductPath() : trimmed.replace(/\\/g, "/");
+    return this.destination.trim().replace(/\\/g, "/");
+  }
+
+  /**
+   * Why this product id is not usable, or `undefined` when it is.
+   *
+   * Mirror of `gearbox_ir::ProductId` -- `validate_kebab` -- which now refuses
+   * the same values at the `gearbox/product/create` boundary. Stated twice
+   * because one is a form and the other is a protocol, the arrangement
+   * `isSecretConfigKey` already has with `is_secret_config_key`: the engine has
+   * to refuse whatever any client sends, and the form has to say so before a
+   * person presses Create.
+   *
+   * There was no check on either side. An empty box produced `id = ""` and a
+   * destination of `products//product.gdl`; a single space produced `id = " "`
+   * and a product that opened and resolved with no diagnostics at all.
+   */
+  protected idRefusal(): string | undefined {
+    const id = this.productId.trim();
+    if (id === "") return "A product needs an id. Something like `payments-demo`.";
+    if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(id)) {
+      return `\`${id}\` is not a product id: lowercase letters, digits and single hyphens, starting with a letter. Something like \`payments-demo\`.`;
+    }
+    return undefined;
+  }
+
+  /**
+   * The roots this product may declare as sources, given where it lands.
+   *
+   * **A root that contains the destination cannot be one of its sources.**
+   * `writable_out_root` refuses any path inside a source root -- ADR-0013 says
+   * so and ADR-0010 tier 5 is why: generation must not write next to
+   * human-authored crates. So a product whose own folder sits inside a declared
+   * source is a product that cannot be written, and the wizard was pre-selecting
+   * exactly that: it checked *every* workspace root, and the first of those is
+   * this checkout, which contains `products/`.
+   *
+   * The consequence was not a refused create but a poisoned session. The first
+   * create succeeded -- at boot the engine's roots are the corpus only -- and
+   * opened the new product, which re-initialised the engine with the roots that
+   * product declared, this checkout among them. From then on every create under
+   * `<checkout>/products/...` was refused, unchecking the box in a later wizard
+   * changed nothing, and the only cure was opening a product whose sources
+   * happened to exclude the checkout. `CatalogueStore.resetToBootSession` closes
+   * the other half of that; this closes the half that starts it.
+   *
+   * With no destination chosen yet, nothing is excluded: there is no containment
+   * to test against, and the checkboxes are inert until the field is filled.
+   */
+  protected selectableRoots(): string[] {
+    const dir = this.productDir();
+    if (dir === "") return [...this.roots];
+    return this.roots.filter((root) => !contains(root, dir));
   }
 
   /** The directory the description lands in -- `productPath()` minus the file. */
@@ -523,6 +585,22 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
       this.update();
       return;
     }
+    // **A preview needs a destination, because the destination decides the
+    // answer.** `sources` are written relative to the description's own folder,
+    // so a preview against a guessed path is a preview of a different product.
+    // The field is empty until somebody chooses; this says so rather than
+    // previewing the suggestion and letting it be mistaken for the choice.
+    if (this.productPath() === "") {
+      this.preview = `Choose a destination. Suggested: ${this.suggestedProductPath()}`;
+      this.update();
+      return;
+    }
+    const refusal = this.idRefusal();
+    if (refusal !== undefined) {
+      this.preview = refusal;
+      this.update();
+      return;
+    }
     try {
       const result = await this.service.createProduct(
         this.createParams(this.mode === "clone-local" ? this.cloneFrom : undefined, true),
@@ -569,6 +647,7 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
     const folder = uri.path.fsPath().replace(/\\/g, "/").replace(/\/+$/, "");
     this.destinationTouched = true;
     this.destination = `${folder}/product.gdl`;
+    this.selectedRoots = new Set(this.selectableRoots());
     this.schedulePreview();
   }
 
@@ -677,9 +756,6 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
               disabled={!connected}
               onChange={(e) => {
                 this.productId = e.target.value;
-                if (!this.destinationTouched) {
-                  this.destination = this.defaultProductPath();
-                }
                 this.schedulePreview();
               }}
             />
@@ -714,10 +790,14 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
               <input
                 data-create-destination
                 value={this.destination}
+                placeholder={this.suggestedProductPath()}
                 disabled={!connected}
                 onChange={(e) => {
                   this.destinationTouched = true;
                   this.destination = e.target.value;
+                  // Which roots may be sources depends on where the product
+                  // lands, so the selection follows the destination.
+                  this.selectedRoots = new Set(this.selectableRoots());
                   this.schedulePreview();
                 }}
               />
@@ -735,21 +815,40 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
           {this.mode === "blank" ? (
             <div className="gbx-create-sources">
               <div>sources</div>
-              {this.roots.map((root) => (
-                <label key={root}>
-                  <input
-                    type="checkbox"
-                    checked={this.selectedRoots.has(root)}
-                    disabled={!connected}
-                    onChange={() => {
-                      if (this.selectedRoots.has(root)) this.selectedRoots.delete(root);
-                      else this.selectedRoots.add(root);
-                      this.schedulePreview();
-                    }}
-                  />
-                  {root}
-                </label>
-              ))}
+              {this.roots.map((root) => {
+                // A root that contains the destination cannot be a source of the
+                // product going into it -- see `selectableRoots`. Offered and
+                // refused is worse than not offered: the refusal arrives from
+                // the engine three steps later, and unchecking it afterwards
+                // does not undo what the first successful create already did to
+                // the session.
+                const usable = this.selectableRoots().includes(root);
+                return (
+                  <label
+                    key={root}
+                    data-create-source={root}
+                    data-source-unusable={usable ? undefined : "true"}
+                    title={
+                      usable
+                        ? undefined
+                        : "The product lands inside this root, and generation must not write next to human-authored crates."
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      checked={usable && this.selectedRoots.has(root)}
+                      disabled={!connected || !usable}
+                      onChange={() => {
+                        if (this.selectedRoots.has(root)) this.selectedRoots.delete(root);
+                        else this.selectedRoots.add(root);
+                        this.schedulePreview();
+                      }}
+                    />
+                    {root}
+                    {!usable && <span className="gbx-id"> — contains the destination</span>}
+                  </label>
+                );
+              })}
             </div>
           ) : (
             <p className="gbx-create-sources-note" data-clone-sources-note>
@@ -764,8 +863,14 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
               // A mode that clones needs something to clone *from*, and for git
               // that is a review rather than a URL: a URL is a thing a person
               // typed, and a review is a checkout that exists.
+              // A destination and a usable id are the two things create cannot
+              // invent: the ADR forbids assuming the first workspace root, and
+              // the engine refuses an id that is blank or not kebab-case. Both
+              // are said in the preview pane; this is what stops the press.
               disabled={
                 !connected ||
+                this.productPath() === "" ||
+                this.idRefusal() !== undefined ||
                 (cloning && this.mode === "clone-local" && !this.cloneFrom) ||
                 (this.mode === "clone-git" && this.clone.status !== "reviewing")
               }
@@ -846,4 +951,20 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
     // steal the front from a Gearbox surface, and this wizard was one.
     void this.commands.executeCommand(SHOW_PRODUCT.id);
   }
+}
+
+/**
+ * Whether `dir` is `root` or sits underneath it.
+ *
+ * Segment-wise rather than a `startsWith` on the string: `/a/products-old` does
+ * not sit inside `/a/products`, and a prefix test says it does. Both sides are
+ * normalised to forward slashes and stripped of a trailing one, which is the
+ * same shape `relativeSource` works in.
+ */
+function contains(root: string, dir: string): boolean {
+  const normalise = (p: string): string => p.replace(/\\/g, "/").replace(/\/+$/, "");
+  const a = normalise(root);
+  const b = normalise(dir);
+  if (a === "" || b === "") return false;
+  return b === a || b.startsWith(`${a}/`);
 }

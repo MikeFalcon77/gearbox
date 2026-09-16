@@ -193,6 +193,24 @@ id_newtype! {
 }
 
 id_newtype! {
+    /// A product's stable machine identity, as `product(id = ...)` declares it.
+    ///
+    /// **Added as a validator before it is a field type.** `ProductIntent.id` is
+    /// still a `String`, and retyping it would make every existing `product.lock`
+    /// re-validate on read -- a migration, not a fix. What was missing was any
+    /// check at all: `gearbox/product/create` stamped whatever arrived, so a
+    /// wizard with an empty box wrote `id = ""` with a destination of
+    /// `products//product.gdl`, and a single space wrote `id = " "` and resolved
+    /// clean with no diagnostics. The same function built a validated `SourceId`
+    /// eleven lines away.
+    ///
+    /// Kebab-case like the others, which is what the existing corpus already
+    /// uses (`payments-demo`) and what the wizard's own default (`new-product`)
+    /// looks like.
+    ProductId, kind = "product id", validate = validate_kebab
+}
+
+id_newtype! {
     /// A deployment profile declared in `product.gdl`.
     ///
     /// A Gearbox concept, not a runtime type: the runtime has no

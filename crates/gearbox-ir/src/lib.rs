@@ -35,8 +35,8 @@ pub use explain::{
 };
 pub use fileset::{FileAction, FileEntry, FileKind, FilePlan, FileSet, Ownership};
 pub use ids::{
-    ApplicationId, CapabilityId, ContractId, GearId, IdError, NodeId, ProfileId, ProviderId,
-    RelPath, RequirementId, SourceId,
+    ApplicationId, CapabilityId, ContractId, GearId, IdError, NodeId, ProductId, ProfileId,
+    ProviderId, RelPath, RequirementId, SourceId,
 };
 pub use intent::{
     ApplicationPin, BindingIntent, BindingMode, ClusterScopeIntent, ConfigValue,

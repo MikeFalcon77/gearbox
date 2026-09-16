@@ -74,6 +74,67 @@ fn create_params(path: &Path, clone_from: Option<String>) -> CreateProductParams
     }
 }
 
+/// Ids are checked before anything is created, and before the path is.
+///
+/// **Neither id was checked at all.** `create_product` stamped whatever arrived,
+/// so an empty box produced `id = ""` with a destination of
+/// `products//product.gdl`, and a single space produced `id = " "` in a product
+/// that then opened and resolved with no diagnostics -- a product whose identity
+/// is a space. The same function built a validated `SourceId` for the literal
+/// `"product"` eighty lines further down, so the validator was present for the
+/// value that could not be wrong and missing for the two that come from a person.
+///
+/// Checked before `writable_out_root` on purpose: a refusal that also created a
+/// directory would be a refusal with a side effect.
+#[test]
+fn a_blank_or_malformed_id_is_refused_before_anything_is_written() {
+    let tmp = scratch("product-id");
+    let workspace = tmp.join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let target = workspace.join("products").join("demo").join("product.gdl");
+
+    for bad in ["", " ", "Demo", "demo_product", "-demo", "demo-", "de--mo", "1demo"] {
+        let mut params = create_params(&target, None);
+        params.id = bad.to_owned();
+        let mut state = write_state(workspace.clone());
+        let response = create_product(&mut state, RequestId::from(1), &params);
+        let message = match response.response_result {
+            Err(e) => e.message,
+            Ok(_) => panic!("`{bad}` must not be accepted as a product id"),
+        };
+        assert!(
+            message.contains("product id"),
+            "`{bad}`: the refusal must name what was wrong: {message}"
+        );
+        assert!(
+            !target.exists(),
+            "`{bad}`: nothing may be written for a refused id"
+        );
+    }
+
+    // The profile id goes through the same gate, on the same call.
+    let mut params = create_params(&target, None);
+    params.profile_id = " ".to_owned();
+    let mut state = write_state(workspace.clone());
+    let response = create_product(&mut state, RequestId::from(1), &params);
+    let message = match response.response_result {
+        Err(e) => e.message,
+        Ok(_) => panic!("a blank profile id must not be accepted"),
+    };
+    assert!(message.contains("profile id"), "{message}");
+
+    // And the shape the corpus already uses is accepted, so the rule is not
+    // merely refusing everything.
+    let mut params = create_params(&target, None);
+    params.id = "payments-demo".to_owned();
+    let mut state = write_state(workspace);
+    let response = create_product(&mut state, RequestId::from(1), &params);
+    assert!(
+        response.response_result.is_ok(),
+        "a kebab-case id must be accepted: {response:?}"
+    );
+}
+
 #[test]
 fn missing_dir_plus_dotdot_is_outside_the_workspace() {
     let tmp = scratch("dotdot");
