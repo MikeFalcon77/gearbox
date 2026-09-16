@@ -128,6 +128,53 @@ export interface StudioSession {
   readonly workspace: string;
 }
 
+/**
+ * What the backend sees when it tries to reach the model provider.
+ *
+ * Hand-written rather than generated, because the engine has nothing to do with
+ * it: this is a fact about the Node process Studio's backend runs in, and
+ * `generated/` holds only what crosses the engine's wire.
+ *
+ * **Why this exists at all.** A TLS or DNS failure reaches the chat as the
+ * Anthropic SDK's `APIConnectionError`, whose default message is the bare string
+ * `Connection error.` It carries no status, so Theia has nothing to format and
+ * renders it verbatim, without even a Details expander. The cause chain that
+ * *does* say what happened -- `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`, say -- does
+ * not survive Theia's RPC error serialization, so it has to be read where the
+ * error is born.
+ */
+export interface AiConnectivityResult {
+  /**
+   * Whether the endpoint answered at all.
+   *
+   * **Any HTTP status counts, 401 included.** The question is whether bytes make
+   * the round trip, and the probe deliberately sends no key: it has to work
+   * before a key is configured, and it must not spend one.
+   */
+  readonly ok: boolean;
+  /** The URL probed, after `ANTHROPIC_BASE_URL` is applied. */
+  readonly url: string;
+  /** The status, when there was one. */
+  readonly status?: number;
+  /** The most specific error code in the `cause` chain, e.g. `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`. */
+  readonly code?: string;
+  /** The `cause` chain, outermost first, one entry per link. */
+  readonly detail?: readonly string[];
+  /**
+   * The TLS-relevant environment, because on this failure it is the answer.
+   *
+   * Reported rather than interpreted here: naming what is set lets the reader
+   * recognise their own machine, and keeps the remedy out of a type.
+   */
+  readonly env: {
+    readonly nodeOptions?: string;
+    readonly extraCaCerts?: string;
+    readonly sslCertFile?: string;
+    readonly sslCertDir?: string;
+    readonly nodeVersion: string;
+  };
+}
+
 export const GearboxService = Symbol("GearboxService");
 export interface GearboxService {
   /**
@@ -361,6 +408,17 @@ export interface GearboxService {
     profile?: string,
     out?: string,
   ): Promise<GenerateFileResult>;
+
+  /**
+   * Can this backend reach the model provider?
+   *
+   * Answered here, and not in the frontend, for two reasons: the request that
+   * fails is the backend's, and the browser's `fetch` goes through a different
+   * stack that would answer a different question; and the `cause` chain naming
+   * the real failure is lost crossing the RPC boundary as an error, so it is
+   * turned into data on this side.
+   */
+  checkAiConnectivity(): Promise<AiConnectivityResult>;
 
   dispose(): void;
   setClient(client: GearboxClient | undefined): void;

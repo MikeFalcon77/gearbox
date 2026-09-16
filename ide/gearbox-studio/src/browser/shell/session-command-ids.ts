@@ -108,3 +108,18 @@ export const SHOW_SETTINGS = {
   label: "Gearbox: Settings",
   shortTitle: "Settings",
 };
+
+/**
+ * Ask the backend whether it can reach the model provider.
+ *
+ * Exists because the failure it diagnoses is invisible: a rejected request
+ * reaches the chat as the Anthropic SDK's `Connection error.`, with no status
+ * and therefore nothing to explain itself. Runnable before any key is set --
+ * the probe sends none -- so "is it me or the network" is answerable without
+ * first provoking a failed question.
+ */
+export const CHECK_AI_CONNECTION = {
+  id: "gearbox.ai.checkConnection",
+  label: "Gearbox: Check AI Connection",
+  shortTitle: "Check AI Connection",
+};

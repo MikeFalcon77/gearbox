@@ -46,7 +46,7 @@
     "supervision-smoke": "node scripts/engine-supervision-smoke.mjs",
     "store-smoke": "node scripts/store-smoke.mjs",
     "build": "npm run build --workspace gearbox-studio && npm run build --workspace browser-app",
-    "start:browser": "npm run start --workspace browser-app",
+    "start:browser": "node scripts/start-studio.mjs",
     "conformance": "playwright test",
     "plugins": "npm run download:plugins --workspace browser-app",
     "verify": "npm run engine && npm run smoke && npm run build && npm run supervision-smoke && npm run store-smoke && npm run conformance",

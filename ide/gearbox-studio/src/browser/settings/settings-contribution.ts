@@ -1,4 +1,5 @@
-// `Gearbox: Settings` — one command, and the menu entry for it.
+// `Gearbox: Settings` — one command, and the menu entry for it, plus the
+// connectivity check that belongs beside it.
 //
 // It opens Theia's own settings editor filtered to `gearbox`, which is the whole
 // implementation: `preferences:open` takes an optional query string, and that is
@@ -15,9 +16,12 @@ import { CommonCommands } from "@theia/core/lib/browser";
 import { CommandRegistry, MenuModelRegistry } from "@theia/core";
 import type { CommandContribution, MenuContribution } from "@theia/core";
 import { CommandService } from "@theia/core/lib/common/command";
+import { MessageService } from "@theia/core/lib/common/message-service";
 
+import { GearboxService } from "../../common/protocol";
+import { summariseConnectivity } from "../ai/connectivity-report";
 import { FILE_SETTINGS } from "../menus";
-import { SHOW_SETTINGS } from "../shell/session-command-ids";
+import { CHECK_AI_CONNECTION, SHOW_SETTINGS } from "../shell/session-command-ids";
 
 /** The query the editor opens on. Matches the section's `settings: ["gearbox.*"]`. */
 export const GEARBOX_SETTINGS_QUERY = "gearbox";
@@ -25,11 +29,30 @@ export const GEARBOX_SETTINGS_QUERY = "gearbox";
 @injectable()
 export class SettingsContribution implements CommandContribution, MenuContribution {
   @inject(CommandService) protected readonly commands!: CommandService;
+  @inject(GearboxService) protected readonly service!: GearboxService;
+  @inject(MessageService) protected readonly messages!: MessageService;
 
   registerCommands(registry: CommandRegistry): void {
     registry.registerCommand(SHOW_SETTINGS, {
       execute: () =>
         this.commands.executeCommand(CommonCommands.OPEN_PREFERENCES.id, GEARBOX_SETTINGS_QUERY),
+    });
+
+    // Palette only, no menu entry: this answers a question somebody already has,
+    // and a permanent item for a check that almost always passes is noise in a
+    // menu that is otherwise about doing things.
+    registry.registerCommand(CHECK_AI_CONNECTION, {
+      execute: async () => {
+        const check = await this.service.checkAiConnectivity();
+        const summary = summariseConnectivity(check);
+        // Error rather than info when it fails, because it is one: the operator
+        // asked a yes/no question and the answer is no.
+        if (check.ok) {
+          this.messages.info(summary);
+        } else {
+          this.messages.error(summary);
+        }
+      },
     });
   }
 

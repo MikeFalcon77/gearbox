@@ -32,11 +32,12 @@ import type { LockResult } from "../common/generated/LockResult";
 import type { LogParams } from "../common/generated/LogParams";
 import type { ProductEdit } from "../common/generated/ProductEdit";
 import type { ProductLoadResult } from "../common/generated/ProductLoadResult";
-import type { GitCloneReview, StudioSession } from "../common/protocol";
+import type { AiConnectivityResult, GitCloneReview, StudioSession } from "../common/protocol";
 import type { ResolveResult } from "../common/generated/ResolveResult";
 import type { ValidateResult } from "../common/generated/ValidateResult";
 import type { ProgressParams } from "../common/generated/ProgressParams";
 import { GearboxClient, GearboxService, ProductRef, method } from "../common/protocol";
+import { checkAiConnectivity as probeAiConnectivity } from "./ai-connectivity";
 import { EngineHandle, spawnEngine } from "./gearbox-engine-process";
 
 /**
@@ -551,6 +552,29 @@ export class GearboxServiceImpl implements GearboxService {
       throw new Error(`cannot call ${method}: the engine is not initialized`);
     }
     return engine.request<T>(method, params, PRODUCT_TIMEOUT_MS);
+  }
+
+  /**
+   * Whether this backend can reach the model provider.
+   *
+   * Independent of the engine on purpose: it neither calls `request` nor checks
+   * that a session exists, so it still answers when the engine is dead or was
+   * never initialized. A connectivity check that needs the rest of the system
+   * healthy is a check you cannot run when you need it.
+   */
+  async checkAiConnectivity(): Promise<AiConnectivityResult> {
+    const result = await probeAiConnectivity();
+    // Logged as well as returned: the backend log is where somebody debugging a
+    // start-up problem is already looking, and the chat is not up yet.
+    if (result.ok) {
+      this.logger.info(`gearbox: AI endpoint ${result.url} answered ${result.status}`);
+    } else {
+      this.logger.warn(
+        `gearbox: AI endpoint ${result.url} unreachable: ${result.code ?? "unknown"} ` +
+          `(${(result.detail ?? []).join(" <- ")})`,
+      );
+    }
+    return result;
   }
 
   dispose(): void {

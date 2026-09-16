@@ -240,7 +240,24 @@ npm run start:browser           # http://127.0.0.1:3000
 
 `GEARBOX_ENGINE` and `GEARBOX_ROOT` override the engine binary and the source root. Studio
 opens a multi-root workspace, because the two repositories are siblings and no single folder
-contains both. The AI chat reads `ANTHROPIC_API_KEY` from the backend's environment.
+contains both. The AI chat takes its key from one of two places. Studio's own setting,
+`gearbox.ai.apiKey` (**Gearbox: Settings**), wins; clearing it falls back to
+`ANTHROPIC_API_KEY` in the backend's environment. `npm run start:browser` loads a `.env` at
+the repo root (see [.env.example](.env.example)) for that fallback -- nothing else reads it,
+and a variable already exported in the shell always beats the file. The chat is optional:
+resolving, generating and every diagnostic work without a key, and the chat says so rather
+than failing.
+
+**A corporate CA is a runtime concern too, not just an `npm install` one.** The backend
+reaches the API through Node's global `fetch`, so a broken trust store surfaces in the chat
+as the bare string `Connection error.` -- the Anthropic SDK's message for a rejected
+request, which carries no status to explain itself. Use `NODE_EXTRA_CA_CERTS`, which appends
+to Node's bundled roots. Two ways to get this wrong, both of which empty or replace the
+store rather than extending it, and both of which produce exactly that message:
+`NODE_OPTIONS=--use-openssl-ca` on a Node that bundles its own OpenSSL with no CA store
+configured, and `SSL_CERT_FILE` pointing at a single corporate root, which on Node >= 22
+replaces the whole store. `npm run start:browser` detects the first and warns about the
+second; **Gearbox: Check AI Connection** reports what the backend actually sees.
 
 [ide/README.md](ide/README.md) covers the rest, including the two native modules that must
 compile and the corporate CA `npm install` needs behind a TLS-intercepting proxy.

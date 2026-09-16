@@ -22,6 +22,10 @@ import type { MutableChatRequestModel } from "@theia/ai-chat/lib/common/chat-mod
 import { FrontendLanguageModelRegistry } from "@theia/ai-core";
 import type { LanguageModelRequirement } from "@theia/ai-core";
 
+import { GearboxService } from "../../common/protocol";
+
+import { explainConnectivity, looksLikeTransportFailure } from "./connectivity-report";
+
 import { SHOW_SETTINGS } from "../shell/session-command-ids";
 
 import { ProductGearTool } from "./product-tools";
@@ -85,6 +89,11 @@ export class GearboxChatAgent extends AbstractStreamParsingChatAgent {
   @inject(FrontendLanguageModelRegistry)
   protected readonly models!: FrontendLanguageModelRegistry;
 
+  // Studio's own backend, asked what it can reach when a request dies in the
+  // transport. The chat's provider cannot answer that: it is the thing failing.
+  @inject(GearboxService)
+  protected readonly service!: GearboxService;
+
   /**
    * Refuse in Gearbox's words when there is no model, rather than in Theia's.
    *
@@ -120,5 +129,46 @@ export class GearboxChatAgent extends AbstractStreamParsingChatAgent {
       }
     }
     return super.invoke(request);
+  }
+
+  /**
+   * Replace `Connection error.` with the reason for it.
+   *
+   * **Why `handleError` and not a `try/catch` around `super.invoke`.**
+   * `AbstractChatAgent.invoke` catches its own failures and routes them here
+   * (`chat-agents.js:157-159`), so nothing is thrown out of the call to wrap.
+   *
+   * **Why an extra round trip instead of reading the error.** A transport
+   * failure reaches the frontend having lost everything that identified it: the
+   * Anthropic SDK reports a rejected `fetch` as `APIConnectionError`, whose
+   * default message is the bare string `Connection error.`, and the `cause`
+   * chain holding the real code does not survive Theia's RPC error
+   * serialization. The backend still has both, so it is asked.
+   */
+  protected override handleError(request: MutableChatRequestModel, error: Error): void {
+    if (!looksLikeTransportFailure(error)) {
+      super.handleError(request, error);
+      return;
+    }
+    // Deliberately not awaited: `handleError` is synchronous by contract. The
+    // response is not finalized until `super.handleError` calls `.error()`, so
+    // appending before that still lands in this answer.
+    void this.explainTransportFailure(request, error);
+  }
+
+  protected async explainTransportFailure(
+    request: MutableChatRequestModel,
+    error: Error,
+  ): Promise<void> {
+    try {
+      const check = await this.service.checkAiConnectivity();
+      request.response.response.addContent(
+        new MarkdownChatResponseContentImpl(explainConnectivity(check)),
+      );
+    } catch {
+      // The diagnosis is a courtesy; failing to obtain one must not replace the
+      // original error with a worse one.
+    }
+    super.handleError(request, error);
   }
 }
