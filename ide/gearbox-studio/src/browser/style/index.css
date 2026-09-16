@@ -38,12 +38,13 @@
 .gbx-pending .gbx-row-name { opacity: 0.65; }
 .gbx-waiting { opacity: 0.45; font-style: italic; font-size: 0.9em; }
 
-/* A technical id is secondary, not faint. `opacity: 0.55` on `#DCE6F4` over
-   `#001838` at `0.85em` measured below 4.5:1, and this is the class that carries
-   gear ids, diagnostic codes and product ids -- the strings a person copies. The
+/* A technical id is secondary, not faint. `opacity: 0.55` at `0.85em` measured
+   below 4.5:1 -- on the dark palette it was `#DCE6F4` over `#001838`, and the
+   arithmetic is no kinder on the light one -- and this is the class that carries
+   gear ids, diagnostic codes and product ids, the strings a person copies. Every
    theme has a colour for exactly this role, so the dimming is a *hue* now rather
-   than a transparency, and it stops compounding with the opacity of whatever
-   contains it. */
+   than a transparency: it stops compounding with the opacity of whatever
+   contains it, and each theme states its own value. */
 .gbx-id {
   color: var(--theia-descriptionForeground, var(--theia-foreground));
   font-family: var(--theia-code-font-family); font-size: 0.85em;

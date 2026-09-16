@@ -120,10 +120,11 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
     .to(GdlLanguageContribution)
     .inSingletonScope();
 
-  // Why: Gearbox Studio is a Constructor Fabric product. The color theme, fonts
+  // Why: Gearbox Studio is a Constructor Fabric product. The color themes, fonts
   // and favicon come from constructorfabric.org tokens, registered natively
   // (not as a VS Code theme extension) so they ship with the extension and do
-  // not depend on `download:plugins`.
+  // not depend on `download:plugins`. Two themes: the light one is the default,
+  // the dark one is the same palette read the other way round.
   bind(FabricThemeContribution).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(FabricThemeContribution);
 

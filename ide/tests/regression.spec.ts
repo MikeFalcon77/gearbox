@@ -229,18 +229,51 @@ test.describe("nothing failed quietly", () => {
     expect(real, `unexpected console output:\n${real.join("\n")}`).toEqual([]);
   });
 
-  test("the Fabric theme is the active color theme", async ({ studio }) => {
+  test("the light Fabric theme is the active color theme", async ({ studio }) => {
     const theme = await studio.page.evaluate(() => {
       const bg = getComputedStyle(document.documentElement)
         .getPropertyValue("--theia-editor-background")
         .trim()
         .toLowerCase();
+      const fg = getComputedStyle(document.documentElement)
+        .getPropertyValue("--theia-editor-foreground")
+        .trim()
+        .toLowerCase();
       const bodyClass = document.body.className;
-      return { bg, bodyClass };
+      return { bg, fg, bodyClass };
     });
-    // navy-deep from constructorfabric.org styles.css
-    expect(theme.bg).toMatch(/#001838|rgb\(\s*0,\s*24,\s*56\s*\)/);
-    expect(theme.bodyClass).toContain("vs-dark");
+    expect(theme.bg).toMatch(/#ffffff|#fff\b|rgb\(\s*255,\s*255,\s*255\s*\)/);
+    // navy-deep from constructorfabric.org styles.css, now carrying the text
+    // rather than the background -- which is what makes this the *Fabric* light
+    // theme and not Theia's stock one.
+    expect(theme.fg).toMatch(/#001838|rgb\(\s*0,\s*24,\s*56\s*\)/);
+    // **Both halves, because `"vs-dark"` contains `"vs"`.** A `toContain("vs")`
+    // alone passes under the dark theme too, so it would assert nothing.
+    expect(theme.bodyClass).toContain("vs");
+    expect(theme.bodyClass).not.toContain("vs-dark");
+  });
+
+  test("the dark Fabric theme is still there to switch back to", async ({ studio }) => {
+    // The light default is a default, not a removal: the brand's dark theme is
+    // the one this shell shipped with, and somebody who wants it back must be
+    // able to pick it. Nothing asserted this while there was only one theme.
+    //
+    // Through the picker a person actually uses, rather than through
+    // `ThemeService`: the registry is reachable only from inside the bundle,
+    // and a theme that is registered but absent from this list is not
+    // selectable, which is the thing being claimed.
+    const { page } = studio;
+    await runCommand(page, "Color Theme");
+    const options = page.locator(`.quick-input-list [role="option"]`);
+    await options.first().waitFor({ state: "visible", timeout: 30_000 });
+    const labels = await options.evaluateAll((nodes) =>
+      nodes.map((node) => (node.textContent ?? "").trim()),
+    );
+    await page.keyboard.press("Escape");
+    await page.locator(".quick-input-widget").waitFor({ state: "hidden" });
+
+    expect(labels.join(" | ")).toContain("Gearbox (Fabric Light)");
+    expect(labels.join(" | ")).toContain("Gearbox (Fabric)");
   });
 });
 

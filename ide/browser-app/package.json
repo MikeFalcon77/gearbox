@@ -44,9 +44,10 @@
     "frontend": {
       "config": {
         "applicationName": "Gearbox Studio",
-        "defaultTheme": "gearbox-fabric",
+        "//defaultTheme": "Both keys name the same theme on purpose. `defaultTheme` governs the first paint, before preferences are ready (`ThemeServiceWithDB.loadUserTheme` reads `localStorage.theme ?? defaultTheme`); the `workbench.colorTheme` preference below is registered second, shadows the value derived from this one, and is what `validateActiveTheme` settles on. Moving only this key changes nothing observable; moving only the preference leaves a dark first frame that flips. The dark `gearbox-fabric` stays registered and selectable in the Color Theme picker.",
+        "defaultTheme": "gearbox-fabric-light",
         "preferences": {
-          "workbench.colorTheme": "gearbox-fabric",
+          "workbench.colorTheme": "gearbox-fabric-light",
           "//ai-features": "Theia AI ships off unless something says otherwise. `@theia/ai-ide` is deliberately NOT installed -- it drags puppeteer-core and an AI terminal surface, which ADR-0011 withdrew -- and it is that package that would rebind AIActivationService to be preference-gated. Without it the service defaults to active, so this key is a statement rather than a switch: the shell offers the chat on purpose. The API key is read from ANTHROPIC_API_KEY in the backend's environment and is never written here.",
           "ai-features.AiEnable.enableAI": true,
           "//tool-confirmation": "The eight read tools are pre-approved; `gearbox_toggle_gear` is deliberately absent and so falls back to `defaultToolConfirmation`, which ships as `confirm`. The asymmetry is the ADR-0017 boundary made operational: a read returns engine output and writes nothing, so a per-call dialog in front of it is friction that teaches people to click through dialogs -- which is the habit the write gate depends on them NOT having. The write verb keeps both gates: this one, and the diff dialog `ProductEditService.toggle` shows.",
