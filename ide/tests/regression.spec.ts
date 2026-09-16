@@ -507,6 +507,40 @@ test.describe("the toolbar names only registered commands", () => {
 });
 
 test.describe("a product is a session, not a panel", () => {
+  /**
+   * Closing and reopening works, and that is a claim about the engine.
+   *
+   * **This was a flake in another file for as long as nobody asserted it.**
+   * Closing a product cleared the store but left the engine initialised on that
+   * product's source roots, because nothing called `initialize` again. A later
+   * open could then fail at the "starting the engine on the product's folder"
+   * step, `openRecent` silently dropped the entry, and the shell stayed on Home
+   * -- which surfaced as whichever test happened to run next timing out on
+   * `data-context="product"`, in a describe block with nothing to do with
+   * sessions. Measured: with `CatalogueStore.resetToBootSession` removed the
+   * failure returns in two runs out of two; with it, six runs clean.
+   *
+   * So the behaviour gets a test of its own, next to the other session claims.
+   * A defect whose only alarm is somebody else's flaky test is a defect that
+   * gets attributed to the test.
+   */
+  test("a product closed and opened again opens", async ({ freshStudio }) => {
+    const { page } = freshStudio;
+    await settled(page);
+
+    await openProduct(page, "dev");
+    await expectContext(page, "product");
+
+    await runCommand(page, "Close Product");
+    await expectContext(page, "home");
+
+    // The second open is the whole point: same session, same page, engine now
+    // back on its boot roots rather than the closed product's.
+    await openProduct(page, "dev");
+    await expectContext(page, "product");
+    await expect(page.locator("[data-resolved-profile]")).toBeVisible({ timeout: 60_000 });
+  });
+
   test("closing returns the shell to home and empties the header", async ({ studio }) => {
     // Closing is not "hide the panel": the session ends, so the resolution, the
     // lock, the diagnostics and the selection go with it. A stale resolution

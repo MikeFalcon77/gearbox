@@ -234,17 +234,41 @@ export class ProductSessionService {
   }
 
   /**
-   * Open a remembered product, dropping the entry if it is gone.
+   * Open a remembered product, dropping the entry only if it is gone.
    *
    * A Recent list is the one place where a path is expected to have rotted, and
    * the honest response is to say so and forget it -- not to open an empty panel
-   * and leave the reader wondering. Checked by asking the engine to list what it
-   * can find rather than by touching the filesystem, which the frontend cannot do.
+   * and leave the reader wondering. Which failure counts as rot is the whole
+   * question, and the answer is the stage the open stopped at; see below.
    */
   async openRecent(ref: ProductRef): Promise<boolean> {
     if (await this.open(ref)) return true;
+
+    // **Forget it only when the description itself could not be read.** This
+    // used to forget on *any* failure, which is not what a rotted Recent entry
+    // is: an engine that would not start, or a catalogue that would not load,
+    // says nothing about whether the product is still there -- and deleting the
+    // shortcut to a product you can still see is worse than leaving one that
+    // warns when clicked.
+    //
+    // Found while tracking down a flaky test, and it was the second half of the
+    // same defect: closing a product left the engine on that product's session,
+    // a later open then failed at `workspace`, and this silently dropped the
+    // entry and stayed on Home. `CatalogueStore.resetToBootSession` fixed the
+    // cause; this stops the consequence being destructive when some other
+    // transient takes its place.
+    //
+    // `describe` is the stage that reads the description at this path, so it is
+    // the one that means the path is the problem -- a file that was moved or
+    // deleted fails there, because starting the engine does not require the
+    // product's directory to exist.
+    const failure = this.openingProgress;
+    const unreadable = failure.status === "failed" && failure.stage === "describe";
+    // No second message: `failStage` has already named the step and the reason,
+    // and "it also stayed in Recent" is not news -- staying is what a list does.
+    if (!unreadable) return false;
     await this.forget(ref);
-    this.messages.warn(`${ref.label} could not be opened, so it was removed from Recent.`);
+    this.messages.warn(`${ref.label} could not be read, so it was removed from Recent.`);
     return false;
   }
 
