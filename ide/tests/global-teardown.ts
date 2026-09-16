@@ -17,6 +17,7 @@
 import { join } from "node:path";
 
 import { productsDiff, productsStatus, restoreProducts } from "./fixtures/products-tree";
+import { corpusDiff, corpusStatus, restoreCorpus } from "./fixtures/corpus-files";
 import {
   flushWriteTraces,
   formatWriteTraces,
@@ -27,6 +28,21 @@ import {
 export default async function globalTeardown(): Promise<void> {
   const repo = join(__dirname, "../..");
   await flushWriteTraces();
+  // The corpus first, because its remedy is narrower and its message is
+  // unambiguous: nothing in a normal run should have touched it after the last
+  // test's own `finally`.
+  const dirtyCorpus = corpusStatus(repo);
+  if (dirtyCorpus !== "") {
+    const corpusChanges = corpusDiff(repo);
+    restoreCorpus(repo);
+    throw new Error(
+      `The run left a gear description changed after the last test finished:\n` +
+        `${dirtyCorpus}\n\n${corpusChanges}\n\n` +
+        `The named files have been restored. Two claims rewrite a \`gear.gdl\` on purpose ` +
+        `and put it back; a write that lands after the final hook is a defect.`,
+    );
+  }
+
   const dirty = productsStatus(repo);
   const traces = readWriteTraces();
   const traceBlock = formatWriteTraces(traces);

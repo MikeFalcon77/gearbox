@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { expect, test as base, type Browser, type Locator, type Page } from "@playwright/test";
 
 import { productsDiff, productsStatus, restoreProducts } from "./products-tree";
+import { corpusDiff, corpusStatus, restoreCorpus } from "./corpus-files";
 import {
   appendWriteTrace,
   flushWriteTraces,
@@ -515,6 +516,25 @@ base.afterEach(async ({}, testInfo) => {
       traceBlock +
       `The tree has been restored. Two claims edit a description on purpose and put ` +
       `it back; anything else writing there is the defect this guard exists to name.`,
+  );
+});
+
+// The same question for the gear descriptions this suite edits, one repository
+// over. Separate hook rather than a branch in the one above: the two have
+// different remedies -- that one may remove untracked entries, this one must
+// never touch anything but the files it names -- and a single hook that did both
+// would have to explain which half it was in.
+base.afterEach(async ({}, testInfo) => {
+  const repo = join(__dirname, "../..");
+  const dirty = corpusStatus(repo);
+  if (dirty === "") return;
+  const diff = corpusDiff(repo);
+  restoreCorpus(repo);
+  throw new Error(
+    `"${testInfo.title}" left a gear description changed:\n${dirty}\n\n${diff}\n\n` +
+      `The named files have been restored. Two claims rewrite a \`gear.gdl\` on purpose ` +
+      `and put it back in a \`finally\`; anything else writing there is the defect this ` +
+      `guard exists to name.`,
   );
 });
 

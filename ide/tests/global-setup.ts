@@ -13,6 +13,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { productsStatus, restoreCommand } from "./fixtures/products-tree";
+import { corpusStatus, restoreCorpusCommand } from "./fixtures/corpus-files";
 import { resetWriteTraces } from "./fixtures/write-traces";
 
 /** The newest mtime under a directory tree. */
@@ -93,6 +94,24 @@ export default function globalSetup(): void {
         // wizard while telling the reader to run `git checkout`, which cannot
         // remove one.
         `Commit the edit, or run \`${restoreCommand(dirty)}\` if it is a leftover.`,
+    );
+  }
+
+  // The gear descriptions this suite edits must match HEAD too.
+  //
+  // Same reason as `products/` above, one repository over: two claims rewrite a
+  // `gear.gdl` in the corpus and put it back, and a file already modified when
+  // the suite starts makes an unrelated claim fail. Named files only -- the
+  // corpus is a separate checkout with its own work in progress, so asking
+  // whether *it* is clean would refuse every run on most machines. See
+  // `fixtures/corpus-files.ts`.
+  const dirtyCorpus = corpusStatus(join(IDE, ".."));
+  if (dirtyCorpus !== "") {
+    throw new Error(
+      `A gear description this suite edits differs from HEAD:\n${dirtyCorpus}\n\n` +
+        `Two claims rewrite a \`gear.gdl\` and restore it, and others read the catalogue it ` +
+        `produces.\n` +
+        `Commit the edit, or run \`${restoreCorpusCommand()}\` if it is a leftover.`,
     );
   }
 

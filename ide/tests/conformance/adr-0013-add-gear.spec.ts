@@ -175,11 +175,18 @@ test.describe("Add Gear shows consequences before the write", () => {
       // the declaration states is checkable -- a rule this repository does not
       // have, enforced against a gear that accepts the value, is the
       // `prefix_path` mistake.
+      // **`event-broker`, because `tenant-resolver` has no enum and this claim
+      // needs one.** The second half of it reported `⚪ not observed` for as long
+      // as it existed -- "this gear exposes no enum field, so there is no closed
+      // set to leave" -- which was true of the gear the test happened to pick,
+      // not of the corpus: `event-broker.mode` is a `DeploymentMode`, and
+      // `ux-navigation.spec.ts` already adds that gear. A claim skipped by its
+      // own choice of subject is a claim nobody was watching.
       const { page } = studio;
       await openProduct(page, "dev");
       await revealCatalogue(page);
       await resetCatalogueView(page);
-      await page.locator('[data-toggle-gear="tenant-resolver"]').click();
+      await page.locator('[data-toggle-gear="event-broker"]').click();
       await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
 
       // Folded, and the free-key input is not reachable until it is opened.
@@ -433,6 +440,19 @@ test.describe("Add Gear shows consequences before the write", () => {
   });
 
   test("errors warn beside the button and never disable it", async ({ studio }) => {
+    // **The error is staged on the gear being added, and it has to be.** This
+    // skipped itself for as long as it existed -- "no gear in this corpus makes
+    // the resolution fail when added" -- and the obvious fix does not work:
+    // planting an error in `product.gdl` puts it in the resolution *before* the
+    // add as well, and `impact.ts` subtracts the two sets by `code|message`
+    // precisely so that "a resolution that merely re-reports it has changed
+    // nothing". The warning reads `newDiagnostics`, so the error must be one the
+    // proposal introduces.
+    //
+    // A free config key the gear does not declare is exactly that, and the
+    // mechanism is already recorded next door: a syntactically valid key is
+    // written cleanly and "refused three steps later at resolve, as GBX0115".
+    // Staged, not written -- Cancel ends the test and nothing reaches the file.
     const page = studio.page;
     await configure(page, "tenant-resolver");
     await expect(page.locator("[data-add-gear-impact]")).toBeVisible({ timeout: 60_000 });
@@ -442,15 +462,20 @@ test.describe("Add Gear shows consequences before the write", () => {
     const submit = page.locator("[data-add-gear-submit]");
     await expect(submit).toBeEnabled();
 
+    await openAdvancedKeys(page, "[data-add-gear-config]");
+    await page.locator("[data-add-gear-config-key]").fill("not_a_field_this_gear_reads");
+    await page.locator("[data-add-gear-config-value]").fill("x");
+    await expect(page.locator("[data-config-key-error]")).toHaveCount(0);
+    await page.locator("[data-add-gear-config-add]").click();
+
     const warning = page.locator("[data-add-gear-error-warning]");
-    if ((await warning.count()) === 0) {
-      test.skip(
-        true,
-        "no gear in this corpus makes the resolution fail when added, so the warning cannot be observed here",
-      );
-    }
-    await expect(warning).toBeVisible();
-    await expect(submit).toBeEnabled();
+    await expect(warning, "an error the proposal introduces must be said").toBeVisible({
+      timeout: 60_000,
+    });
+    // The claim itself: it warns and does not take the button away.
+    await expect(submit, "an error in between is a waypoint, not a refusal").toBeEnabled();
+
     await page.locator("[data-add-gear-cancel]").click();
+    await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0);
   });
 });

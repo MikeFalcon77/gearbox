@@ -8,7 +8,28 @@
 // `@theia/markers` is a declared dependency of browser-app and gives the Problems
 // view below -- so the destination exists and nothing writes to it.
 
-import { expect, openConflicts, openProduct, problems, test } from "../fixtures/studio";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+import {
+  expect,
+  openConflicts,
+  openProduct,
+  problems,
+  revealCatalogue,
+  settled,
+  test,
+} from "../fixtures/studio";
+
+const REPO = join(__dirname, "../../..");
+
+/**
+ * A gear description the corpus ships, and the one the guard already watches.
+ *
+ * `fixtures/corpus-files.ts` lists it; editing any other corpus file from a test
+ * means adding it there first, or nothing will notice a file left rewritten.
+ */
+const GEAR_GDL = join(REPO, "../gears-rust/gears/system/api-gateway/gear.gdl");
 
 test.describe("diagnostics reach a person", () => {
   test("the Problems view is present to receive markers [PRD cpt-gearbox-fr-editor-diagnostics]", async ({
@@ -30,7 +51,7 @@ test.describe("diagnostics reach a person", () => {
   });
 
   test("the catalogue panel renders the diagnostics a load produced [PRD cpt-gearbox-fr-editor-diagnostics]", async ({
-    studio,
+    freshStudio,
   }) => {
     // Scoped to the catalogue widget, and that scoping is the point. Unscoped,
     // this test flipped to green the day the Product view landed -- because the
@@ -43,13 +64,48 @@ test.describe("diagnostics reach a person", () => {
     // currently skips on a clean corpus -- a selector that cannot match is a
     // claim that will never observe what it says, and the skip would have hidden
     // that indefinitely.
-    const rendered = studio.page.locator(".gbx-widget-catalogue .gbx-conflict");
-    const count = await rendered.count();
-    test.skip(
-      count === 0,
-      "the gear tree loads clean, so the catalogue rendered no diagnostic to inspect",
+    // **The corpus is made to produce one, because a clean corpus cannot.** This
+    // skipped itself on every run -- "the gear tree loads clean, so the catalogue
+    // rendered no diagnostic to inspect" -- which is a property of the corpus and
+    // not of the panel, so the claim proved nothing for as long as it existed.
+    //
+    // `category` rather than something that fails harder: GBX0108 is a *warning*
+    // (`gear category is not one the platform uses`), so the gear stays in the
+    // catalogue carrying a diagnostic, which is exactly the state this claim is
+    // about. An error could drop the gear and take the row with it.
+    //
+    // Restored in a `finally`, and the restoration is guarded: `global-setup`,
+    // a per-test hook and `global-teardown` all now ask whether this file
+    // matches HEAD (`fixtures/corpus-files.ts`). Before that guard existed a
+    // crash here left the corpus rewritten and nothing said so.
+    const { page } = freshStudio;
+    const original = readFileSync(GEAR_GDL, "utf8");
+    expect(original, "the file this claim rewrites must declare a category").toMatch(
+      /category = "[^"]*"/,
     );
-    expect(await rendered.first().textContent()).toMatch(/GBX\d{4}/);
+
+    try {
+      writeFileSync(
+        GEAR_GDL,
+        original.replace(/category = "[^"]*"/, 'category = "not-a-platform-category"'),
+      );
+      await settled(page);
+      await revealCatalogue(page);
+
+      const rendered = page.locator(".gbx-widget-catalogue .gbx-conflict");
+      await expect(rendered.first(), "the catalogue must render what the load produced").toBeVisible(
+        { timeout: 60_000 },
+      );
+      expect(await rendered.first().textContent()).toMatch(/GBX\d{4}/);
+      // The specific one, so a different diagnostic arriving for a different
+      // reason cannot satisfy this claim by accident.
+      await expect(page.locator('[data-catalogue-diagnostics]')).toBeVisible();
+      await expect(
+        page.locator(".gbx-widget-catalogue").locator('[data-conflict-code="GBX0108"]'),
+      ).toHaveCount(1);
+    } finally {
+      writeFileSync(GEAR_GDL, original);
+    }
   });
 
   test("resolution diagnostics appear as problem markers [PRD cpt-gearbox-fr-editor-diagnostics]", async ({
