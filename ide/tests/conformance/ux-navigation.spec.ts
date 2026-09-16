@@ -272,10 +272,13 @@ test.describe("validation is a stage, not a doorway", () => {
     // on this corpus introduces a diagnostic, so there is no compact list to look
     // at. Tried all nine addable gears, plugins with a host chosen included.
     //
-    // What still holds is asserted at the source, the way the `ensurePlan` rule
-    // is: the panel renders the shared row at compact density rather than a
-    // key-value line of its own. The DOM half returns as soon as the corpus has a
-    // proposal that introduces a diagnostic.
+    // **The DOM half is back, because the corpus now has such a proposal.**
+    // `GBX0120` reports a required configuration field that nothing supplies,
+    // and `event-broker` is the gear that carries two of them: `mode` and
+    // `default_storage_backend` are required, and `EventBrokerConfig` declares
+    // no container default. So adding it without configuring it introduces a
+    // diagnostic the current resolution does not have, which is exactly the
+    // subtraction section 6 performs.
     const widget = readFileSync(
       join(IDE, "gearbox-studio/src/browser/add-gear/add-gear-widget.tsx"),
       "utf8",
@@ -283,11 +286,22 @@ test.describe("validation is a stage, not a doorway", () => {
     expect(widget, "Add Gear should render diagnostics with the shared row").toMatch(
       /<DiagnosticsList[\s\S]{0,200}density="compact"/,
     );
-    test.skip(
-      true,
-      "no proposal on this corpus introduces a diagnostic: the one that did was previewing a plugin as a top-level gear, which this build refuses",
-    );
-    await expect(studio.page.locator("[data-add-gear-impact-diagnostics]")).toHaveCount(0);
+
+    const { page } = studio;
+    await openProduct(page, "dev");
+    await page.locator("[data-add-gear]").click();
+    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+    await page.locator("[data-add-gear-select]").selectOption("event-broker");
+
+    const introduced = page.locator("[data-add-gear-impact-diagnostics]");
+    await expect(introduced).toBeVisible({ timeout: 60_000 });
+    // The shared row, at compact density -- the claim this test is for -- and
+    // carrying its code, because a diagnostic nobody can look up is a sentence.
+    const rows = introduced.locator(".gbx-conflict");
+    expect(await rows.count()).toBeGreaterThan(0);
+    await expect(introduced.locator('[data-conflict-code="GBX0120"]').first()).toBeVisible();
+
+    await page.locator("[data-add-gear-cancel]").click();
   });
 });
 

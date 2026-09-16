@@ -23,6 +23,7 @@ import { CommandRegistry } from "@theia/core/lib/common";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
+import { errorsIn } from "../diagnostics/diagnostics-list";
 import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
 import { RESOLVE_PRODUCT } from "../view-contributions";
@@ -209,9 +210,13 @@ export class ToolbarWidget extends ReactWidget {
    * screen, and the count opens it.
    */
   protected renderStatus(status: string, resolved: boolean): React.ReactNode {
-    const errors = (this.products.current.resolution?.diagnostics ?? []).filter(
-      (d) => d.severity === "error",
-    ).length;
+    // **`state.diagnostics`, not `resolution.diagnostics`.** Every other reader
+    // uses the former, and the difference is only visible in the case this badge
+    // exists for: a refused load leaves `status: "error"` with the diagnostics
+    // kept and `resolution` unset (`ProductStore`), so reading through the
+    // resolution counted zero errors exactly when there were some, and the
+    // header went quiet at the moment it had something to say.
+    const errors = errorsIn(this.products.current.diagnostics);
 
     if (status === "loading" || status === "resolving") {
       return (

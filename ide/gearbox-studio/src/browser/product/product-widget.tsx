@@ -31,6 +31,7 @@ import {
   errorsIn,
   summarise,
   worstFirst,
+  worstOf,
 } from "../diagnostics/diagnostics-list";
 import { ProductStore } from "../product-store";
 import { GenerateService } from "../generate/generate-service";
@@ -103,6 +104,22 @@ export class ProductWidget extends ReactWidget {
    * "which stage" and "how much of this stage".
    */
   protected section: ProductSection = "overview";
+
+  /**
+   * The product whose errors have already chosen a stage.
+   *
+   * Keyed on the open product's path, so the landing below happens when a
+   * product arrives and not again while it is being worked on.
+   *
+   * **Per resolution was the obvious key and it was wrong.** `ProductStore`
+   * bumps its revision on every piece of work it starts, and editing a
+   * description is a stream of them -- so a draft that momentarily resolved with
+   * an error moved the stage out from under someone who was typing into it.
+   * `adr-0013-create-product` caught it: the config key input went from visible
+   * to detached mid-`fill`, and the failure read as a timeout on an element that
+   * was plainly there. Arriving at a product is the event this is about.
+   */
+  protected stagedFor: string | undefined;
   protected addingProfile = false;
   protected newProfileId = "";
   protected newProfileKind: "embedded" | "self_hosted" | "kubernetes" = "embedded";
@@ -115,7 +132,12 @@ export class ProductWidget extends ReactWidget {
     this.title.caption = ProductWidget.LABEL;
     this.title.closable = true;
     this.addClass("gbx-widget-product");
-    this.toDispose.push(this.store.onChanged(() => this.update()));
+    this.toDispose.push(
+      this.store.onChanged(() => {
+        this.landOnErrors();
+        this.update();
+      }),
+    );
     this.toDispose.push(this.edits.onDraftChanged(() => this.update()));
     // Overview reports whether a generated tree exists, so it has to hear when
     // that answer changes -- a plan arriving, an apply writing, or the plan being
@@ -132,6 +154,82 @@ export class ProductWidget extends ReactWidget {
     // Home is a deliberate starting point now, and a product arrives by an
     // explicit act: the Continue card, the picker, or `File > Open Product...`.
     this.update();
+  }
+
+  /**
+   * A resolution that carries errors opens on the stage that shows them.
+   *
+   * **Only for errors, and only once.** Warnings and hints are the ordinary
+   * state of a healthy product -- the demo resolves with four of them under two
+   * profiles -- so moving for those would move for everything and stop meaning
+   * anything. An error is different: it is what stops the lock being written.
+   *
+   * Moves *to* Validation and never away from it: the stage a person chose is
+   * theirs, and a later store event must not take it back. Guarded by the open
+   * product rather than by the store revision -- see `stagedFor` for why the
+   * narrower key is the correct one and what the wider one broke.
+   *
+   * The second panel is deliberately not opened. `ConflictsViewContribution`
+   * argues that a panel appearing at startup to say "no conflicts" says
+   * nothing, and it is withdrawn on every product change besides. Showing the
+   * stage that is already there is the cheaper answer to the same need.
+   *
+   * **The positive path is unobserved on this corpus, and saying so is the
+   * point.** No product in the tree resolves with an error -- the demo carries
+   * two warnings and an info under `embedded` and four and an info under the
+   * other two -- so no suite reaches the branch that moves the stage. What is
+   * asserted is that it does *not* fire for warnings, which is the half that
+   * broke something. Producing the other half would mean writing an error into
+   * `products/`, which the three guards on the descriptions exist to prevent and
+   * rightly; it returns as soon as the corpus has a product that resolves with
+   * one.
+   */
+  protected landOnErrors(): void {
+    const state = this.store.current;
+    const path = state.open?.path;
+    if (path === undefined) return;
+    // Mid-flight: the diagnostics on screen still describe the previous answer.
+    if (state.status === "loading" || state.status === "resolving") return;
+    // Never while an edit is pending. A draft is a person mid-sentence, and its
+    // resolution is a question about what they have typed so far -- not an
+    // answer to move the screen for.
+    if (this.edits.hasDraft()) return;
+    if (this.stagedFor === path) return;
+    this.stagedFor = path;
+    if (errorsIn(state.diagnostics) > 0) {
+      this.section = "validation";
+    }
+  }
+
+  /**
+   * How many diagnostics the Validation stage holds, and how bad the worst is.
+   *
+   * **A signpost, not a second summary.** The list, the per-severity counts and
+   * the explain controls all already live on that stage; what was missing was
+   * any reason to go there. The strip drew four bare labels, Overview reported
+   * no number at all, and the one visible affordance -- `Show conflicts` -- sent
+   * a person to a separate panel at the bottom rather than to the stage that
+   * answers the same question in place.
+   *
+   * Nothing when there is nothing: a tab that always carries a `0` trains the
+   * reader to stop seeing it, which is the same argument that keeps the
+   * Conflicts panel from opening at startup to say "no conflicts".
+   */
+  protected renderStageCount(diagnostics: readonly Diagnostic[]): React.ReactNode {
+    if (diagnostics.length === 0) return undefined;
+    const worst = worstOf(diagnostics) ?? "info";
+    return (
+      <span
+        className={`gbx-stage-count gbx-stage-count-${worst}`}
+        data-validation-count={diagnostics.length}
+        data-validation-worst={worst}
+        // The words, because the colour alone cannot say which of four
+        // severities this is -- the same rule the config fields follow.
+        title={summarise(diagnostics.length, errorsIn(diagnostics))}
+      >
+        {diagnostics.length}
+      </span>
+    );
   }
 
   /**
@@ -314,11 +412,24 @@ export class ProductWidget extends ReactWidget {
               }}
             >
               {section.label}
+              {/* **The signpost that was missing.** Validation already renders
+                  the whole list with its counts, one click away, and nothing
+                  said so: the strip drew four bare labels, and the only visible
+                  affordance sent people to a second panel at the bottom
+                  instead. The count is on the tab because that is where a
+                  person looks to decide which stage to open. */}
+              {section.id === "validation" && this.renderStageCount(state.diagnostics)}
             </button>
           ))}
+          {/* **Still a link out, now a visible one.** That it navigates rather
+              than being a fifth stage is deliberate and unchanged -- "a tab
+              holding a file plan and an Apply button would be a second answer to
+              a question the Generate view already answers". What changes is the
+              weight: `gbx-start-link` drew the last step of composing a product
+              as body text in link colour, at the end of a row of four tabs. */}
           <button
             type="button"
-            className="gbx-start-link"
+            className="gbx-view-tab gbx-view-tab-next"
             data-product-section-generate
             onClick={() => this.showGenerate()}
           >
@@ -1398,8 +1509,13 @@ function renderDiagnosticsSummary(
   show: () => void,
 ): React.ReactNode {
   if (diagnostics.length === 0) return undefined;
-  const errors = diagnostics.filter((d) => d.severity === "error").length;
-  const worst = errors > 0 ? "error" : (diagnostics[0]?.severity ?? "info");
+  const errors = errorsIn(diagnostics);
+  // `worstOf`, not `diagnostics[0].severity`. The engine orders by `(code,
+  // message)` for determinism, so the first element is the lowest code: a
+  // product carrying `GBX0504` (info) and `GBX0602` (warning) painted itself
+  // info-coloured. The `errors > 0` branch was covering for that and only for
+  // the top severity.
+  const worst = worstOf(diagnostics) ?? "info";
   return (
     <div className={`gbx-diagnostics gbx-diagnostics-${String(worst).toLowerCase()}`}>
       <div className="gbx-diagnostics-label">

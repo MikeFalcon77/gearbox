@@ -74,6 +74,19 @@ export function errorsIn(diagnostics: readonly Diagnostic[]): number {
   return diagnostics.filter((d) => d.severity === "error").length;
 }
 
+/**
+ * The most serious severity present, or `undefined` for an empty list.
+ *
+ * **Not `diagnostics[0].severity`, which is what two callers were using.** The
+ * engine orders diagnostics by `(code, message)` for determinism, not by
+ * severity, so the first element is the lowest code -- and a product carrying
+ * `GBX0504` (info) and `GBX0602` (warning) reported itself as info. Ordering by
+ * severity is what `worstFirst` is for, and this is the one-value form of it.
+ */
+export function worstOf(diagnostics: readonly Diagnostic[]): Severity | undefined {
+  return worstFirst(diagnostics)[0]?.severity;
+}
+
 /** "3 conflicts" is wrong when two of them are hints. */
 export function summarise(total: number, errors: number): string {
   if (total === 0) return "No conflicts";

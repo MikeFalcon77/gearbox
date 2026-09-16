@@ -13,6 +13,7 @@ import {
   openGraph,
   openPalette,
   openProduct,
+  productSection,
   revealCatalogue,
   revealInspector,
   runCommand,
@@ -522,5 +523,103 @@ test.describe("a product is a session, not a panel", () => {
     // Named rather than skipped silently, because the claim matters: closing under
     // an unsaved edit is exactly the loss the write gates exist to prevent.
     await openProduct(studio.page, "dev");
+  });
+});
+
+test.describe("a required config field says so", () => {
+  // Nothing in a design document says "a required field wears an asterisk", so
+  // this lives here rather than in the conformance table. It exists because the
+  // marker, the inline note and the placeholder had no DOM coverage at all --
+  // the three of them could have been deleted and every suite stayed green.
+
+  /** Open the configurator on a gear and wait for its fields. */
+  async function configure(page: import("@playwright/test").Page, gear: string): Promise<void> {
+    const add = page.locator("[data-add-gear]");
+    await expect(add).toBeVisible({ timeout: 60_000 });
+    await add.click();
+    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+    await page.locator("[data-add-gear-select]").selectOption(gear);
+  }
+
+  test("a field the gear requires and does not default is marked", async ({ studio }) => {
+    // `event-broker` is the corpus's one gear that exercises this:
+    // `EventBrokerConfig` carries no container `#[serde(default)]`, so `mode`
+    // and `default_storage_backend` are required, and neither default is a
+    // literal the projector can read. Engine-side the same pair is what
+    // `GBX0120` reports.
+    await openProduct(studio.page, "dev");
+    await configure(studio.page, "event-broker");
+
+    for (const field of ["mode", "default_storage_backend"]) {
+      await expect(
+        studio.page.locator(`[data-config-field-required="${field}"]`),
+        `${field} is required with no default, so it must be marked`,
+      ).toHaveCount(1, { timeout: 30_000 });
+    }
+    // Said in words as well as by the glyph: a `title` on an empty span reaches
+    // nobody using a screen reader.
+    await expect(
+      studio.page.locator('[data-config-field-required="mode"] .gbx-sr-only'),
+    ).toHaveText("required");
+
+    await studio.page.locator("[data-add-gear-cancel]").click();
+  });
+
+  test("a gear whose config all defaults is marked nowhere", async ({ studio }) => {
+    // The negative control, and the reason this pair exists: `grpc-hub` looks
+    // like a gear that ought to demand a listen address, and it demands
+    // nothing. `GrpcHubConfig` is `#[serde(deny_unknown_fields, default)]`, so
+    // every field has a default; `listen_addr` is an endpoint's `config_key`
+    // besides, which generation writes from the port the resolver assigned.
+    // An empty panel here is the right answer, not a missing feature.
+    await openProduct(studio.page, "dev");
+    await configure(studio.page, "grpc-hub");
+
+    const fields = studio.page.locator("[data-add-gear-flow] [data-config-field]");
+    expect(
+      await fields.count(),
+      "grpc-hub exposes three config fields, so this is not passing on an empty form",
+    ).toBeGreaterThan(0);
+    await expect(
+      studio.page.locator("[data-add-gear-flow] [data-config-field-required]"),
+    ).toHaveCount(0);
+
+    await studio.page.locator("[data-add-gear-cancel]").click();
+  });
+});
+
+test.describe("the diagnostics count is a signpost, not a hijack", () => {
+  // The Validation stage already rendered the whole list with its counts; what
+  // was missing was any reason to go there. Both halves are asserted here
+  // because the second one broke something on its first attempt: keyed per
+  // store revision, the stage moved out from under a person typing into a
+  // config field, since editing a description is a stream of revisions.
+
+  test("the count is on the tab, and warnings do not move the stage", async ({ studio }) => {
+    await openProduct(studio.page, "dev");
+
+    const tab = studio.page.locator('[data-product-section="validation"]');
+    const badge = tab.locator("[data-validation-count]");
+    await expect(badge).toBeVisible({ timeout: 60_000 });
+
+    // Read off the stage rather than hard-coded: the demo's diagnostics change
+    // whenever a code is added, and a number pinned here would be a second
+    // place to update.
+    const shown = Number(await badge.getAttribute("data-validation-count"));
+    expect(shown, "this profile resolves with diagnostics to count").toBeGreaterThan(0);
+
+    // The demo resolves with warnings and an info and no errors, which is the
+    // case that must *not* move anything: a product whose ordinary state moved
+    // the screen would move it always and so mean nothing.
+    await expect(badge).toHaveAttribute("data-validation-worst", "warning");
+    await expect(
+      studio.page.locator('[data-product-section="overview"]'),
+      "warnings must leave the arriving stage alone",
+    ).toHaveAttribute("aria-selected", "true");
+
+    // And the count agrees with the list it points at.
+    await productSection(studio.page, "validation");
+    const rows = studio.page.locator("[data-product-validation] .gbx-conflict");
+    expect(await rows.count()).toBe(shown);
   });
 });

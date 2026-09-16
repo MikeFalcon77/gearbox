@@ -114,6 +114,13 @@
 }
 .gbx-diagnostics-error { border-left: 3px solid var(--theia-editorError-foreground); }
 .gbx-diagnostics-warning { border-left: 3px solid var(--theia-editorWarning-foreground); }
+/* All four, because `worstOf` can return any of them and the two that were
+   missing rendered as no border at all -- a summary line indistinguishable from
+   a product with nothing to say. Neutral rather than coloured for the lower two,
+   matching `.gbx-conflict-info`/`-hint` below: a hue is what marks the two
+   severities worth interrupting for. */
+.gbx-diagnostics-info,
+.gbx-diagnostics-hint { border-left: 3px solid var(--theia-editorGroup-border); }
 .gbx-diagnostics-label {
   text-transform: uppercase;
   font-size: 0.85em;
@@ -254,6 +261,23 @@
   background: var(--theia-editorWidget-background);
   border-color: var(--theia-editorGroup-border);
   font-weight: 600;
+}
+/* The count beside a stage's name. Colour says how bad, the number says how
+   much, and the `title` says both in words -- a tab whose only signal is a hue
+   is one a person cannot read. Full opacity even on an unselected tab: the
+   point of the mark is to be seen from the stage you are not on, and
+   `.gbx-view-tab` dims its contents to 0.7. */
+.gbx-stage-count {
+  margin-left: 6px; padding: 0 5px; border-radius: 8px;
+  font-size: 0.85em; font-variant-numeric: tabular-nums;
+  opacity: 1;
+  color: var(--theia-badge-foreground);
+  background: var(--theia-badge-background);
+}
+.gbx-stage-count-error { background: var(--theia-editorError-foreground); }
+.gbx-stage-count-warning {
+  color: var(--theia-editor-background);
+  background: var(--theia-editorWarning-foreground);
 }
 
 /* The shared arrowhead markers live in a zero-height SVG, which must not take a
@@ -605,6 +629,17 @@
   border-bottom: 1px solid var(--theia-editorGroup-border);
 }
 .gbx-generate-counts { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+/* Which profile this plan is for, first in the head, before the counts. It does
+   not take `flex: 1`: the identity of the plan should not be the thing that
+   moves when the badge row grows. */
+.gbx-generate-profile {
+  display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+.gbx-generate-profile-note {
+  font-size: 0.9em;
+  color: var(--theia-descriptionForeground, var(--theia-foreground));
+}
 /* "Up to date" is not a warning. Every other reason in this list is something
    standing between the person and a write they asked for; this one is the write
    already having happened, so it must not be the colour of a problem. */
@@ -615,6 +650,16 @@
   margin: 6px 0 0; padding-left: 20px;
   color: var(--theia-editorWarning-foreground);
 }
+/* The one action this screen exists for, on a line that is only ever this.
+   Previously a chip at the end of `.gbx-generate-head`, which wraps -- so a wide
+   badge row moved the primary action to the left of a second line. A row of its
+   own cannot do that. The reason Apply is off sits beside it rather than two
+   elements away, because the two are one message. */
+.gbx-generate-actions {
+  display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
+  margin-top: 8px;
+}
+.gbx-generate-actions .gbx-generate-blocks { margin-top: 0; }
 .gbx-generate-body {
   flex: 1 1 auto; min-height: 0;
   display: flex; gap: 8px; margin-top: 8px;
@@ -953,7 +998,19 @@
   margin: 8px 0 6px; padding-bottom: 6px;
   border-bottom: 1px solid var(--theia-editorGroup-border);
 }
-.gbx-product-nav .gbx-start-link { margin-left: auto; }
+/* The link out to Generate, pushed to the far end of the strip: it is the step
+   after the four stages, not one of them. It reads with a tab's weight now
+   rather than as body text in link colour -- same family as its neighbours, and
+   marked as the one that leaves. */
+.gbx-product-nav .gbx-view-tab-next {
+  margin-left: auto;
+  opacity: 1;
+  border-color: var(--theia-editorGroup-border);
+  color: var(--theia-textLink-foreground);
+}
+.gbx-product-nav .gbx-view-tab-next:hover {
+  background: var(--theia-list-hoverBackground);
+}
 .gbx-validation { padding: 2px 0; }
 
 .gbx-provenance { font-size: 0.75em; margin-left: 6px; }
@@ -1061,7 +1118,10 @@
   line-height: 1.4;
 }
 .gbx-config-field input[type="checkbox"] { justify-self: start; }
-/* A required field with no default: an asterisk that does not depend on colour. */
+/* A required field with no default: an asterisk that does not depend on colour.
+   The element also carries the word for a screen reader, so the glyph is
+   decoration and the text is the answer -- which is why the `content` sits on
+   `::after` rather than being the element's own text. */
 .gbx-config-required::after { content: " *"; color: var(--theia-editorWarning-foreground); }
 .gbx-config-blocked { opacity: 0.75; font-style: italic; }
 

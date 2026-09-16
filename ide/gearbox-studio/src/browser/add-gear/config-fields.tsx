@@ -132,7 +132,22 @@ function ConfigField(
     >
       <span className="gbx-config-field-name">
         {field.name}
-        {field.required && <span className="gbx-config-required" title="required" />}
+        {/* **Required *and* without a default**, which is what the stylesheet's
+            rule for this class has always claimed and the condition did not: it
+            was `field.required` alone, so a field the gear gives a default
+            carried an asterisk saying a value must be supplied when one already
+            is. The two halves are now the same test `valueMissing` applies, and
+            the same one `GBX0120` applies engine-side.
+
+            The word, not only the mark: an empty `<span>` with a `title` gives a
+            screen reader nothing, and this panel's own rule two lines down is to
+            say things "in words rather than by a colour". The visible glyph
+            comes from CSS; the text is for anyone not reading pixels. */}
+        {mustBeSupplied(field) && (
+          <span className="gbx-config-required" data-config-field-required={field.name}>
+            <span className="gbx-sr-only">required</span>
+          </span>
+        )}
         {/* Which of the three states this value is in, said in words rather than
             by a colour: a person deciding whether to touch a field needs to know
             whether they would be overriding the resolver, and "inherited" and
@@ -241,11 +256,24 @@ export function valueProblem(
  * visible before a GBX code explains it from the other side of the screen.
  */
 export function valueMissing(field: ConfigFieldDecl, value: ConfigValue | undefined): boolean {
-  return (
-    value === undefined &&
-    field.required &&
-    (field.default === undefined || field.default === null)
-  );
+  return value === undefined && mustBeSupplied(field);
+}
+
+/**
+ * Whether this field needs a value from somebody.
+ *
+ * Required *and* without a compiled-in default. Both halves matter and the
+ * marker used to test only the first, so a field the gear defaults still wore
+ * an asterisk -- a mark saying "you must supply this" over a value that is
+ * already supplied.
+ *
+ * The same test the engine applies in `config_check::report_unset_required`,
+ * which is what `GBX0120` reports. One rule, stated in two places because one
+ * of them is a form and the other is a resolution, and they must not disagree
+ * about which fields it is about.
+ */
+export function mustBeSupplied(field: ConfigFieldDecl): boolean {
+  return field.required && (field.default === undefined || field.default === null);
 }
 
 function Control(props: {

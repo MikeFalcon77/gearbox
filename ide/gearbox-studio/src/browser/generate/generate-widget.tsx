@@ -114,6 +114,38 @@ export class GenerateWidget extends ReactWidget {
     this.update();
   }
 
+  /**
+   * The profile this plan belongs to, and what its kind does not produce.
+   *
+   * **The condition is the engine's own, not a table repeated here.**
+   * `docker::files` and `helm::files` both return nothing when
+   * `lock.kubernetes.is_none()`, and that same field is on the resolution the
+   * client already holds -- so this reads the fact rather than re-deriving it
+   * from the profile kind. A future profile kind that gains images would light
+   * this up without anyone remembering to edit it.
+   */
+  protected renderProfile(): React.ReactNode {
+    const state = this.product.current;
+    const profile = state.profile;
+    if (profile === undefined) return undefined;
+    const decl = state.intent?.profiles[profile];
+    const kubernetes = state.resolution?.product?.kubernetes;
+    const deploys = kubernetes !== undefined && kubernetes !== null;
+    return (
+      <div className="gbx-generate-profile" data-generate-profile={profile}>
+        <span className="gbx-badge" title="deployment profile">
+          {profile}
+        </span>
+        {decl !== undefined && <span className="gbx-id">{decl.profile}</span>}
+        {!deploys && (
+          <span className="gbx-generate-profile-note" data-generate-no-deployment>
+            no images or chart: those come from a `kubernetes` profile
+          </span>
+        )}
+      </div>
+    );
+  }
+
   protected render(): React.ReactNode {
     const caps = this.catalogue.engineCapabilities;
     if (caps !== undefined && !caps.generate) {
@@ -156,6 +188,19 @@ export class GenerateWidget extends ReactWidget {
     return (
       <div className="gbx-generate" data-out-root={gen.plan.out_root} data-written={gen.written ?? ""}>
         <div className="gbx-generate-head">
+          {/* **Which profile this plan is for.** The screen used to name no
+              profile at all: the only identity it carried was `data-out-root`,
+              an attribute nothing prints, so a plan for `dev` and a plan for
+              `prod` were two file lists with no way to tell them apart. A
+              Kubernetes profile writes a Dockerfile per image and a Helm
+              umbrella chart and an embedded one writes neither, which makes the
+              absence of `docker/` and `helm/` either correct or alarming
+              depending on a fact the screen was keeping to itself.
+
+              Named, not offered: the switch lives in the Product view, and the
+              shell header follows the same rule -- it "shows the profile; it
+              does not offer to change it". */}
+          {this.renderProfile()}
           <div className="gbx-generate-counts">
             {(["create", "update", "unchanged", "conflict", "kept"] as const).map((action) =>
               (counts[action] ?? 0) > 0 ? (
@@ -183,8 +228,22 @@ export class GenerateWidget extends ReactWidget {
               </span>
             )}
           </div>
+        </div>
+        {/* **Its own row, and the house primary style.** This was a
+            `gbx-choice gbx-choice-on` chip inside the head -- the class whose own
+            comment in the stylesheet calls it the profile switch -- so the
+            central action of the product looked like a small selected toggle. It
+            also sat *after* `.gbx-generate-counts`, which is `flex: 1` in a
+            `flex-wrap: wrap` row, so a wide enough badge row pushed it onto a
+            second line at the left edge: the position of the one thing this
+            screen is for depended on how many badges there happened to be.
+            A row of its own is what makes that impossible.
+
+            Under the head rather than at the bottom of the panel: the tree and
+            the diff below both scroll, and a footer would leave the screen. */}
+        <div className="gbx-generate-actions">
           <button
-            className="gbx-choice gbx-choice-on"
+            className="gbx-start-primary"
             type="button"
             disabled={!this.generate.canApply}
             data-apply="true"
@@ -192,16 +251,17 @@ export class GenerateWidget extends ReactWidget {
           >
             Apply
           </button>
+          {/* Beside the button it explains, not two elements away from it. */}
+          {blocks.length > 0 && (
+            <ul className="gbx-generate-blocks">
+              {blocks.map((block) => (
+                <li key={block.id} data-apply-block={block.id}>
+                  {block.reason}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-        {blocks.length > 0 && (
-          <ul className="gbx-generate-blocks">
-            {blocks.map((block) => (
-              <li key={block.id} data-apply-block={block.id}>
-                {block.reason}
-              </li>
-            ))}
-          </ul>
-        )}
         <div className="gbx-generate-body">
           <div className="gbx-generate-tree" role="tree">
             {treeOf(plans).map((node) => this.renderNode(node, 0))}
