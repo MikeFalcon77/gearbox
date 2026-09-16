@@ -7,6 +7,7 @@
 // `Cargo.lock` (~100k) across for a preview nobody asked to read.
 
 import { codicon, ReactWidget } from "@theia/core/lib/browser";
+import { CommandService } from "@theia/core/lib/common/command";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 import * as monaco from "@theia/monaco-editor-core";
@@ -16,7 +17,9 @@ import type { FileKind } from "../../common/generated/FileKind";
 import type { FilePlan } from "../../common/generated/FilePlan";
 import type { GenerateFileResult } from "../../common/generated/GenerateFileResult";
 import { CatalogueStore } from "../catalogue-store";
+import { DiagnosticsList } from "../diagnostics/diagnostics-list";
 import { ProductStore } from "../product-store";
+import { SHOW_PRODUCT } from "../shell/session-command-ids";
 import { GenerateService } from "./generate-service";
 
 const ACTION_ICON: Record<FileAction, string> = {
@@ -89,6 +92,8 @@ export class GenerateWidget extends ReactWidget {
   @inject(ProductStore) protected readonly product!: ProductStore;
   @inject(GenerateService) protected readonly generate!: GenerateService;
   @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
+  // For the one way out of a failed plan. See the error branch in `render`.
+  @inject(CommandService) protected readonly commands!: CommandService;
 
   protected selected: string | undefined;
   protected preview: GenerateFileResult | undefined;
@@ -168,10 +173,39 @@ export class GenerateWidget extends ReactWidget {
 
     const gen = this.generate.current;
     if (gen.status === "error") {
+      // **A refusal is not a reason, and this screen used to show only the
+      // refusal.** `resolution reported errors; nothing was generated` replaced
+      // the entire widget: no profile, no list of which errors, and no control
+      // of any kind -- so the correct decision not to generate arrived as a dead
+      // end. The errors are already in the store, because the resolution is what
+      // this screen draws from, so the reasons cost nothing to show.
+      const errors = (state.resolution?.diagnostics ?? []).filter((d) => d.severity === "error");
       return (
         <div className="gbx-generate">
+          {this.renderProfile()}
           <div className="gbx-error" role="alert">
             {gen.error}
+          </div>
+          {errors.length > 0 && (
+            <>
+              <div className="gbx-group-label">
+                {errors.length === 1 ? "the error" : `the ${errors.length} errors`} that stopped it
+              </div>
+              <DiagnosticsList diagnostics={errors} density="compact" />
+            </>
+          )}
+          <div className="gbx-generate-actions">
+            <button
+              type="button"
+              className="gbx-start-primary"
+              data-generate-to-product="true"
+              onClick={() => void this.commands.executeCommand(SHOW_PRODUCT.id)}
+            >
+              Open the Product view
+            </button>
+            <span className="gbx-waiting">
+              Generation resumes on its own once the resolution has no errors.
+            </span>
           </div>
         </div>
       );

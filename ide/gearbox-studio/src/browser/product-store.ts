@@ -405,18 +405,28 @@ export class ProductStore {
   }
 
   /**
-   * Record a failure, keeping the diagnostics the engine attached to it.
+   * Record a failure, carrying the diagnostics the engine attached to it.
    *
    * A refused `product/load` carries its reasons in `data.diagnostics`, and the
    * message alone ("product load failed") is useless without them -- which is
    * exactly why the engine was taught to attach them.
+   *
+   * **Empty rather than the previous product's, when there are none.** This used
+   * to fall back to `this.state.diagnostics`, written as the rare case and in
+   * fact the only branch that ever ran: Theia's error codec was dropping `data`
+   * for every engine error, so `diagnosticsOf` always answered `undefined` (see
+   * `withEngineData` in `node/gearbox-service-impl.ts`). The visible result was
+   * a product that would not evaluate, reported by three surfaces with the
+   * diagnostics of the resolution before it -- "0 errors, 2 warnings" for a file
+   * the engine had just refused to read. Keeping a previous answer is worse than
+   * keeping none, because nothing on screen says which one it is.
    */
   protected fail(epoch: number, error: unknown): void {
     if (epoch !== this.epoch) return;
     this.update({
       status: "error",
       error: messageOf(error),
-      diagnostics: diagnosticsOf(error) ?? this.state.diagnostics,
+      diagnostics: diagnosticsOf(error) ?? [],
     });
   }
 

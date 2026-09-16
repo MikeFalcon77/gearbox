@@ -239,6 +239,40 @@ fn leader_election_always_falls_back_to_the_sdk_default() {
     assert!(codes(&r).contains(&DiagnosticCode::ClusterSdkDefault));
 }
 
+/// The message names the gear that asked, and an empty table says so in words.
+///
+/// **Both halves were read as a stray error.** A product that had just added one
+/// consumer gear was told about scope `event-broker` -- the name the consumer
+/// declares its requirement *under*, not a gear the product contained -- with a
+/// `help` that ended at the heading `per provider:` because no provider gear was
+/// in the closure to list. Nothing in either line connected the complaint to the
+/// gear that had been added a moment earlier.
+#[test]
+fn an_unsatisfiable_requirement_names_who_asked() {
+    let cat = support::cluster_catalogue(vec![(
+        ClusterPrimitive::Lock,
+        "main",
+        &["cluster.lock.prefix-watch"],
+    )]);
+    let r = single(&cat, &support::intent(&["app"]));
+
+    let d = r
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::ClusterUnsatisfiable)
+        .expect("GBX0502");
+    assert!(
+        d.message.contains("required by `app`"),
+        "the message must name the gear that required it: {}",
+        d.message
+    );
+    let help = d.help.as_deref().unwrap_or_default();
+    assert!(
+        !help.trim_end().ends_with("per provider:"),
+        "a heading with no list under it: {help}"
+    );
+}
+
 #[test]
 fn an_unsatisfiable_requirement_shows_every_provider() {
     // `prefix-watch` exists only on `standalone`, and `standalone` does not

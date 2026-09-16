@@ -609,6 +609,17 @@
    "what is in my product" should be answerable by looking, not by pointing. */
 .gbx-in-product-on { opacity: 1; color: var(--theia-successBackground); }
 
+/* What each edit in the batch targets, between the count and the diff. The diff
+   is a diff of one file and cannot say which profile or gear a line belongs to;
+   this is the part a person checks the confirmation against. */
+.gbx-edit-targets {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  text-align: left;
+  font-size: 0.9em;
+}
+.gbx-edit-targets li { margin: 1px 0; }
+
 .gbx-edit-preview {
   margin: 8px 0 0;
   padding: 6px 8px;

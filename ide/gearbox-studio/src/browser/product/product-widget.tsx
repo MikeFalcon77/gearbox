@@ -592,10 +592,11 @@ export class ProductWidget extends ReactWidget {
     defaultProfile: string,
   ): React.ReactNode {
     if (profile === undefined) return undefined;
-    const fields = profileFields(profile).map(({ wire, label, value, choices }) => ({
+    const fields = profileFields(profile).map(({ wire, label, value, choices, required }) => ({
       wire,
       label,
       choices,
+      required,
       value: this.edits.draftProfileField(id, wire, value ?? undefined),
     }));
     return (
@@ -613,9 +614,19 @@ export class ProductWidget extends ReactWidget {
             {profile.profile}
           </span>
         </div>
-        {fields.map(({ wire, label, value, choices }) => (
-          <div className="gbx-kv" key={wire}>
-            <label htmlFor={`gbx-profile-${id}-${wire}`}>{label}</label>
+        {fields.map(({ wire, label, value, choices, required }) => (
+          <div className="gbx-kv" key={wire} data-profile-field-row={wire}>
+            <label htmlFor={`gbx-profile-${id}-${wire}`}>
+              {label}
+              {required === true && (
+                /* Said in words as well as by the glyph, the same way the config
+                   form marks a required field -- a bare `title` reaches no
+                   screen reader. */
+                <span className="gbx-config-required" data-profile-field-required={wire}>
+                  <span className="gbx-sr-only">required</span>
+                </span>
+              )}
+            </label>
             <span>
               {choices !== undefined ? (
                 <select
@@ -635,11 +646,16 @@ export class ProductWidget extends ReactWidget {
                     })
                   }
                 >
-                  {/* The unset case is a value: a profile that declares no
-                      discovery gets the SDK's default, and offering only the two
-                      named ones would make "not set" unreachable once something
-                      had been chosen. */}
-                  <option value="">not set</option>
+                  {/* **No "not set" for a required field.** Unsetting removes
+                      the argument, and these arguments are non-`Option` in the
+                      grammar -- so the option was a way to make the open product
+                      refuse to evaluate, after which this form is not rendered
+                      and the value cannot be put back. The comment here used to
+                      claim "a profile that declares no discovery gets the SDK's
+                      default", which is true of no kind that has this field:
+                      `embedded` is the one with no discovery, and it has no
+                      fields at all. Optional fields keep the option. */}
+                  {required !== true && <option value="">not set</option>}
                   {choices.map((choice) => (
                     <option key={choice} value={choice}>
                       {choice}
@@ -656,14 +672,21 @@ export class ProductWidget extends ReactWidget {
                 // `Discard` pair is one per product and lives in the header, so
                 // the marker is what says *here*.
                 data-field-modified={this.edits.isDraftedProfileField(id, wire) ? "true" : undefined}
-                onChange={(e) =>
+                onChange={(e) => {
+                  // **The same rule as the select, and the easier one to hit.**
+                  // `host` is a plain text box, so emptying it queued a removal
+                  // with no dropdown involved -- the quickest accidental route
+                  // to a product that will not open. An empty required box is
+                  // not an edit; the field keeps what it had until something
+                  // replaces it.
+                  if (required === true && e.target.value.trim() === "") return;
                   this.edits.queueDraft({
                     kind: "set_profile_field",
                     profile: id,
                     field: wire,
                     value: e.target.value === "" ? null : e.target.value,
-                  })
-                }
+                  });
+                }}
               />
               )}
             </span>
@@ -1320,6 +1343,20 @@ export class ProductWidget extends ReactWidget {
  * point is not tidiness: a free-text field for a two-valued enum invites a typo
  * that reaches the description, and the refusal for it comes from the evaluator
  * on the next resolve rather than from the control.
+ *
+ * **`required` is why a control may not offer to clear itself.** These three --
+ * `self_hosted`'s `host` and `worker_discovery`, `kubernetes`'s `discovery` --
+ * are non-`Option` named arguments in `gearbox-gdl`'s `product.rs`, so starlark
+ * refuses the call outright when one is missing and the product stops opening.
+ * Unsetting a field *removes* the argument, so for these the control was a way
+ * to make the open product unopenable, on a screen that then stopped rendering:
+ * the form was gone, and with it the only way to put the value back.
+ *
+ * Mirror of `gearbox_gdl::edit_call::required_profile_fields`, which is also
+ * where the scaffold values live, and which now refuses the same removal on the
+ * engine side for callers that are not this form. Stated twice because one is a
+ * form and the other is a grammar, and they must not disagree -- the same
+ * arrangement `isSecretConfigKey` has with `is_secret_config_key`.
  */
 function profileFields(
   profile: DeploymentProfileDecl,
@@ -1328,6 +1365,7 @@ function profileFields(
   label: string;
   value: string | null | undefined;
   choices?: readonly string[];
+  required?: boolean;
 }> {
   // Named once: both profile kinds carry a `discovery`, under two different wire
   // names, and the set of values is the same `Discovery` in both.
@@ -1337,19 +1375,26 @@ function profileFields(
       return [];
     case "self_hosted":
       return [
-        { wire: "host", label: "host", value: profile.host },
+        { wire: "host", label: "host", value: profile.host, required: true },
         {
           wire: "worker_discovery",
           label: "worker_discovery",
           value: profile.discovery,
           choices: discovery,
+          required: true,
         },
         { wire: "target_dir", label: "target_dir", value: profile.target_dir },
         { wire: "cargo_profile", label: "cargo_profile", value: profile.cargo_profile },
       ];
     case "kubernetes":
       return [
-        { wire: "discovery", label: "discovery", value: profile.discovery, choices: discovery },
+        {
+          wire: "discovery",
+          label: "discovery",
+          value: profile.discovery,
+          choices: discovery,
+          required: true,
+        },
         { wire: "namespace", label: "namespace", value: profile.namespace },
         { wire: "image_registry", label: "image_registry", value: profile.image_registry },
       ];

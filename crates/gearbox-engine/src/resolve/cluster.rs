@@ -517,10 +517,41 @@ fn unsatisfiable(ctx: &Context<'_>, named: Option<&str>) -> Diagnostic {
             )
         },
     );
+
+    // **Name who asked.** The scope is not the asker, and reading this without
+    // the asker is how it looked like a stray error: a product that had just
+    // added `api-contracts-consumer` was told about `event-broker`, which is the
+    // *scope* name the consumer declares its requirement under -- and no
+    // `event-broker` gear was in the product at all.
+    let asked_by = ctx
+        .need
+        .requesters
+        .iter()
+        .map(|gear| format!("`{gear}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // **An empty table is a different answer, not a shorter one.** `rows` is
+    // empty when the closure holds no provider gear, and the help then read
+    // `per provider:` followed by nothing -- a heading for a list that does not
+    // exist, which says less than saying so.
+    let help = if rows.is_empty() {
+        format!(
+            "no cluster provider gear is in this product's closure, so there is nothing that \
+             could answer `{}`; add a gear that provides it",
+            ctx.primitive.config_key()
+        )
+    } else {
+        format!("per provider:\n{}", rows.join("\n"))
+    };
+
     Diagnostic::error(
         DiagnosticCode::ClusterUnsatisfiable,
-        format!("{subject} in scope `{}` with {{{required}}}", ctx.scope),
-        format!("per provider:\n{}", rows.join("\n")),
+        format!(
+            "{subject} in scope `{}` with {{{required}}}, required by {asked_by}",
+            ctx.scope
+        ),
+        help,
     )
     .at(loc(ctx.uri))
 }

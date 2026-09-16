@@ -8,6 +8,7 @@
 // so a second window gets its own engine rather than stealing the first's.
 
 import { ILogger } from "@theia/core/lib/common/logger";
+import { ResponseError } from "@theia/core/lib/common/message-rpc/rpc-message-encoder";
 import { inject, injectable } from "@theia/core/shared/inversify";
 import { randomBytes } from "crypto";
 import { execFile } from "child_process";
@@ -545,13 +546,21 @@ export class GearboxServiceImpl implements GearboxService {
    * spins for the rest of the session with nothing to retry from and nothing in
    * the log. `initialize` and `catalogue/load` have had the death/timeout race
    * since the supervisor was written; these methods were reaching past it.
+   *
+   * **And one place that keeps the engine's reasons attached.** See
+   * `withEngineData`: every refusal the engine explains travels through here, so
+   * this is where the explanation is either preserved or lost.
    */
   private async request<T>(method: string, params: unknown): Promise<T> {
     const engine = this.engine;
     if (!engine || engine.dead) {
       throw new Error(`cannot call ${method}: the engine is not initialized`);
     }
-    return engine.request<T>(method, params, PRODUCT_TIMEOUT_MS);
+    try {
+      return await engine.request<T>(method, params, PRODUCT_TIMEOUT_MS);
+    } catch (error) {
+      throw withEngineData(error);
+    }
   }
 
   /**
@@ -678,4 +687,48 @@ async function headRef(root: string): Promise<{ resolvedRef?: string }> {
   } catch {
     return {};
   }
+}
+
+/**
+ * Re-throwable form of an engine refusal that survives the Theia proxy.
+ *
+ * **The bug this exists to close.** The engine attaches its reasons to a JSON-RPC
+ * error as `data.diagnostics` -- `error_with_diagnostics` in `gearbox-rpc` --
+ * and `vscode-jsonrpc` hands us a `ResponseError` carrying them. Theia then
+ * serialises errors with a msgpack extension that keeps `data` **only** when the
+ * value is an instance of *its own* `ResponseError` class:
+ *
+ * ```js
+ * const isResponseError = error instanceof ResponseError;   // @theia/core's
+ * ...
+ * data.isResponseError ? new ResponseError(code, message, data) : new Error(message)
+ * ```
+ *
+ * Two unrelated classes with the same name, so the test failed for every engine
+ * error and every one of them reached the browser as a bare `new Error(message)`.
+ * `ProductStore.diagnosticsOf` therefore always answered `undefined`, and its
+ * `?? this.state.diagnostics` fallback -- written as the rare case -- was the
+ * only branch that ever ran. That is why a product that would not evaluate still
+ * showed the previous product's diagnostics as current.
+ *
+ * Converting here rather than at each call site: `request` is the single funnel,
+ * so one conversion covers every method, including the ones added later.
+ *
+ * Exported for `scripts/rpc-error-smoke.mjs`, which pins both halves: that
+ * Theia's codec keeps `data` for its own class and drops it for the other, and
+ * that this function turns the second into the first. The first half is a fact
+ * about a dependency, so it is the half that can change under an upgrade
+ * without anything here failing to compile.
+ */
+export function withEngineData(error: unknown): unknown {
+  // Already Theia's own, or nothing to preserve: hand it back untouched.
+  if (error instanceof ResponseError) return error;
+  if (!(error instanceof Error)) return error;
+  const carrier = error as Error & { code?: unknown; data?: unknown };
+  if (carrier.data === undefined) return error;
+  const code = typeof carrier.code === "number" ? carrier.code : 0;
+  const wrapped = new ResponseError(code, error.message, carrier.data);
+  // Keep the origin readable in the backend log; the browser gets its own stack.
+  wrapped.stack = error.stack;
+  return wrapped;
 }

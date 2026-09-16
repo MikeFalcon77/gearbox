@@ -95,7 +95,20 @@ export class ConflictsWidget extends ReactWidget {
           </button>
         </div>
 
-        {diagnostics.length === 0 ? (
+        {state.status === "error" && diagnostics.length === 0 ? (
+          /* **"No conflicts" is the wrong answer for a product that did not
+             load.** The diagnostics this panel draws are a *resolution's*, and a
+             failed load produced none -- so an empty list here used to read as a
+             clean bill of health for a file the engine had just refused. It read
+             worse than that before `ProductStore.fail` stopped keeping the
+             previous resolution's diagnostics: the panel reported the product
+             before this one as though it were this one. The reason itself lives
+             in the Product panel, which is where the file and the retry are. */
+          <div className="gbx-empty" data-conflicts-unavailable="true">
+            This product did not load, so there is no resolution to report on.{" "}
+            {state.error ?? "The Product view has the reason."}
+          </div>
+        ) : diagnostics.length === 0 ? (
           <div className="gbx-empty">
             Nothing to report: the <code>{state.profile}</code> resolution raised no diagnostics.
           </div>

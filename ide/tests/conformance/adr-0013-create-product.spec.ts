@@ -508,36 +508,55 @@ test.describe("edit config and profiles in the open product", () => {
     expect(diffOf(DEMO_REL)).toBe("");
   });
 
-  test("an added profile appears in the switcher and resolves [ADR-0013 §Confirmation]", async ({
-    studio,
-  }) => {
-    const profileId = "conformance-staging";
-    expect(diffOf(DEMO_REL)).toBe("");
-
-    try {
-      await openProduct(studio.page, "dev");
-      await studio.page.locator("[data-add-profile]").click();
-      await studio.page.locator("[data-profile-new-id]").fill(profileId);
-      await studio.page.locator("[data-profile-add-confirm]").click();
-      await acceptPreview(studio.page);
-      await expect(studio.page.locator(`[data-profile="${profileId}"]`)).toBeVisible({
-        timeout: 30_000,
-      });
-      await studio.page.locator(`[data-profile="${profileId}"]`).click();
-      await expect(studio.page.locator(`[data-resolved-profile="${profileId}"]`)).toBeVisible({
-        timeout: 60_000,
-      });
-
-      await studio.page.locator(`[data-remove-profile="${profileId}"]`).click();
-      await acceptPreview(studio.page);
-      await expect(studio.page.locator(`[data-profile="${profileId}"]`)).toHaveCount(0, {
-        timeout: 30_000,
-      });
+  /**
+   * **Every kind the picker offers, because this claim used to cover one.**
+   * It filled an id, confirmed, and never touched `[data-profile-new-kind]` --
+   * so it exercised `embedded` and stayed green while `self_hosted` and
+   * `kubernetes` failed every time: the form sent no fields, and the grammar
+   * requires `host` + `worker_discovery` / `discovery`. A picker offering three
+   * options of which two could not work, under a claim that said adding a
+   * profile works.
+   */
+  for (const kind of ["embedded", "self_hosted", "kubernetes"] as const) {
+    // **`freshStudio`, one context each.** Three tests that each add a profile to
+    // the same description, remove it, and reload the store do not survive
+    // sharing a page: the middle one saw the chip it had just removed, because
+    // the previous test's trailing reload was still in flight. Isolation here is
+    // cheaper than a wait tuned to whichever of the three runs second.
+    test(`an added ${kind} profile appears in the switcher and resolves [ADR-0013 §Confirmation]`, async ({
+      freshStudio,
+    }) => {
+      const studio = freshStudio;
+      const profileId = `conformance-${kind.replace(/_/g, "-")}`;
       expect(diffOf(DEMO_REL)).toBe("");
-    } finally {
-      if (diffOf(DEMO_REL) !== "") {
-        execFileSync("git", ["checkout", "--", DEMO_REL], { cwd: REPO });
+
+      try {
+        await settled(studio.page);
+        await openProduct(studio.page, "dev");
+        await studio.page.locator("[data-add-profile]").click();
+        await studio.page.locator("[data-profile-new-id]").fill(profileId);
+        await studio.page.locator("[data-profile-new-kind]").selectOption(kind);
+        await studio.page.locator("[data-profile-add-confirm]").click();
+        await acceptPreview(studio.page);
+        await expect(studio.page.locator(`[data-profile="${profileId}"]`)).toBeVisible({
+          timeout: 30_000,
+        });
+        await studio.page.locator(`[data-profile="${profileId}"]`).click();
+        await expect(studio.page.locator(`[data-resolved-profile="${profileId}"]`)).toBeVisible({
+          timeout: 60_000,
+        });
+
+        await studio.page.locator(`[data-remove-profile="${profileId}"]`).click();
+        await acceptPreview(studio.page);
+        await expect(studio.page.locator(`[data-profile="${profileId}"]`)).toHaveCount(0, {
+          timeout: 30_000,
+        });
+        expect(diffOf(DEMO_REL)).toBe("");
+      } finally {
+        if (diffOf(DEMO_REL) !== "") {
+          execFileSync("git", ["checkout", "--", DEMO_REL], { cwd: REPO });
+        }
       }
-    }
-  });
+    });
+  }
 });

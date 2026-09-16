@@ -138,10 +138,20 @@ export class ToolbarWidget extends ReactWidget {
   protected renderProduct(): React.ReactNode {
     const state = this.products.current;
     const product = state.resolution?.product?.product;
+    // **The product's name, not the reference it was opened by.** `ProductRef.label`
+    // is documented as a repository-relative *path* ("which is what a person
+    // recognises" -- `protocol.ts`), and that is what discovery puts there. So
+    // this header read `UX Audit Clone` right after Create, because the create
+    // path passed a display name as the label, and
+    // `products/ux-audit-clone-20260916/product.gdl` after closing and reopening
+    // the same product -- while Overview two lines down said the name both
+    // times. One entity, two names, side by side. The expression is the one
+    // `createGearForProduct` already uses.
+    const name = state.intent?.display_name ?? state.open?.label ?? "";
     return (
       <>
-        <span className="gbx-toolbar-name" data-product={state.open?.label ?? ""}>
-          {state.open?.label ?? ""}
+        <span className="gbx-toolbar-name" data-product={name}>
+          {name}
         </span>
         {state.profile !== undefined && (
           // `data-header-profile`, not `data-profile`: the Product view's own

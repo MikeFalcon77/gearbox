@@ -302,6 +302,19 @@ pub fn add_profile(
     {
         return Ok(Edit::Unchanged);
     }
+    // **A field the caller did not name is scaffolded, not refused.** Studio's
+    // Add profile form asks for an id and a kind, which is the right amount to
+    // ask: the values below are editable in the profile form the moment the
+    // profile exists, and asking for them twice in two shapes is how the two
+    // shapes disagree. Before this, that form sent no fields at all and so could
+    // add an `embedded` profile and nothing else.
+    let mut supplied: Vec<(String, String)> = fields.to_vec();
+    for (name, default) in required_profile_fields(kind) {
+        if !supplied.iter().any(|(key, _)| key == name) {
+            supplied.push(((*name).to_owned(), (*default).to_owned()));
+        }
+    }
+    let fields = supplied.as_slice();
     require_profile_fields(uri, kind, fields)?;
     let mut parts = vec![format!("id = {}", quote_string(id))];
     for (k, v) in fields {
@@ -417,6 +430,24 @@ pub fn set_profile_field(
                 "add the profile first, then edit its fields",
             )
         })?;
+    // **Unsetting is a removal, and some arguments cannot be removed.** A
+    // `None` here deletes the argument from the call, so for a field the kind
+    // requires the result is a description the evaluator will not read -- the
+    // product stops opening, and the control that did it is on a screen that no
+    // longer renders. Refused before the write rather than reported after it.
+    if value.is_none() {
+        let kind = entry_callee(source, entry).unwrap_or_default();
+        if required_profile_fields(&kind)
+            .iter()
+            .any(|(name, _)| *name == field)
+        {
+            return Err(refuse(
+                uri,
+                &format!("`{kind}` profile needs `{field}`, so it cannot be unset"),
+                &format!("give `{field}` another value instead of clearing it"),
+            ));
+        }
+    }
     let rendered = value.map(quote_string);
     let new_entry = set_named_arg_on_call(uri, slice(source, entry), field, rendered.as_deref())?;
     if new_entry == slice(source, entry) {
@@ -490,25 +521,17 @@ product(
     )
 }
 
+/// The scaffold entry for a new profile. `id` arrives already quoted.
+///
+/// Reads `required_profile_fields`, which is where the values and the reason for
+/// them live -- this used to carry its own copy, and the copy was the bug behind
+/// Add profile offering two kinds it could not add.
 fn render_profile_entry(kind: &str, id: &str) -> String {
-    // `static`, and it is the only value that works here. The lowering accepts
-    // exactly `static` and `directory` -- this rendered `dns`, which is not a
-    // discovery kind at all, so a profile scaffolded for either non-embedded
-    // kind evaluated straight to a diagnostic.
-    //
-    // `directory` would parse and still be the wrong scaffold: it makes the
-    // resolver demand `gear-orchestrator` and `grpc-hub` in the host process
-    // (`TopologyNoOrchestrator`, `TopologyNoGrpcHub`), which a product that has
-    // just been created has not selected. A scaffold has to evaluate clean on
-    // its own; `profile_scaffolds_evaluate` in `tests/product.rs` holds it to
-    // that, which is the link that was missing when `dns` went in.
-    match kind {
-        "kubernetes" => format!("{kind}(id = {id}, discovery = \"static\")"),
-        "self_hosted" => {
-            format!("{kind}(id = {id}, host = \"localhost\", worker_discovery = \"static\")")
-        }
-        _ => format!("{kind}(id = {id})"),
+    let mut parts = vec![format!("id = {id}")];
+    for (name, value) in required_profile_fields(kind) {
+        parts.push(format!("{name} = {}", quote_string(value)));
     }
+    format!("{kind}({})", parts.join(", "))
 }
 
 /// Clone a product file, changing `id` and `name` on the top-level call.
@@ -591,17 +614,50 @@ fn require_gdl_identifier(uri: &str, name: &str, what: &str) -> Result<(), Diagn
     }
 }
 
+/// The fields a profile of this kind cannot be written without.
+///
+/// **One table, because two operations need the same answer.** `add_profile`
+/// asks before writing a new entry, and `set_profile_field` asks before
+/// *removing* an argument from an existing one. Until the second caller existed
+/// you could not add a `self_hosted` profile without `worker_discovery` but
+/// could delete it from one afterwards, which left a description the evaluator
+/// refuses to read -- `product.rs` declares these as non-`Option` named
+/// arguments, so starlark rejects the call outright and the product stops
+/// opening.
+///
+/// Mirrored in the Studio profile form (`profileFields` in
+/// `product/product-widget.tsx`), which is what stops the control offering the
+/// removal in the first place. Two statements of one rule, and they must agree.
+///
+/// **The value beside each name is the scaffold default**, and it lives here so
+/// that the rule and the way to satisfy it cannot drift apart. They had:
+/// `add_profile` refused a `self_hosted` profile with no `host`, while
+/// `render_profile_entry` -- three hundred lines away, used only by the create
+/// wizard -- already knew that `host = "localhost"` and
+/// `worker_discovery = "static"` evaluate clean. So Add profile offered two
+/// kinds that could never succeed, next to a wizard that produced both of them
+/// without trouble. Every caller now reads this one table.
+///
+/// `static` is not a free choice: the lowering accepts exactly `static` and
+/// `directory`, and `directory` makes the resolver demand `gear-orchestrator`
+/// and `grpc-hub` in the host process, which a product that was just created has
+/// not selected. `profile_scaffolds_evaluate` in `tests/product.rs` holds these
+/// values to evaluating on their own.
+#[must_use]
+pub fn required_profile_fields(kind: &str) -> &'static [(&'static str, &'static str)] {
+    match kind {
+        "kubernetes" => &[("discovery", "static")],
+        "self_hosted" => &[("host", "localhost"), ("worker_discovery", "static")],
+        _ => &[],
+    }
+}
+
 fn require_profile_fields(
     uri: &str,
     kind: &str,
     fields: &[(String, String)],
 ) -> Result<(), Diagnostics> {
-    let required: &[&str] = match kind {
-        "kubernetes" => &["discovery"],
-        "self_hosted" => &["host", "worker_discovery"],
-        _ => &[],
-    };
-    for name in required {
+    for (name, _) in required_profile_fields(kind) {
         if !fields.iter().any(|(key, _)| key == name) {
             return Err(refuse(
                 uri,

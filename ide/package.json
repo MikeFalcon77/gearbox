@@ -43,13 +43,14 @@
   },
   "scripts": {
     "smoke": "node scripts/rpc-smoke.mjs",
+    "error-smoke": "node scripts/rpc-error-smoke.mjs",
     "supervision-smoke": "node scripts/engine-supervision-smoke.mjs",
     "store-smoke": "node scripts/store-smoke.mjs",
     "build": "npm run build --workspace gearbox-studio && npm run build --workspace browser-app",
     "start:browser": "node scripts/start-studio.mjs",
     "conformance": "playwright test",
     "plugins": "npm run download:plugins --workspace browser-app",
-    "verify": "npm run engine && npm run smoke && npm run build && npm run supervision-smoke && npm run store-smoke && npm run conformance",
+    "verify": "npm run engine && npm run smoke && npm run build && npm run error-smoke && npm run supervision-smoke && npm run store-smoke && npm run conformance",
     "engine": "cargo build --manifest-path ../Cargo.toml -p gearbox-cli"
   },
   "//conformance": "Playwright, and the browser is a separate explicit step: `npx playwright install chromium`. Playwright has no postinstall of its own -- not in @playwright/test, playwright or playwright-core -- so npm's install-script gate does not apply to it, and nothing downloads 100MB behind your back either.",

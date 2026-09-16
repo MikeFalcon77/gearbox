@@ -730,17 +730,125 @@ fn add_gear_quotes_injection_payloads() {
     }
 }
 
+/// Adding with no fields scaffolds the ones the kind cannot do without.
+///
+/// **This replaces a test that asserted the opposite.** `add_profile` used to
+/// refuse a `kubernetes` or `self_hosted` profile that arrived without its
+/// required fields, and the only caller -- Studio's Add profile form, which asks
+/// for an id and a kind -- always arrived that way. So two of the three kinds
+/// could not be added through the UI at all, while the create wizard produced
+/// both of them from `render_profile_entry`, which already knew the values. Both
+/// now read `required_profile_fields`.
 #[test]
-fn add_profile_refuses_incomplete_kubernetes() {
-    let diagnostics = add_profile(URI, WITH_CONFIG, "kubernetes", "prod", &[])
-        .expect_err("incomplete kubernetes");
+fn add_profile_scaffolds_the_fields_its_kind_requires() {
+    let entry = |kind: &str, id: &str, fields: &[(String, String)]| {
+        add_profile(URI, WITH_CONFIG, kind, id, fields)
+            .expect("editable")
+            .changed()
+            .expect("changed")
+            .to_owned()
+    };
+
+    let kubernetes = entry("kubernetes", "prod", &[]);
     assert!(
-        diagnostics
-            .as_slice()
-            .iter()
-            .any(|d| d.message.contains("needs `discovery`")),
-        "{diagnostics:?}"
+        kubernetes.contains(r#"kubernetes(id = "prod", discovery = "static")"#),
+        "{kubernetes}"
     );
+
+    let self_hosted = entry("self_hosted", "local", &[]);
+    assert!(
+        self_hosted
+            .contains(r#"self_hosted(id = "local", host = "localhost", worker_discovery = "static")"#),
+        "{self_hosted}"
+    );
+
+    // `embedded` requires none and must not acquire any: its constructor takes
+    // only an id, so a scaffolded argument would be a call the evaluator refuses.
+    let embedded = entry("embedded", "staging", &[]);
+    assert!(embedded.contains(r#"embedded(id = "staging")"#), "{embedded}");
+    assert!(!embedded.contains("discovery"), "{embedded}");
+
+    // A value the caller named wins; the rest are still filled in.
+    let explicit = entry(
+        "self_hosted",
+        "local",
+        &[("host".into(), "gateway".into())],
+    );
+    assert!(explicit.contains(r#"host = "gateway""#), "{explicit}");
+    assert!(
+        explicit.contains(r#"worker_discovery = "static""#),
+        "{explicit}"
+    );
+}
+
+/// Removing a scaffolded profile is the exact inverse of adding it, for every
+/// kind -- not just the one the byte-exact test already covered.
+#[test]
+fn add_then_remove_is_an_inverse_for_every_kind() {
+    for kind in ["embedded", "self_hosted", "kubernetes"] {
+        let added = add_profile(URI, WITH_CONFIG, kind, "audit", &[])
+            .expect("editable")
+            .changed()
+            .expect("changed")
+            .to_owned();
+        assert!(added.contains("audit"), "{kind}: {added}");
+        assert_eq!(
+            remove_profile(URI, &added, "audit")
+                .expect("editable")
+                .changed()
+                .expect("changed"),
+            WITH_CONFIG,
+            "{kind} did not round-trip"
+        );
+    }
+}
+
+/// A field the kind requires cannot be cleared, because clearing it removes the
+/// argument and the evaluator then refuses to read the description at all.
+///
+/// The form offered exactly this: a select with a "not set" option, and a plain
+/// text input for `host` that sent `null` when emptied. The product stopped
+/// opening, and the control that did it was on a screen that no longer rendered,
+/// so the value could not be put back.
+#[test]
+fn a_required_profile_field_cannot_be_unset() {
+    let with_local = add_profile(
+        URI,
+        WITH_CONFIG,
+        "self_hosted",
+        "local",
+        &[
+            ("host".into(), "gateway".into()),
+            ("worker_discovery".into(), "directory".into()),
+        ],
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    for field in ["host", "worker_discovery"] {
+        let diagnostics = set_profile_field(URI, &with_local, "local", field, None)
+            .expect_err("a required field must not be unsettable");
+        assert!(
+            diagnostics
+                .as_slice()
+                .iter()
+                .any(|d| d.message.contains(&format!("needs `{field}`"))),
+            "{field}: {diagnostics:?}"
+        );
+    }
+
+    // An optional one still clears, which is the behaviour the control is for.
+    let cleared = set_profile_field(URI, &with_local, "local", "worker_discovery", Some("static"))
+        .expect("editable")
+        .changed()
+        .expect("changed")
+        .to_owned();
+    assert!(cleared.contains(r#"worker_discovery = "static""#), "{cleared}");
+    let without_target = set_profile_field(URI, &with_local, "local", "target_dir", None)
+        .expect("editable");
+    assert_eq!(without_target, Edit::Unchanged, "absent optional stays absent");
 }
 
 #[test]

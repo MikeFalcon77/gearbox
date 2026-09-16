@@ -191,9 +191,10 @@ export class ProductEditService {
     const applied = await this.applyDescriptionEdit({
       title: "Apply changes",
       ok: "Apply",
-      summary: `${edits.length} edit${edits.length === 1 ? "" : "s"} on ${open.label}`,
+      summary: `${edits.length} edit${edits.length === 1 ? "" : "s"} on ${this.productName(open.label)}`,
       path: open.path,
       label: open.label,
+      targets: edits,
       dryRun: () => this.service.applyEdits(open.path, edits, true),
       commit: () => this.service.applyEdits(open.path, edits, false),
       log: `apply ${edits.length} draft edit(s)`,
@@ -494,7 +495,7 @@ export class ProductEditService {
       return false;
     }
     if (!preview.changed) {
-      this.messages.info(`${open.label} already names ${gear}.`);
+      this.messages.info(`${this.productName(open.label)} already names ${gear}.`);
       return false;
     }
 
@@ -541,6 +542,7 @@ export class ProductEditService {
       summary: `${edits.length} edit${edits.length === 1 ? "" : "s"} on ${target.label}`,
       path: target.path,
       label: target.label,
+      targets: edits,
       dryRun: () => this.service.applyEdits(target.path, [...edits], true),
       commit: () => this.service.applyEdits(target.path, [...edits], false),
       log: `apply ${edits.length} edit(s) to ${target.path}`,
@@ -590,15 +592,15 @@ export class ProductEditService {
     if (!preview.changed) {
       this.messages.info(
         add
-          ? `${open.label} already names ${gear}.`
-          : `${open.label} does not name ${gear}.`,
+          ? `${this.productName(open.label)} already names ${gear}.`
+          : `${this.productName(open.label)} does not name ${gear}.`,
       );
       return false;
     }
 
     // Captured before the dialog, compared after it. See the header.
     const at = this.product.revision;
-    if (!(await this.confirm(add, gear, open.label, preview))) {
+    if (!(await this.confirm(add, gear, this.productName(open.label), preview))) {
       return false;
     }
     if (!(await this.stillTrue(at, open.path, gear, source, add, preview))) {
@@ -670,7 +672,15 @@ export class ProductEditService {
       return false;
     }
     await this.product.ensureDiscovered();
-    await this.session.open({ path: params.path, label: params.name });
+    // **Open it by the reference discovery minted, not by one built here.**
+    // `ProductRef.label` is a repository-relative path by contract, and passing
+    // `params.name` put a display name in that slot -- so the shell header read
+    // the name until the product was closed and reopened, then read the path,
+    // and the catalogue's Add/Remove dialogs inherited whichever it happened to
+    // be. Discovery has just run, so the correct reference is already in hand;
+    // the fallback keeps the open working if it has not caught up.
+    const discovered = this.product.current.products.find((ref) => ref.path === params.path);
+    await this.session.open(discovered ?? { path: params.path, label: params.name });
     return true;
   }
 
@@ -708,6 +718,19 @@ export class ProductEditService {
     });
   }
 
+  /**
+   * The open product as a person names it, for prose that is about the product.
+   *
+   * **Not for prose about the file.** "X has unsaved changes. Save or revert
+   * them first" has to help somebody find an editor tab, and the path does that
+   * where a display name does not -- so those messages keep `label`, which is a
+   * repository-relative path by `ProductRef`'s contract. This is for the
+   * sentences that name the thing being changed.
+   */
+  protected productName(fallback: string): string {
+    return this.product.current.intent?.display_name ?? fallback;
+  }
+
   protected async applyDescriptionEdit(args: {
     title: string;
     ok: string;
@@ -717,6 +740,8 @@ export class ProductEditService {
     dryRun: () => Promise<EditGearResult>;
     commit: () => Promise<EditGearResult>;
     log: string;
+    /** The edits this preview is of, named in the dialog. See `describeEdit`. */
+    targets?: readonly ProductEdit[];
   }): Promise<boolean> {
     if (this.isDirty(args.path)) {
       this.messages.error(
@@ -736,7 +761,8 @@ export class ProductEditService {
       return false;
     }
     const at = this.product.revision;
-    if (!(await this.confirmEdit(args.title, args.ok, args.summary, preview))) return false;
+    if (!(await this.confirmEdit(args.title, args.ok, args.summary, preview, args.targets ?? [])))
+      return false;
     const open = this.product.current.open;
     if (this.product.revision !== at || open?.path !== args.path || this.isDirty(args.path)) {
       this.messages.warn("Nothing was written: the product changed while the preview was open.");
@@ -770,11 +796,25 @@ export class ProductEditService {
     ok: string,
     summary: string,
     preview: EditGearResult,
+    targets: readonly ProductEdit[] = [],
   ): Promise<boolean> {
     const body = document.createElement("div");
     const head = document.createElement("div");
     head.textContent = summary;
     body.appendChild(head);
+    // Between the count and the diff: what each of those edits is *for*. See
+    // `describeEdit` for why a diff of one file is not enough on its own.
+    if (targets.length > 0) {
+      const list = document.createElement("ul");
+      list.className = "gbx-edit-targets";
+      for (const edit of targets) {
+        const item = document.createElement("li");
+        item.dataset.editTarget = edit.kind;
+        item.textContent = describeEdit(edit);
+        list.appendChild(item);
+      }
+      body.appendChild(list);
+    }
     const diff = document.createElement("pre");
     diff.className = "gbx-edit-preview";
     diff.textContent = this.diffText(preview);
@@ -967,6 +1007,44 @@ class EditPreviewDialog extends ConfirmDialog {
       return;
     }
     super.onActivateRequest(msg);
+  }
+}
+
+/**
+ * What one queued edit targets, in words, for the confirmation dialog.
+ *
+ * **The diff alone does not say.** The preview body was the summary line plus
+ * the engine's diff, and the diff is a diff of one file: changing
+ * `cargo_profile` on the `local` profile showed `+ , cargo_profile =
+ * "release"),` and nothing else. A person looking at the `prod` profile on
+ * screen -- the switcher is per screen, the draft is per product -- had no way
+ * to tell from the dialog which profile the line belonged to, which is the one
+ * thing the confirmation exists to establish.
+ *
+ * Every arm reads fields the edit already carries, so this costs no round trip.
+ */
+function describeEdit(edit: ProductEdit): string {
+  switch (edit.kind) {
+    case "add_gear":
+      return `add gear \`${edit.gear}\` from \`${edit.source}\``;
+    case "remove_gear":
+      return `remove gear \`${edit.gear}\``;
+    case "add_source":
+      return `add source \`${edit.id}\` at \`${edit.at}\``;
+    case "set_config":
+      return edit.value === null
+        ? `gear \`${edit.gear}\`: clear config \`${edit.key}\``
+        : `gear \`${edit.gear}\`: config \`${edit.key}\` = ${JSON.stringify(edit.value)}`;
+    case "set_features":
+      return `gear \`${edit.gear}\`: features = [${edit.features.join(", ")}]`;
+    case "add_plugin":
+      return `gear \`${edit.gear}\`: add plugin \`${edit.plugin}\``;
+    case "set_plugins":
+      return `gear \`${edit.gear}\`: plugins = [${edit.plugins.join(", ")}]`;
+    case "set_profile_field":
+      return edit.value === null
+        ? `profile \`${edit.profile}\`: clear \`${edit.field}\``
+        : `profile \`${edit.profile}\`: \`${edit.field}\` = ${JSON.stringify(edit.value)}`;
   }
 }
 
