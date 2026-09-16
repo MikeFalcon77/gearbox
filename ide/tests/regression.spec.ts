@@ -14,6 +14,7 @@ import {
   openPalette,
   openProduct,
   revealCatalogue,
+  revealInspector,
   runCommand,
   expectContext,
   test,
@@ -307,6 +308,17 @@ test.describe("every view has an icon, and the icon exists", () => {
   });
 
   test("the Gearbox views carry a codicon in the shell", async ({ studio }) => {
+    // **The state is established, not inherited.** The Inspector is gated on
+    // having a subject -- a panel whose whole content is "select something" is
+    // worse than an absent one -- so with nothing selected it has no tab and no
+    // icon to carry. This test inherited a session where something happened to
+    // be selected, and that held only because two conformance claims failed
+    // earlier in the run and left one behind them. With those fixed the suite
+    // reaches here at the home screen and this asserted on a tab that does not
+    // exist. The same mistake the first test in this file already names --
+    // "relied on that without saying so" -- two screens further in.
+    await openProduct(studio.page, "dev");
+    await revealInspector(studio.page);
     // Theia gives every tab the id `shell-tab-<widgetId>`, which is what makes
     // this checkable without depending on a label the activity bar does not show.
     const icons = await studio.page.evaluate(() =>

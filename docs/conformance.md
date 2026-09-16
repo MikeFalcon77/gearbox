@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **172** — 164 built, 1 not built, 2 broken, 5 not observed.
+Claims: **172** — 166 built, 1 not built, 0 broken, 5 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -34,7 +34,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | a scaffold shows its file plan before writing anything | `ADR-0010 §Consequences: a preview is not optional` | ✅ built |  |
 | a scaffold has three shapes, and each offers what its kind needs | `ADR-0010 tier 0` | ✅ built |  |
 | choosing a host writes the plugin's locator instead of commenting it | `ADR-0010 tier 0` | ✅ built |  |
-| a generated composition crate carries a header naming its generator | `ADR-0010 tier 2` | ❌ broken | [31mTest timeout of 120000ms exceeded.[39m |
+| a generated composition crate carries a header naming its generator | `ADR-0010 tier 2` | ✅ built |  |
 | a description edit shows the line before writing it | `ADR-0010 §Consequences: a preview is not optional` | ✅ built |  |
 | adding a gear inserts one line, and removing it restores the file exactly | `ADR-0010 tier 3` | ✅ built |  |
 | Inspector projects config struct fields as typed controls | `Phase 7` | ✅ built |  |
@@ -246,7 +246,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | it renders the cluster graph | `PRD cpt-gearbox-fr-studio: renders the cluster graph` | ✅ built |  |
 | the cluster view explains an empty resolution | `PRD cpt-gearbox-fr-studio: renders the cluster graph` | ✅ built |  |
 | it answers why for a selected decision | `PRD cpt-gearbox-fr-studio: answers why` | ✅ built |  |
-| it previews and applies generation | `PRD cpt-gearbox-fr-generate-preview` | ❌ broken | Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoHaveAttribute[2m([22m[32mexpected[39m[2m)[22m failed |
+| it previews and applies generation | `PRD cpt-gearbox-fr-generate-preview` | ✅ built |  |
 | the resolver notice is gone, and gone because the engine says so | `PRD cpt-gearbox-fr-rpc-api` | ✅ built |  |
 | it contains no resolution logic of its own | `PRD cpt-gearbox-fr-studio: no resolution logic` | ✅ built |  |
 
