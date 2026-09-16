@@ -153,6 +153,15 @@ export class ProductWidget extends ReactWidget {
     // this widget, put a product back on screen with nobody having asked for one.
     // Home is a deliberate starting point now, and a product arrives by an
     // explicit act: the Continue card, the picker, or `File > Open Product...`.
+    //
+    // **Staged before the first render, not only on the next store event.** The
+    // subscription above covers the common path, where this panel exists and a
+    // product arrives afterwards. It does not cover a panel built while a
+    // product is *already* resolved -- closing and reopening the Product view --
+    // because no store event follows, and the widget would sit on Overview with
+    // the errors one tab away. Idempotent by the guards inside: `stagedFor`
+    // fires once per open product.
+    this.landOnErrors();
     this.update();
   }
 
@@ -174,15 +183,15 @@ export class ProductWidget extends ReactWidget {
    * nothing, and it is withdrawn on every product change besides. Showing the
    * stage that is already there is the cheaper answer to the same need.
    *
-   * **The positive path is unobserved on this corpus, and saying so is the
-   * point.** No product in the tree resolves with an error -- the demo carries
-   * two warnings and an info under `embedded` and four and an info under the
-   * other two -- so no suite reaches the branch that moves the stage. What is
-   * asserted is that it does *not* fire for warnings, which is the half that
-   * broke something. Producing the other half would mean writing an error into
-   * `products/`, which the three guards on the descriptions exist to prevent and
-   * rightly; it returns as soon as the corpus has a product that resolves with
-   * one.
+   * **Both halves are observed, and the positive one costs a temporary edit.**
+   * No product in the corpus resolves with an error -- the demo carries two
+   * warnings and an info under `embedded` and four and an info under the other
+   * two -- so `regression.spec.ts` writes one in for the length of two tests
+   * and restores the bytes in a `finally`. GBX0115, a config key the gear does
+   * not declare: an error, and one resolution does not stop on, so the lock
+   * still arrives with its applications and bindings. GBX0120 looks like the
+   * obvious candidate and is not -- it is a warning on purpose, because the
+   * value may still come from a profile.
    */
   protected landOnErrors(): void {
     const state = this.store.current;

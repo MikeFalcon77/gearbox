@@ -5,11 +5,12 @@
 // arrowhead". Kept in their own file so that the conformance files stay a
 // one-to-one map onto the documents.
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
   expect,
+  openGenerate,
   openGraph,
   openPalette,
   openProduct,
@@ -17,9 +18,13 @@ import {
   revealCatalogue,
   revealInspector,
   runCommand,
+  settled,
   expectContext,
   test,
 } from "./fixtures/studio";
+
+/** The repository root: this file sits in `ide/tests`. */
+const REPO = join(__dirname, "../..");
 
 test.describe("the panel is operable without a mouse", () => {
   // Every interaction in the catalogue was a bare `onClick` on a div once. A
@@ -586,6 +591,87 @@ test.describe("a required config field says so", () => {
 
     await studio.page.locator("[data-add-gear-cancel]").click();
   });
+
+  test("the note and the placeholder say it in words too", async ({ studio }) => {
+    // The marker is a glyph, and a glyph is not an explanation. Both of the
+    // other two surfaces that carry the same fact had no coverage at all, so
+    // either could have been deleted silently -- which is the whole reason this
+    // describe exists.
+    const { page } = studio;
+    await openProduct(page, "dev");
+    await configure(page, "event-broker");
+
+    for (const field of ["mode", "default_storage_backend"]) {
+      await expect(
+        page.locator(`[data-config-field-missing="${field}"]`),
+        `${field} is required with no default, so it must say so in words`,
+      ).toHaveText("required, and the gear declares no default");
+    }
+
+    // The placeholder reaches the two kinds by different routes, so both are
+    // asserted: an enum has no `placeholder` attribute to carry it, and shows
+    // it as the text of the empty option that means "left alone".
+    await expect(
+      page.locator('[data-config-field="mode"] select option[value=""]'),
+      "an enum carries the placeholder as its empty option",
+    ).toHaveText("required");
+    await expect(
+      page.locator('[data-config-field="default_storage_backend"] input'),
+      "a string field carries it as the attribute",
+    ).toHaveAttribute("placeholder", "required");
+
+    await page.locator("[data-add-gear-cancel]").click();
+  });
+});
+
+test.describe("the Generate screen names the profile it plans for", () => {
+  // Without this the absent `docker/` and `helm/` of an embedded profile read as
+  // a missing feature rather than as the definition of the profile kind -- the
+  // question they actually prompted. The note is driven by
+  // `resolution.product.kubernetes`, the same fact the engine branches on, so it
+  // is keyed to the profile *kind* and not to a list of profile ids kept here.
+
+  test("an embedded profile names itself and says what it does not produce", async ({
+    studio,
+  }) => {
+    const { page } = studio;
+    await openProduct(page, "dev");
+    await openGenerate(page);
+
+    await expect(page.locator("[data-generate-profile]")).toHaveAttribute(
+      "data-generate-profile",
+      "dev",
+    );
+    await expect(page.locator("[data-generate-no-deployment]")).toBeVisible();
+    // And the plan agrees with the note rather than merely sitting beside it.
+    await expect(page.locator('[data-plan-path^="docker/"]')).toHaveCount(0);
+    await expect(page.locator('[data-plan-path^="helm/"]')).toHaveCount(0);
+  });
+
+  test("a kubernetes profile drops the note and plans the images and the chart", async ({
+    studio,
+  }) => {
+    const { page } = studio;
+    await openProduct(page, "prod");
+    await openGenerate(page);
+
+    await expect(page.locator("[data-generate-profile]")).toHaveAttribute(
+      "data-generate-profile",
+      "prod",
+    );
+    await expect(
+      page.locator("[data-generate-no-deployment]"),
+      "this profile does produce them, so the note must be gone",
+    ).toHaveCount(0);
+    expect(
+      await page.locator('[data-plan-path^="docker/"]').count(),
+      "a kubernetes profile plans Dockerfiles",
+    ).toBeGreaterThan(0);
+    expect(
+      await page.locator('[data-plan-path^="helm/"]').count(),
+      "a kubernetes profile plans a chart",
+    ).toBeGreaterThan(0);
+  });
 });
 
 test.describe("the diagnostics count is a signpost, not a hijack", () => {
@@ -621,5 +707,122 @@ test.describe("the diagnostics count is a signpost, not a hijack", () => {
     await productSection(studio.page, "validation");
     const rows = studio.page.locator("[data-product-validation] .gbx-conflict");
     expect(await rows.count()).toBe(shown);
+  });
+
+  // --- the other half, which needs a product that resolves with an error -----
+  //
+  // No product in the corpus does, so one is made to for the length of these
+  // two tests. GBX0120 looks like the candidate and is not: it is a *warning*
+  // on purpose, because a value may still arrive from a profile. GBX0115 -- a
+  // config key the gear does not declare -- is an error, and resolution does
+  // not stop on it, so the lock still comes back with applications, bindings
+  // and gears. That combination is exactly what the stage-moving path needs.
+
+  /** The one line these tests rewrite, and what they rewrite it to. */
+  const DECLARED = '        use_gear("api-gateway", source = "gears-rust"),\n';
+  const WITH_ERROR =
+    '        use_gear("api-gateway", source = "gears-rust", config = {"demo_mode": "x"}),\n';
+
+  /**
+   * Open `payments-demo` **without** establishing a stage.
+   *
+   * `openProduct` clicks Overview -- correct for every other test, and fatal
+   * here, because the arriving stage is the claim. This does the opening half
+   * only, and the demo's own default profile is the `dev` one these tests want,
+   * so no profile switch is needed either.
+   */
+  async function openKeepingStage(page: import("@playwright/test").Page): Promise<void> {
+    if ((await page.locator(".gbx-toolbar").getAttribute("data-context")) !== "product") {
+      const card = page.locator('[data-start-action="continue"]');
+      if (await card.isVisible().catch(() => false)) {
+        await card.click();
+      } else {
+        await runCommand(page, "Open Product…");
+        const options = page.locator(`.quick-input-list [role="option"]`);
+        await options.first().waitFor({ state: "visible", timeout: 30_000 });
+        await options.filter({ hasText: "payments-demo" }).first().click();
+      }
+      await expect(page.locator(".gbx-toolbar")).toHaveAttribute("data-context", "product", {
+        timeout: 90_000,
+      });
+    }
+    await page.locator(".gbx-product").waitFor({ state: "visible", timeout: 60_000 });
+  }
+
+  /**
+   * Run `body` against a description that resolves with an error.
+   *
+   * The restore is not optional and not tidiness: `global-setup` refuses to
+   * start the suite when `products/` differs from HEAD, and `base.afterEach`
+   * fails whichever test left it dirty. A throw inside `body` would otherwise
+   * block the *next* run rather than this one.
+   */
+  async function withAnErrorInTheDescription(body: () => Promise<void>): Promise<void> {
+    const gdl = join(REPO, "products/payments-demo/product.gdl");
+    const original = readFileSync(gdl, "utf8");
+    expect(
+      original,
+      "the line these tests rewrite must be present verbatim, or they assert nothing",
+    ).toContain(DECLARED);
+    try {
+      writeFileSync(gdl, original.replace(DECLARED, WITH_ERROR));
+      await body();
+    } finally {
+      writeFileSync(gdl, original);
+    }
+  }
+
+  test("a resolution carrying an error arrives on Validation", async ({ freshStudio }) => {
+    const { page } = freshStudio;
+    await withAnErrorInTheDescription(async () => {
+      await settled(page);
+      await openKeepingStage(page);
+
+      const badge = page.locator("[data-validation-count]");
+      await expect(badge, "the error has to reach the badge before the stage can mean anything")
+        .toHaveAttribute("data-validation-worst", "error", { timeout: 90_000 });
+      await expect(
+        page.locator('[data-product-section="validation"]'),
+        "an error is what stops the lock being written, so it gets the stage",
+      ).toHaveAttribute("aria-selected", "true");
+      await expect(
+        page.locator('[data-product-validation] [data-conflict-code="GBX0115"]'),
+        "and the stage it opened shows the diagnostic that moved it",
+      ).toBeVisible();
+    });
+  });
+
+  test("rebuilding the panel comes back to Validation", async ({ freshStudio }) => {
+    // The subscription covers a product arriving at a panel that already
+    // exists. This is the other order: the panel is built while the product is
+    // already resolved, so no store event follows and nothing would move the
+    // stage. Closing the view and reopening it is that order, and it is a thing
+    // a person does.
+    const { page } = freshStudio;
+    await withAnErrorInTheDescription(async () => {
+      await settled(page);
+      await openKeepingStage(page);
+      await expect(page.locator("[data-validation-count]")).toHaveAttribute(
+        "data-validation-worst",
+        "error",
+        { timeout: 90_000 },
+      );
+
+      // A stage a person chose, so that landing on Validation again cannot be
+      // mistaken for the stage simply never having moved.
+      await productSection(page, "overview");
+
+      const tab = page.locator('[id="shell-tab-gearbox.product"]');
+      await tab.locator(".lm-TabBar-tabCloseIcon").click();
+      await page.locator(".gbx-widget-product").waitFor({ state: "detached", timeout: 30_000 });
+
+      await runCommand(page, "Gearbox: Show Product");
+      await page.locator(".gbx-product").waitFor({ state: "visible", timeout: 60_000 });
+
+      await expect(
+        page.locator('[data-product-section="validation"]'),
+        "a fresh panel over an error-carrying resolution opens on the errors",
+      ).toHaveAttribute("aria-selected", "true");
+    });
   });
 });
