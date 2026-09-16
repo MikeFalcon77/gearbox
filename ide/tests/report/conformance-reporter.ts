@@ -28,8 +28,15 @@ import type {
  * Every claim this suite makes, counted. Raise it when adding a test; a drop is
  * a failure, because a claim that stopped being collected proved nothing and
  * said nothing.
+ *
+ * **The failure this pin raises does not mark any test as failed.** It comes out
+ * of `onEnd` as a reporter-level status, so a run that adds a claim and forgets
+ * this number still prints "N passed, 0 failed" above the refusal. Five claims
+ * were added over 2026-09-16 without raising it, and three completion reports
+ * read the pass counts and called the suite green while the run was exiting 1.
+ * If you are checking whether the suite passes, check the exit code.
  */
-const EXPECTED_TESTS = 172;
+const EXPECTED_TESTS = 177;
 
 
 type Status = "built" | "broken" | "not-built" | "unobserved";
