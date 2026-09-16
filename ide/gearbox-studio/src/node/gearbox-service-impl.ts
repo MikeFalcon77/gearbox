@@ -200,6 +200,21 @@ export class GearboxServiceImpl implements GearboxService {
         // default for the catalogue-only case: a product opened from elsewhere
         // would otherwise be readable and unwritable, which is the worst of both.
         workspace: this.workspace,
+        // **Where a product may be created, whatever this session is.**
+        // ADR-0013: "Start-screen create runs against the repository workspace
+        // the engine already knows from boot ... not against an open product
+        // session." It could not, and the reason is two lines up: the session's
+        // roots and workspace are what the write gate reads, so opening a
+        // product whose `sources` contain the directory products live in made
+        // every later create there refuse -- permanently, because unchecking the
+        // source in the next wizard tells the engine nothing.
+        //
+        // Sent on every `initialize` and always the same values, because the
+        // engine cannot work them out: this backend disposes and respawns it per
+        // call, so each process sees exactly one `initialize` and has no boot of
+        // its own to remember. These are that boot -- the same defaults the
+        // catalogue-only case uses.
+        creation_boundary: { roots: roots(), workspace: findRepoRoot(__dirname) },
       },
       INITIALIZE_TIMEOUT_MS,
     );

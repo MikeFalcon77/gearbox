@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **177** — 172 built, 1 not built, 0 broken, 4 not observed.
+Claims: **177** — 175 built, 1 not built, 0 broken, 1 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -115,12 +115,12 @@ Rust, and the ADRs' own Confirmation sections say which.
 | a gear that declares no extension point is offered no plugin | `plan §9.1: the surface offers only what is applicable` | ✅ built |  |
 | a host is offered only the plugins that fill its own points | `plan §9.1: the surface offers only what is applicable` | ✅ built |  |
 | What will be written names every staged edit, not just the gear | `plan §9.1: the review is the exact serialization` | ✅ built |  |
-| free keys are behind Advanced, and a bad value is refused at the field | `plan §9.1: checked where the caret is` | ⚪ not observed | this gear exposes no enum field, so there is no closed set to leave |
+| free keys are behind Advanced, and a bad value is refused at the field | `plan §9.1: checked where the caret is` | ✅ built |  |
 | a plugin is attached to a host, and the impact is of that | `ADR-0013 §Amendment: a plugin is not a selected gear` | ✅ built |  |
 | an invalid value disables Add before the next debounce | `plan §9.1: checked where the caret is` | ✅ built |  |
 | a config key that no field could be is refused at the row | `plan §9.1: checked where the caret is` | ✅ built |  |
 | features are curated, and one that is not for this deployment says so | `plan §9.1: features are projected` | ✅ built |  |
-| errors warn beside the button and never disable it | `—` | ⚪ not observed | no gear in this corpus makes the resolution fail when added, so the warning cannot be observed here |
+| errors warn beside the button and never disable it | `—` | ✅ built |  |
 
 ## `conformance/adr-0013-create-product.spec.ts`
 
@@ -187,7 +187,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Claim | Source | Status | Note |
 |---|---|---|---|
 | the Problems view is present to receive markers | `PRD cpt-gearbox-fr-editor-diagnostics` | ✅ built |  |
-| the catalogue panel renders the diagnostics a load produced | `PRD cpt-gearbox-fr-editor-diagnostics` | ⚪ not observed | the gear tree loads clean, so the catalogue rendered no diagnostic to inspect |
+| the catalogue panel renders the diagnostics a load produced | `PRD cpt-gearbox-fr-editor-diagnostics` | ✅ built |  |
 | resolution diagnostics appear as problem markers | `PRD cpt-gearbox-fr-editor-diagnostics` | ✅ built |  |
 | markers are replaced atomically on each resolution | `PRD cpt-gearbox-fr-editor-diagnostics` | ✅ built |  |
 | description diagnostics arrive over a language-server interface with source ranges | `PRD cpt-gearbox-fr-editor-diagnostics` | 🚧 not built |  |

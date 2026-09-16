@@ -363,9 +363,14 @@ test.describe("an open says which part of it is slow", () => {
     // answered first, so opening another product kept the old one's error on
     // screen for the whole open and then in place of the new one's refusal.
     //
-    // Asserted on the source because reaching it needs two products and a
-    // failure, and this corpus has one product and no way to make it fail (see
-    // the note below). An ordering bug of this shape returns silently.
+    // Asserted on the source rather than through the shell, and the reason has
+    // narrowed since it was written: it needs two products *and* a failure. A
+    // second product is reachable -- `adr-0013-create-product.spec.ts` makes
+    // them -- and since 2026-09-16 so is a failure, because a claim in
+    // `regression.spec.ts` writes an error into the demo description and
+    // restores it in a `finally`. What is left is that assembling both at once
+    // is a fixture, not a claim, and an ordering bug of this shape returns
+    // silently either way. Promotable to a behavioural claim; not promoted here.
     const widget = readFileSync(
       join(IDE, "gearbox-studio/src/browser/product/product-widget.tsx"),
       "utf8",
@@ -380,21 +385,29 @@ test.describe("an open says which part of it is slow", () => {
     ).toBe(true);
   });
 
-  // **There is no browser claim for a refused open, and that is a finding rather
-  // than an omission.** Every product in this corpus opens; writing one that does
-  // not evaluate means putting it under `products/`, which `global-setup` refuses.
-  // Killing the engine looks like the way in and is not: `initialize` spawns a new
-  // engine on every call, so an open that begins with `catalogue.load` gets a
-  // fresh one and succeeds -- verified by trying it, and the panel duly never
-  // reported a failure.
+  // **There is no browser claim for a refused open, and the reason is no longer
+  // that one is impossible.** Every product in this corpus opens. Writing one
+  // that does not evaluate was described here as putting it under `products/`,
+  // "which `global-setup` refuses" -- that was too strong, and 2026-09-16 proved
+  // it: `global-setup` refuses a `products/` that is *already* dirty when the
+  // suite starts, and blesses a claim that edits a description and puts it back,
+  // which is what `regression.spec.ts` now does to provoke an error. A GDL parse
+  // or evaluation error written the same way would give a product that does not
+  // open.
+  //
+  // Killing the engine looks like the other way in and is not: `initialize`
+  // spawns a new engine on every call, so an open that begins with
+  // `catalogue.load` gets a fresh one and succeeds -- verified by trying it, and
+  // the panel duly never reported a failure.
   //
   // So the failure paths are checked deterministically in
   // `scripts/store-smoke.mjs` against `shell/opening-outcome.js`, which is where
   // the decisions live and which imports nothing but types: a `git(...)` source
   // belongs to `describe`, a catalogue that reports `status: "error"` stops its
   // own step, and a product the store did not resolve is not an open at all. That
-  // script runs in `npm run verify`. A `⚪ not observed` row here would suggest a
-  // later run might see it, and none can.
+  // script runs in `npm run verify`. A `⚪ not observed` row here would still be
+  // the wrong shape -- it suggests a later run might happen to see it, when what
+  // is true is that no run will unless somebody writes the mutation on purpose.
 });
 
 test.describe("Overview says what the product is", () => {

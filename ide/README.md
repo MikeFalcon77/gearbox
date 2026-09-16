@@ -1,7 +1,8 @@
 # Gearbox Studio (Eclipse Theia)
 
 The editor front end for the Gearbox engine. Domain views today: **Start**, **Catalogue**,
-**Product**, **Inspector**, **Graph**, **Conflicts**, **Lock** and **Generate**. Two working
+**Product**, **Inspector**, **Graph**, **Conflicts**, **Lock**, **Generate** and the **AI
+Chat** (ADR-0017), which answers from the resolver's own output through typed read-only tools. Two working
 contexts are live — **Home** and **Product** — derived from what is actually open; **Gear** is
 declared and reserved until New Gear lands. The terminal is withdrawn (ADR-0011): the package
 stays for dependents, the shell asserts its absence. Conformance prefers visible Start and header
@@ -21,6 +22,16 @@ npm run plugins                       # once: fetches the VS Code git extension
 npm run build
 npm run start:browser                 # http://127.0.0.1:3000
 ```
+
+`start:browser` goes through `scripts/start-studio.mjs`, which loads a `.env` at the repository
+root (see `.env.example`) for `ANTHROPIC_API_KEY` and refuses to pass on a `NODE_OPTIONS` that
+leaves Node with no CA store. A variable already exported in the shell always wins over the file.
+
+The AI chat is optional: resolving, generating and every diagnostic work without a key, and the
+chat says so rather than failing. Its key comes from **Gearbox: Settings** (`gearbox.ai.apiKey`,
+which wins) or from `ANTHROPIC_API_KEY` in the backend's environment. **Gearbox: Check AI
+Connection** probes the provider and reports what the backend actually sees -- it sends no key, so
+it works before one is set.
 
 Studio opens its own workspace: the repository root plus every source root the engine reports. That
 is what gives the Explorer something to browse, lets a generated `product.lock` be opened at all, and
@@ -140,7 +151,17 @@ first can drift.
 `theia-version.txt`. A transitive `^` pulls a second `@theia/core` copy, which breaks inversify
 identity -- the most common Theia build failure. Check with `npm ls @theia/core`: exactly one entry.
 
-**`npm install` needs the corporate CA in `NODE_EXTRA_CA_CERTS`.** Nine packages have install
+**The corporate CA is needed at install time *and* at run time, and the root README points
+here for both.** At run time the backend reaches the AI provider through Node's global `fetch`, so
+a broken trust store surfaces in the chat as the bare string `Connection error.` -- the SDK's
+message for a request that never got an answer. `NODE_EXTRA_CA_CERTS` is the variable that
+*appends* to Node's bundled roots. Two ways to get it wrong, both of which empty or replace the
+store: `NODE_OPTIONS=--use-openssl-ca` on a Node whose bundled OpenSSL has no CA store configured
+(the flag then discards the bundled roots and reads nothing), and `SSL_CERT_FILE` pointing at a
+single corporate root, which on Node >= 22 replaces the whole store so public hosts stop
+verifying. `npm run start:browser` detects the first and warns about the second.
+
+**`npm install` needs the same CA in `NODE_EXTRA_CA_CERTS`.** Nine packages have install
 scripts, and two of them -- `drivelist` and `@theia/ffmpeg` -- compile from source through
 `node-gyp`, which downloads Node headers over TLS and does *not* pick up the `cafile` npm itself
 uses. Behind a TLS-intercepting proxy the download fails with `unable to get local issuer

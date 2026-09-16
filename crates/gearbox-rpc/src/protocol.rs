@@ -120,6 +120,48 @@ pub struct InitializeParams {
     /// happened to be launched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
+
+    /// The roots and workspace `gearbox/product/create` is judged against,
+    /// whatever this session declares above.
+    ///
+    /// **Why create needs its own boundary.** ADR
+    /// `cpt-gearbox-adr-create-product` says "Start-screen create runs against
+    /// the repository workspace the engine already knows from boot ... not
+    /// against an open product session". It could not: `writable_out_root`
+    /// reads `roots` and `workspace`, so opening a product whose `sources`
+    /// contain the place products live made every later create refuse with "is
+    /// inside a source root" -- the first create in a session worked and the
+    /// next did not.
+    ///
+    /// **And the server cannot remember it by itself.** Studio disposes and
+    /// respawns the engine on every `initialize`, so each process sees exactly
+    /// one, and "the first one" is not a boot the process ever witnessed. The
+    /// client is the only party that knows its own defaults, so it says them.
+    ///
+    /// Absent means "judge create by this session", which is what every client
+    /// that does not set it gets -- including the CLI, whose behaviour is
+    /// therefore unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_boundary: Option<CreationBoundary>,
+}
+
+/// Where a client will always permit `create`, independent of its session.
+///
+/// Both halves are needed because `writable_out_root` applies both tests: a path
+/// must be inside the workspace and outside every source root. Judging create by
+/// boot roots while still measuring it against an open product's *workspace*
+/// would refuse the same paths for the other of the two reasons.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct CreationBoundary {
+    /// The source roots create is judged against. Empty means "none declared",
+    /// which makes every path pass the source-root half.
+    #[serde(default)]
+    pub roots: Vec<String>,
+
+    /// The workspace create is judged against. Absent falls back to the
+    /// session's, because a create with no workspace at all is refused anyway.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

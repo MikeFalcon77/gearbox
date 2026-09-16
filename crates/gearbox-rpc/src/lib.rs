@@ -56,6 +56,16 @@ pub enum ServeError {
     Protocol(String),
 }
 
+/// A `CreationBoundary` as this process holds it.
+///
+/// Paths rather than opened `SourceRoot`s: the only question asked of them is
+/// whether a candidate path sits inside one, and `open_roots` would scan trees
+/// that nothing is going to be read from.
+struct CreationBoundaryState {
+    roots: Vec<PathBuf>,
+    workspace: Option<PathBuf>,
+}
+
 /// Everything the server knows between requests.
 struct State {
     roots: Vec<SourceRoot>,
@@ -73,6 +83,17 @@ struct State {
     /// The roots that could not be opened, kept so the client can be told which
     /// and why rather than being handed a shorter list.
     failed_roots: Vec<FailedRoot>,
+    /// The boundary `create` is judged against, when the client named one.
+    ///
+    /// Separate from `roots`/`workspace` above, and unchanged by a later
+    /// `initialize` that names a session -- which is the whole point: opening a
+    /// product must not move where a product may be created. See
+    /// `CreationBoundary` in `protocol.rs` for why the client has to tell us
+    /// rather than the server remembering its own boot.
+    ///
+    /// `None` means "judge create by the session", which is what the CLI and
+    /// every client that does not set it get.
+    creation_boundary: Option<CreationBoundaryState>,
     initialized: bool,
     /// What the client declared at `initialize`.
     ///
@@ -99,6 +120,10 @@ pub fn serve_stdio(default_roots: &[PathBuf]) -> Result<(), ServeError> {
         roots,
         catalogue: None,
         failed_roots,
+        // Nothing to hold yet: the CLI's `--root` values are already `roots`
+        // above, and a client that wants create judged separately says so at
+        // `initialize`.
+        creation_boundary: None,
         initialized: false,
         // Read-only until a client says otherwise, which is the posture
         // `cpt-gearbox-fr-rpc-writes-opt-in` asks for.
@@ -355,6 +380,15 @@ fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Re
     state.initialized = true;
     state.allow_writes = params.allow_writes;
     state.workspace = params.workspace.as_deref().map(PathBuf::from);
+    // Replaced wholesale when named, and left alone when not: a client that
+    // declares a creation boundary once, at boot, and then opens products
+    // without repeating it keeps the boundary it declared.
+    if let Some(boundary) = params.creation_boundary.as_ref() {
+        state.creation_boundary = Some(CreationBoundaryState {
+            roots: boundary.roots.iter().map(PathBuf::from).collect(),
+            workspace: boundary.workspace.as_deref().map(PathBuf::from),
+        });
+    }
 
     ok(
         id,
@@ -995,7 +1029,11 @@ fn create_product(state: &mut State, id: RequestId, params: &CreateProductParams
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    let parent = match writable_out_root(state, parent_input) {
+    // **The one method judged by a boundary rather than by the session.** See
+    // `CreationBoundary`: opening a product whose `sources` contain the place
+    // products live used to make every later create refuse. Falls back to the
+    // session when no boundary was declared, so the CLI is unaffected.
+    let parent = match creation_out_root(state, parent_input) {
         Ok(path) => path,
         Err(refusal) => return error(id, error_code::EDIT_REFUSED, &refusal),
     };
@@ -1604,6 +1642,40 @@ fn writable_path(state: &State, path: &Path) -> Result<PathBuf, String> {
 /// The workspace is still required. Failing closed: if nothing was declared,
 /// nothing is writable.
 fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
+    let roots: Vec<PathBuf> = state.roots.iter().map(|root| root.root.clone()).collect();
+    writable_out_root_against(&roots, state.workspace.as_deref(), path)
+}
+
+/// `writable_out_root` for `create`, against the declared creation boundary.
+///
+/// The workspace falls back to the session's: a boundary that names roots but no
+/// workspace still has to be measured against something, and a create with no
+/// workspace at all is refused either way.
+fn creation_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
+    let Some(boundary) = state.creation_boundary.as_ref() else {
+        return writable_out_root(state, path);
+    };
+    let workspace = boundary
+        .workspace
+        .as_deref()
+        .or(state.workspace.as_deref());
+    writable_out_root_against(&boundary.roots, workspace, path)
+}
+
+/// The same rule, against a boundary the caller names.
+///
+/// **Split out for `create` alone.** Every other writer -- generate,
+/// `scaffold_gear` -- is judged by the open session, and ADR-0013's 2026-09-07
+/// amendment depends on that: a gear scaffolded for a product is refused inside
+/// the product's own source root, and the flow works around it by declaring a new
+/// source. Repointing the shared function would move those too. `create` is the
+/// one method an ADR says must not be judged by the session, so it is the one
+/// method that passes a different boundary.
+fn writable_out_root_against(
+    roots: &[PathBuf],
+    workspace: Option<&Path>,
+    path: &Path,
+) -> Result<PathBuf, String> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -1630,11 +1702,11 @@ fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
     // unreachable for the one layout the comment named. Checked here against the
     // nearest *existing* ancestor, because the joined path does not exist yet at
     // this point and cannot: the join needs the workspace this check precedes.
-    if let Some(refusal) = inside_a_source_root(state, &canonical_existing, path) {
+    if let Some(refusal) = inside_a_source_root(roots, &canonical_existing, path) {
         return Err(refusal);
     }
 
-    let Some(raw_workspace) = state.workspace.as_ref() else {
+    let Some(raw_workspace) = workspace else {
         return Err("no workspace was declared, so no output root is writable".to_owned());
     };
     let workspace = raw_workspace.canonicalize().map_err(|e| {
@@ -1664,7 +1736,7 @@ fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
     // ancestor; this one sees where the `..` components actually land, which is a
     // different question -- `workspace/keep/missing/../../../gears-rust` starts
     // inside the workspace and ends inside a source root.
-    if let Some(refusal) = inside_a_source_root(state, &resolved, path) {
+    if let Some(refusal) = inside_a_source_root(roots, &resolved, path) {
         return Err(refusal);
     }
 
@@ -1691,9 +1763,9 @@ fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
 /// already reported as a `FailedRoot` at `initialize`, and refusing every write
 /// because an unrelated root went missing would be a second, worse answer to
 /// that.
-fn inside_a_source_root(state: &State, candidate: &Path, requested: &Path) -> Option<String> {
-    state.roots.iter().find_map(|root| {
-        let src = root.root.canonicalize().ok()?;
+fn inside_a_source_root(roots: &[PathBuf], candidate: &Path, requested: &Path) -> Option<String> {
+    roots.iter().find_map(|root| {
+        let src = root.canonicalize().ok()?;
         candidate.starts_with(&src).then(|| {
             format!(
                 "`{}` is inside a source root; generation must not write next to \

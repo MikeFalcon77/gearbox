@@ -73,6 +73,7 @@ fn state() -> Option<State> {
         roots,
         catalogue: None,
         failed_roots,
+        creation_boundary: None,
         initialized: true,
         // Deliberately false. A preview needs no write permission, and a preview
         // that only worked for a client that had asked for one would be evidence

@@ -830,3 +830,109 @@ own folder* and `absolutePath` returns a wrong-but-plausible answer instead of
 refusing. No arm above catches it, and the client cannot: detecting it would mean
 inferring from a coincidence. It is engine behaviour shared with `package`, the
 catalogue already reports the diagnostic, and no gear in this corpus triggers it.
+
+## Amendment 2026-09-16: the destination is asked for, the ids are checked, and create keeps its own boundary
+
+**Status: accepted. It tightens three rules this ADR already stated and adds one
+mechanism to make a fourth true; it reverses nothing.**
+
+A live UX pass found eleven defects, four of them in this flow. Two of the four
+were this document being ignored rather than being wrong.
+
+### Amendment: destination picker
+
+The section above says the wizard "asks for a **destination folder**" and "must
+not silently take the first workspace root". It did exactly that: the field
+opened pre-filled from `tryGetRoots()[0]`, chosen by index, reinstalled on every
+root refresh and on every keystroke in the id box, and the path was used as a
+fallback when the field was blank -- so Create could be pressed without anybody
+choosing a folder.
+
+The suggestion is a **placeholder** now. It stays visible and one click from
+`Choose…`, and it is not a value, so a create with no destination is not
+possible. This section is named because `docs/conformance.md` cites it: the claim
+"the destination is choosable, and sources are relative to it" had been pointing
+at a heading that did not exist.
+
+### A root that contains the destination is not one of its sources
+
+The rule "the path must **not** sit inside a source root" was enforced only by
+the engine, three steps after the choice, and the wizard pre-selected *every*
+workspace root -- the first of which is the checkout that contains `products/`.
+So the default selection described a product that could not be written.
+
+The wizard no longer offers such a root: the checkbox is disabled and says why.
+This is a client-side restatement of an engine rule, which is a cost accepted
+deliberately -- a refusal that arrives after the choice cannot be acted on at the
+point the choice is made.
+
+### Ids are validated, by the same rule as every other id
+
+`gearbox/product/create` stamped whatever arrived. An empty box wrote `id = ""`
+with a destination of `products//product.gdl`; a single space wrote `id = " "`
+into a product that then opened and resolved with no diagnostics at all. The
+function was already building a validated `SourceId` for a literal eleven lines
+further down.
+
+`ProductId` joins the other id newtypes in `gearbox-ir` -- kebab-case,
+`validate_kebab`, the rule gears, profiles and sources already share -- and
+`create_product` refuses both it and `profile_id` **before** touching the
+filesystem, so a refusal has no side effect. `ProductIntent.id` stays a `String`:
+retyping it would re-validate every existing `product.lock` on read, which is a
+migration and not this fix.
+
+### Create keeps its own boundary
+
+"Start-screen create runs against the repository workspace the engine already
+knows from boot ... not against an open product session" was not true, and could
+not be. `writable_out_root` reads the session's roots and workspace, so opening a
+product whose `sources` contain the directory products live in made every later
+create there refuse with the tier-5 message. The first create in a session
+worked; the next did not; unchecking the source in the following wizard changed
+nothing, because the engine had already been told. The only cure anybody found
+was opening some other product whose sources happened to exclude the checkout.
+
+Two changes make the sentence true:
+
+* Closing a product returns the engine to its boot roots. Nothing did that
+  before -- `initialize` is what sets the roots, and closing only cleared the
+  store -- so a session carried the last product's roots until it ended.
+* `InitializeParams` carries a **creation boundary**: the roots and workspace
+  `create` is judged against, whatever the session declares. The server cannot
+  work this out for itself, and the reason is worth recording: Studio disposes
+  and respawns the engine on every `initialize`, so each process sees exactly one
+  and has no boot of its own to remember. The client is the only party that knows
+  its own defaults.
+
+**What this relaxes, stated rather than buried.** `create` may now write into a
+directory the *current session* declares as a source. That is a narrowing of
+ADR-0010 tier 5 for one method, and it is bounded by the boundary's own
+workspace -- the repository -- so a corpus that sits beside the checkout is still
+refused. Every other writer, `generate` and `scaffold_gear`, is still judged by
+the session, which the 2026-09-07 amendment above depends on: a gear scaffolded
+for a product is refused inside that product's source root, and the flow works
+around it by declaring a new source rather than by exempting the method.
+
+`create` with no boundary declared behaves exactly as before, which is what the
+CLI does.
+
+### Confirmation
+
+* The destination field opens empty, with the suggestion as its placeholder, and
+  Create is unavailable until a folder is chosen.
+* A root containing the chosen destination is offered disabled, with the reason.
+* A blank, whitespace or non-kebab id is refused before the preview, and before
+  anything is written.
+* Two products can be created in one session, the first closed in between.
+* `create_is_judged_by_the_creation_boundary_not_the_session` pins both
+  directions in Rust: with a boundary the create passes though the session names
+  its parent, and with none the session's refusal is unchanged.
+
+**Not browser-observable on this corpus, and said rather than left implied.** The
+end-to-end effect of the creation boundary cannot be seen from a test here:
+`payments-demo` declares a sibling as its only source, so with it open the
+session's roots and the client's boot roots are the same list and create behaves
+identically either way. Observing it would need a product in the corpus that
+declares the directory products live in. The engine half is pinned above; the
+client half is one object literal built from the same two expressions the
+catalogue-only case already uses.

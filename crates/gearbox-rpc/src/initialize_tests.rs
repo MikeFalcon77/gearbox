@@ -76,6 +76,7 @@ fn state_with(root: &Path) -> State {
         roots,
         catalogue: Some(marked_catalogue()),
         failed_roots,
+        creation_boundary: None,
         initialized: false,
         allow_writes: false,
         workspace: None,
@@ -87,6 +88,7 @@ fn params(roots: &[&Path]) -> InitializeParams {
         roots: roots.iter().map(|r| r.display().to_string()).collect(),
         allow_writes: false,
         workspace: None,
+        creation_boundary: None,
     }
 }
 
@@ -203,6 +205,7 @@ fn a_load_that_stopped_early_is_not_cached() {
         roots,
         catalogue: None,
         failed_roots,
+        creation_boundary: None,
         initialized: true,
         allow_writes: false,
         workspace: None,

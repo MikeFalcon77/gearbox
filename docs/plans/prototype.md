@@ -1099,9 +1099,17 @@ secondary to Start. See ADR-0011 / ADR-0013 amendments of the same date.
 
 The favicon gap this section used to record is closed. `@theia/cli` 1.75 still offers no hook and
 its generated `index.html` still has no `<link rel="icon">`, so `FabricThemeContribution` injects
-one from `onStart` -- the same contribution that registers the Constructor Fabric colour theme and
+one from `onStart` -- the same contribution that registers the Constructor Fabric colour themes and
 the Geist fonts. The UI check still tolerates a favicon 404 **by name**, which now only matters if
 that injection regresses.
+
+Two themes since 2026-09-16, not one: `Gearbox (Fabric Light)` is the default and
+`Gearbox (Fabric)` stays in the Color Theme picker. The same brand tokens read the other way round
+-- navy carries the text rather than the background -- which is why no stylesheet changed: the
+sheet is entirely `var(--theia-*)`, so a rule that needs a different value under a different
+background gets it from the palette. One favicon serves both; it is a mark, not a palette. There is
+no ADR on the theme, and the light default is recorded here and in the registration's own
+comments.
 
 
 #### The graph's four views, and what the corpus can and cannot show

@@ -33,6 +33,7 @@ export * from "./ContractKind";
 export * from "./ContractVersion";
 export * from "./CreateProductParams";
 export * from "./CreateSourceEntry";
+export * from "./CreationBoundary";
 export * from "./CutBlocker";
 export * from "./CutCandidate";
 export * from "./CutSavings";

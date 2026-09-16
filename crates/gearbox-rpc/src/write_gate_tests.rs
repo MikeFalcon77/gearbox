@@ -54,6 +54,7 @@ fn state_with_roots(workspace: PathBuf, roots: &[PathBuf]) -> State {
         roots,
         catalogue: None,
         failed_roots,
+        creation_boundary: None,
         initialized: true,
         allow_writes: true,
         workspace: Some(workspace),
@@ -72,6 +73,77 @@ fn create_params(path: &Path, clone_from: Option<String>) -> CreateProductParams
         clone_from,
         dry_run: true,
     }
+}
+
+/// `create` is judged by the declared creation boundary, not by the session.
+///
+/// **The bug this closes.** `writable_out_root` reads the session's roots, so
+/// opening a product whose `sources` contain the directory products live in made
+/// every later `create` there refuse with "is inside a source root" -- the first
+/// create in a session worked and the next did not, and unchecking the source in
+/// the next wizard changed nothing because the engine had already been told.
+/// ADR-0013 says start-screen create runs against the workspace the engine knows
+/// from boot; this is the state that makes that true.
+///
+/// Both directions asserted: with a boundary the create passes, and without one
+/// the old refusal still stands -- the CLI declares no boundary and must keep the
+/// behaviour it had.
+#[test]
+fn create_is_judged_by_the_creation_boundary_not_the_session() {
+    let tmp = scratch("creation-boundary");
+    let workspace = tmp.join("ws");
+    let products = workspace.join("products");
+    std::fs::create_dir_all(&products).unwrap();
+    let target = products.join("demo").join("product.gdl");
+
+    // The session has the workspace itself as a source root, which is exactly
+    // what a product created with the wizard's old default declared.
+    let session_roots = [workspace.clone()];
+
+    let mut without = state_with_roots(workspace.clone(), &session_roots);
+    let refused = create_product(&mut without, RequestId::from(1), &create_params(&target, None));
+    let message = match refused.response_result {
+        Err(e) => e.message,
+        Ok(_) => panic!("with no boundary the session's roots must still govern"),
+    };
+    assert!(
+        message.contains("inside a source root"),
+        "the session refusal must be unchanged for clients that declare no boundary: {message}"
+    );
+
+    // Same session, plus a boundary that does not contain the destination --
+    // which is what the client declares from its own defaults.
+    let mut with = state_with_roots(workspace.clone(), &session_roots);
+    with.creation_boundary = Some(CreationBoundaryState {
+        roots: vec![tmp.join("corpus")],
+        workspace: Some(workspace),
+    });
+    let allowed = create_product(&mut with, RequestId::from(1), &create_params(&target, None));
+    assert!(
+        allowed.response_result.is_ok(),
+        "a create inside the boundary must pass even with the session naming its parent: {:?}",
+        allowed.response_result
+    );
+
+    // And the boundary is a boundary, not a bypass: a destination inside one of
+    // *its* roots is still refused.
+    let corpus = tmp.join("corpus");
+    std::fs::create_dir_all(&corpus).unwrap();
+    let mut inside = state_with_roots(corpus.clone(), &[]);
+    inside.creation_boundary = Some(CreationBoundaryState {
+        roots: vec![corpus.clone()],
+        workspace: Some(corpus.clone()),
+    });
+    let refused_again = create_product(
+        &mut inside,
+        RequestId::from(1),
+        &create_params(&corpus.join("demo").join("product.gdl"), None),
+    );
+    let message = match refused_again.response_result {
+        Err(e) => e.message,
+        Ok(_) => panic!("the boundary's own roots must still refuse"),
+    };
+    assert!(message.contains("inside a source root"), "{message}");
 }
 
 /// Ids are checked before anything is created, and before the path is.

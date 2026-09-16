@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-09-13
 decision-makers: Mike Yastrebtsov
 ---
@@ -25,7 +25,15 @@ enabled `ai-features.AiEnable.enableAI`, added one tool, and put the widget in
 the shell. No document was amended, so the repository has held a contradiction
 for four days: the code does the thing the vision forbids, and neither says so.
 
-**The chat has also never worked.** `@theia/ai-chat` registers no user-facing
+> **Read as of 2026-09-13.** The Context below describes the state this ADR was
+> written against, in the tense it was written in, and it is no longer the state
+> of the repository: the decision was implemented, the chat answers, and
+> `docs/conformance.md` carries six built claims for it. The paragraphs about an
+> inert surface are the *reason for the decision*, not a description of today.
+> This note exists because the section was read as current twice, once by its own
+> author and once by someone auditing the chat four days later.
+
+**The chat had also never worked.** `@theia/ai-chat` registers no user-facing
 agent — Theia's `Universal` and `Coder` live in `@theia/ai-ide`, which this
 application deliberately does not install, because it drags `puppeteer-core` and
 the AI terminal surface ADR-0011 withdrew. Nothing in this repository bound a
@@ -249,10 +257,11 @@ Bad, or at least owed:
 
 ## Confirmation
 
-* `ide/tests/conformance/adr-0017-native-chat.spec.ts` — five claims: that the
+* `ide/tests/conformance/adr-0017-native-chat.spec.ts` — six claims: that the
   chat offers a `Gearbox` agent at all, that selecting a gear names it on a
-  single chip, that the chip follows the selection rather than accumulating, and
-  that a catalogue row and a conflict row are both draggable.
+  single chip, that the chip follows the selection rather than accumulating, that
+  a selection made before the chat opened still produces a chip, and that a
+  catalogue row and a conflict row are both draggable.
 * `make diagnostics-check` — the generated catalogue cannot fall behind the
   declaration it is generated from, and a first-ever generated file cannot pass
   while being absent from the commit.
@@ -311,3 +320,36 @@ should be read as one.
 * Does not supersede vision §64. MCP remains the interface for
   `cpt-gearbox-actor-external-agent`; this serves
   `cpt-gearbox-actor-theia-studio`, whose state is not on the wire.
+
+## Amendment 2026-09-16: the decision landed, and the key has a second home
+
+**Status: accepted. This records what shipped; it reverses nothing.**
+
+The Decision Outcome above is implemented. `GearboxChatAgent` is bound as the
+`ChatAgent`, the default and the fallback agent id, so a plain sentence resolves
+to it; the eight read tools and the one write verb are offered through its
+`functions`; and `docs/conformance.md` carries six built claims for the surface.
+
+Three things are true now that the text above predates:
+
+* **The key is a setting first.** ADR-0011's 2026-09-14 amendment added
+  `gearbox.ai.apiKey`, and it takes precedence; `ANTHROPIC_API_KEY` in the
+  backend's environment is the fallback, and `npm run start:browser` loads a
+  `.env` at the repository root into it. The Consequences above say the variable
+  is "load-bearing", which was true when only it existed.
+* **A refusal at the transport now says what it was.** The Anthropic SDK reports
+  any rejected request as `APIConnectionError`, whose default message is the bare
+  string `Connection error.`, and Theia's error codec was dropping the engine's
+  own diagnostics on the way to the browser besides. `Gearbox: Check AI
+  Connection` probes the provider from the backend with no key -- any status,
+  401 included, means the transport works -- and the chat reports the cause chain
+  instead of the bare string.
+* **The two ways to break the trust store are documented**, because both present
+  as that same string: `NODE_OPTIONS=--use-openssl-ca` on a Node whose bundled
+  OpenSSL has no CA store configured, and `SSL_CERT_FILE` pointing at a single
+  corporate root, which on Node >= 22 replaces the store rather than extending
+  it. `NODE_EXTRA_CA_CERTS` is the one that appends. The launcher detects the
+  first and warns about the second.
+
+Still unbuilt, and still correctly listed above: the MCP adapter of vision §64,
+and the AI Configuration view that `@theia/ai-ide` would bring.
