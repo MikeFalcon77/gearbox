@@ -25,7 +25,12 @@ use crate::requirement::ClusterPrimitive;
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum SourceDecl {
     /// A local directory, relative to the product description.
-    Path { at: String },
+    Path {
+        at: String,
+        /// Where `source(...)` was written in the product description.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        declared_at: Option<Location>,
+    },
 
     /// A package registry, and the naming convention that turns a gear id into
     /// a package name.
@@ -44,6 +49,9 @@ pub enum SourceDecl {
         /// the package name.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         prefix: Option<String>,
+        /// Where `source(...)` was written in the product description.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        declared_at: Option<Location>,
     },
 
     /// A Git repository at a pinned reference.
@@ -58,10 +66,29 @@ pub enum SourceDecl {
         rev: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         branch: Option<String>,
+        /// Where `source(...)` was written in the product description.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        declared_at: Option<Location>,
     },
 }
 
 impl SourceDecl {
+    /// Where this source was declared, when known.
+    ///
+    /// The span of the whole `source(...)` call, not of the `at = path(...)`
+    /// inside it: `path`, `git` and `registry` take no `Evaluator`, so the
+    /// enclosing call is the finest span that exists. See
+    /// `cpt-gearbox-adr-gdl-language-server` on why call granularity is the
+    /// ceiling here.
+    #[must_use]
+    pub const fn declared_at(&self) -> Option<&Location> {
+        match self {
+            Self::Path { declared_at, .. }
+            | Self::Registry { declared_at, .. }
+            | Self::Git { declared_at, .. } => declared_at.as_ref(),
+        }
+    }
+
     /// Whether this reference pins an immutable point in history.
     ///
     /// A branch does not, so a lock built from one is repeatable but not
@@ -436,6 +463,10 @@ pub struct ProviderBinding {
     /// A reference to externally managed credentials. Never a credential itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_ref: Option<String>,
+
+    /// Where `provider(...)` was written in the product description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_at: Option<Location>,
 }
 
 /// A cluster scope's provider bindings.
@@ -460,6 +491,10 @@ pub struct ClusterScopeIntent {
     /// Profiles this applies to. Empty means all of them.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub profiles: BTreeSet<ProfileId>,
+
+    /// Where `cluster_profile(...)` was written in the product description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_at: Option<Location>,
 }
 
 impl ClusterScopeIntent {
@@ -498,6 +533,10 @@ pub struct ApplicationPin {
 
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub profiles: BTreeSet<ProfileId>,
+
+    /// Where `application(...)` was written in the product description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_at: Option<Location>,
 }
 
 const fn one() -> u32 {

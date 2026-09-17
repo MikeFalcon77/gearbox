@@ -426,6 +426,11 @@ pub fn pin_role(
         role: role.map(str::to_owned),
         replicas,
         profiles: BTreeSet::new(),
+        // No span: this pin was built here, not read from a description. Every
+        // diagnostic about it therefore exercises the `Location::or_file`
+        // fallback, which is why the anchored cases are tested from text in
+        // `tests/diagnostic_spans.rs` instead.
+        declared_at: None,
     });
 }
 
@@ -551,9 +556,12 @@ pub fn bind_cluster(
             provider: cache.to_owned(),
             options: BTreeMap::new(),
             secret_ref: secret_ref.map(ToOwned::to_owned),
+            declared_at: None,
         },
         leader_election: None,
         lock: None,
         profiles: BTreeSet::new(),
+        // Built here, not read from a description -- see `pin_role`.
+        declared_at: None,
     });
 }

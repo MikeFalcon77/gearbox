@@ -403,6 +403,9 @@ gdl_record! {
         /// arrive at a plugin as a raw JSON map.
         pub options: Vec<(String, serde_json::Value)>,
         pub secret_ref: Option<String>,
+        /// Where `provider(...)` was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }
 
@@ -418,6 +421,9 @@ gdl_record! {
         pub leader_election: Option<ProviderBindingRecord>,
         pub lock: Option<ProviderBindingRecord>,
         pub profiles: Vec<String>,
+        /// Where `cluster_profile(...)` was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }
 
@@ -433,6 +439,9 @@ gdl_record! {
         pub role: Option<String>,
         pub replicas: u32,
         pub profiles: Vec<String>,
+        /// Where `application(...)` was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }
 

@@ -58,13 +58,21 @@ fn non_empty(value: Option<&str>) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn invalid(uri: &str, message: impl Into<String>, help: impl Into<String>) -> Diagnostic {
-    Diagnostic::error(DiagnosticCode::GdlEval, message, help).at(Location::file(uri.to_owned()))
+/// `at` rather than `uri`, so every call site states where it points.
+///
+/// The four records that carry a span -- `source`, the three profile kinds,
+/// `use_gear` and `bind` -- pass `Location::or_file(record.declared_at.as_ref(),
+/// uri)`. Everything else passes `Location::file(uri.to_owned())`, because there
+/// is no span to pass: `templates`, `plugin`, `application`, `cluster_profile`
+/// and `prefer` take no `eval` yet, and the id validators are handed a bare
+/// string. Spelling the fallback out at the call site is the point -- a shared
+/// `uri` parameter hid which diagnostics could be anchored and which could not.
+fn invalid(at: Location, message: impl Into<String>, help: impl Into<String>) -> Diagnostic {
+    Diagnostic::error(DiagnosticCode::GdlEval, message, help).at(at)
 }
 
-fn collision(uri: &str, message: impl Into<String>, help: impl Into<String>) -> Diagnostic {
-    Diagnostic::error(DiagnosticCode::GdlDuplicateProfileScoped, message, help)
-        .at(Location::file(uri.to_owned()))
+fn collision(at: Location, message: impl Into<String>, help: impl Into<String>) -> Diagnostic {
+    Diagnostic::error(DiagnosticCode::GdlDuplicateProfileScoped, message, help).at(at)
 }
 
 /// Build typed intent, reporting everything wrong with the declaration.
@@ -84,17 +92,17 @@ pub fn build(
     let profiles = build_profiles(uri, decl, diagnostics);
     if profiles.is_empty() {
         diagnostics.push(invalid(
-            uri,
+            Location::file(uri.to_owned()),
             "product declares no deployment profile",
             "add at least one, e.g. `profiles = [embedded(id = \"dev\")]`",
         ));
         return None;
     }
 
-    let default_profile = profile_id(uri, &decl.default_profile, diagnostics)?;
+    let default_profile = profile_id(None, uri, &decl.default_profile, diagnostics)?;
     if !profiles.contains_key(&default_profile) {
         diagnostics.push(invalid(
-            uri,
+            Location::file(uri.to_owned()),
             format!(
                 "`default_profile = \"{default_profile}\"` names no declared profile; \
                  declared: {}",
@@ -128,7 +136,7 @@ pub fn build(
 fn build_profiles(uri: &str, decl: &ProductDecl, diagnostics: &mut Diagnostics) -> Profiles {
     let mut profiles = Profiles::new();
     for record in &decl.profiles {
-        let Some(id) = profile_id(uri, &record.id, diagnostics) else {
+        let Some(id) = profile_id(record.declared_at.as_ref(), uri, &record.id, diagnostics) else {
             continue;
         };
         let Some(profile) = deployment_profile(uri, record, &id, diagnostics) else {
@@ -136,7 +144,7 @@ fn build_profiles(uri: &str, decl: &ProductDecl, diagnostics: &mut Diagnostics) 
         };
         if profiles.insert(id.clone(), profile).is_some() {
             diagnostics.push(collision(
-                uri,
+                Location::or_file(record.declared_at.as_ref(), uri),
                 format!("deployment profile `{id}` is declared twice"),
                 "give each profile a distinct id; the id is what `--profile` selects",
             ));
@@ -160,7 +168,7 @@ fn build_templates(uri: &str, decl: &ProductDecl, diagnostics: &mut Diagnostics)
             let at = non_empty(record.at.as_deref());
             if at.is_none() {
                 diagnostics.push(invalid(
-                    uri,
+                    Location::file(uri.to_owned()),
                     "`templates` declares `path()` with no directory".to_owned(),
                     "write `templates = path(\"../../house-templates\")`; the path is relative \
                      to the product description and may point outside it",
@@ -170,7 +178,7 @@ fn build_templates(uri: &str, decl: &ProductDecl, diagnostics: &mut Diagnostics)
         }
         other => {
             diagnostics.push(invalid(
-                uri,
+                Location::file(uri.to_owned()),
                 format!("`templates` uses `{other}()`, which generation cannot read"),
                 "use `path(\"...\")`; a template set fetched at generation time would make \
                  `--dry-run` a preview of whatever the remote said at the time",
@@ -191,7 +199,7 @@ fn build_sources(
             Ok(id) => id,
             Err(e) => {
                 diagnostics.push(invalid(
-                    uri,
+                    Location::or_file(record.declared_at.as_ref(), uri),
                     format!("source id `{}` is not valid: {e}", record.id),
                     "source ids are kebab-case",
                 ));
@@ -205,19 +213,22 @@ fn build_sources(
             "path" => {
                 let Some(at) = non_empty(record.at.at.as_deref()) else {
                     diagnostics.push(invalid(
-                        uri,
+                        Location::or_file(record.declared_at.as_ref(), uri),
                         format!("source `{id}` declares `path()` with no directory"),
                         "write `path(\"../some-repo\")`; the path is relative to the product \
                          description",
                     ));
                     continue;
                 };
-                SourceDecl::Path { at }
+                SourceDecl::Path {
+                    at,
+                    declared_at: record.declared_at.clone(),
+                }
             }
             "git" => {
                 let Some(url) = non_empty(record.at.url.as_deref()) else {
                     diagnostics.push(invalid(
-                        uri,
+                        Location::or_file(record.declared_at.as_ref(), uri),
                         format!("source `{id}` declares `git()` with no url"),
                         "write `git(url = \"...\", tag = \"...\")`",
                     ));
@@ -228,12 +239,13 @@ fn build_sources(
                     tag: record.at.tag.clone(),
                     rev: record.at.rev.clone(),
                     branch: record.at.branch.clone(),
+                    declared_at: record.declared_at.clone(),
                 }
             }
             "registry" => {
                 let Some(url) = non_empty(record.at.url.as_deref()) else {
                     diagnostics.push(invalid(
-                        uri,
+                        Location::or_file(record.declared_at.as_ref(), uri),
                         format!("source `{id}` declares `registry()` with no registry"),
                         "write `registry(\"crates.io\")`, optionally with \
                          `prefix = \"cf-gears-\"`",
@@ -243,11 +255,12 @@ fn build_sources(
                 SourceDecl::Registry {
                     url,
                     prefix: non_empty(record.at.prefix.as_deref()),
+                    declared_at: record.declared_at.clone(),
                 }
             }
             other => {
                 diagnostics.push(invalid(
-                    uri,
+                    Location::or_file(record.declared_at.as_ref(), uri),
                     format!("source `{id}` uses `{other}()`, which is not a source kind"),
                     "use `path(\"...\")`, `git(url = \"...\", tag = \"...\")` or \
                      `registry(\"crates.io\")`",
@@ -257,7 +270,7 @@ fn build_sources(
         };
         if sources.insert(id.clone(), at).is_some() {
             diagnostics.push(invalid(
-                uri,
+                Location::or_file(record.declared_at.as_ref(), uri),
                 format!("source `{id}` is declared twice"),
                 "give each source a distinct id",
             ));
@@ -276,14 +289,14 @@ fn build_gears(
     let mut selected = Vec::new();
     let mut seen = BTreeSet::new();
     for record in &decl.gears {
-        let Some(gear) = gear_id(uri, &record.gear, "use_gear", diagnostics) else {
+        let Some(gear) = gear_id(record.declared_at.as_ref(), uri, &record.gear, "use_gear", diagnostics) else {
             continue;
         };
         let source = match SourceId::new(record.source.clone()) {
             Ok(id) => id,
             Err(e) => {
                 diagnostics.push(invalid(
-                    uri,
+                    Location::or_file(record.declared_at.as_ref(), uri),
                     format!(
                         "use_gear(\"{gear}\", source = \"{}\") is not a valid source id: {e}",
                         record.source
@@ -295,7 +308,7 @@ fn build_gears(
         };
         if !sources.contains_key(&source) {
             diagnostics.push(invalid(
-                uri,
+                Location::or_file(record.declared_at.as_ref(), uri),
                 format!("use_gear(\"{gear}\") names source `{source}`, which is not declared"),
                 format!(
                     "declared sources: {}",
@@ -306,7 +319,7 @@ fn build_gears(
         }
         if !seen.insert(gear.clone()) {
             diagnostics.push(invalid(
-                uri,
+                Location::or_file(record.declared_at.as_ref(), uri),
                 format!("gear `{gear}` is selected twice"),
                 "list each gear once; per-profile differences belong on `bind`/`process`",
             ));
@@ -324,7 +337,7 @@ fn build_gears(
             ] {
                 if value.is_some() {
                     diagnostics.push(invalid(
-                        uri,
+                        Location::or_file(record.declared_at.as_ref(), uri),
                         format!("`{gear}` sets `{field}`, but source `{source}` is not a registry"),
                         format!(
                             "remove `{field}`, or declare the source as \
@@ -365,7 +378,7 @@ fn build_plugins(
     let mut claimed = Claims::new();
 
     for entry in &record.plugins {
-        let Some(gear) = gear_id(uri, &entry.gear, "plugin", diagnostics) else {
+        let Some(gear) = gear_id(record.declared_at.as_ref(), uri, &entry.gear, "plugin", diagnostics) else {
             continue;
         };
         let scoped = scoped_profiles(
@@ -377,7 +390,7 @@ fn build_plugins(
         );
         if !claim(&mut claimed, host.as_str(), gear.as_str(), &scoped) {
             diagnostics.push(collision(
-                uri,
+                Location::or_file(record.declared_at.as_ref(), uri),
                 format!("plugin `{gear}` is selected twice for `{host}` in the same profile"),
                 "list each implementation once; per-profile differences belong in \
                  `profiles = [...]`",
@@ -403,14 +416,14 @@ fn build_bindings(
     let mut claimed = Claims::new();
 
     for record in &decl.bindings {
-        let Some(consumer) = gear_id(uri, &record.consumer, "bind", diagnostics) else {
+        let Some(consumer) = gear_id(record.declared_at.as_ref(), uri, &record.consumer, "bind", diagnostics) else {
             continue;
         };
         let contract = match ContractId::new(record.contract.clone()) {
             Ok(id) => id,
             Err(e) => {
                 diagnostics.push(invalid(
-                    uri,
+                    Location::or_file(record.declared_at.as_ref(), uri),
                     format!(
                         "bind names contract `{}`, which is not valid: {e}",
                         record.contract
@@ -430,7 +443,7 @@ fn build_bindings(
 
         if !claim(&mut claimed, consumer.as_str(), contract.as_str(), &scoped) {
             diagnostics.push(collision(
-                uri,
+                Location::or_file(record.declared_at.as_ref(), uri),
                 format!(
                     "two `bind` declarations cover consumer `{consumer}` and contract \
                      `{contract}` in the same profile"
@@ -473,7 +486,7 @@ fn build_cluster_scopes(
         );
         if !claim(&mut claimed, "cluster", &record.scope, &scoped) {
             diagnostics.push(collision(
-                uri,
+                Location::or_file(record.declared_at.as_ref(), uri),
                 format!(
                     "cluster scope `{}` is bound twice in the same profile",
                     record.scope
@@ -500,14 +513,14 @@ fn build_application_pins(
             Ok(id) => id,
             Err(e) => {
                 diagnostics.push(invalid(
-                    uri,
+                    Location::or_file(record.declared_at.as_ref(), uri),
                     format!("application name `{}` is not valid: {e}", record.name),
                     "application names are kebab-case",
                 ));
                 continue;
             }
         };
-        let Some(anchor) = gear_id(uri, &record.anchor, "application", diagnostics) else {
+        let Some(anchor) = gear_id(record.declared_at.as_ref(), uri, &record.anchor, "application", diagnostics) else {
             continue;
         };
         let scoped = scoped_profiles(
@@ -518,6 +531,7 @@ fn build_application_pins(
             diagnostics,
         );
         pins.push(ApplicationPin {
+            declared_at: record.declared_at.clone(),
             name,
             anchor,
             // Not checked here: whether the anchor declares this role is a
@@ -542,14 +556,14 @@ fn build_preferences(
             "fewer-applications" => Preference::FewerApplications,
             "isolate" => {
                 let raw = record.gear.clone().unwrap_or_default();
-                match gear_id(uri, &raw, "prefer.isolate", diagnostics) {
+                match gear_id(None, uri, &raw, "prefer.isolate", diagnostics) {
                     Some(gear) => Preference::Isolate { gear },
                     None => continue,
                 }
             }
             other => {
                 diagnostics.push(invalid(
-                    uri,
+                    Location::file(uri.to_owned()),
                     format!("unknown preference `{other}`"),
                     "use `prefer.existing_infrastructure()`, `prefer.fewer_applications()` or \
                      `prefer.isolate(gear = \"...\")`",
@@ -584,7 +598,7 @@ fn scoped_profiles(
                 out.insert(id);
             }
             Ok(id) => diagnostics.push(invalid(
-                uri,
+                Location::file(uri.to_owned()),
                 format!("{what} is scoped to profile `{id}`, which is not declared"),
                 format!(
                     "declared profiles: {}",
@@ -592,7 +606,7 @@ fn scoped_profiles(
                 ),
             )),
             Err(e) => diagnostics.push(invalid(
-                uri,
+                Location::file(uri.to_owned()),
                 format!("{what} is scoped to `{name}`, which is not a valid profile id: {e}"),
                 "profile ids are kebab-case",
             )),
@@ -638,6 +652,7 @@ fn cluster_scope(
         leader_election: record.leader_election.as_ref().map(provider_binding),
         lock: record.lock.as_ref().map(provider_binding),
         profiles,
+        declared_at: record.declared_at.clone(),
     }
 }
 
@@ -646,6 +661,7 @@ fn provider_binding(record: &ProviderBindingRecord) -> ProviderBinding {
         provider: record.provider.clone(),
         options: record.options.iter().cloned().collect(),
         secret_ref: record.secret_ref.clone(),
+        declared_at: record.declared_at.clone(),
     }
 }
 
@@ -668,12 +684,21 @@ fn binding_mode(variant: &str) -> BindingMode {
     }
 }
 
-fn profile_id(uri: &str, raw: &str, diagnostics: &mut Diagnostics) -> Option<ProfileId> {
+/// `declared_at` is the declaration that names the id, when there is one.
+///
+/// `default_profile = "..."` is written on the `product(...)` call, which records
+/// no span, so that caller passes `None` and gets the file.
+fn profile_id(
+    declared_at: Option<&Location>,
+    uri: &str,
+    raw: &str,
+    diagnostics: &mut Diagnostics,
+) -> Option<ProfileId> {
     match ProfileId::new(raw.to_owned()) {
         Ok(id) => Some(id),
         Err(e) => {
             diagnostics.push(invalid(
-                uri,
+                Location::or_file(declared_at, uri),
                 format!("profile id `{raw}` is not valid: {e}"),
                 "profile ids are kebab-case",
             ));
@@ -682,12 +707,22 @@ fn profile_id(uri: &str, raw: &str, diagnostics: &mut Diagnostics) -> Option<Pro
     }
 }
 
-fn gear_id(uri: &str, raw: &str, what: &str, diagnostics: &mut Diagnostics) -> Option<GearId> {
+/// `declared_at` is the declaration that names the gear, when there is one.
+///
+/// `application(anchor = ...)` and `prefer.isolate(...)` record no span yet, so
+/// those callers pass `None`.
+fn gear_id(
+    declared_at: Option<&Location>,
+    uri: &str,
+    raw: &str,
+    what: &str,
+    diagnostics: &mut Diagnostics,
+) -> Option<GearId> {
     match GearId::new(raw.to_owned()) {
         Ok(id) => Some(id),
         Err(e) => {
             diagnostics.push(invalid(
-                uri,
+                Location::or_file(declared_at, uri),
                 format!("{what} names gear `{raw}`, which is not a valid gear id: {e}"),
                 "gear ids are kebab-case, exactly as `#[toolkit::gear(name = \"...\")]` \
                  spells them",
@@ -714,7 +749,7 @@ fn deployment_profile(
                 Ok(host) => host,
                 Err(e) => {
                     diagnostics.push(invalid(
-                        uri,
+                        Location::or_file(record.declared_at.as_ref(), uri),
                         format!("profile `{id}` names host `{raw}`, which is not valid: {e}"),
                         "the host is an application name, kebab-case",
                     ));
@@ -726,7 +761,7 @@ fn deployment_profile(
                 Some(raw) if is_cargo_profile_name(raw) => Some(raw.to_owned()),
                 Some(raw) => {
                     diagnostics.push(invalid(
-                        uri,
+                        Location::or_file(record.declared_at.as_ref(), uri),
                         format!("profile `{id}` names cargo profile `{raw}`"),
                         "use a single path segment (`dev`, `release`, or a custom Cargo profile \
                          name); `dev` writes under `target/debug`",
@@ -737,7 +772,7 @@ fn deployment_profile(
             Some(DeploymentProfileDecl::SelfHosted {
                 id: id.clone(),
                 host,
-                discovery: discovery(uri, id, record.discovery.as_deref(), diagnostics)?,
+                discovery: discovery(uri, id, record.discovery.as_deref(), record.declared_at.as_ref(), diagnostics)?,
                 target_dir: record.target_dir.clone(),
                 cargo_profile,
                 declared_at: record.declared_at.clone(),
@@ -745,14 +780,14 @@ fn deployment_profile(
         }
         "kubernetes" => Some(DeploymentProfileDecl::Kubernetes {
             id: id.clone(),
-            discovery: discovery(uri, id, record.discovery.as_deref(), diagnostics)?,
+            discovery: discovery(uri, id, record.discovery.as_deref(), record.declared_at.as_ref(), diagnostics)?,
             namespace: record.namespace.clone(),
             image_registry: record.image_registry.clone(),
             declared_at: record.declared_at.clone(),
         }),
         other => {
             diagnostics.push(invalid(
-                uri,
+                Location::or_file(record.declared_at.as_ref(), uri),
                 format!("profile `{id}` has unknown kind `{other}`"),
                 "use `embedded(...)`, `self_hosted(...)` or `kubernetes(...)`",
             ));
@@ -777,6 +812,7 @@ fn discovery(
     uri: &str,
     id: &ProfileId,
     raw: Option<&str>,
+    declared_at: Option<&Location>,
     diagnostics: &mut Diagnostics,
 ) -> Option<Discovery> {
     match raw.unwrap_or("static") {
@@ -784,7 +820,7 @@ fn discovery(
         "directory" => Some(Discovery::Directory),
         other => {
             diagnostics.push(invalid(
-                uri,
+                Location::or_file(declared_at, uri),
                 format!("profile `{id}` asks for discovery `{other}`"),
                 "use `\"static\"` or `\"directory\"`",
             ));

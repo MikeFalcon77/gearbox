@@ -190,3 +190,269 @@ fn a_declaration_with_no_span_falls_back_to_the_file() {
     assert!(location.uri.ends_with(PRODUCT_PATH), "{}", location.uri);
     assert_eq!(location.range, Range::whole_file());
 }
+
+// --------------------------------------------------------------------------
+// The GDL layer. These fire during evaluation, so they need no catalogue and
+// no resolution -- `eval_product_text` alone produces them.
+
+/// Everything wrong with `text`, straight from the evaluator.
+///
+/// Separate from `diagnostics_of`: a description this broken has no intent to
+/// resolve, and `intent()` would panic before the assertion ran.
+fn eval_diagnostics(text: &str) -> Vec<Diagnostic> {
+    eval_product_text(Path::new(PRODUCT_PATH), None, text)
+        .diagnostics
+        .iter()
+        .cloned()
+        .collect()
+}
+
+const DUPLICATE_SOURCE: &str = r#"product(
+    id = "spans-probe",
+    name = "Spans Probe",
+    version = "0.1.0",
+    sources = [
+        source(id = "twice", at = path(".")),
+        source(id = "twice", at = path("./other")),
+    ],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [],
+)
+"#;
+
+/// A source declared twice points at the second `source(...)`, not at line 1.
+#[test]
+fn a_duplicate_source_is_anchored_on_its_declaration() {
+    let diagnostics = eval_diagnostics(DUPLICATE_SOURCE);
+    let diagnostic = find(&diagnostics, "is declared twice");
+    assert_anchored(diagnostic, DUPLICATE_SOURCE, r#"source(id = "twice", at = path("./other"))"#);
+}
+
+const CLUSTER_SCOPE_BOUND_TWICE: &str = r#"product(
+    id = "spans-probe",
+    name = "Spans Probe",
+    version = "0.1.0",
+    sources = [source(id = "somewhere", at = path("."))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [],
+    cluster_profiles = [
+        cluster_profile(name = "cache", cache = provider("standalone"), profiles = ["dev"]),
+        cluster_profile(name = "cache", cache = provider("postgres"), profiles = ["dev"]),
+    ],
+)
+"#;
+
+/// A cluster scope bound twice in one profile points at the second
+/// `cluster_profile(...)`, not at line 1.
+#[test]
+fn a_cluster_scope_bound_twice_is_anchored_on_its_second_declaration() {
+    let diagnostics = eval_diagnostics(CLUSTER_SCOPE_BOUND_TWICE);
+    let diagnostic = find(&diagnostics, "is bound twice");
+    assert_anchored(
+        diagnostic,
+        CLUSTER_SCOPE_BOUND_TWICE,
+        r#"cluster_profile(name = "cache", cache = provider("postgres")"#,
+    );
+}
+
+const BAD_GEAR_ID: &str = r#"product(
+    id = "spans-probe",
+    name = "Spans Probe",
+    version = "0.1.0",
+    sources = [source(id = "somewhere", at = path("."))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [
+        use_gear("Not Kebab", source = "somewhere"),
+    ],
+)
+"#;
+
+/// An id that is not kebab-case points at the `use_gear(...)` that wrote it.
+///
+/// Reaches the anchor through `gear_id`, which takes the span from its caller --
+/// the case that would otherwise stay file-level because the validator is handed
+/// a bare string.
+#[test]
+fn an_invalid_gear_id_is_anchored_on_its_use_gear() {
+    let diagnostics = eval_diagnostics(BAD_GEAR_ID);
+    let diagnostic = find(&diagnostics, "not a valid gear id");
+    assert_anchored(diagnostic, BAD_GEAR_ID, r#"use_gear("Not Kebab""#);
+}
+
+const BAD_DISCOVERY: &str = r#"product(
+    id = "spans-probe",
+    name = "Spans Probe",
+    version = "0.1.0",
+    sources = [source(id = "somewhere", at = path("."))],
+    profiles = [
+        kubernetes(id = "k8s", discovery = "elsewhere"),
+    ],
+    default_profile = "k8s",
+    gears = [],
+)
+"#;
+
+/// An unknown `discovery` points at the profile that asked for it.
+#[test]
+fn an_unknown_discovery_is_anchored_on_its_profile() {
+    let diagnostics = eval_diagnostics(BAD_DISCOVERY);
+    let diagnostic = find(&diagnostics, "asks for discovery");
+    assert_anchored(diagnostic, BAD_DISCOVERY, r#"kubernetes(id = "k8s""#);
+}
+
+const BAD_TEMPLATES: &str = r#"product(
+    id = "spans-probe",
+    name = "Spans Probe",
+    version = "0.1.0",
+    sources = [source(id = "somewhere", at = path("."))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [],
+    templates = git(url = "https://example.invalid", tag = "v1"),
+)
+"#;
+
+/// `templates` stays file-level, and that is the boundary worth pinning.
+///
+/// The `templates` record takes no `eval`, so no span exists for it -- the point
+/// of the explicit `Location::file` at that call site. If somebody later gives
+/// that record a span, this test is what says the fallback stopped being
+/// necessary, rather than the change going unnoticed.
+#[test]
+fn a_declaration_that_records_no_span_stays_file_level() {
+    let diagnostics = eval_diagnostics(BAD_TEMPLATES);
+    let diagnostic = find(&diagnostics, "templates");
+    let location = diagnostic
+        .location
+        .as_ref()
+        .expect("still a location, just not a position");
+    assert_eq!(
+        location.range,
+        Range::whole_file(),
+        "no span is recorded for `templates`, so the honest answer is the file"
+    );
+}
+
+const PINNED_UNDER_EMBEDDED: &str = r#"product(
+    id = "spans-probe",
+    name = "Spans Probe",
+    version = "0.1.0",
+    sources = [source(id = "somewhere", at = path("."))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [
+        use_gear("anchor-gear", source = "somewhere"),
+    ],
+    applications = [
+        application("second", anchor = "anchor-gear"),
+    ],
+)
+"#;
+
+/// An `application(...)` an embedded profile cannot honour points at itself.
+///
+/// The row Part 1 deferred: the complaint is a conflict between the pin and the
+/// profile, and the pin is the declaration that *asks* for something, so it is
+/// the one underlined. It needed `ApplicationPin` to carry a span, which is what
+/// this part added.
+#[test]
+fn an_application_an_embedded_profile_cannot_honour_is_anchored_on_itself() {
+    let diagnostics = diagnostics_of(PINNED_UNDER_EMBEDDED, "dev");
+    let diagnostic = find(&diagnostics, "asks for a second application");
+    assert_anchored(
+        diagnostic,
+        PINNED_UNDER_EMBEDDED,
+        r#"application("second", anchor = "anchor-gear")"#,
+    );
+}
+
+const CLUSTER_SCOPE: &str = r#"product(
+    id = "spans-probe",
+    name = "Spans Probe",
+    version = "0.1.0",
+    sources = [source(id = "somewhere", at = path("."))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [
+        use_gear("app", source = "somewhere"),
+        use_gear("cluster", source = "somewhere"),
+    ],
+    cluster_profiles = [
+        cluster_profile(name = "main", cache = provider("not-a-provider")),
+    ],
+)
+"#;
+
+/// A cluster scope naming a provider nothing registers points at the scope.
+///
+/// The scope and not the `provider(...)` inside it, deliberately: the failing
+/// primitive may be `cache`, `leader_election` or `lock`, and the resolver knows
+/// which only as a name. Pointing at the cache binding when the lock is at fault
+/// would underline the wrong line, and the `cluster_profile(...)` span contains
+/// all three.
+#[test]
+fn a_cluster_scope_is_anchored_on_its_declaration() {
+    let catalogue = support::cluster_catalogue(vec![(
+        gearbox_ir::ClusterPrimitive::Cache,
+        "main",
+        &["cluster.cache.linearizable"],
+    )]);
+    let resolution = resolve_at(
+        &catalogue,
+        &intent(CLUSTER_SCOPE),
+        &ProfileId::new("dev").unwrap(),
+        Some(Path::new(PRODUCT_PATH)),
+    );
+    let diagnostics: Vec<Diagnostic> = resolution.diagnostics.iter().cloned().collect();
+    let diagnostic = find(&diagnostics, "not-a-provider");
+    assert_anchored(
+        diagnostic,
+        CLUSTER_SCOPE,
+        r#"cluster_profile(name = "main""#,
+    );
+}
+
+const UNKNOWN_ROLE: &str = r#"product(
+    id = "spans-probe",
+    name = "Spans Probe",
+    version = "0.1.0",
+    sources = [source(id = "somewhere", at = path("."))],
+    profiles = [kubernetes(id = "k8s", discovery = "static")],
+    default_profile = "k8s",
+    gears = [
+        use_gear("anchor-gear", source = "somewhere"),
+    ],
+    applications = [
+        application("app", anchor = "anchor-gear", role = "bogus-role"),
+    ],
+)
+"#;
+
+/// An `application(...)` naming a role its anchor does not declare points at
+/// the `application(...)` that named it.
+#[test]
+fn an_application_naming_an_unknown_role_is_anchored_on_itself() {
+    let catalogue = support::catalogue_of(vec![support::gear_with_roles(
+        "anchor-gear",
+        &["worker"],
+    )]);
+    let resolution = resolve_at(
+        &catalogue,
+        &intent(UNKNOWN_ROLE),
+        &ProfileId::new("k8s").unwrap(),
+        Some(Path::new(PRODUCT_PATH)),
+    );
+    let diagnostics: Vec<Diagnostic> = resolution.diagnostics.iter().cloned().collect();
+    let diagnostic = find(&diagnostics, "which declares no such role");
+    assert_anchored(
+        diagnostic,
+        UNKNOWN_ROLE,
+        r#"application("app", anchor = "anchor-gear", role = "bogus-role")"#,
+    );
+}
+
+#[path = "support/resolve_fixtures.rs"]
+mod support;

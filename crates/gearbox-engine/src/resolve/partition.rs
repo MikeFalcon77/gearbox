@@ -587,7 +587,7 @@ fn report_unknown_roles(
                 ),
                 help,
             )
-            .at(Location::file(uri.to_owned())),
+            .at(gearbox_ir::Location::or_file(pin.declared_at.as_ref(), uri)),
         );
     }
 }
@@ -651,7 +651,7 @@ fn report_embedded_violations(
                 "`application(\"{}\")` asks for a second application",
                 pin.name
             ),
-            uri,
+            gearbox_ir::Location::or_file(pin.declared_at.as_ref(), uri),
         ));
         if pin.replicas > 1 {
             diagnostics.push(embedded_violation(
@@ -659,7 +659,7 @@ fn report_embedded_violations(
                     "`application(\"{}\", replicas = {})` asks for more than one copy",
                     pin.name, pin.replicas
                 ),
-                uri,
+                gearbox_ir::Location::or_file(pin.declared_at.as_ref(), uri),
             ));
         }
     }
@@ -672,7 +672,10 @@ fn report_embedded_violations(
                 "{} severable edge(s) stay local because the profile is single-application",
                 cuts.cuttable.len()
             ),
-            uri,
+            // The only one of the three that is about the profile rather than an
+            // `application(...)`, and the profile declaration is not in scope
+            // here -- so the file, honestly, until it is threaded.
+            Location::file(uri.to_owned()),
         ));
     }
 }
@@ -837,7 +840,9 @@ fn report_orphans(
     }
 }
 
-fn embedded_violation(what: &str, uri: &str) -> Diagnostic {
+/// `at` is decided by the caller, because two of the three things this says are
+/// about an `application(...)` and the third is about the profile.
+fn embedded_violation(what: &str, at: gearbox_ir::Location) -> Diagnostic {
     Diagnostic::new(
         DiagnosticCode::TopologyEmbeddedViolation,
         format!("{what}, and the embedded profile is one application by definition"),
@@ -846,5 +851,5 @@ fn embedded_violation(what: &str, uri: &str) -> Diagnostic {
         "resolved as a single application anyway, so the product is still buildable; resolve for a \
          `self_hosted` or `kubernetes` profile to get the topology this asks for",
     )
-    .at(Location::file(uri.to_owned()))
+    .at(at)
 }

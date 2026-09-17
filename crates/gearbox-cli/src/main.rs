@@ -978,8 +978,8 @@ const fn label(severity: Severity) -> &'static str {
 /// presentation, and the IR should not own a phrasing only the CLI uses.
 fn describe_source(source: &gearbox_ir::SourceDecl) -> String {
     match source {
-        gearbox_ir::SourceDecl::Path { at } => format!("path {at}"),
-        gearbox_ir::SourceDecl::Registry { url, prefix } => {
+        gearbox_ir::SourceDecl::Path { at, .. } => format!("path {at}"),
+        gearbox_ir::SourceDecl::Registry { url, prefix, .. } => {
             let url = without_userinfo(url);
             match prefix {
                 Some(prefix) => format!("registry {url} (packages named {prefix}<gear>)"),
@@ -991,6 +991,7 @@ fn describe_source(source: &gearbox_ir::SourceDecl) -> String {
             tag,
             rev,
             branch,
+            ..
         } => {
             let pin = tag
                 .as_ref()
@@ -1206,6 +1207,7 @@ mod tests {
             tag: Some("v1.2.3".to_owned()),
             rev: None,
             branch: None,
+            declared_at: None,
         };
         let rendered = describe_source(&git);
         assert!(
@@ -1218,6 +1220,7 @@ mod tests {
         let registry = gearbox_ir::SourceDecl::Registry {
             url: "https://token@registry.example.com/index".to_owned(),
             prefix: Some("cf-gears-".to_owned()),
+            declared_at: None,
         };
         let rendered = describe_source(&registry);
         assert!(!rendered.contains("token@"), "{rendered}");

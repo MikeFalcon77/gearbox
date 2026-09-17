@@ -103,6 +103,7 @@ pub fn resolve(
                 spread,
                 prefer_existing,
                 uri,
+                declared_at: declared_scope.and_then(|s| s.declared_at.as_ref()),
             },
             declared,
             diagnostics,
@@ -137,6 +138,15 @@ struct Context<'a> {
     spread: bool,
     prefer_existing: bool,
     uri: &'a str,
+    /// Where this scope's `cluster_profile(...)` was written, when the
+    /// description declared one.
+    ///
+    /// The scope rather than the individual `provider(...)`: the failing
+    /// primitive may be `cache`, `leader_election` or `lock`, and pointing at
+    /// the cache binding when the lock is at fault would underline the wrong
+    /// line. The `cluster_profile(...)` span contains all three, which is the
+    /// call-level answer `cpt-gearbox-adr-gdl-language-server` settles on.
+    declared_at: Option<&'a Location>,
 }
 
 /// Group the closure's cluster requirements by scope and primitive.
@@ -278,7 +288,7 @@ fn explicit(
                 ),
                 format!("registered providers are: {}", names(ctx.providers)),
             )
-            .at(loc(ctx.uri)),
+            .at(loc(ctx)),
         );
         Selected::downgraded(
             request.provider.clone(),
@@ -353,7 +363,7 @@ fn automatic(
                 why(ctx, candidates),
                 ctx.primitive.config_key()
             ))
-            .at(loc(ctx.uri)),
+            .at(loc(ctx)),
         );
         return (
             ClusterResolution::Provider {
@@ -401,7 +411,7 @@ fn automatic(
                 "gears/system/cluster/cluster/src/defaults/leader.rs \
                  (CasBasedLeaderElectionBackend::features)",
             )
-            .at(loc(ctx.uri)),
+            .at(loc(ctx)),
         );
         return (
             ClusterResolution::SdkCasDefault {
@@ -553,7 +563,7 @@ fn unsatisfiable(ctx: &Context<'_>, named: Option<&str>) -> Diagnostic {
         ),
         help,
     )
-    .at(loc(ctx.uri))
+    .at(loc(ctx))
 }
 
 /// The rule that catches a silent correctness bug.
@@ -588,7 +598,7 @@ fn guard_process_local(
              Choose a backend that is not process-local, or keep the requesters in one \
              unreplicated application",
         )
-        .at(loc(ctx.uri)),
+        .at(loc(ctx)),
     );
 }
 
@@ -631,7 +641,7 @@ fn report_runtime_capabilities(
             "gears/system/cluster/plugins/redis-cluster-plugin/src/cache/mod.rs:347 \
              (consistency() returns what the startup preflight computed)",
         )
-        .at(loc(ctx.uri)),
+        .at(loc(ctx)),
     );
 }
 
@@ -677,7 +687,7 @@ fn check_credentials(
              generated configuration, and the credential itself never enters the lock or any \
              values file",
         )
-        .at(loc(ctx.uri)),
+        .at(loc(ctx)),
     );
 }
 
@@ -692,8 +702,9 @@ fn names(providers: &[ClusterProviderDecl]) -> String {
         .join(", ")
 }
 
-fn loc(uri: &str) -> Location {
-    Location::file(uri.to_owned())
+/// Where a diagnostic about one cluster decision points.
+fn loc(ctx: &Context<'_>) -> Location {
+    Location::or_file(ctx.declared_at, ctx.uri)
 }
 
 /// Report a replicated stateful gear with no leader election in its scope.
@@ -761,7 +772,12 @@ pub fn report_stateful_replicas(
                  job fires N times. Add a `leader_election` binding to the gear's cluster \
                  scope, or run one replica",
             )
-            .at(loc(uri)),
+            // File-level, and not for lack of a span. The complaint names an
+            // application and a remedy in a cluster scope, and neither is in
+            // hand here -- `report_stateful_replicas` walks applications, not
+            // scopes. Two candidate anchors and no way to tell which is at
+            // fault is exactly when the file is the honest answer.
+            .at(Location::file(uri.to_owned())),
         );
     }
 }

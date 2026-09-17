@@ -383,11 +383,13 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = pos)] name: &str,
         #[starlark(require = named)] secret_ref: Option<&str>,
         #[starlark(kwargs)] options: SmallMap<String, Value<'v>>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ProviderBindingRecord> {
         Ok(ProviderBindingRecord {
             provider: name.to_owned(),
             options: self::options(options)?,
             secret_ref: secret_ref.map(str::to_owned),
+            declared_at: call_location(eval),
         })
     }
 
@@ -402,6 +404,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] leader_election: Option<&'v ProviderBindingRecord>,
         #[starlark(require = named)] lock: Option<&'v ProviderBindingRecord>,
         #[starlark(require = named)] profiles: Option<UnpackList<String>>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ClusterProfileRecord> {
         Ok(ClusterProfileRecord {
             scope: name.to_owned(),
@@ -409,16 +412,18 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             leader_election: leader_election.cloned(),
             lock: lock.cloned(),
             profiles: strings(profiles),
+            declared_at: call_location(eval),
         })
     }
 
     /// `application("name", anchor = ..., replicas = ..., profiles = [...])`
-    fn application(
+    fn application<'v>(
         #[starlark(require = pos)] name: &str,
         #[starlark(require = named)] anchor: &str,
         #[starlark(require = named)] role: Option<&str>,
         #[starlark(require = named, default = 1)] replicas: u32,
         #[starlark(require = named)] profiles: Option<UnpackList<String>>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ApplicationRecord> {
         if replicas == 0 {
             return Err(anyhow::anyhow!(
@@ -431,6 +436,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             role: role.map(str::to_owned),
             replicas,
             profiles: strings(profiles),
+            declared_at: call_location(eval),
         })
     }
 

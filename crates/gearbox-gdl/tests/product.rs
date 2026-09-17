@@ -284,12 +284,27 @@ product(
     let source = sources
         .get(&SourceId::new("cf").unwrap())
         .expect("the source");
+    let gearbox_ir::SourceDecl::Registry { url, prefix, .. } = source else {
+        panic!("a `registry()` source must be the Registry variant: {source:?}");
+    };
+    assert_eq!(url, "crates.io");
+    assert_eq!(prefix.as_deref(), Some("cf-gears-"));
+
+    // Field by field rather than comparing the whole variant, because it now
+    // carries the `source(...)` span and a literal expectation would have to
+    // restate the fixture's own line numbers to match.
+    let at = source
+        .declared_at()
+        .expect("`source(...)` records where it was written");
     assert_eq!(
-        source,
-        &gearbox_ir::SourceDecl::Registry {
-            url: "crates.io".to_owned(),
-            prefix: Some("cf-gears-".to_owned()),
-        }
+        at.range.start.line,
+        u32::try_from(
+            src.lines()
+                .position(|line| line.contains("source(id = \"cf\""))
+                .expect("the fixture declares it")
+        )
+        .unwrap(),
+        "the span must be the `source(...)` line, not the top of the file"
     );
 }
 
