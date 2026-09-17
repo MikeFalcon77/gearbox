@@ -43,13 +43,18 @@ impl Closure {
 /// Unknown gears are reported and skipped rather than aborting: a product naming
 /// one gear that does not exist should still resolve the rest, so the operator
 /// sees every problem at once instead of one per run.
+///
+/// `uri` is the product description's URI, passed in rather than derived here:
+/// `intent.gdl_path` is relative to its root, and a relative path in a `file://`
+/// URI reads its first segment as the host. `resolve_at` is the one place that
+/// knows the real path.
 pub fn expand(
     catalogue: &Catalogue,
     intent: &ProductIntent,
     profile: &gearbox_ir::ProfileId,
+    uri: &str,
     diagnostics: &mut Diagnostics,
 ) -> Closure {
-    let uri = format!("file://{}", intent.gdl_path.as_str());
     let mut closure = Closure::default();
     let mut queue: VecDeque<GearId> = VecDeque::new();
 
@@ -61,7 +66,20 @@ pub fn expand(
         .collect();
     for gear in &selected {
         if !catalogue.gears.contains_key(gear) {
-            diagnostics.push(unknown(gear, None, &uri));
+            // `selected` is a deduped set of ids, so the selection is looked up
+            // again here. The *first* `use_gear` naming this gear, when two
+            // profiles each name it: both are equally at fault, and underlining
+            // one of them beats underlining the file.
+            let declared_at = intent
+                .selected_gears
+                .iter()
+                .find(|s| &s.gear == gear)
+                .and_then(|s| s.declared_at.clone());
+            diagnostics.push(unknown(
+                gear,
+                None,
+                gearbox_ir::Location::or_file(declared_at.as_ref(), uri),
+            ));
             continue;
         }
         closure
@@ -84,7 +102,11 @@ pub fn expand(
                 continue;
             }
             if !catalogue.gears.contains_key(&plugin.gear) {
-                diagnostics.push(unknown_plugin(&plugin.gear, &selection.gear, &uri));
+                diagnostics.push(unknown_plugin(
+                    &plugin.gear,
+                    &selection.gear,
+                    gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri),
+                ));
                 continue;
             }
             let reason = InclusionReason::PluginOf {
@@ -108,7 +130,7 @@ pub fn expand(
         };
         for dep in &descriptor.colocated_deps {
             if !catalogue.gears.contains_key(dep) {
-                diagnostics.push(unknown(dep, Some(&current), &uri));
+                diagnostics.push(unknown(dep, Some(&current), Location::file(uri.to_owned())));
                 continue;
             }
             let reason = InclusionReason::ColocatedBy {
@@ -132,7 +154,7 @@ pub fn expand(
         reasons.dedup();
     }
 
-    detect_cycle(catalogue, &closure, &uri, diagnostics);
+    detect_cycle(catalogue, &closure, uri, diagnostics);
     closure
 }
 
@@ -164,17 +186,25 @@ fn applies(
 }
 
 /// A plugin named under a host that the catalogue does not have.
-fn unknown_plugin(plugin: &GearId, host: &GearId, uri: &str) -> Diagnostic {
+///
+/// Anchored on the host's `use_gear(...)`, which is the call the `plugins = [...]`
+/// entry sits inside.
+fn unknown_plugin(plugin: &GearId, host: &GearId, at: gearbox_ir::Location) -> Diagnostic {
     Diagnostic::error(
         DiagnosticCode::TopologyUnknownGear,
         format!("`{host}` selects the plugin `{plugin}`, which is not in the catalogue"),
         "a plugin is an ordinary gear with its own `gear.gdl`; either it has none yet, or its \
          source root is not open. `gearbox validate --product ...` says which",
     )
-    .at(Location::file(uri.to_owned()))
+    .at(at)
 }
 
-fn unknown(gear: &GearId, pulled_by: Option<&GearId>, uri: &str) -> Diagnostic {
+/// `at` is decided by the caller, because the two cases this serves are about
+/// different files. A `use_gear("x")` naming nothing is about the description and
+/// gets its call span; a co-location dependency naming nothing is projected from
+/// `#[toolkit::gear(deps = [...])]` in Rust, so no `.gdl` span is true of it and
+/// the caller passes the file.
+fn unknown(gear: &GearId, pulled_by: Option<&GearId>, at: gearbox_ir::Location) -> Diagnostic {
     let message = match pulled_by {
         Some(by) => format!(
             "`{by}` declares a co-location dependency on `{gear}`, which is not in the catalogue"
@@ -190,8 +220,7 @@ fn unknown(gear: &GearId, pulled_by: Option<&GearId>, uri: &str) -> Diagnostic {
                  nobody has described yet"
             .to_owned(),
     };
-    Diagnostic::error(DiagnosticCode::TopologyUnknownGear, message, help)
-        .at(Location::file(uri.to_owned()))
+    Diagnostic::error(DiagnosticCode::TopologyUnknownGear, message, help).at(at)
 }
 
 /// Report a cycle among co-location edges.

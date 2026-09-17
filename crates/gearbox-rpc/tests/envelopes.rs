@@ -41,6 +41,7 @@ fn capabilities_report_what_is_absent_rather_than_omitting_it() {
         resolve: false,
         generate: false,
         writes: false,
+        text_document_sync: gearbox_rpc::lsp::SYNC_FULL,
     })
     .unwrap();
 
@@ -54,6 +55,13 @@ fn capabilities_report_what_is_absent_rather_than_omitting_it() {
         assert!(json.get(key).is_some(), "`{key}` must be present");
     }
     assert_eq!(json["resolve"], serde_json::json!(false));
+
+    // LSP's spelling, not Rust's. A language client reads this object as
+    // `ServerCapabilities`, and `text_document_sync` would be a field it does
+    // not know -- so it would fall back to "no sync", never send a `didOpen`,
+    // and nothing would be underlined with no error anywhere to say why.
+    assert_eq!(json["textDocumentSync"], serde_json::json!(1));
+    assert!(json.get("text_document_sync").is_none());
 }
 
 #[test]

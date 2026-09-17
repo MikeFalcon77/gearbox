@@ -284,7 +284,11 @@ Verified against the installed packages, not assumed:
   error — the file renders as plain text.
 * `--plugins=local-dir:../plugins`, which the browser application currently passes, does nothing:
   `@theia/plugin-ext` is not installed and the backend's argument parser is not strict, so the flag
-  is accepted and ignored. The directory does not exist either.
+  is accepted and ignored. The directory does not exist either. **No longer true as of 2026-09-16:**
+  the plugin host arrived so that git could be a VS Code extension, and the directory is populated
+  by `npm run plugins`. The flag is live. The grammar decision above is unchanged — see
+  `cpt-gearbox-adr-gdl-language-server`, which invokes the revisit clause below and keeps the native
+  path for a different reason.
 
 ## Amendment 2026-08-30: PerspectiveService is the carrier
 
@@ -484,6 +488,12 @@ The editor stack, the Explorer, git, the `.gdl` grammar decision, the packaging 
 
 * If Studio ever needs to host third-party extensions, `@theia/plugin-ext` arrives and the `.gdl`
   grammar should move to the VSIX path, since the cost that ruled it out will already have been paid.
+  **Triggered and answered, 2026-09-17.** The plugin host arrived for git, so the condition is met.
+  `cpt-gearbox-adr-gdl-language-server` re-examined the grammar and the language client and kept both
+  native — the grammar because a VSIX would carry a second copy of a vocabulary that is generated
+  from the engine's globals, and the client because `monaco-languageclient` depends on
+  `monaco-editor` rather than `@theia/monaco-editor-core`, which is a second Monaco. The clause was
+  right to ask; the answer came out the same way for reasons that did not exist when it was written.
 * If a Theia upgrade removes `initializeLayout` or reworks the menu model again, the suppressions are
   the first thing to re-verify; the assertion that a removed menu stays removed is what will notice.
 * If the two perspectives turn out to be one — if in practice nobody uses the catalogue except while

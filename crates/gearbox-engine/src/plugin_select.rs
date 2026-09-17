@@ -53,7 +53,7 @@ fn report_plugin_config_types(intent: &ProductIntent, uri: &str, diagnostics: &m
                     format!("gear `{}`: `vendor` must be a string", selection.gear),
                     "set `vendor` to a string, or drop the key to use the crate default",
                 )
-                .at(Location::file(uri.to_owned())),
+                .at(gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri)),
             );
         }
         for plugin in &selection.plugins {
@@ -64,7 +64,7 @@ fn report_plugin_config_types(intent: &ProductIntent, uri: &str, diagnostics: &m
                         format!("plugin `{}`: {msg}", plugin.gear),
                         "set `vendor` to a string, or drop the key to use the crate default",
                     )
-                    .at(Location::file(uri.to_owned())),
+                    .at(gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri)),
                 );
             }
             if let Err(msg) = plugin.configured_priority() {
@@ -74,7 +74,7 @@ fn report_plugin_config_types(intent: &ProductIntent, uri: &str, diagnostics: &m
                         format!("plugin `{}`: {msg}", plugin.gear),
                         "set `priority` to an integer, or drop the key to use the crate default",
                     )
-                    .at(Location::file(uri.to_owned())),
+                    .at(gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri)),
                 );
             }
         }
@@ -222,7 +222,7 @@ fn report_misplaced_plugins(
                         fills.point.qualified()
                     ),
                 )
-                .at(Location::file(uri.to_owned())),
+                .at(gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri)),
             );
         }
     }
@@ -421,7 +421,7 @@ fn report_orphan_plugins(
                     "select the host gear and list this one under its `plugins = [...]`, or \
                      drop it",
                 )
-                .at(Location::file(uri.to_owned())),
+                .at(gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri)),
             );
         }
     }

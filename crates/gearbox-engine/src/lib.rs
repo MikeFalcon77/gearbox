@@ -14,6 +14,7 @@ pub mod catalogue;
 pub mod cluster;
 pub mod config;
 pub mod config_check;
+pub mod description;
 pub mod docs;
 pub mod feature_check;
 pub mod features;
@@ -33,6 +34,7 @@ pub mod validate;
 
 pub use catalogue::{CatalogueScan, Continue, LoadEvent, load_catalogue, load_catalogue_staged};
 pub use cluster::ClusterProjection;
+pub use description::check_description;
 pub use generate::{
     GenerateError, GenerateInput, Generated, TemplateSet, apply_generate, generate,
 };

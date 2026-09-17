@@ -80,6 +80,7 @@ fn state() -> Option<State> {
         // that it writes.
         allow_writes: false,
         workspace: None,
+        documents: BTreeMap::new(),
     })
 }
 

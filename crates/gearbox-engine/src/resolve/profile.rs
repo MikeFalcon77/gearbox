@@ -40,13 +40,17 @@ fn applies(profiles: &BTreeSet<ProfileId>, profile: &ProfileId) -> bool {
 /// long as they apply to different profiles -- that is how a product says "REST
 /// here, gRPC there". They become a contradiction only after narrowing, so this
 /// is the one place the check can be made.
+///
+/// `uri` is the product description's URI, passed in rather than derived here:
+/// `intent.gdl_path` is relative to its root, and a relative path in a `file://`
+/// URI reads its first segment as the host. `resolve_at` is the one place that
+/// knows the real path.
 pub fn scope<'a>(
     intent: &'a ProductIntent,
     profile: &ProfileId,
+    uri: &str,
     diagnostics: &mut Diagnostics,
 ) -> ProfileScoped<'a> {
-    let uri = format!("file://{}", intent.gdl_path.as_str());
-
     let bindings: Vec<&BindingIntent> = intent
         .bindings
         .iter()
@@ -58,7 +62,7 @@ pub fn scope<'a>(
             .map(|b| format!("{}/{}", b.consumer, b.contract)),
         "bind",
         profile,
-        &uri,
+        uri,
         diagnostics,
     );
 
@@ -71,7 +75,7 @@ pub fn scope<'a>(
         cluster_scopes.iter().map(|s| s.scope.clone()),
         "cluster_profile",
         profile,
-        &uri,
+        uri,
         diagnostics,
     );
 
@@ -84,7 +88,7 @@ pub fn scope<'a>(
         application_pins.iter().map(|p| p.name.to_string()),
         "application",
         profile,
-        &uri,
+        uri,
         diagnostics,
     );
     // Keyed on the anchor *and* the role, because both halves are the pin's
@@ -99,7 +103,7 @@ pub fn scope<'a>(
             .map(|p| format!("{}/{}", p.anchor, p.role.as_deref().unwrap_or(""))),
         "application anchor",
         profile,
-        &uri,
+        uri,
         diagnostics,
     );
 

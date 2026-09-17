@@ -113,9 +113,18 @@ fn secret_fields<'a>(catalogue: &'a Catalogue, gear: &GearId) -> Vec<&'a str> {
 /// the hash from the product it is given rather than trusting the recorded one, so
 /// what lands on disk verifies against itself. It will not match the *input*
 /// lock's hash -- it is a different lock, which is what `GBX0705` says out loud.
+/// `product_dir` is the directory holding `product.gdl`, and it is what the
+/// diagnostic points at. Before it was threaded here the location was
+/// `Location::file(lock.product.id)` -- a product *id* in the field that holds a
+/// URI, so the editor was handed `payments-demo` as a link. `None` means the
+/// caller has no description on disk (every test that builds a lock by hand),
+/// and then the diagnostic carries no location at all rather than a made-up one:
+/// the wire type says resolution diagnostics often have none and are anchored by
+/// the client.
 pub fn redact_product<'a>(
     lock: &'a ResolvedProduct,
     catalogue: Option<&Catalogue>,
+    product_dir: Option<&std::path::Path>,
     diagnostics: &mut Diagnostics,
 ) -> Cow<'a, ResolvedProduct> {
     let Some(catalogue) = catalogue else {
@@ -140,20 +149,24 @@ pub fn redact_product<'a>(
     }
 
     let mut redacted = lock.clone();
+    let at = product_dir
+        .map(|dir| gearbox_ir::file_uri(&dir.join(crate::product::PRODUCT_FILE)))
+        .map(Location::file);
     for (id, fields) in dirty {
         for field in fields {
             let name = secret_env_name(&id, &field);
-            diagnostics.push(
-                Diagnostic::new(
-                    DiagnosticCode::GenLiteralSecretInLock,
-                    format!("`{id}` config field `{field}` carries a credential in the lock"),
-                )
-                .with_help(format!(
-                    "generation wrote `${{{name}}}` instead; re-resolve the product so the lock \
-                     stops carrying it, and set `{field} = \"${{{name}}}\"` in the description"
-                ))
-                .at(Location::file(lock.product.id.clone())),
-            );
+            let reported = Diagnostic::new(
+                DiagnosticCode::GenLiteralSecretInLock,
+                format!("`{id}` config field `{field}` carries a credential in the lock"),
+            )
+            .with_help(format!(
+                "generation wrote `${{{name}}}` instead; re-resolve the product so the lock \
+                 stops carrying it, and set `{field} = \"${{{name}}}\"` in the description"
+            ));
+            diagnostics.push(match at.clone() {
+                Some(location) => reported.at(location),
+                None => reported,
+            });
             if let Some(gear) = redacted.gears.get_mut(&id) {
                 gear.config
                     .insert(field, Value::String(format!("${{{name}}}")));

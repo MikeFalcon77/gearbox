@@ -293,12 +293,11 @@ fn literal_secret(
 /// Where a diagnostic about one selection points.
 ///
 /// The `use_gear(...)` span when the description recorded one; claiming
-/// byte-zero precision would be worse than claiming none.
+/// byte-zero precision would be worse than claiming none. The rule itself is
+/// `Location::or_file`, next to the sentinel it falls back to: this file was the
+/// first of about thirty across two crates to need it.
 fn location(selection: &gearbox_ir::GearSelection, uri: &str) -> Location {
-    selection
-        .declared_at
-        .clone()
-        .unwrap_or_else(|| Location::file(uri.to_owned()))
+    gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri)
 }
 
 #[cfg(test)]

@@ -1,0 +1,681 @@
+//! The `textDocument/*` lifecycle, and the rule about which diagnostics may be
+//! underlined.
+//!
+//! Driven through `document_notification` against an in-memory connection, which
+//! is the whole handler: the only thing between it and `serve`'s loop is a match
+//! on the method name.
+//!
+//! The rule tested last is the one this slice turns on
+//! (`cpt-gearbox-adr-gdl-language-server`), and it is the kind that decays
+//! quietly. Publishing everything would look like an improvement in a diff --
+//! more diagnostics reach the editor -- and the damage would show up only as
+//! squiggles under the first character of files whose real error is thirty lines
+//! down.
+
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
+)]
+
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use lsp_server::Connection;
+
+use super::*;
+
+static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+fn scratch(label: &str) -> PathBuf {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("crate lives under the workspace");
+    let nth = NEXT.fetch_add(1, Ordering::Relaxed);
+    let dir = repo.join(format!(
+        "target/gbx-document-{label}-{}-{nth}",
+        std::process::id()
+    ));
+    drop(std::fs::remove_dir_all(&dir));
+    std::fs::create_dir_all(&dir).expect("scratch directory");
+    dir
+}
+
+/// A session with no roots, which is what an editor that has opened a file
+/// outside the corpus has.
+fn state() -> State {
+    State {
+        roots: Vec::new(),
+        catalogue: None,
+        failed_roots: Vec::new(),
+        creation_boundary: None,
+        initialized: true,
+        allow_writes: false,
+        workspace: None,
+        documents: BTreeMap::new(),
+    }
+}
+
+/// A session with `root` open as a source root, which is what an editor working
+/// inside the corpus has.
+///
+/// The root is canonicalized by `SourceRoot::open`, so the fixture canonicalizes
+/// the path it builds URIs from too -- otherwise a symlink anywhere above the
+/// scratch directory would make the two spellings different paths and the test
+/// would fail for a reason that is not the one it is about.
+fn state_with_root(root: &Path) -> State {
+    State {
+        roots: vec![
+            SourceRoot::open(SourceId::new("fixture").unwrap(), root).expect("scratch root opens"),
+        ],
+        ..state()
+    }
+}
+
+fn did_open(uri: &str, text: &str) -> Notification {
+    Notification {
+        method: method::DID_OPEN.to_owned(),
+        params: serde_json::json!({
+            "textDocument": { "uri": uri, "languageId": "gdl", "version": 1, "text": text }
+        }),
+    }
+}
+
+fn did_change(uri: &str, version: i32, text: &str) -> Notification {
+    Notification {
+        method: method::DID_CHANGE.to_owned(),
+        params: serde_json::json!({
+            "textDocument": { "uri": uri, "version": version },
+            "contentChanges": [{ "text": text }]
+        }),
+    }
+}
+
+fn did_close(uri: &str) -> Notification {
+    Notification {
+        method: method::DID_CLOSE.to_owned(),
+        params: serde_json::json!({ "textDocument": { "uri": uri } }),
+    }
+}
+
+/// The next `publishDiagnostics` on the wire, decoded.
+///
+/// Every branch of the handler ends in one, so a test that finds none has found
+/// a document the editor would be left holding stale markers for.
+fn published(client: &Connection) -> PublishDiagnosticsParams {
+    loop {
+        let message = client
+            .receiver
+            .try_recv()
+            .expect("the handler must publish, even when there is nothing to say");
+        if let Message::Notification(notification) = message
+            && notification.method == method::PUBLISH_DIAGNOSTICS
+        {
+            return serde_json::from_value(notification.params).expect("publish params");
+        }
+    }
+}
+
+/// A gear description whose `name` is a number.
+///
+/// It parses, so the evaluator is what rejects it, and the span it reports
+/// covers the whole `gear(...)` call -- a range with something in it, which is
+/// what "source ranges" in the requirement asks for.
+const MISTYPED_GEAR: &str = "gear(\n  name = 5,\n  category = \"example\",\n  \
+                             package = cargo(crate_name = \"demo\", lib = \"demo\", \
+                             path = \".\"),\n)\n";
+
+/// A description that stops in the middle: the call is never closed.
+///
+/// Its diagnostic is a *point*, not a span -- the place the expression should
+/// have continued. Kept as a fixture because it is what a half-typed file looks
+/// like, and because it is the case a "non-empty range" rule would wrongly drop.
+const TRUNCATED_GEAR: &str = "gear(\n  name = \"Demo\",\n";
+
+/// A file with no `gear()` in it at all.
+///
+/// The one diagnostic reachable from a description alone that is genuinely about
+/// the file rather than a place in it, so it is the fixture for the rule.
+const EMPTY_GEAR: &str = "";
+
+const VALID_GEAR: &str = "gear(\n  name = \"Demo\",\n  category = \"example\",\n  \
+                          package = cargo(crate_name = \"demo\", lib = \"demo\", path = \".\"),\n)\n";
+
+/// Opening a broken description underlines it, and underlines *something*.
+///
+/// The range assertion is the claim. A diagnostic that arrives with
+/// `(0,0)-(0,0)` satisfies "a diagnostic was published" and fails the
+/// requirement, which asks for "source ranges".
+#[test]
+fn opening_a_broken_description_publishes_a_range() {
+    let dir = scratch("open");
+    let path = dir.join("gear.gdl");
+    let uri = gearbox_ir::file_uri(&path);
+    let (server, client) = Connection::memory();
+    let mut state = state();
+
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_open(&uri, MISTYPED_GEAR)
+    ));
+
+    let params = published(&client);
+    assert_eq!(params.uri, uri);
+    assert_eq!(params.version, Some(1));
+    assert!(
+        !params.diagnostics.is_empty(),
+        "a file that does not evaluate"
+    );
+    for diagnostic in &params.diagnostics {
+        assert_ne!(
+            diagnostic.range.start, diagnostic.range.end,
+            "this fixture's error is a span, not a point: {diagnostic:?}"
+        );
+        assert_eq!(
+            diagnostic.severity, 1,
+            "a description that fails is an error"
+        );
+        assert_eq!(diagnostic.source, "gearbox");
+    }
+}
+
+/// A description that stops halfway is underlined where it stops.
+///
+/// The companion to the test above, and the reason the rule is written against
+/// `Range::whole_file` rather than against emptiness: this diagnostic's range has
+/// nothing between its ends, and it is still a true statement about a position.
+/// A rule that dropped empty ranges would leave every half-typed file unmarked --
+/// which is most files, most of the time somebody is typing.
+#[test]
+fn a_truncated_description_is_underlined_where_it_stops() {
+    let dir = scratch("truncated");
+    let uri = gearbox_ir::file_uri(&dir.join("gear.gdl"));
+    let (server, client) = Connection::memory();
+    let mut state = state();
+
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_open(&uri, TRUNCATED_GEAR)
+    ));
+
+    let published = published(&client);
+    let [diagnostic] = published.diagnostics.as_slice() else {
+        panic!("one parse error, got {:?}", published.diagnostics);
+    };
+    assert_eq!(
+        diagnostic.range.start, diagnostic.range.end,
+        "the fixture must really be a point, or this proves nothing"
+    );
+    assert_ne!(
+        diagnostic.range.start,
+        gearbox_ir::Position::origin(),
+        "and it must be a point somewhere other than the origin, which is the \
+         sentinel meaning `no position`"
+    );
+}
+
+/// What the buffer says, not what the file says.
+///
+/// The point of holding documents at all. With the file on disk valid and the
+/// buffer broken, anything that read the path would publish nothing -- so the
+/// diagnostics here can only have come from the text the client sent.
+#[test]
+fn the_text_from_did_change_is_what_is_evaluated() {
+    let dir = scratch("change");
+    let path = dir.join("gear.gdl");
+    std::fs::write(&path, VALID_GEAR).unwrap();
+    let uri = gearbox_ir::file_uri(&path);
+    let (server, client) = Connection::memory();
+    let mut state = state();
+
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_open(&uri, VALID_GEAR)
+    ));
+    assert!(
+        published(&client).diagnostics.is_empty(),
+        "the valid text is valid"
+    );
+
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_change(&uri, 2, MISTYPED_GEAR)
+    ));
+
+    let params = published(&client);
+    assert_eq!(params.version, Some(2));
+    assert!(
+        !params.diagnostics.is_empty(),
+        "the buffer is broken, and the buffer is the question"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        VALID_GEAR,
+        "and nothing was written: an editor's buffer is not a save"
+    );
+}
+
+/// Closing a document takes its markers with it.
+///
+/// An empty list is how LSP says "clean now". Staying silent would leave the
+/// squiggles on a buffer nobody can see, which is the stale-marker failure
+/// `cpt-gearbox-fr-editor-diagnostics` exists to prevent.
+#[test]
+fn closing_a_document_publishes_an_empty_list_and_forgets_it() {
+    let dir = scratch("close");
+    let uri = gearbox_ir::file_uri(&dir.join("gear.gdl"));
+    let (server, client) = Connection::memory();
+    let mut state = state();
+
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_open(&uri, MISTYPED_GEAR)
+    ));
+    assert!(!published(&client).diagnostics.is_empty());
+
+    assert!(document_notification(&server, &mut state, did_close(&uri)));
+
+    let params = published(&client);
+    assert_eq!(params.uri, uri);
+    assert!(params.diagnostics.is_empty(), "closed means nothing to say");
+    assert!(
+        state.documents.is_empty(),
+        "a document the editor closed must not be held for the life of the session"
+    );
+}
+
+/// A diagnostic that names a file but no position is **not** underlined.
+///
+/// `no gear() declaration` is built with `Location::file`, which is
+/// `Range::whole_file` -- 81 diagnostics in `gearbox-engine` are, and this is the
+/// one reachable from a description alone.
+///
+/// Both halves matter. That the diagnostic exists is asserted directly, so this
+/// cannot pass because the check stopped running; that it is not published is
+/// the rule.
+#[test]
+fn a_diagnostic_with_no_position_is_not_underlined() {
+    let dir = scratch("anchorless");
+    let path = dir.join("gear.gdl");
+    let uri = gearbox_ir::file_uri(&path);
+    let diagnostics = gearbox_engine::check_description(&path, None, EMPTY_GEAR)
+        .expect("`gear.gdl` is a description");
+    assert!(
+        diagnostics.iter().any(|d| d
+            .location
+            .as_ref()
+            .is_some_and(|l| { l.uri == uri && l.range == gearbox_ir::Range::whole_file() })),
+        "the fixture must actually produce an anchorless diagnostic, or this test \
+         proves nothing: {diagnostics:?}"
+    );
+
+    let (server, client) = Connection::memory();
+    let mut state = state();
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_open(&uri, EMPTY_GEAR)
+    ));
+
+    assert!(
+        published(&client).diagnostics.is_empty(),
+        "underlining the start of the file is a false claim about where the error is"
+    );
+}
+
+/// An incremental change against a server advertising `Full` is refused aloud.
+///
+/// Treating `text` as the whole document would replace the file with a fragment,
+/// and every diagnostic after it would be confident and wrong.
+#[test]
+fn an_incremental_change_is_refused_rather_than_half_applied() {
+    let dir = scratch("incremental");
+    let uri = gearbox_ir::file_uri(&dir.join("gear.gdl"));
+    let (server, client) = Connection::memory();
+    let mut state = state();
+
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_open(&uri, VALID_GEAR)
+    ));
+    drop(published(&client));
+
+    let incremental = Notification {
+        method: method::DID_CHANGE.to_owned(),
+        params: serde_json::json!({
+            "textDocument": { "uri": uri, "version": 2 },
+            "contentChanges": [{
+                "range": { "start": { "line": 0, "character": 0 },
+                           "end": { "line": 0, "character": 4 } },
+                "text": "gearx"
+            }]
+        }),
+    };
+    assert!(document_notification(&server, &mut state, incremental));
+
+    assert_eq!(
+        state.documents.get(&uri).map(String::as_str),
+        Some(VALID_GEAR),
+        "the document keeps the last whole text the client actually sent"
+    );
+    let Ok(Message::Notification(logged)) = client.receiver.try_recv() else {
+        panic!("the mismatch must be said out loud, not swallowed");
+    };
+    assert_eq!(logged.method, method::LOG);
+}
+
+/// The URI a client sends and the URI the engine builds are the same document.
+///
+/// Theia percent-encodes and `gearbox_ir::file_uri` does not, so a path with a
+/// space in it is where the two spellings part company -- and a dropped
+/// diagnostic there would look like "this file is fine".
+#[test]
+fn a_percent_encoded_uri_names_the_same_file() {
+    let dir = scratch("encoded").join("my products");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("gear.gdl");
+    let encoded = gearbox_ir::file_uri(&path).replace(' ', "%20");
+    assert!(
+        encoded.contains("%20"),
+        "the fixture must exercise encoding"
+    );
+
+    assert_eq!(
+        lsp::path_from_uri(&encoded).as_deref(),
+        Some(path.as_path())
+    );
+
+    let (server, client) = Connection::memory();
+    let mut state = state();
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_open(&encoded, MISTYPED_GEAR)
+    ));
+
+    let params = published(&client);
+    assert_eq!(
+        params.uri, encoded,
+        "published under the spelling the client used, or it cannot match its own document"
+    );
+    assert!(
+        !params.diagnostics.is_empty(),
+        "a space in the path must not silently empty the diagnostics"
+    );
+}
+
+/// A description whose `load()` only resolves if the source root is known.
+///
+/// `//` addresses the source root explicitly, so this is the one thing a gear
+/// can say that has a different answer depending on which directory the server
+/// calls the root. That makes it the fixture for the `source_root` argument:
+/// nothing else about evaluating a single description depends on it.
+const ROOTED_GEAR: &str = "load(\"//shared.gdl\", \"SHARED\")\ngear(\n  name = \"Demo\",\n  \
+                           category = \"example\",\n  package = SHARED,\n)\n";
+
+/// A source root laid out on disk, with the shared fragment at its top.
+///
+/// The gear sits two directories down, so the root is not the gear's own
+/// directory and `strip_prefix` has more than one component to keep.
+fn rooted_fixture(label: &str) -> (PathBuf, PathBuf) {
+    let root = scratch(label)
+        .canonicalize()
+        .expect("scratch canonicalizes");
+    std::fs::create_dir_all(root.join("gears/demo")).unwrap();
+    std::fs::write(
+        root.join("shared.gdl"),
+        "SHARED = cargo(crate_name = \"cf-shared\", lib = \"shared\")\n",
+    )
+    .unwrap();
+    let path = root.join("gears/demo/gear.gdl");
+    (root, path)
+}
+
+/// The open source root is the `load()` boundary the description is evaluated
+/// against, and it comes from the session rather than from the file's directory.
+///
+/// Both halves are the test. That the same text is *broken* without a root is
+/// what proves the fixture depends on the root at all -- without it this would
+/// pass against a server that ignored `state.roots` entirely, which is exactly
+/// the bug it is here to catch. An editor that got the boundary wrong would
+/// underline a `load()` that the catalogue loader accepts without complaint,
+/// and the person would be told their working description is broken.
+#[test]
+fn a_gear_is_evaluated_against_the_source_root_the_session_has_open() {
+    let (root, path) = rooted_fixture("rooted");
+    let uri = gearbox_ir::file_uri(&path);
+
+    let rootless = gearbox_engine::check_description(&path, None, ROOTED_GEAR)
+        .expect("`gear.gdl` is a description");
+    assert!(
+        !rootless.is_empty(),
+        "the fixture must really need the root, or this test proves nothing"
+    );
+
+    let (server, client) = Connection::memory();
+    let mut state = state_with_root(&root);
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_open(&uri, ROOTED_GEAR)
+    ));
+
+    let params = published(&client);
+    assert_eq!(params.uri, uri);
+    assert!(
+        params.diagnostics.is_empty(),
+        "`//shared.gdl` is inside the open root, so this description is clean: {:?}",
+        params.diagnostics
+    );
+}
+
+/// Between two nested roots, the description belongs to the inner one.
+///
+/// Not a preference: it is the only answer that does not depend on the order the
+/// client listed its roots in. The outer root would also accept this file, and
+/// with a wider `load()` boundary -- so a `load()` this server waved through
+/// would be refused the moment the gear was loaded under the root it is really
+/// declared in, and the editor would disagree with the catalogue about a file
+/// neither of them had changed.
+#[test]
+fn the_innermost_of_two_nested_roots_is_the_one_used() {
+    let (outer, _) = rooted_fixture("nested");
+    let inner = outer.join("gears");
+    // The inner root gets no `shared.gdl`, so a description resolving `//` against
+    // it fails where the same text resolved against the outer root succeeds.
+    let path = inner.join("demo/gear.gdl");
+    let uri = gearbox_ir::file_uri(&path);
+
+    let mut state = state_with_root(&outer);
+    state
+        .roots
+        .push(SourceRoot::open(SourceId::new("inner").unwrap(), &inner).expect("inner root opens"));
+
+    let (server, client) = Connection::memory();
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_open(&uri, ROOTED_GEAR)
+    ));
+    assert!(
+        !published(&client).diagnostics.is_empty(),
+        "`//shared.gdl` does not exist under the inner root, and the inner root is the one \
+         this file is declared in"
+    );
+
+    // Listed the other way round, the answer must not change.
+    state.roots.reverse();
+    let (server, client) = Connection::memory();
+    let mut fresh = state;
+    assert!(document_notification(
+        &server,
+        &mut fresh,
+        did_open(&uri, ROOTED_GEAR)
+    ));
+    assert!(
+        !published(&client).diagnostics.is_empty(),
+        "which root a file belongs to is a property of the file, not of `Vec` order"
+    );
+}
+
+/// A URI with `..` in it is classified by where it resolves, not by how it is
+/// spelled.
+///
+/// `Path::starts_with` compares components, so an unresolved `..` makes the
+/// boundary check a spelling test: it answers wrongly in both directions. The
+/// direction that lets a path out of a root it is not in is
+/// `lsp_tests::a_dot_dot_uri_is_collapsed`; this is the other one, which is the
+/// direction a person actually meets. The climb here lands back on the same
+/// file -- a real spelling for a real document -- and unresolved it shares only
+/// two components with the root, so the file would be evaluated with no source
+/// root at all and its legal `load()` underlined as an escape.
+#[test]
+fn a_uri_that_climbs_is_classified_by_where_it_resolves() {
+    let (root, path) = rooted_fixture("climbing");
+    let leaf = root.file_name().unwrap().to_string_lossy().into_owned();
+    let climbing = root
+        .parent()
+        .unwrap()
+        .join("..")
+        .join(root.parent().unwrap().file_name().unwrap())
+        .join(&leaf)
+        .join("gears/demo/gear.gdl");
+    assert!(
+        climbing.components().any(|c| c == Component::ParentDir),
+        "the fixture must really contain a `..`"
+    );
+
+    let uri = gearbox_ir::file_uri(&climbing);
+    assert_eq!(
+        lsp::path_from_uri(&uri).as_deref(),
+        Some(path.as_path()),
+        "the `..` names the same file, and the decode must say so"
+    );
+
+    let (server, client) = Connection::memory();
+    let mut state = state_with_root(&root);
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_open(&uri, ROOTED_GEAR)
+    ));
+    assert!(
+        published(&client).diagnostics.is_empty(),
+        "resolved, this file is inside the root and its `load()` is legal"
+    );
+}
+
+/// A `didChange` carrying no changes changes nothing.
+///
+/// Republishing would be harmless; *not* republishing is the claim, and it is
+/// the one worth pinning, because the way this branch breaks is by falling
+/// through to an evaluation of a document the client never sent -- which for an
+/// empty `contentChanges` on a URI that was never opened means publishing
+/// diagnostics for an empty buffer.
+#[test]
+fn a_change_with_no_changes_publishes_nothing() {
+    let dir = scratch("empty-change");
+    let uri = gearbox_ir::file_uri(&dir.join("gear.gdl"));
+    let (server, client) = Connection::memory();
+    let mut state = state();
+
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_open(&uri, VALID_GEAR)
+    ));
+    drop(published(&client));
+
+    let empty = Notification {
+        method: method::DID_CHANGE.to_owned(),
+        params: serde_json::json!({
+            "textDocument": { "uri": uri, "version": 2 },
+            "contentChanges": []
+        }),
+    };
+    assert!(document_notification(&server, &mut state, empty));
+
+    assert!(
+        client.receiver.try_recv().is_err(),
+        "nothing moved, so the markers already on screen are still the right ones"
+    );
+    assert_eq!(
+        state.documents.get(&uri).map(String::as_str),
+        Some(VALID_GEAR),
+        "and the stored document is untouched"
+    );
+}
+
+/// Params this server cannot read end the notification, not the session.
+///
+/// A notification has no id to answer, so the only thing the loop can do is say
+/// so on stderr and carry on -- and carrying on is the part that matters: a
+/// panic here would take down a language server over one malformed message from
+/// a client that is free to send another.
+#[test]
+fn a_malformed_notification_is_survived() {
+    let (server, client) = Connection::memory();
+    let mut state = state();
+
+    let no_text = Notification {
+        method: method::DID_OPEN.to_owned(),
+        params: serde_json::json!({
+            "textDocument": { "uri": "file:///a/gear.gdl", "version": 1 }
+        }),
+    };
+    assert!(
+        document_notification(&server, &mut state, no_text),
+        "the peer is not gone; only the message was unreadable"
+    );
+
+    let not_an_object = Notification {
+        method: method::DID_CHANGE.to_owned(),
+        params: serde_json::json!("nonsense"),
+    };
+    assert!(document_notification(&server, &mut state, not_an_object));
+
+    assert!(
+        client.receiver.try_recv().is_err(),
+        "there is no document to publish about: the server was never told which one"
+    );
+    assert!(state.documents.is_empty(), "and nothing was stored");
+}
+
+/// A `didOpen` with no version publishes without one, rather than claiming zero.
+///
+/// LSP requires the field, so this is a misbehaving client -- but the text it
+/// sent is perfectly good and the diagnostics are true. Echoing `0` would be the
+/// server inventing the one number the client uses to decide whether an answer
+/// is stale.
+#[test]
+fn a_document_opened_without_a_version_is_published_without_one() {
+    let dir = scratch("versionless");
+    let uri = gearbox_ir::file_uri(&dir.join("gear.gdl"));
+    let (server, client) = Connection::memory();
+    let mut state = state();
+
+    let versionless = Notification {
+        method: method::DID_OPEN.to_owned(),
+        params: serde_json::json!({
+            "textDocument": { "uri": uri, "languageId": "gdl", "text": MISTYPED_GEAR }
+        }),
+    };
+    assert!(document_notification(&server, &mut state, versionless));
+
+    let params = published(&client);
+    assert_eq!(
+        params.version, None,
+        "no version was given, so none is claimed"
+    );
+    assert!(
+        !params.diagnostics.is_empty(),
+        "and the diagnostics are published anyway: the text is what they are about"
+    );
+}

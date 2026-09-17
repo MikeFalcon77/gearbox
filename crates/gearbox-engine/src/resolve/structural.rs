@@ -452,7 +452,7 @@ fn check_discovery(
                  rather than discovered",
             )
             .with_evidence("libs/toolkit/src/discovery.rs:38")
-            .at(Location(uri)),
+            .at(declared(declaration, uri)),
         );
         return;
     }
@@ -490,7 +490,7 @@ fn check_discovery(
                      `use_gear(\"{DIRECTORY_SERVER}\")`, or switch the profile to static discovery"
                 ),
             )
-            .at(Location(uri)),
+            .at(declared(declaration, uri)),
         );
     }
 
@@ -509,7 +509,7 @@ fn check_discovery(
                      `use_gear(\"{GRPC_HUB}\")`, or switch the profile to static discovery"
                 ),
             )
-            .at(Location(uri)),
+            .at(declared(declaration, uri)),
         );
     }
 }
@@ -547,7 +547,7 @@ fn check_worker_paths(
             "the host spawns each worker by absolute executable path, which is built from the \
              Cargo target directory; add `target_dir = \"...\"` to the profile",
         )
-        .at(Location(uri)),
+        .at(declared(declaration, uri)),
     );
 }
 
@@ -582,7 +582,7 @@ fn report_spawn_gap(
              multi-application, not multi-machine. Use the kubernetes profile for that",
         )
         .with_evidence("libs/toolkit/src/bootstrap/run.rs:74")
-        .at(Location(uri)),
+        .at(declared(declaration, uri)),
     );
 }
 
@@ -593,8 +593,23 @@ fn has_cap(catalogue: &Catalogue, gear: &GearId, cap: RuntimeCap) -> bool {
         .is_some_and(|g| g.runtime_caps.contains(&cap))
 }
 
-/// Shorthand for the one location every check in this file uses.
+/// Shorthand for a diagnostic that names the file and no position in it.
 #[expect(non_snake_case, reason = "reads as a constructor at each call site")]
 fn Location(uri: &str) -> gearbox_ir::Location {
     gearbox_ir::Location::file(uri.to_owned())
+}
+
+/// Where a diagnostic *about the profile declaration* points.
+///
+/// The `embedded(...)` / `self_hosted(...)` / `kubernetes(...)` call when the
+/// description recorded one, the file otherwise.
+///
+/// **Only for checks that are about the profile itself.** Most checks in this
+/// file take a `ResolvedApplication` and are about an `application(...)` call,
+/// which carries no span yet; anchoring those on the profile would underline a
+/// declaration that is not the one at fault, and a squiggle in the wrong place
+/// is a false claim rather than an imprecise one
+/// (`cpt-gearbox-adr-gdl-language-server`).
+fn declared(declaration: &DeploymentProfileDecl, uri: &str) -> gearbox_ir::Location {
+    gearbox_ir::Location::or_file(declaration.declared_at(), uri)
 }

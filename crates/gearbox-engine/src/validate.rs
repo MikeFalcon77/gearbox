@@ -15,7 +15,7 @@
 //! (GBX0301). Reporting them as one code would make the common case unhelpful.
 
 use gearbox_ir::{
-    Diagnostic, DiagnosticCode, Diagnostics, GearId, Location, ProductIntent, Severity,
+    Diagnostic, DiagnosticCode, Diagnostics, GearId, ProductIntent, Severity,
 };
 
 use crate::catalogue::CatalogueScan;
@@ -134,10 +134,16 @@ pub fn validate_at(
 ///
 /// A `ProductIntent` carries `gdl_path` relative to its own root, so building a
 /// URI out of it alone yields `file://product.gdl` -- a link no editor can open.
+///
+/// Through `gearbox_ir::file_uri` rather than `format!("file://{}", display())`,
+/// which is the hand-rolled form that function exists to replace: on Windows it
+/// yields backslashes a URI parser rejects and reads `C:` as the authority. The
+/// relative fallback is still a lie about where the file is, but it is at least
+/// a well-formed URI, and `file_uri` documents that trade.
 fn product_uri(intent: &ProductIntent, product_path: Option<&std::path::Path>) -> String {
     match product_path.map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf())) {
-        Some(path) => format!("file://{}", path.display()),
-        None => format!("file://{}", intent.gdl_path.as_str()),
+        Some(path) => gearbox_ir::file_uri(&path),
+        None => gearbox_ir::file_uri(std::path::Path::new(intent.gdl_path.as_str())),
     }
 }
 
@@ -166,7 +172,10 @@ fn check_selections(
                     ),
                     skeleton(&found),
                 )
-                .at(Location::file(uri.to_owned()))
+                .at(gearbox_ir::Location::or_file(
+                    selection.declared_at.as_ref(),
+                    uri,
+                ))
                 // `src/` is put back: `RustFile::relative` is keyed relative to
                 // the crate's `src/`, so joining it straight onto the crate
                 // directory yields a path that does not exist -- and evidence
@@ -187,7 +196,10 @@ fn check_selections(
                     ),
                     nearest_hint(scan.catalogue.gears.keys(), selection.gear.as_str()),
                 )
-                .at(Location::file(uri.to_owned())),
+                .at(gearbox_ir::Location::or_file(
+                    selection.declared_at.as_ref(),
+                    uri,
+                )),
             ),
         }
     }

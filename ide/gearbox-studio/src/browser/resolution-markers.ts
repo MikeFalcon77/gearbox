@@ -14,8 +14,11 @@
 // with `cleanAllMarkers`, which would take other contributors' markers too.
 //
 // Only *resolution* diagnostics. The requirement's other half -- description-file
-// diagnostics with source ranges over a language-server interface -- is a
-// different mechanism and is not built; nothing here should look like it is.
+// diagnostics with source ranges over a language-server interface -- lives in
+// `gdl/description-markers.ts` and writes under its own owner, `gearbox-gdl`.
+// The owners must stay distinct: `setMarkers` replaces everything one owner has
+// on a URI, so sharing one would make each half erase the other's findings about
+// the same file.
 
 import { FrontendApplicationContribution } from "@theia/core/lib/browser";
 import { URI } from "@theia/core/lib/common/uri";

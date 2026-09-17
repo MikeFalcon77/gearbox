@@ -17,4 +17,18 @@ export type Capabilities = { catalogue: boolean, staged_catalogue: boolean, reso
  * property of the build. A client that forgot to ask can therefore see that
  * it forgot, instead of discovering it from a refusal later.
  */
-writes: boolean, };
+writes: boolean, 
+/**
+ * LSP's `ServerCapabilities.textDocumentSync`, in LSP's spelling.
+ *
+ * **This field is why `capabilities` is a superset rather than a second
+ * surface.** An LSP client reads `result.capabilities.textDocumentSync` and
+ * ignores the sibling fields it does not recognise, which is what the
+ * protocol requires of it; a Gearbox client reads the sibling fields and
+ * ignores this one. One object, two readers, no negotiation between them.
+ *
+ * `1` is `Full`: the whole document arrives on every edit. See
+ * `crate::lsp::SYNC_FULL` for why incremental sync is not worth its
+ * bookkeeping here.
+ */
+textDocumentSync: number, };

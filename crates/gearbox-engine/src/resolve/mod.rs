@@ -93,19 +93,29 @@ pub fn resolve_at(
 ) -> Resolution {
     let mut diagnostics = Diagnostics::new();
 
-    // Step 1 -- narrow to the profile. Done first because everything after it
-    // reads the narrowed view, and because a duplicate that only appears once
-    // narrowed is a contradiction the description could not have shown.
-    let scoped = profile::scope(intent, profile, &mut diagnostics);
-
-    // Step 2 -- the co-location closure.
-    let closure = closure::expand(catalogue, intent, profile, &mut diagnostics);
-
-    // Step 3 -- which edges could carry a boundary.
+    // Computed before step 1, and that ordering is load-bearing. Steps 1 and 2
+    // each used to build their own URI with `format!("file://{}", gdl_path)`,
+    // which is the exact mistake the doc comment above this function warns about
+    // -- a relative path in a URI reads its first segment as the *host*, so
+    // `products/demo/product.gdl` becomes host `products` and a path that opens
+    // nothing. Every diagnostic they raised was therefore unopenable, and
+    // invisible to the language server besides: `lsp::publishable` matches
+    // `location.uri` against the document's own URI, so a wrong URI discards the
+    // diagnostic however good its range is.
     let uri = match product_path {
         Some(path) => gearbox_ir::file_uri(path),
         None => gearbox_ir::file_uri(std::path::Path::new(intent.gdl_path.as_str())),
     };
+
+    // Step 1 -- narrow to the profile. Done first because everything after it
+    // reads the narrowed view, and because a duplicate that only appears once
+    // narrowed is a contradiction the description could not have shown.
+    let scoped = profile::scope(intent, profile, &uri, &mut diagnostics);
+
+    // Step 2 -- the co-location closure.
+    let closure = closure::expand(catalogue, intent, profile, &uri, &mut diagnostics);
+
+    // Step 3 -- which edges could carry a boundary.
     let cuts = cuts::classify(catalogue, &closure, &uri, &mut diagnostics);
 
     // Not a resolver step: a join between the product's config values and the

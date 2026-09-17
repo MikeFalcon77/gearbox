@@ -4,6 +4,14 @@
 // `cargo test -p gearbox-rpc --test export_bindings`. Nothing here restates a
 // field: a transcribed wire format diverges, and diverges silently
 // (cpt-gearbox-nfr-no-type-drift).
+//
+// The `textDocument/*` methods are the one place that reads differently, and for
+// the same reason rather than against it. Their payloads are LSP's, not
+// Gearbox's, so the definition both ends share is the protocol's own -- imported
+// below from `vscode-languageserver-protocol`, written by neither side and
+// therefore unable to drift from either (cpt-gearbox-adr-gdl-language-server).
+
+import type { PublishDiagnosticsParams } from "@theia/core/shared/vscode-languageserver-protocol";
 
 import type { CatalogueChanged } from "./generated/CatalogueChanged";
 import type { CatalogueDiagnostics } from "./generated/CatalogueDiagnostics";
@@ -66,6 +74,13 @@ export const method = {
   CATALOGUE_DIAGNOSTICS: "gearbox/catalogueDiagnostics",
   PROGRESS: "$/progress",
   LOG: "gearbox/log",
+  // LSP's own, and spelled as LSP spells them rather than under a `gearbox/`
+  // prefix: the engine answers these to any language client, not only to this
+  // one (`cpt-gearbox-adr-gdl-language-server`).
+  DID_OPEN: "textDocument/didOpen",
+  DID_CHANGE: "textDocument/didChange",
+  DID_CLOSE: "textDocument/didClose",
+  PUBLISH_DIAGNOSTICS: "textDocument/publishDiagnostics",
 } as const;
 
 /**
@@ -420,6 +435,36 @@ export interface GearboxService {
    */
   checkAiConnectivity(): Promise<AiConnectivityResult>;
 
+  /**
+   * Tell the engine an editor opened a `.gdl`, and what is in the buffer.
+   *
+   * The three document methods are LSP notifications, so they answer nothing:
+   * what comes back is `onDocumentDiagnostics`, whenever the engine has an
+   * opinion. The `Promise<void>` is the RPC layer's, not the protocol's.
+   *
+   * `text` rather than a path, because the buffer is the question. What is on
+   * disk is what `validate` and the catalogue load answer about, and an editor
+   * that asked about a file it had not saved would be told about the version it
+   * was replacing.
+   */
+  didOpenDocument(uri: string, version: number, text: string): Promise<void>;
+
+  /** The whole buffer again. The engine advertises `textDocumentSync: Full`. */
+  didChangeDocument(uri: string, version: number, text: string): Promise<void>;
+
+  /**
+   * The editor closed it.
+   *
+   * The engine answers with an empty diagnostic list, but that is not what the
+   * markers rely on: `DescriptionMarkers.forget` clears them as it stops
+   * tracking the file, because the engine may already be gone and a `didClose`
+   * sent into a dead connection is dropped on purpose. Having stopped tracking
+   * it, the client then ignores that empty list along with any other answer
+   * about a closed buffer. What must not happen on either path is a marker
+   * outliving its buffer, pointing at text nobody can see.
+   */
+  didCloseDocument(uri: string): Promise<void>;
+
   dispose(): void;
   setClient(client: GearboxClient | undefined): void;
 }
@@ -442,6 +487,18 @@ export interface GearboxClient {
    * `done` that would have ended it died with the process.
    */
   onEngineExit(reason: string): void;
+  /**
+   * Diagnostics for one open description, replacing whatever was published for
+   * that URI before.
+   *
+   * `PublishDiagnosticsParams` is imported from the protocol rather than
+   * generated from Rust like every other type on this wire. That is not an
+   * exception to `cpt-gearbox-nfr-no-type-drift` but the same rule reaching its
+   * better answer: these four methods carry LSP's payloads, so the definition
+   * both sides agree on is LSP's own, written by neither of them. See
+   * `cpt-gearbox-adr-gdl-language-server`.
+   */
+  onDocumentDiagnostics(params: PublishDiagnosticsParams): void;
 }
 
 /**

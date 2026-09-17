@@ -1359,6 +1359,34 @@ impl Location {
     pub fn file(uri: impl Into<String>) -> Self {
         Self::new(uri, Range::whole_file())
     }
+
+    /// The declaration's own span when the description recorded one, the whole
+    /// file otherwise.
+    ///
+    /// One rule, next to the sentinel it falls back to, because it is applied at
+    /// roughly thirty call sites across two crates and the wrong answer is not a
+    /// cosmetic slip. A diagnostic carrying `Range::whole_file` is *not
+    /// published* to an editor at all (`gearbox_rpc::lsp::publishable`), and one
+    /// carrying the span of the *wrong* declaration is worse than that: it
+    /// underlines a line that is not at fault, which is a false claim about
+    /// where the error is rather than an imprecise one
+    /// (`cpt-gearbox-adr-gdl-language-server`).
+    ///
+    /// The fallback is deliberate and permanent. Not every declaration carries a
+    /// span -- an intent built in a test has `declared_at: None` throughout, and
+    /// a record reached through a `load()`ed fragment names the fragment rather
+    /// than the importing file -- so every caller needs an answer for "no span",
+    /// and the file is the honest one.
+    ///
+    /// Callers pass the span of the thing the diagnostic is *about*. Passing a
+    /// nearby declaration because it happens to be in scope is the failure this
+    /// cannot prevent and reviewers have to.
+    #[must_use]
+    pub fn or_file(declared_at: Option<&Self>, uri: &str) -> Self {
+        declared_at
+            .cloned()
+            .unwrap_or_else(|| Self::file(uri.to_owned()))
+    }
 }
 
 /// A `file://` URI for a path on this machine.

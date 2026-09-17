@@ -1,12 +1,14 @@
-// `cpt-gearbox-fr-editor-diagnostics`, in two halves that are in different
-// states:
+// `cpt-gearbox-fr-editor-diagnostics`, in two halves:
 //
 //   Description-file diagnostics MUST be reported with source ranges over a
 //   language-server interface, and resolution diagnostics MUST be surfaced as
 //   editor problem markers replaced atomically on each resolution.
 //
-// `@theia/markers` is a declared dependency of browser-app and gives the Problems
-// view below -- so the destination exists and nothing writes to it.
+// Both are built now, by two contributions writing to `ProblemManager` under two
+// different owners -- `gearbox` for the resolution, `gearbox-gdl` for the open
+// description. The separate owners are why the last claim here can break a
+// `product.gdl` without the resolution claims above losing their markers, and
+// they are the mechanism `cpt-gearbox-adr-gdl-language-server` records.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -17,6 +19,7 @@ import {
   openProduct,
   problems,
   revealCatalogue,
+  revealInExplorer,
   settled,
   test,
 } from "../fixtures/studio";
@@ -30,6 +33,20 @@ const REPO = join(__dirname, "../../..");
  * means adding it there first, or nothing will notice a file left rewritten.
  */
 const GEAR_GDL = join(REPO, "../gears-rust/gears/system/api-gateway/gear.gdl");
+
+/**
+ * The product description, which the language-server claim breaks and restores.
+ *
+ * In this repository rather than in the gears corpus, so the guard in
+ * `fixtures/corpus-files.ts` does not cover it -- but the two git claims read
+ * this tree's own status, which is a stricter guard than that one and the reason
+ * the rewrite is undone in a `finally`. `adr-0010` mutates the same file for the
+ * same kind of round trip.
+ */
+const PRODUCT_GDL = join(REPO, "products/payments-demo/product.gdl");
+
+/** The line the fixture rewrites, and the text that must be there to rewrite. */
+const GOOD_PROFILE = 'embedded(id = "dev")';
 
 test.describe("diagnostics reach a person", () => {
   test("the Problems view is present to receive markers [PRD cpt-gearbox-fr-editor-diagnostics]", async ({
@@ -161,14 +178,83 @@ test.describe("diagnostics reach a person", () => {
     // its removal made this claim fail the day such a diagnostic first existed.
   });
 
-  test.fixme(
-    "description diagnostics arrive over a language-server interface with source ranges [PRD cpt-gearbox-fr-editor-diagnostics]",
-    async ({ studio }) => {
-      // Distinct from the marker half: this one is about squiggles in the `.gdl`
-      // editor at a range the engine reported, not about a list in a panel. No
-      // language server is registered for `.gdl` -- the grammar is a TextMate
-      // contribution only.
-      await expect(studio.page.locator(".squiggly-error")).toBeVisible();
-    },
-  );
+  test("description diagnostics arrive over a language-server interface with source ranges [PRD cpt-gearbox-fr-editor-diagnostics]", async ({
+    freshStudio,
+  }) => {
+    // The other half of the requirement, and distinct from every claim above:
+    // those are about a list in a panel produced by a *resolution*, this is about
+    // the description being edited, marked from the engine's `textDocument/*`
+    // surface (`cpt-gearbox-adr-gdl-language-server`).
+    //
+    // **The range is the claim.** The version this replaces asserted only that
+    // `.squiggly-error` was visible somewhere on the page, without opening a
+    // `.gdl` at all -- it would have passed on a squiggle in any editor, from any
+    // source, at any position. So this asserts *which text* is underlined and
+    // *which line* the marker names, which is what "with source ranges"
+    // distinguishes from "a diagnostic arrived".
+    //
+    // `freshStudio`, and for two reasons. The description is broken on disk for
+    // the length of this test, so a shared session would carry a failed product
+    // load into the next claim; and it leaves an editor tab open on a
+    // `product.gdl`, which `prd-explain` locates by `data-uri` and would then
+    // match twice.
+    const { page } = freshStudio;
+    const original = readFileSync(PRODUCT_GDL, "utf8");
+    // A typo in a profile constructor: the evaluator reports the name it could
+    // not resolve, and the span it gives is the token itself rather than the
+    // enclosing call -- which is what makes the underlined text checkable.
+    const TYPO = "embeddedd";
+    expect(original, "the fixture rewrites a profile constructor").toContain(GOOD_PROFILE);
+    // One-based, as the Problems view renders it.
+    const line = original.split("\n").findIndex((text) => text.includes(GOOD_PROFILE)) + 1;
+
+    try {
+      writeFileSync(PRODUCT_GDL, original.replace(GOOD_PROFILE, `${TYPO}(id = "dev")`));
+
+      // Broken *before* it is opened, deliberately. Opening reads the file, so
+      // this exercises `didOpen` with no dependency on a file watcher noticing a
+      // change to a buffer that is already up -- a race that would make this
+      // claim flake for a reason that has nothing to do with what it asserts.
+      const node = await revealInExplorer(page, "gearbox", ["products", "payments-demo"], "product.gdl");
+      await node.dblclick();
+
+      const editor = page.locator('.monaco-editor[data-uri*="product.gdl"]');
+      await expect(editor).toBeVisible({ timeout: 30_000 });
+
+      const squiggle = editor.locator(".squiggly-error");
+      await expect(squiggle.first(), "the description must be underlined").toBeVisible({
+        timeout: 30_000,
+      });
+      // **Where the underline is, not what it says.** Monaco draws a marker
+      // squiggle as an empty absolutely-positioned overlay rather than as a class
+      // on the text spans, so there is no string to read -- `allTextContents()`
+      // returns `""` however right the diagnostic is. The observable the DOM does
+      // offer is the position, which is the half of the claim that matters: a
+      // diagnostic carrying the whole-file sentinel would be drawn on the first
+      // line of the file, and this one is drawn on the line with the typo in it.
+      const typoLine = editor.locator(".view-line", { hasText: TYPO });
+      await expect(typoLine, "the broken line must be on screen to compare against").toHaveCount(1);
+      const lineBox = await typoLine.boundingBox();
+      const underline = await squiggle.first().boundingBox();
+      expect(lineBox, "the line has no box to measure").not.toBeNull();
+      expect(underline, "the squiggle has no box to measure").not.toBeNull();
+      // A couple of pixels of slack in each direction: the squiggle is drawn
+      // under the glyphs rather than around them, so its box is inset within the
+      // line's row by a rounding amount that depends on the font metrics.
+      expect(underline!.y).toBeGreaterThanOrEqual(lineBox!.y - 2);
+      expect(underline!.y).toBeLessThanOrEqual(lineBox!.y + lineBox!.height + 2);
+      expect(underline!.width, "a squiggle with no width underlines nothing").toBeGreaterThan(0);
+
+      // And the marker's own position, which the Problems view renders from
+      // `range.start`. `Ln 1, Col 1` is what a diagnostic with no span looks
+      // like; this asserts the line the typo is actually on.
+      const { files, markers } = await problems(page);
+      const shown = `expected Ln ${line}\nfiles: ${files.join(" | ")}\nmarkers: ${markers.join(" | ")}`;
+      expect(files.some((file) => file.includes("product.gdl")), shown).toBe(true);
+      expect(markers.some((marker) => marker.includes(`Ln ${line}`)), shown).toBe(true);
+      expect(markers.some((marker) => marker.includes(TYPO)), shown).toBe(true);
+    } finally {
+      writeFileSync(PRODUCT_GDL, original);
+    }
+  });
 });

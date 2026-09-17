@@ -58,6 +58,7 @@ fn state_with_roots(workspace: PathBuf, roots: &[PathBuf]) -> State {
         initialized: true,
         allow_writes: true,
         workspace: Some(workspace),
+        documents: BTreeMap::new(),
     }
 }
 
@@ -101,7 +102,11 @@ fn create_is_judged_by_the_creation_boundary_not_the_session() {
     let session_roots = [workspace.clone()];
 
     let mut without = state_with_roots(workspace.clone(), &session_roots);
-    let refused = create_product(&mut without, RequestId::from(1), &create_params(&target, None));
+    let refused = create_product(
+        &mut without,
+        RequestId::from(1),
+        &create_params(&target, None),
+    );
     let message = match refused.response_result {
         Err(e) => e.message,
         Ok(_) => panic!("with no boundary the session's roots must still govern"),
@@ -165,7 +170,16 @@ fn a_blank_or_malformed_id_is_refused_before_anything_is_written() {
     std::fs::create_dir_all(&workspace).unwrap();
     let target = workspace.join("products").join("demo").join("product.gdl");
 
-    for bad in ["", " ", "Demo", "demo_product", "-demo", "demo-", "de--mo", "1demo"] {
+    for bad in [
+        "",
+        " ",
+        "Demo",
+        "demo_product",
+        "-demo",
+        "demo-",
+        "de--mo",
+        "1demo",
+    ] {
         let mut params = create_params(&target, None);
         params.id = bad.to_owned();
         let mut state = write_state(workspace.clone());

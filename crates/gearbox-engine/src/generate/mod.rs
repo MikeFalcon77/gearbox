@@ -264,7 +264,12 @@ pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
     // the image and the `product.lock` this run writes cannot disagree about what
     // the value is. `GBX0116` means a lock resolved by this build never has one;
     // a lock from an earlier build can, and `GBX0705` says so out loud.
-    let redacted = crate::secrets::redact_product(input.lock, input.catalogue, &mut diagnostics);
+    let redacted = crate::secrets::redact_product(
+        input.lock,
+        input.catalogue,
+        input.product_dir,
+        &mut diagnostics,
+    );
     // A fresh input rather than a mutation: `templates` is owned, so the struct
     // cannot be spread over a shared reference. The clone is of a map that is
     // empty for every product without a template overlay.

@@ -351,7 +351,10 @@ fn expand_and_resolve_agree() {
     // this pins the two entry points together.
     require!(cat, prod);
     let mut diagnostics = gearbox_ir::Diagnostics::new();
-    let direct = closure::expand(&cat, &prod, &pid("dev"), &mut diagnostics);
+    // The URI `resolve` would build for this intent, so the two entry points are
+    // compared on equal terms rather than one of them inventing a different one.
+    let uri = gearbox_ir::file_uri(std::path::Path::new(prod.gdl_path.as_str()));
+    let direct = closure::expand(&cat, &prod, &pid("dev"), &uri, &mut diagnostics);
     let through = resolve(&cat, &prod, &pid("dev"));
     assert_eq!(direct.members, through.closure.members);
 }

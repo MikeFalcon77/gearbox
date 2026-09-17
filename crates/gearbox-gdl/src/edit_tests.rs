@@ -757,23 +757,23 @@ fn add_profile_scaffolds_the_fields_its_kind_requires() {
 
     let self_hosted = entry("self_hosted", "local", &[]);
     assert!(
-        self_hosted
-            .contains(r#"self_hosted(id = "local", host = "localhost", worker_discovery = "static")"#),
+        self_hosted.contains(
+            r#"self_hosted(id = "local", host = "localhost", worker_discovery = "static")"#
+        ),
         "{self_hosted}"
     );
 
     // `embedded` requires none and must not acquire any: its constructor takes
     // only an id, so a scaffolded argument would be a call the evaluator refuses.
     let embedded = entry("embedded", "staging", &[]);
-    assert!(embedded.contains(r#"embedded(id = "staging")"#), "{embedded}");
+    assert!(
+        embedded.contains(r#"embedded(id = "staging")"#),
+        "{embedded}"
+    );
     assert!(!embedded.contains("discovery"), "{embedded}");
 
     // A value the caller named wins; the rest are still filled in.
-    let explicit = entry(
-        "self_hosted",
-        "local",
-        &[("host".into(), "gateway".into())],
-    );
+    let explicit = entry("self_hosted", "local", &[("host".into(), "gateway".into())]);
     assert!(explicit.contains(r#"host = "gateway""#), "{explicit}");
     assert!(
         explicit.contains(r#"worker_discovery = "static""#),
@@ -840,15 +840,28 @@ fn a_required_profile_field_cannot_be_unset() {
     }
 
     // An optional one still clears, which is the behaviour the control is for.
-    let cleared = set_profile_field(URI, &with_local, "local", "worker_discovery", Some("static"))
-        .expect("editable")
-        .changed()
-        .expect("changed")
-        .to_owned();
-    assert!(cleared.contains(r#"worker_discovery = "static""#), "{cleared}");
-    let without_target = set_profile_field(URI, &with_local, "local", "target_dir", None)
-        .expect("editable");
-    assert_eq!(without_target, Edit::Unchanged, "absent optional stays absent");
+    let cleared = set_profile_field(
+        URI,
+        &with_local,
+        "local",
+        "worker_discovery",
+        Some("static"),
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+    assert!(
+        cleared.contains(r#"worker_discovery = "static""#),
+        "{cleared}"
+    );
+    let without_target =
+        set_profile_field(URI, &with_local, "local", "target_dir", None).expect("editable");
+    assert_eq!(
+        without_target,
+        Edit::Unchanged,
+        "absent optional stays absent"
+    );
 }
 
 #[test]

@@ -105,6 +105,29 @@ fn self_hosted_says_it_is_one_machine() {
         "a runtime-gap diagnostic must cite the spawn backend: {:?}",
         spawn.evidence
     );
+    // And it points at the `self_hosted(...)` that made it true, not at the top
+    // of the file. A diagnostic carrying the whole-file sentinel is not
+    // published to the editor at all (`gearbox_rpc::lsp::publishable`), so this
+    // is the difference between a squiggle and silence.
+    let at = spawn.location.as_ref().expect("GBX0604 carries a location");
+    assert_ne!(
+        at.range,
+        gearbox_ir::Range::whole_file(),
+        "the profile declaration carries a span; the diagnostic must use it: {at:?}"
+    );
+    let declared_on = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../products/payments-demo/product.gdl"),
+    )
+    .expect("the product this test just resolved");
+    let expected = declared_on
+        .lines()
+        .position(|line| line.contains("self_hosted("))
+        .expect("the description declares a self_hosted profile");
+    assert_eq!(
+        at.range.start.line as usize, expected,
+        "must be anchored on the `self_hosted(...)` line"
+    );
 
     // Kubernetes does not spawn at all, so the note would be wrong there.
     let prod_ = resolve(&cat, &prod, &pid("prod"));

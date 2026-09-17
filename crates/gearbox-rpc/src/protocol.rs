@@ -42,6 +42,12 @@ pub mod method {
 
     pub const INITIALIZED: &str = "initialized";
     pub const EXIT: &str = "exit";
+    // LSP's own, spelled exactly as LSP spells them: a `.gdl` language client
+    // built on anything standard has to find them here. See `crate::lsp`.
+    pub const DID_OPEN: &str = "textDocument/didOpen";
+    pub const DID_CHANGE: &str = "textDocument/didChange";
+    pub const DID_CLOSE: &str = "textDocument/didClose";
+    pub const PUBLISH_DIAGNOSTICS: &str = "textDocument/publishDiagnostics";
     pub const CATALOGUE_CHANGED: &str = "gearbox/catalogueChanged";
     pub const CATALOGUE_DIAGNOSTICS: &str = "gearbox/catalogueDiagnostics";
     pub const PROGRESS: &str = "$/progress";
@@ -245,6 +251,20 @@ pub struct Capabilities {
     /// property of the build. A client that forgot to ask can therefore see that
     /// it forgot, instead of discovering it from a refusal later.
     pub writes: bool,
+
+    /// LSP's `ServerCapabilities.textDocumentSync`, in LSP's spelling.
+    ///
+    /// **This field is why `capabilities` is a superset rather than a second
+    /// surface.** An LSP client reads `result.capabilities.textDocumentSync` and
+    /// ignores the sibling fields it does not recognise, which is what the
+    /// protocol requires of it; a Gearbox client reads the sibling fields and
+    /// ignores this one. One object, two readers, no negotiation between them.
+    ///
+    /// `1` is `Full`: the whole document arrives on every edit. See
+    /// `crate::lsp::SYNC_FULL` for why incremental sync is not worth its
+    /// bookkeeping here.
+    #[serde(rename = "textDocumentSync")]
+    pub text_document_sync: u8,
 }
 
 /// `gearbox/product/load` -- evaluate a `product.gdl` and return what it says.

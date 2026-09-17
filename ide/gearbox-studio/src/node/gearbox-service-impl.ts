@@ -10,6 +10,7 @@
 import { ILogger } from "@theia/core/lib/common/logger";
 import { ResponseError } from "@theia/core/lib/common/message-rpc/rpc-message-encoder";
 import { inject, injectable } from "@theia/core/shared/inversify";
+import type { PublishDiagnosticsParams } from "@theia/core/shared/vscode-languageserver-protocol";
 import { randomBytes } from "crypto";
 import { execFile } from "child_process";
 import * as fs from "fs";
@@ -166,6 +167,10 @@ export class GearboxServiceImpl implements GearboxService {
     engine.connection.onNotification(method.LOG, (event: LogParams) =>
       this.client?.onLog(event.message),
     );
+    engine.connection.onNotification(
+      method.PUBLISH_DIAGNOSTICS,
+      (params: PublishDiagnosticsParams) => this.client?.onDocumentDiagnostics(params),
+    );
 
     // A child that dies on its own has to stop being this service's engine, or
     // the next `loadCatalogue` sends a request into a disposed connection and
@@ -219,6 +224,18 @@ export class GearboxServiceImpl implements GearboxService {
       INITIALIZE_TIMEOUT_MS,
     );
     engine.connection.sendNotification(method.INITIALIZED, {});
+    // **Re-open what the editor still has open.** `initialize` disposes and
+    // respawns the engine, so the new process knows about no documents at all --
+    // and the frontend has no reason to find out, since opening a product is not
+    // an event about the file somebody is editing. Without this, every marker on
+    // an open `.gdl` would freeze at whatever the previous engine said and stay
+    // there until the next keystroke, which is exactly the stale-marker failure
+    // `cpt-gearbox-fr-editor-diagnostics` is about.
+    for (const [uri, document] of this.documents) {
+      this.notifyEngine(method.DID_OPEN, {
+        textDocument: { uri, languageId: "gdl", version: document.version, text: document.text },
+      });
+    }
     return result;
   }
 
@@ -576,6 +593,57 @@ export class GearboxServiceImpl implements GearboxService {
     } catch (error) {
       throw withEngineData(error);
     }
+  }
+
+  /**
+   * The editor's open descriptions, mirrored on this side of the wire.
+   *
+   * Held because this service respawns the engine on every `initialize`, and a
+   * new engine knows nothing. The frontend is the authority on what is open; this
+   * is only what has to be replayed to make a fresh process agree with it.
+   */
+  private readonly documents = new Map<string, { version: number; text: string }>();
+
+  async didOpenDocument(uri: string, version: number, text: string): Promise<void> {
+    this.documents.set(uri, { version, text });
+    this.notifyEngine(method.DID_OPEN, {
+      textDocument: { uri, languageId: "gdl", version, text },
+    });
+  }
+
+  async didChangeDocument(uri: string, version: number, text: string): Promise<void> {
+    this.documents.set(uri, { version, text });
+    this.notifyEngine(method.DID_CHANGE, {
+      textDocument: { uri, version },
+      // One whole-document event: the engine advertises `textDocumentSync: Full`
+      // and refuses a change carrying a `range` rather than half-applying it.
+      contentChanges: [{ text }],
+    });
+  }
+
+  async didCloseDocument(uri: string): Promise<void> {
+    this.documents.delete(uri);
+    this.notifyEngine(method.DID_CLOSE, { textDocument: { uri } });
+  }
+
+  /**
+   * Send one notification to the engine, or drop it.
+   *
+   * Deliberately not `request`: a notification has no reply, so there is no
+   * timeout to race and nothing to reject. Dropping it when the engine is gone is
+   * right rather than lax -- a `didChange` for a process that no longer exists
+   * describes a document nothing is tracking, and throwing would surface an
+   * engine restart to the person as an editor error about a file they are simply
+   * typing in. The markers already on screen go stale for as long as it takes the
+   * engine to come back and the next keystroke to arrive, which is the mildest
+   * failure available here.
+   */
+  private notifyEngine(method: string, params: unknown): void {
+    const engine = this.engine;
+    if (!engine || engine.dead) return;
+    engine.connection.sendNotification(method, params).catch((error: unknown) => {
+      this.logger.warn(`gearbox: cannot send ${method}: ${String(error)}`);
+    });
   }
 
   /**

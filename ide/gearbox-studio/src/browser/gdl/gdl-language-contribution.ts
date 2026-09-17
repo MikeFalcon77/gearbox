@@ -7,12 +7,13 @@
 // contribution to iterate.
 //
 // This ships as a native Theia contribution rather than as the bundled VS Code
-// extension the prototype plan sketched. That path needs `@theia/plugin-ext`
-// and a populated `ide/plugins/`, neither of which this app has -- the
-// `--plugins=local-dir:../plugins` flag in browser-app is inert today. Adding a
-// plugin host to run one grammar is a large dependency for a small feature, and
-// it would give up the thing that makes this version trustworthy: the
-// vocabulary is generated from the engine's own globals.
+// extension the prototype plan sketched. **The original reason expired**: that
+// path needed `@theia/plugin-ext` and a populated `ide/plugins/`, and both
+// arrived when git did, so `--plugins=local-dir:../plugins` is no longer inert.
+// What keeps the grammar here is the thing that makes this version trustworthy:
+// the vocabulary is generated from the engine's own globals, and a VSIX would
+// carry a second copy of it. `description-markers.ts` records the separate
+// reason the *language server* client is native too.
 
 import { injectable } from "@theia/core/shared/inversify";
 import * as monaco from "@theia/monaco-editor-core";

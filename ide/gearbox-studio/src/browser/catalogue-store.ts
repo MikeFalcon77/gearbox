@@ -51,8 +51,16 @@ const EMPTY: CatalogueState = {
   completed: 0,
 };
 
+/**
+ * Everything the backend calls back about the catalogue.
+ *
+ * `onDocumentDiagnostics` is deliberately not here: it is about one open
+ * editor, not about the catalogue, and `DescriptionMarkers` owns it. The
+ * forwarder in the frontend module is what implements the whole `GearboxClient`,
+ * routing each callback to whichever object the question belongs to.
+ */
 @injectable()
-export class CatalogueStore implements GearboxClient {
+export class CatalogueStore implements Omit<GearboxClient, "onDocumentDiagnostics"> {
   @inject(GearboxService) protected readonly service!: GearboxService;
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
 

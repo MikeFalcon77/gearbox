@@ -27,7 +27,7 @@
 //! worse than a build error that names the feature.
 
 use gearbox_ir::{
-    Catalogue, Diagnostic, DiagnosticCode, Diagnostics, Location, ProductIntent, ProfileId,
+    Catalogue, Diagnostic, DiagnosticCode, Diagnostics, ProductIntent, ProfileId,
 };
 
 /// Report every selected feature that belongs to none of `profiles`' kinds.
@@ -96,7 +96,7 @@ pub fn check(
                          it runs"
                     ),
                 )
-                .at(Location::file(uri.to_owned())),
+                .at(gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri)),
             );
         }
     }

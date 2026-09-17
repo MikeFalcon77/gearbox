@@ -80,6 +80,7 @@ fn state_with(root: &Path) -> State {
         initialized: false,
         allow_writes: false,
         workspace: None,
+        documents: BTreeMap::new(),
     }
 }
 
@@ -209,6 +210,7 @@ fn a_load_that_stopped_early_is_not_cached() {
         initialized: true,
         allow_writes: false,
         workspace: None,
+        documents: BTreeMap::new(),
     };
 
     drop(catalogue_load(&server, &mut state, RequestId::from(1)));

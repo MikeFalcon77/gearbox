@@ -94,6 +94,7 @@ import { ProductWidget } from "./product/product-widget";
 import { GearAuthorWidget } from "./gear/gear-author-widget";
 import { StartWidget } from "./start/start-widget";
 import { AddGearWidget } from "./add-gear/add-gear-widget";
+import { DescriptionMarkers } from "./gdl/description-markers";
 import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
 import { FabricThemeContribution } from "./theme/fabric-theme-contribution";
 import { GearboxPerspectives } from "./shell/gearbox-perspectives";
@@ -213,6 +214,15 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bind(ResolutionMarkers).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(ResolutionMarkers);
 
+  // The requirement's other half: the description being typed, marked from the
+  // engine's `textDocument/*` surface. A singleton because the forwarder above
+  // reaches it by `container.get`, and a contribution because `onStart` is where
+  // it starts watching for editors -- the ones a reload restores arrive after
+  // it, through `onDidCreate`, since the layout is restored once the
+  // contributions have started.
+  bind(DescriptionMarkers).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(DescriptionMarkers);
+
   // Opens the directories Studio already knows it works on. Without a workspace
   // the Explorer is empty, a generated `product.lock` cannot be opened at all,
   // and the VS Code git extension finds no repositories -- three failures that
@@ -306,6 +316,11 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
         onProgress: (event) => container.get(CatalogueStore).onProgress(event),
         onLog: (message) => container.get(CatalogueStore).onLog(message),
         onEngineExit: (reason) => container.get(CatalogueStore).onEngineExit(reason),
+        // The one callback that is not the catalogue's. It is about a single
+        // open editor, so it goes to the contribution that owns that file's
+        // markers -- see `DescriptionMarkers`.
+        onDocumentDiagnostics: (params) =>
+          container.get(DescriptionMarkers).onDocumentDiagnostics(params),
       };
       return provider.createProxy<GearboxService>(GEARBOX_SERVICE_PATH, forwarder);
     })

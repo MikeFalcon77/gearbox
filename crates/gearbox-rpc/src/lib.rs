@@ -13,7 +13,12 @@
 //! the engine keeps no dependency on parallelism (ADR
 //! `cpt-gearbox-adr-staged-catalogue-loading`).
 
+pub mod lsp;
 pub mod protocol;
+
+#[cfg(test)]
+#[path = "document_tests.rs"]
+mod document_tests;
 
 #[cfg(test)]
 #[path = "initialize_tests.rs"]
@@ -36,6 +41,10 @@ use gearbox_ir::{
 };
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
 
+use crate::lsp::{
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    LspDiagnostic, PublishDiagnosticsParams,
+};
 use crate::protocol::{
     AddProfileParams, ApplyEditsParams, Capabilities, CatalogueChanged, CatalogueDiagnostics,
     CatalogueLoadResult, CreateProductParams, EditGearParams, EditGearResult, FailedRoot,
@@ -103,6 +112,25 @@ struct State {
     allow_writes: bool,
     /// The directory the client declared as its workspace, if it declared one.
     workspace: Option<PathBuf>,
+    /// Open descriptions, by URI, as the editor has them rather than as disk
+    /// has them.
+    ///
+    /// The first thing in `State` that belongs to a *client* rather than to a
+    /// workspace, and the reason it can be a plain map: the request loop is one
+    /// thread, so `didChange` and the evaluation it triggers cannot interleave.
+    ///
+    /// Bounded by what the editor has open and emptied by `didClose`, which is
+    /// the contract LSP already guarantees -- a client that opens a document
+    /// closes it.
+    ///
+    /// **Uncapped on purpose**, and it is a trust decision rather than an
+    /// oversight. The peer here is the process that spawned this one over its
+    /// own stdio, which is the person's editor running as the person: a cap
+    /// would not keep anything out that is not already in, and the size it
+    /// would have to be guessed at is the size of a legitimate description,
+    /// which nobody can guess. A cap that is ever reached refuses to diagnose a
+    /// file the editor is showing, and says so nowhere the person is looking.
+    documents: BTreeMap<String, String>,
 }
 
 /// Run the server on stdio until the client says `exit`.
@@ -129,6 +157,7 @@ pub fn serve_stdio(default_roots: &[PathBuf]) -> Result<(), ServeError> {
         // `cpt-gearbox-fr-rpc-writes-opt-in` asks for.
         allow_writes: false,
         workspace: None,
+        documents: BTreeMap::new(),
     };
 
     for message in &connection.receiver {
@@ -154,8 +183,13 @@ pub fn serve_stdio(default_roots: &[PathBuf]) -> Result<(), ServeError> {
                 if notification.method == method::EXIT {
                     break;
                 }
-                // `initialized` and anything else the client volunteers: nothing
-                // to do, and answering a notification is a protocol error.
+                // A notification is never answered -- that is what makes it one --
+                // so a handler that cannot reach the client has nowhere to report
+                // it, and `false` ends the loop exactly as a failed send does for
+                // a request.
+                if !document_notification(&connection, &mut state, notification) {
+                    break;
+                }
             }
             Message::Response(_) => {
                 // The server issues no requests yet, so a response is unsolicited.
@@ -199,6 +233,185 @@ fn open_roots(paths: &[PathBuf]) -> (Vec<SourceRoot>, Vec<FailedRoot>) {
         }
     }
     (opened, failed)
+}
+
+/// Handle one `textDocument/*` notification. `false` means the peer is gone.
+///
+/// Every branch ends in a `publishDiagnostics`, including the ones with nothing
+/// to say. Publishing an empty list is how LSP spells "this document is clean
+/// now"; staying silent would leave the last set of squiggles on screen, which is
+/// the stale-marker failure `cpt-gearbox-fr-editor-diagnostics` names.
+fn document_notification(
+    connection: &Connection,
+    state: &mut State,
+    mut notification: Notification,
+) -> bool {
+    // Taken out before the match so the arms can consume it: the caller owns the
+    // notification and drops it the moment this returns, and for `didOpen` and
+    // `didChange` these params *are* the document text. Deserializing from a
+    // clone would copy the whole buffer, per keystroke, to no end.
+    let params = std::mem::take(&mut notification.params);
+    let method = notification.method.as_str();
+    match method {
+        method::DID_OPEN => {
+            let Some(params) = document_params::<DidOpenTextDocumentParams>(method, params) else {
+                return true;
+            };
+            let document = params.text_document;
+            let uri = document.uri;
+            state.documents.insert(uri.clone(), document.text);
+            publish_document_diagnostics(connection, state, &uri, document.version)
+        }
+        method::DID_CHANGE => {
+            let Some(params) = document_params::<DidChangeTextDocumentParams>(method, params)
+            else {
+                return true;
+            };
+            let uri = params.text_document.uri;
+            let version = params.text_document.version;
+            // Full sync, so the last event carries the whole document. Taking the
+            // last rather than the first is what keeps a client that sent several
+            // from being half-applied.
+            let Some(change) = params.content_changes.into_iter().next_back() else {
+                // No changes at all. Nothing moved, so nothing is republished:
+                // the markers already on screen are still the right ones.
+                return true;
+            };
+            if change.range.is_some() {
+                // An incremental edit against a server that advertised `Full`.
+                // Applying `text` as if it were the document would replace the
+                // file with a fragment, and the diagnostics that followed would
+                // be confident and wrong -- so the document is left as it was and
+                // the mismatch is said out loud.
+                return notify(
+                    connection,
+                    method::LOG,
+                    &LogParams {
+                        message: format!(
+                            "ignoring an incremental change to `{uri}`: this server \
+                             advertises textDocumentSync = Full, so send the whole document"
+                        ),
+                    },
+                );
+            }
+            state.documents.insert(uri.clone(), change.text);
+            publish_document_diagnostics(connection, state, &uri, version)
+        }
+        method::DID_CLOSE => {
+            let Some(params) = document_params::<DidCloseTextDocumentParams>(method, params) else {
+                return true;
+            };
+            let uri = params.text_document.uri;
+            state.documents.remove(&uri);
+            // What is on disk is not this server's to complain about once the
+            // editor has stopped showing it, and a marker that outlived its
+            // buffer would point at text nobody can see.
+            notify(
+                connection,
+                method::PUBLISH_DIAGNOSTICS,
+                &PublishDiagnosticsParams {
+                    uri,
+                    version: None,
+                    diagnostics: Vec::new(),
+                },
+            )
+        }
+        // `initialized`, `$/cancelRequest`, and anything else a client
+        // volunteers: nothing to do, and answering a notification is a protocol
+        // error.
+        _ => true,
+    }
+}
+
+/// Decode a notification's params, reporting a malformed one to stderr.
+///
+/// `None` rather than an error response, because a notification has no id to
+/// answer. A client sending params this server cannot read is a bug in the
+/// client, and the loop's job is to survive it.
+fn document_params<P: serde::de::DeserializeOwned>(
+    method: &str,
+    params: serde_json::Value,
+) -> Option<P> {
+    match serde_json::from_value(params) {
+        Ok(params) => Some(params),
+        Err(e) => {
+            eprintln!("gearbox: cannot read `{method}` params: {e}");
+            None
+        }
+    }
+}
+
+/// Evaluate one open document and send what is wrong with it.
+///
+/// The publication rule lives in `lsp::publishable`, and the two ways a document
+/// yields nothing are deliberately not distinguished here: a file that is neither
+/// a `product.gdl` nor a `gear.gdl`, and one that is a clean `product.gdl`, both
+/// publish an empty list. The client's marker set matches the server's opinion
+/// either way, which is the only property that matters to the person looking at
+/// the editor.
+fn publish_document_diagnostics(
+    connection: &Connection,
+    state: &State,
+    uri: &str,
+    version: Option<i32>,
+) -> bool {
+    let diagnostics = state
+        .documents
+        .get(uri)
+        .and_then(|text| document_diagnostics(state, uri, text))
+        .unwrap_or_default();
+
+    notify(
+        connection,
+        method::PUBLISH_DIAGNOSTICS,
+        &PublishDiagnosticsParams {
+            uri: uri.to_owned(),
+            version,
+            diagnostics,
+        },
+    )
+}
+
+/// What is wrong with `text`, read as the description `uri` names.
+///
+/// Split out so the rule can be tested without a connection.
+fn document_diagnostics(state: &State, uri: &str, text: &str) -> Option<Vec<LspDiagnostic>> {
+    let path = lsp::path_from_uri(uri)?;
+    // The source root this file sits in, when it sits in one: that is the
+    // `load()` boundary `load_catalogue` gives a gear. `check_description`
+    // ignores it for a product, which has none -- so a description is evaluated
+    // the same way whether the question came from an editor or from the disk.
+    //
+    // **The innermost matching root, not the first one listed.** Roots may nest,
+    // and `find` would have answered by `Vec` order -- so the same file could be
+    // evaluated against a different `load()` boundary depending on the order the
+    // client happened to pass its roots in, which is not a property of the file.
+    // Deepest wins because that is the narrowest boundary the file provably sits
+    // inside, and a `load()` allowed under a wider one would be refused when the
+    // gear is loaded from the root it is actually declared under. `path` is
+    // normalized by `path_from_uri`, which is what makes `starts_with` a
+    // containment test rather than a spelling test.
+    let source_root = state
+        .roots
+        .iter()
+        .filter(|source| path.starts_with(&source.root))
+        .max_by_key(|source| source.root.components().count())
+        .map(|source| source.root.as_path());
+
+    let diagnostics = gearbox_engine::check_description(&path, source_root, text)?;
+
+    // Matched against the URI *this server* would have written, not against the
+    // client's spelling: `gearbox_ir::file_uri` does not percent-encode and
+    // Theia's `URI.toString()` does, so comparing the two raw would drop every
+    // diagnostic on a path containing a space.
+    let own = gearbox_ir::file_uri(&path);
+    Some(
+        diagnostics
+            .into_iter()
+            .filter(|diagnostic| lsp::publishable(diagnostic, &own))
+            .map(lsp::to_lsp)
+            .collect(),
+    )
 }
 
 #[allow(clippy::cognitive_complexity)]
@@ -408,6 +621,8 @@ fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Re
                 // Echoed back, so a client that forgot to ask for writes can see
                 // that it forgot instead of finding out from a refusal later.
                 writes: state.allow_writes,
+                // The LSP half of the same object. See `Capabilities`.
+                text_document_sync: crate::lsp::SYNC_FULL,
             },
             // `SourceRoot::root` is already canonicalized, which is what makes
             // it safe to join a `gdl_path` onto without `..` ambiguity.
@@ -1655,10 +1870,7 @@ fn creation_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
     let Some(boundary) = state.creation_boundary.as_ref() else {
         return writable_out_root(state, path);
     };
-    let workspace = boundary
-        .workspace
-        .as_deref()
-        .or(state.workspace.as_deref());
+    let workspace = boundary.workspace.as_deref().or(state.workspace.as_deref());
     writable_out_root_against(&boundary.roots, workspace, path)
 }
 
