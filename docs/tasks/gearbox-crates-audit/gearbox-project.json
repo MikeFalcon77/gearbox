@@ -1,0 +1,419 @@
+{
+  "batch": "gearbox-project",
+  "scope": "crates/gearbox-project",
+  "head_sha": "b5a8d7e6c53fb744863502a175c9a3b2a42dd43b",
+  "reported": [
+    {
+      "file": "crates/gearbox-project/src/config.rs",
+      "line": 508,
+      "severity": "CRITICAL",
+      "id": "RUST-SEC-001",
+      "comment": "`attrs.with` forces `secret: false` even when the field's type says it is a credential. `#[serde(with = \"...\")] token: SecretString` projects as a non-secret field, and `ConfigField.secret` is the only gate `gearbox-engine` has for keeping a credential out of the generated ConfigMap (see `generate/helm.rs` and `secrets.rs`). The wire shape being unreadable is a reason to report `Complex`, not a reason to forget the field is a secret.",
+      "issue": "A `#[serde(with)]` field loses its secret classification, so a `SecretString` credential projects as non-secret.",
+      "fix": "Compute `secret` from `classify(optional.unwrap_or(&field.ty), files)` regardless of `with`/`flatten`, and only override the `ConfigFieldType` to `Complex`.",
+      "_anchor_text": "(ConfigFieldType::Complex, false)"
+    },
+    {
+      "file": "crates/gearbox-project/src/cluster.rs",
+      "line": 198,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "No test reaches this error. Every registry test in `cluster_tests.rs` uses the well-formed `REGISTRY` fixture and calls `.expect(\"project\")`, so the case the doc comment above calls out, a chain whose middle registration is unreadable looking exactly like a shorter chain, is unverified. Can we add a fixture with `with_cache_provider(make_provider())` between two readable registrations and assert the `Err`?",
+      "issue": "The unreadable-provider-argument error path of `project_provider_registry` has no test.",
+      "fix": "Add a `cluster_tests.rs` test with a non-path argument in the middle of the builder chain asserting `project_provider_registry` returns `Err`.",
+      "_anchor_text": "return unreadable(\"is not a path, `Arc::new(<path>)` or `Box::new(<path>)`\");"
+    },
+    {
+      "file": "crates/gearbox-project/src/cluster.rs",
+      "line": 405,
+      "severity": "HIGH",
+      "id": "RUST-ERR-001",
+      "comment": "A `backend = \"...\"` that is absolute or climbs out of the crate is not a capability-read failure. This renders as \"cannot read `features` on `<the path>`\" with the spec stuffed into the `ty` field, so the message points the reader at the wrong thing and a caller matching on `Capability` sees a path error.",
+      "issue": "The narrowing-path validation failure is reported as ClusterProjectionError::Capability with the path in the `ty` field.",
+      "fix": "Add a ClusterProjectionError variant for an invalid `backend` spec, mirroring LocateError::AttrEscapes, and return it here instead of Capability.",
+      "_anchor_text": "ClusterProjectionError::Capability {"
+    },
+    {
+      "file": "crates/gearbox-project/src/cluster.rs",
+      "line": 498,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "Nothing in this crate asserts `runtime_determined`. The comment on `BackendCapabilities` records that refusing a computed capability used to make a configurable backend unusable and that these methods now contribute no capability instead, but neither the `features` push here nor the `consistency` push at line 475 is pinned by a test. A backend that reads its flag from a field (`LockFeatures::new(self.linearizable)`) would go back to being an error with nothing catching it.",
+      "issue": "`BackendCapabilities::runtime_determined` is never asserted, leaving the computed-capability behavior change untested.",
+      "fix": "Add tests asserting `runtime_determined` contains `\"features\"` for a field-read `features()` body and `\"consistency\"` for a non-path `consistency()` body, with `declared` empty.",
+      "_anchor_text": "None => runtime_determined.push(\"features\"),"
+    },
+    {
+      "file": "crates/gearbox-project/src/cluster.rs",
+      "line": 532,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "The only caller of this in tests is `sdk_defaults_are_recognised_as_derived_from_the_cache`, which sits behind `require!(cluster_crate())`, so on a checkout without the corpus the function has no coverage at all. Every other pub fn in this file has an inline fixture plus a real-tree check. The negative case is untested too: a `features()` body that is not a cache-consistency comparison must yield no `SdkDefaultRule`.",
+      "issue": "`project_sdk_defaults` is exercised only by a corpus-gated test, with no inline fixture and no negative case.",
+      "fix": "Add inline-fixture tests in `cluster_tests.rs` for a derived `features()` body and for a non-derived one, asserting the rule is emitted in the first case and absent in the second.",
+      "_anchor_text": "pub fn project_sdk_defaults(files: &[RustFile]) -> Vec<SdkDefaultRule> {"
+    },
+    {
+      "file": "crates/gearbox-project/src/config.rs",
+      "line": 214,
+      "severity": "HIGH",
+      "id": "RUST-NO-002",
+      "comment": "The parse error is dropped, and `parse_nested_meta` stops at the first meta item it cannot read, so every later item in the same `#[serde(...)]` is lost with it. `#[serde(rename(serialize = \"a\", deserialize = \"b\"), skip)]` is legal serde and leaves `skip` false here, so a field serde never reads is projected as configuration and lands in the values schema.",
+      "issue": "serde_attrs drops the parse_nested_meta error, so a serde meta form it cannot model silently truncates the rest of the attribute.",
+      "fix": "Propagate the parse_nested_meta error out of serde_attrs, or record a partial-read flag on SerdeAttrs so a truncated attribute is not treated as fully read.",
+      "_anchor_text": "drop(attr.parse_nested_meta(|meta| {"
+    },
+    {
+      "file": "crates/gearbox-project/src/config.rs",
+      "line": 365,
+      "severity": "HIGH",
+      "id": "RUST-SEC-001",
+      "comment": "`secret` is set for the exact ident `SecretString` and nothing else. A field typed `Secret<String>`, `SecretBox<str>` or `SecretVec<u8>` falls through to the `find_item` arm and comes back as `Complex` with `secret: false`, so a properly wrapped credential is projected as an ordinary value and the generator writes it into the ConfigMap in plaintext.",
+      "issue": "Secret detection matches only the `SecretString` ident, so other secrecy wrappers project as non-secret.",
+      "fix": "Match every secrecy wrapper ident in `classify` (`Secret`, `SecretBox`, `SecretString`, `SecretVec`) and return `secret: true` for each.",
+      "_anchor_text": "\"SecretString\" => (ConfigFieldType::Str, true),"
+    },
+    {
+      "file": "crates/gearbox-project/src/config.rs",
+      "line": 476,
+      "severity": "HIGH",
+      "id": "RUST-ERR-001",
+      "comment": "When `root` names nothing in this crate we return an empty vector, which is the same answer as a struct with no named keys. The caller cannot tell the two apart, and `gearbox-engine::config` already has to emit the merged message \"`{root}` declares no configuration fields, or this crate does not declare it\". A `Result` with a not-found variant would let it say which happened. The same conflation also swallows the `attrs.skip` filter case, and the root can be an operator-supplied string via `config_schema = config(rust = ...)`.",
+      "issue": "project_config_fields returns an empty Vec both for a missing root struct and for a struct with no named fields.",
+      "fix": "Return a Result whose error distinguishes 'root struct not found' from 'struct declares no named fields' and split the merged diagnostic in gearbox-engine accordingly.",
+      "_anchor_text": "return Vec::new();"
+    },
+    {
+      "file": "crates/gearbox-project/src/config.rs",
+      "line": 501,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "No test declares `#[serde(rename_all = ...)]` on a config struct, so this branch never runs: the three fixtures that use `rename_all` all put it on an enum, which goes through `variant_names` instead. That leaves seven of the eight case arms in `rename_all` and its unknown-value fallthrough unexercised, and this is the value an operator has to type as a YAML key.",
+      "issue": "Container-level `rename_all` on a config struct is untested, leaving most of the `rename_all` case table unexercised.",
+      "fix": "Add a `config_tests.rs` test with `#[serde(rename_all = \"camelCase\")]` on a config struct, plus one with an unrecognised rule asserting the field name is left alone.",
+      "_anchor_text": ".map_or(ident.clone(), |rule| rename_all(rule, &ident))"
+    },
+    {
+      "file": "crates/gearbox-project/src/config.rs",
+      "line": 528,
+      "severity": "HIGH",
+      "id": "RUST-SEC-001",
+      "comment": "The default literal is read the same way for a `SecretString` field as for any other, so a `#[serde(default = \"default_password\")]` returning a string literal lands verbatim in `ConfigField::default` and travels into the catalogue. `secret` is computed a few lines above and never consulted here, and the redaction in `gearbox-engine`'s `secrets.rs` rewrites configured values, not projected defaults.",
+      "issue": "A compiled-in credential default is projected verbatim into `ConfigField::default` with no regard for the `secret` flag.",
+      "fix": "Drop the default, or substitute a placeholder, when `secret` is true.",
+      "_anchor_text": "let default = default_expr.and_then(|expr| {"
+    },
+    {
+      "file": "crates/gearbox-project/src/contract.rs",
+      "line": 156,
+      "severity": "HIGH",
+      "id": "RUST-NO-002",
+      "comment": "An ident this does not know is dropped from the set, so the provider comes back with fewer transports than the attribute lists. That is the failure the `project_provides` doc above refuses for parse errors: a provider quietly reading as local-only, a plausible answer and the wrong one. The macro rejects an unknown spelling today, but `one_per_installation` shows the platform lands the new spelling first and this parser catches up afterwards.",
+      "issue": "An unmodelled transport ident is silently dropped from the projected transport set instead of being reported.",
+      "fix": "Return a syn::Error naming the unknown transport ident instead of dropping it from the set.",
+      "_anchor_text": "_ => false,"
+    },
+    {
+      "file": "crates/gearbox-project/src/contract.rs",
+      "line": 366,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "This propagation is documented under `# Errors` but no test reaches it: `contract_tests.rs` always calls `.expect(\"parse\")`, so a `#[toolkit::contract]` missing `gear` or `version` is never exercised. The values are unchecked too, `gear`, `version` and `kind` are never asserted on a `ProjectedContract` in this crate even though every fixture declares them.",
+      "issue": "`project_contracts` error propagation is untested and the `gear`, `version` and `kind` fields it produces are never asserted.",
+      "fix": "Add a test asserting `project_contracts` returns `Err` for an attribute with no `version`, and assert `gear`, `version` and `kind` in the existing versioned-projection test.",
+      "_anchor_text": "let args = attr.parse_args::<ContractArgs>()?;"
+    },
+    {
+      "file": "crates/gearbox-project/src/error_enum.rs",
+      "line": 80,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "Nothing tests this ordering. The doc above says two enums of one name in one crate must arrive in a stable order so the consumer can refuse rather than guess, and `complain` in the corpus tests relies on `declared.first()` being deterministic, but that whole path only runs when the sibling checkout is reachable. A fixture with two enums of the same ident in different files would pin it.",
+      "issue": "The stable-order invariant of `project_error_enums` has no test, and the duplicate-ident case is reachable only through corpus-gated tests.",
+      "fix": "Add an `error_enum_tests.rs` test with two same-named enums across two `RustFile` fixtures asserting the projected order by relative path and line.",
+      "_anchor_text": "out.sort_by(|a, b| {"
+    },
+    {
+      "file": "crates/gearbox-project/src/gear.rs",
+      "line": 101,
+      "severity": "HIGH",
+      "id": "RUST-NO-002",
+      "comment": "An unknown `lifecycle(...)` key is consumed and thrown away here, while `GearArgs` records unknown arguments in `ProjectedGear::unmodelled` so the skew surfaces as GBX0608. The bare-flag path at line 106 has the same hole. When the next lifecycle argument lands in the macro, this parser reports nothing at all.",
+      "issue": "LifecycleArgs silently discards unknown lifecycle keys instead of recording them as unmodelled.",
+      "fix": "Carry unknown lifecycle keys out of LifecycleArgs and push them into ProjectedGear::unmodelled (for example as `lifecycle.<key>`), for both the `key = value` and bare-flag forms.",
+      "_anchor_text": "_ => {"
+    },
+    {
+      "file": "crates/gearbox-project/src/gear.rs",
+      "line": 242,
+      "severity": "HIGH",
+      "id": "RUST-ARCH-001",
+      "comment": "`conditional` is set only from attributes on the gear item, but `scan_crate` discovers files by walking the directory and never reads the `mod` declarations, so a gear in a file reached by `#[cfg(feature = \"x\")] mod gear;` projects as `conditional: false`. That is exactly the claim lib.rs says this field exists to avoid making, and nothing in the crate can currently see module-level gating.",
+      "issue": "Conditionality is read only from item attributes, while the directory-walk scan makes module-level `#[cfg]` gating unobservable, so a cfg-gated gear is reported as unconditional.",
+      "fix": "Record module-level gating as well, either by reading the `mod` declarations that reach each scanned file or by marking conditionality as unknown when it cannot be determined, and state that limit on `ProjectedGear::conditional`.",
+      "_anchor_text": "projected.conditional = has_cfg(site.item_attrs);"
+    },
+    {
+      "file": "crates/gearbox-project/src/gear.rs",
+      "line": 242,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "No test asserts `conditional` anywhere in the workspace. The comment right below says this used to be left `false`, which made the projection claim every cfg-gated gear was unconditional, and nothing now stops that regression coming back. `gear_tests.rs` builds an `AttributeSite` for each of its fixtures already, so a case with `#[cfg(feature = \"x\")]` beside the gear attribute is cheap to add.",
+      "issue": "`ProjectedGear::conditional` and `has_cfg` have no test, so the cfg-gated-gear fix has no regression guard.",
+      "fix": "Add a `gear_tests.rs` test projecting an item whose attribute list includes `#[cfg(...)]` and assert `conditional` is true, plus one without it asserting false.",
+      "_anchor_text": "projected.conditional = has_cfg(site.item_attrs);"
+    },
+    {
+      "file": "crates/gearbox-project/src/gts.rs",
+      "line": 191,
+      "severity": "HIGH",
+      "id": "RUST-SEC-001",
+      "comment": "These two prefixes are the only check on a `$id` read out of an arbitrary `.schema.json`; everything after them goes verbatim into `GtsType::type_id` and then into `gearbox_ir::GtsTypeDecl`, which does not validate it either. The Rust path gets the `gts_id!` compile-time check that `gts_literal` documents, so this is the one identifier source in the module with no charset or length validation behind it.",
+      "issue": "A GTS type id from a JSON schema is accepted on a prefix check alone and carried verbatim, unlike the macro-validated Rust path.",
+      "fix": "Validate the full identifier charset and length here against the same grammar `gts_id!` enforces, and return `Ok(None)` when it does not match.",
+      "_anchor_text": "if !type_id.starts_with(\"gts.\") && !type_id.starts_with(\"cf.\") {"
+    },
+    {
+      "file": "crates/gearbox-project/src/gts_tests.rs",
+      "line": 112,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "The name promises deduplication but the fixture declares `cf.b.v1~` and `cf.a.v1~`, two distinct ids, so `out.dedup()` never removes anything. Only the sort is exercised here. Add a third struct declaring an id already present so the dedup half actually runs.",
+      "issue": "Test named for sorting and deduplication contains no duplicate ids, so the dedup path is unexercised.",
+      "fix": "Add a duplicate `type_id` declaration to the fixture and assert the projected list has one entry for it.",
+      "_anchor_text": "fn declarations_are_sorted_and_deduplicated() {"
+    },
+    {
+      "file": "crates/gearbox-project/src/plugin.rs",
+      "line": 203,
+      "severity": "HIGH",
+      "id": "RUST-ERR-001",
+      "comment": "`VendorDefault` has no way to say \"the default is there but I could not read it\". A field written as `vendor: DEFAULT_VENDOR.to_owned()` with a `const` behind it comes back as `vendor: None`, which per the doc on `VendorDefault` is the thing the vendor-mismatch check keys on. `cluster::resolve_str_const` already resolves this exact shape for provider names.",
+      "issue": "project_vendor_default has no error channel, so an unreadable compiled-in default is indistinguishable from a config type that declares none.",
+      "fix": "Return a Result (or add an `unreadable` marker to VendorDefault) so an unresolvable initializer is reported, and resolve `const` paths the way cluster::resolve_str_const does.",
+      "_anchor_text": "pub fn project_vendor_default(files: &[RustFile]) -> VendorDefault {"
+    },
+    {
+      "file": "crates/gearbox-project/src/plugin.rs",
+      "line": 297,
+      "severity": "HIGH",
+      "id": "RUST-NO-002",
+      "comment": "Same truncation as in `config::serde_attrs`: the error is dropped and the walk stops at the first form this does not model, so a `default = \"fn\"` written after it is never seen. The comment says that is not a failure worth reporting, but the module doc above says a missing default is exactly what the vendor-mismatch check keys on, so it comes back as a wrong answer rather than a gap.",
+      "issue": "serde_default_fn drops the parse_nested_meta error, so a truncated serde attribute reads as 'no default fn'.",
+      "fix": "Propagate the error out of serde_default_fn, or return an explicit 'attribute not fully read' signal so project_vendor_default does not report an existing default as absent.",
+      "_anchor_text": "drop(attr.parse_nested_meta(|meta| {"
+    },
+    {
+      "file": "crates/gearbox-project/src/profile.rs",
+      "line": 87,
+      "severity": "HIGH",
+      "id": "RUST-ERR-001",
+      "comment": "An `impl ClusterProfile` whose `NAME` is not a string literal disappears from the result here, and the function has no error channel to say so. `cluster::project_provider_name` treats the same shape as an error for exactly this reason, and a dropped profile makes `check_profiles` report `ClusterProfileNotImplemented` against a crate that does implement it.",
+      "issue": "A ClusterProfile impl with a non-literal NAME is silently skipped, and project_cluster_profiles cannot report it.",
+      "fix": "Return a Result and report an impl whose NAME is not a readable literal, resolving a const path via resolve_str_const as project_provider_name does.",
+      "_anchor_text": "name: name_const(imp)?,"
+    },
+    {
+      "file": "crates/gearbox-project/src/profile.rs",
+      "line": 87,
+      "severity": "HIGH",
+      "id": "RUST-SEC-001",
+      "comment": "`NAME` is taken verbatim as the operator-facing profile name, and `gearbox-engine`'s `ClusterProjection.profiles` keeps it a bare `String` all the way to `ClientScope::new(\"cluster:{name}\")`. A `NAME` containing `:` then resolves into a different scope namespace than the one it declares. `gearbox_ir::ProfileId` already validates this shape and is never applied on this path.",
+      "issue": "A projected cluster profile name is unvalidated and becomes a `ClientScope` segment, so a name containing `:` can cross scope namespaces.",
+      "fix": "Run `NAME` through `gearbox_ir::ProfileId` here so a marker whose name is not a valid profile id is reported rather than projected.",
+      "_anchor_text": "name: name_const(imp)?,"
+    },
+    {
+      "file": "crates/gearbox-project/src/scan.rs",
+      "line": 119,
+      "severity": "HIGH",
+      "id": "RUST-SEC-001",
+      "comment": "Every `.rs` file under `src/` is read fully into memory with no size cap and no cap on how many, then handed to `syn::parse_file`. This crate is pointed at trees it does not own, so one oversized file in a scanned crate exhausts memory in whatever process is doing the projection.",
+      "issue": "Source file contents are read unbounded, with no maximum size or file-count limit before parsing.",
+      "fix": "Use `meta.len()` from the `symlink_metadata` already fetched above to reject a file over an explicit cap before calling `read_to_string`, and cap the number of paths collected by the walk.",
+      "_anchor_text": "let text = std::fs::read_to_string(&path).map_err(|e| ScanError::Read(path.clone(), e))?;"
+    },
+    {
+      "file": "crates/gearbox-project/src/attribute.rs",
+      "line": 76,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "`all_sites` calls this for every attribute on every struct and enum in the tree, and each call allocates a `Vec<String>` plus one `String` per path segment. Every `///` line is such an attribute, so the allocation count is far above the number of attributes that could ever match. The same test can be done on `attr.path().segments` in place.",
+      "issue": "is_gear_attribute allocates a Vec<String> of path segments for every attribute inspected during the scan.",
+      "fix": "Match on `attr.path().segments.len()` and compare the segment idents to `gear` / `toolkit` / `gears_toolkit` directly instead of collecting into a `Vec<String>`.",
+      "_anchor_text": "let segments: Vec<String> = attr"
+    },
+    {
+      "file": "crates/gearbox-project/src/cluster.rs",
+      "line": 228,
+      "severity": "MEDIUM",
+      "id": "RUST-ERR-001",
+      "comment": "This is the one public function in the crate that errors with a bare `String`, with `ClusterProjectionError` defined at the top of the same file. The caller can only interpolate it into a message, so the unreadable-argument case cannot be told apart from anything added here later.",
+      "issue": "project_provider_registry returns Result<_, String> while the rest of the crate returns typed errors.",
+      "fix": "Add a ClusterProjectionError variant carrying the setter name and the primitive for an unreadable registration and return that instead of a String.",
+      "_anchor_text": ") -> Result<Vec<ProjectedClusterProvider>, String> {"
+    },
+    {
+      "file": "crates/gearbox-project/src/cluster.rs",
+      "line": 230,
+      "severity": "MEDIUM",
+      "id": "RUST-ARCH-001",
+      "comment": "Any impl carrying a `provider_registry` method matches here, and every chain is appended to the same `out`, so two such impls come back as one merged registry with nothing saying they were two. `project_backend_capabilities` refuses the analogous case with `BackendAmbiguous` precisely because the cluster crate holds SDK defaults plus test doubles, so hop 1 silently accepts what hop 3 reports as a caller error.",
+      "issue": "`project_provider_registry` merges registrations from every impl with a `provider_registry` method, while the sibling backend projection treats non-uniqueness as an error.",
+      "fix": "Collect the matching `provider_registry` impls first and return an ambiguity error when there is more than one, mirroring `ClusterProjectionError::BackendAmbiguous`.",
+      "_anchor_text": "for (_, imp) in impls(files) {"
+    },
+    {
+      "file": "crates/gearbox-project/src/config.rs",
+      "line": 111,
+      "severity": "MEDIUM",
+      "id": "RUST-ARCH-001",
+      "comment": "`visit_file` descends into inline `mod` blocks, but `find_item`, `find_struct`, `default_impl_fields` and `plugin::free_fn_body` only scan `file.ast.items`. For a config struct declared inside an inline `mod` the two halves disagree: the annotation form drops the root entirely (the `find_struct` gate in `visit_local` fails) and the gear reads as having no configuration, while the turbofish form records the root and then yields no fields.",
+      "issue": "Config root discovery walks inline modules while the struct, enum and default lookups it feeds are top-level only, so the two halves of the same projection disagree about which items exist.",
+      "fix": "Use one traversal for both halves: make `find_item`, `find_struct`, `default_impl_fields` and `free_fn_body` descend into inline `mod` blocks the way `error_enum::collect` does.",
+      "_anchor_text": "syn::visit::visit_file(&mut visitor, &file.ast);"
+    },
+    {
+      "file": "crates/gearbox-project/src/config.rs",
+      "line": 150,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "`call.method.to_string()` allocates a `String` for every method call node in every scanned file, only to compare it against four fixed names. `syn::Ident` compares against `&str` directly, so `CONFIG_METHODS.iter().any(|m| call.method == *m)` does the same test with no allocation.",
+      "issue": "The method ident is allocated as a String for every method call node in the full-AST visit to test membership in a four-element list.",
+      "fix": "Replace `CONFIG_METHODS.contains(&call.method.to_string().as_str())` with `CONFIG_METHODS.iter().any(|m| call.method == *m)`.",
+      "_anchor_text": "if CONFIG_METHODS.contains(&call.method.to_string().as_str())"
+    },
+    {
+      "file": "crates/gearbox-project/src/config.rs",
+      "line": 370,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "`find_item` is a linear scan over every item in every scanned file, and it runs once per config field that is not a known scalar, then again in `enum_default` for a field with a default. For a struct like `OidcAuthNGearConfig` with ten-plus non-scalar fields that is ten-plus full passes over the crate's AST for what is a lookup by ident.",
+      "issue": "classify does a full linear scan of all items per config field, and enum_default repeats it.",
+      "fix": "Build a `HashMap<String, &syn::Item>` of named items once in `project_config_fields` and pass it to `classify` and `enum_default` instead of scanning `files` per field.",
+      "_anchor_text": "_ => match find_item(files, &ident) {"
+    },
+    {
+      "file": "crates/gearbox-project/src/config_tests.rs",
+      "line": 39,
+      "severity": "MEDIUM",
+      "id": "TEST-QUALITY-4",
+      "comment": "Eight tests in this file go through `require!`, and on a checkout without the corpus every one of them prints a line and passes with no assertion run. The whole real-tree tier then reports green having verified nothing, which is the failure `test_corpus`'s own comment describes. The `GEARBOX_CORPUS_REQUIRED` switch already exists for this: wire it in here so an authoritative run fails instead of skipping. The same macro silently passes five plugin tests (`plugin_tests.rs:35`), four cluster tests including the only test of `project_sdk_defaults` (`cluster_tests.rs:42`), and the decisive transport case `real_tree_v1_has_grpc_and_v2_does_not` (`contract_tests.rs:111`); note `api_contracts_sdk()` also returns `None` when the directory exists but the scan is unreachable, so the skip covers more than a missing checkout.",
+      "issue": "The `require!` skip macro passes every corpus test with no assertion when the sibling checkout is absent, across config, plugin, cluster and contract test files.",
+      "fix": "Make `require!` panic when `GEARBOX_CORPUS_REQUIRED` is set, matching the `decide` mechanism already used for the prevents corpus test.",
+      "_anchor_text": "eprintln!(\"skipping: ../gears-rust not present\");"
+    },
+    {
+      "file": "crates/gearbox-project/src/contract.rs",
+      "line": 101,
+      "severity": "MEDIUM",
+      "id": "RUST-ARCH-001",
+      "comment": "The `X` / `toolkit::X` / `gears_toolkit::X` spelling rule is written out four times: here, `is_consumes_attribute`, `is_contract_attribute`, and `is_gear_attribute` in attribute.rs. A fifth spelling has to be added in four places, and a copy that misses it makes those facts read as absent rather than as an error; `gts.rs::is_schema_attribute` already answers the same question by last segment only, so the crate has two different rules for \"is this attribute ours\".",
+      "issue": "The toolkit attribute-path spelling rule is duplicated across four functions in two modules, with a fifth divergent rule in gts.rs.",
+      "fix": "Put one `is_toolkit_attribute(attr, name)` helper in `attribute.rs` and call it from `contract.rs` and `gts.rs` instead of repeating the segment match.",
+      "_anchor_text": "fn is_provides_attribute(attr: &syn::Attribute) -> bool {"
+    },
+    {
+      "file": "crates/gearbox-project/src/contract.rs",
+      "line": 282,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "`project_contracts` calls this for every attribute on every trait in the crate, including doc comments, and each call allocates a `Vec<String>` and a `String` per path segment. The path can be matched on its segment idents without collecting them first.",
+      "issue": "is_contract_attribute allocates a Vec<String> of path segments for every trait attribute in the scan.",
+      "fix": "Compare `attr.path().segments` idents in place against `contract` / `toolkit` / `gears_toolkit` instead of collecting them into a `Vec<String>`.",
+      "_anchor_text": "let segments: Vec<String> = attr"
+    },
+    {
+      "file": "crates/gearbox-project/src/contract.rs",
+      "line": 374,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "`project_transports` walks every item of every file, and it is called once per `#[toolkit::contract]` trait, so an SDK crate with n contracts scans its whole tree n times. The projection traits can be collected in a single pass before the loop and looked up by base ident.",
+      "issue": "project_transports rescans all files and items once per contract, making project_contracts quadratic in contract count.",
+      "fix": "Collect `*Rest` / `*Grpc` projection traits into a map keyed by the base ident in one pass before the loop, and read each contract's transports out of that map.",
+      "_anchor_text": "let transports = project_transports(files, &trait_ident);"
+    },
+    {
+      "file": "crates/gearbox-project/src/error_enum_corpus_tests.rs",
+      "line": 223,
+      "severity": "MEDIUM",
+      "id": "TEST-QUALITY-4",
+      "comment": "If no `DiagnosticCode` carries a `prevents()` reference, this returns and the test passes having resolved nothing. An empty reference set is exactly the regression this file exists to catch, since it means the column stopped being populated. Make it `assert!(!referenced.is_empty(), ...)` instead of a silent return.",
+      "issue": "Empty `prevents` reference set short-circuits the test with no assertion, so losing the column reads as a pass.",
+      "fix": "Replace the `if referenced.is_empty() { return; }` guard with an assertion that at least one `prevents` reference exists.",
+      "_anchor_text": "return;"
+    },
+    {
+      "file": "crates/gearbox-project/src/gts.rs",
+      "line": 160,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "The `||` short-circuit means this arm runs for every macro that is not `struct_to_gts_schema`, which is every macro in the crate, and each one gets its whole token stream rendered into a `String` to answer one substring test. With `gts_id!` alone appearing over a thousand times in the tree, that is a lot of formatting per scanned crate. Walking `mac.tokens` for an ident named `struct_to_gts_schema` finds the nested call without building the string.",
+      "issue": "file_uses_unsupported_macro formats every macro invocation's full token stream into a String to run a substring check.",
+      "fix": "Iterate `mac.tokens` looking for a `TokenTree::Ident` equal to `struct_to_gts_schema` instead of calling `to_string()` on the token stream.",
+      "_anchor_text": "|| mac.tokens.to_string().contains(\"struct_to_gts_schema\")"
+    },
+    {
+      "file": "crates/gearbox-project/src/manifest.rs",
+      "line": 85,
+      "severity": "MEDIUM",
+      "id": "RUST-SEC-001",
+      "comment": "This skips the symlink guard whenever `symlink_metadata` returns `Err` for any reason, and then reads the path anyway through `read_to_string`, which does follow the link. `scan_crate` handles the same call with an explicit `Err` arm and refuses; this one fails open. Checked for a reachable bypass and did not find one: lstat and open resolve the same path, so this is a fail-open guard rather than a live symlink escape. Worth closing because the doc above promises a crate is only read through a real manifest, and on an lstat error that lapses.",
+      "issue": "The Cargo.toml symlink guard is skipped rather than failing closed when `symlink_metadata` errors.",
+      "fix": "Match on the `symlink_metadata` result and return `ManifestError::Unreadable` for any error, the way `scan_crate` turns an unexpected metadata error into `ScanError::Read`.",
+      "_anchor_text": "if let Ok(meta) = std::fs::symlink_metadata(&path)"
+    },
+    {
+      "file": "crates/gearbox-project/src/plugin_tests.rs",
+      "line": 282,
+      "severity": "MEDIUM",
+      "id": "TEST-QUALITY-2",
+      "comment": "The three `assert_eq!` calls above already pin `host_vendor` to \"constructorfabric\", `a` to \"cf\" and `b` to \"keycloak\", so this inequality cannot fail once those pass. It is a dead assertion. If the point is that the mismatch is what GBX0512 catches, assert on whatever the check itself produces rather than on three literals compared with each other.",
+      "issue": "Final inequality assertion is guaranteed true by the three preceding equality assertions on literals.",
+      "fix": "Drop the inequality or replace it with an assertion on the mismatch detection result instead of on already-pinned literals.",
+      "_anchor_text": "host_vendor != a && host_vendor != b,"
+    },
+    {
+      "file": "crates/gearbox-project/src/profile_tests.rs",
+      "line": 64,
+      "severity": "MEDIUM",
+      "id": "TEST-QUALITY-2",
+      "comment": "This asserts a property of a string constant declared 20 lines up in the same file, so it can only fail if someone edits the fixture. It tests nothing about `project_cluster_profiles`, and the assertion that follows repeats what `name_is_read_not_derived_from_the_ident` already checks, which leaves the test with no coverage of its own. If the point is that visibility is never required, assert that a `pub struct` marker and a private one both project.",
+      "issue": "Assertion checks the test fixture's own literal text instead of production behavior, and the test's only other assertion duplicates an earlier test.",
+      "fix": "Replace the fixture-text check with a comparison of a private marker against a `pub` one, asserting both project identically.",
+      "_anchor_text": "assert!(!EVENT_BROKER.contains(\"pub struct\"));"
+    },
+    {
+      "file": "crates/gearbox-project/src/scan.rs",
+      "line": 83,
+      "severity": "MEDIUM",
+      "id": "RUST-ERR-001",
+      "comment": "The walkdir error is flattened into a `String` here, so the `io::ErrorKind` behind it is gone. A permission-denied subdirectory and a symlink loop both arrive as prose, while the sibling `Read` and `Parse` variants keep their cause with `#[source]`.",
+      "issue": "ScanError::Walk stringifies walkdir::Error, discarding the source chain the other variants preserve.",
+      "fix": "Add a variant holding `#[source] walkdir::Error` and keep `Walk(PathBuf, String)` for the hand-written symlink refusals.",
+      "_anchor_text": "ScanError::Walk(at, e.to_string())"
+    },
+    {
+      "file": "crates/gearbox-project/src/scan.rs",
+      "line": 171,
+      "severity": "MEDIUM",
+      "id": "TEST-QUALITY-4",
+      "comment": "On a non-unix target this arm removes the directory and asserts nothing, so the test reports as passing without ever calling `scan_crate`. Put `#[cfg(unix)]` on the `#[test]` fn itself, then the test does not exist off unix rather than existing and verifying nothing.",
+      "issue": "The non-unix branch of the symlink test asserts nothing, so the test passes off unix without exercising `scan_crate`.",
+      "fix": "Move the `#[cfg(unix)]` gate onto the `#[test]` function and delete the empty `#[cfg(not(unix))]` arm.",
+      "_anchor_text": "#[cfg(not(unix))]"
+    },
+    {
+      "file": "crates/gearbox-project/src/scan.rs",
+      "line": 193,
+      "severity": "MEDIUM",
+      "id": "TEST-QUALITY-4",
+      "comment": "Same shape as the test above: off unix this arm just cleans up and asserts nothing, so the suite claims the json-symlink case is covered on a platform where it never ran. Gate the whole `#[test]` fn with `#[cfg(unix)]` instead.",
+      "issue": "The non-unix branch of the json-symlink test asserts nothing and still reports as a pass.",
+      "fix": "Move the `#[cfg(unix)]` gate onto the `#[test]` function and delete the empty `#[cfg(not(unix))]` arm.",
+      "_anchor_text": "#[cfg(not(unix))]"
+    }
+  ],
+  "dropped_low": [],
+  "dropped_anchor": []
+}
