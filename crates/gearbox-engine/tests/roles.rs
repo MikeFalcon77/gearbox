@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gearbox_engine::{SourceRoot, load_catalogue};
-use gearbox_ir::{Catalogue, DiagnosticCode, GearId, Severity, SourceId};
+use gearbox_ir::{Catalogue, DiagnosticCode, GearId, Range, Severity, SourceId};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
@@ -31,16 +31,10 @@ pub struct DemoGear;
 const MANIFEST: &str = "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
      [lib]\nname = \"demo\"\npath = \"src/lib.rs\"\n";
 
-fn root(declared: &str) -> PathBuf {
-    let nth = NEXT.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("gbx-roles-{}-{nth}", std::process::id()));
-    drop(std::fs::remove_dir_all(&root));
-    let crate_dir = root.join("demo");
-    std::fs::create_dir_all(crate_dir.join("src")).unwrap();
-    std::fs::write(
-        crate_dir.join("gear.gdl"),
-        format!(
-            r#"
+/// The `gear.gdl` text for a description ending with `declared`.
+fn source(declared: &str) -> String {
+    format!(
+        r#"
 gear(
     name = "Demo",
     description = "d",
@@ -50,9 +44,32 @@ gear(
     {declared}
 )
 "#
-        ),
     )
-    .unwrap();
+}
+
+/// The zero-based line holding `needle`, for asserting a diagnostic's anchor.
+fn line_of(text: &str, needle: &str) -> u32 {
+    let found: Vec<u32> = text
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains(needle))
+        .map(|(i, _)| u32::try_from(i).expect("fixtures are short"))
+        .collect();
+    assert_eq!(
+        found.len(),
+        1,
+        "`{needle}` must appear on exactly one line of the fixture, found {found:?}"
+    );
+    found[0]
+}
+
+fn root(declared: &str) -> PathBuf {
+    let nth = NEXT.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!("gbx-roles-{}-{nth}", std::process::id()));
+    drop(std::fs::remove_dir_all(&root));
+    let crate_dir = root.join("demo");
+    std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+    std::fs::write(crate_dir.join("gear.gdl"), source(declared)).unwrap();
     std::fs::write(crate_dir.join("Cargo.toml"), MANIFEST).unwrap();
     std::fs::write(crate_dir.join("src/lib.rs"), GEAR_RS).unwrap();
     root
@@ -182,8 +199,8 @@ fn a_directory_name_that_is_not_kebab_is_refused() {
     // The rule every other identifier obeys, applied to the one that escaped
     // it. `directory_name` names an entry in the same directory a `GearId`
     // names, and it was a plain `String` checked by nobody.
-    let catalogue =
-        catalogue(r#"roles = [role(name = "ingest", directory_name = "demo_ingest")],"#);
+    let declared = r#"roles = [role(name = "ingest", directory_name = "demo_ingest")],"#;
+    let catalogue = catalogue(declared);
     let d = catalogue
         .diagnostics
         .iter()
@@ -195,6 +212,20 @@ fn a_directory_name_that_is_not_kebab_is_refused() {
         d.help.as_deref().is_some_and(|h| h.contains("Rename it")),
         "an explicit name is renamed, not defaulted: {:?}",
         d.help
+    );
+
+    // Anchored on the `role(...)` call, not the file: several roles on one
+    // gear must not all collapse onto the same complaint.
+    let location = d.location.as_ref().expect("carries a location");
+    assert_ne!(
+        location.range,
+        Range::whole_file(),
+        "must anchor on the role(...) call, not the file: {d:#?}"
+    );
+    assert_eq!(
+        location.range.start.line,
+        line_of(&source(declared), "role(name = \"ingest\""),
+        "must be anchored on the role(...) line"
     );
 }
 

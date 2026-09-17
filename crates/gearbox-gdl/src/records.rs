@@ -93,6 +93,9 @@ gdl_record! {
         /// three -- because projection is meaningless until exactly one
         /// attribute is identified.
         pub attr: Option<String>,
+        /// Where `cargo(...)` was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }
 
@@ -108,6 +111,9 @@ gdl_record! {
         pub design: Option<String>,
         pub adr: Vec<String>,
         pub openapi: Option<String>,
+        /// Where `docs(...)` was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }
 
@@ -130,6 +136,9 @@ gdl_record! {
     ConfigRecord as "gdl_config" {
         pub rust: Option<String>,
         pub exposes: Vec<String>,
+        /// Where `config(...)` was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }
 
@@ -152,6 +161,9 @@ gdl_record! {
     FeatureRecord as "gdl_feature" {
         pub name: String,
         pub kinds: Vec<String>,
+        /// Where `feature(...)` was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }
 
@@ -226,6 +238,9 @@ gdl_record! {
         pub sdk: CargoRecord,
         pub critical: bool,
         pub resolving_client: Option<String>,
+        /// Where `consume(...)` was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }
 
@@ -280,6 +295,9 @@ gdl_record! {
         /// escape hatch for a crate that grows a second one, and its absence is
         /// what GBX0510 tells the author to supply.
         pub backend: Option<String>,
+        /// Where `cluster_plugin(...)` was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }
 
@@ -294,6 +312,9 @@ gdl_record! {
         pub name: String,
         pub directory_name: Option<String>,
         pub labels: Vec<String>,
+        /// Where `role(...)` was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }
 

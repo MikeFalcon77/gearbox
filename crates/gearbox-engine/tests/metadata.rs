@@ -12,9 +12,10 @@
 )]
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gearbox_engine::{SourceRoot, load_catalogue};
-use gearbox_ir::{Catalogue, GearId, Severity, SourceId};
+use gearbox_ir::{Catalogue, GearId, Range, Severity, SourceId};
 
 fn gears_rust() -> Option<PathBuf> {
     let mut dir: &Path = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -101,6 +102,77 @@ fn an_unknown_category_warns_rather_than_failing() {
     let code = gearbox_ir::DiagnosticCode::GdlUnknownCategory;
     assert_eq!(code.default_severity(), Severity::Warning);
     assert!(!code.requires_evidence());
+}
+
+static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+const CATEGORY_GEAR_RS: &str = r#"
+#[toolkit::gear(name = "demo", capabilities = [system])]
+pub struct DemoGear;
+"#;
+
+const CATEGORY_MANIFEST: &str = "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+     [lib]\nname = \"demo\"\npath = \"src/lib.rs\"\n";
+
+/// The `gear.gdl` text for a gear declaring `category = "bogus"`.
+const UNKNOWN_CATEGORY_GEAR_GDL: &str = r#"
+gear(
+    name = "Demo",
+    description = "d",
+    category = "bogus",
+    visibility = "internal",
+    package = cargo(crate_name = "demo", lib = "demo", path = "."),
+)
+"#;
+
+fn line_of(text: &str, needle: &str) -> u32 {
+    let found: Vec<u32> = text
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains(needle))
+        .map(|(i, _)| u32::try_from(i).expect("fixtures are short"))
+        .collect();
+    assert_eq!(
+        found.len(),
+        1,
+        "`{needle}` must appear on exactly one line of the fixture, found {found:?}"
+    );
+    found[0]
+}
+
+/// An unknown `category` points at the `gear(...)` call that declared it, not
+/// at line 1: `category` is an argument of `gear(...)`, not a call of its own.
+#[test]
+fn an_unknown_category_is_anchored_on_its_gear_call() {
+    let nth = NEXT.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!("gbx-category-{}-{nth}", std::process::id()));
+    drop(std::fs::remove_dir_all(&root));
+    let crate_dir = root.join("demo");
+    std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+    std::fs::write(crate_dir.join("gear.gdl"), UNKNOWN_CATEGORY_GEAR_GDL).unwrap();
+    std::fs::write(crate_dir.join("Cargo.toml"), CATEGORY_MANIFEST).unwrap();
+    std::fs::write(crate_dir.join("src/lib.rs"), CATEGORY_GEAR_RS).unwrap();
+
+    let source = SourceRoot::open(SourceId::new("demo").unwrap(), &root).unwrap();
+    let catalogue = load_catalogue(&[source]).catalogue;
+    drop(std::fs::remove_dir_all(&root));
+
+    let d = catalogue
+        .diagnostics
+        .iter()
+        .find(|d| d.code == gearbox_ir::DiagnosticCode::GdlUnknownCategory)
+        .expect("GBX0108");
+    let location = d.location.as_ref().expect("carries a location");
+    assert_ne!(
+        location.range,
+        Range::whole_file(),
+        "must anchor on the gear(...) call, not the file: {d:#?}"
+    );
+    assert_eq!(
+        location.range.start.line,
+        line_of(UNKNOWN_CATEGORY_GEAR_GDL, "gear("),
+        "must be anchored on the gear(...) line"
+    );
 }
 
 // ---------------------------------------------------------------- docs

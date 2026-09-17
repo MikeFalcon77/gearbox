@@ -75,7 +75,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     /// name is the Rust identifier and `r#crate` is not a legal raw identifier.
     /// Unambiguous next to `lib` regardless: one is the package, one is the
     /// library target.
-    fn cargo(
+    fn cargo<'v>(
         #[starlark(require = named)] crate_name: &str,
         #[starlark(require = named)] lib: &str,
         #[starlark(require = named, default = ".")] path: &str,
@@ -83,6 +83,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named, default = true)] default_features: bool,
         #[starlark(require = named)] link: Option<UnpackList<String>>,
         #[starlark(require = named)] attr: Option<&str>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<CargoRecord> {
         Ok(CargoRecord {
             crate_name: crate_name.to_owned(),
@@ -92,23 +93,26 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             default_features,
             link: link.map(|l| l.items).unwrap_or_default(),
             attr: attr.map(str::to_owned),
+            declared_at: crate::declarative::call_location(eval),
         })
     }
 
     /// `docs(...)` -- override where this gear's documents live.
     ///
     /// Only needed when they are not at `docs/` beside the gear or one level up.
-    fn docs(
+    fn docs<'v>(
         #[starlark(require = named)] prd: Option<&str>,
         #[starlark(require = named)] design: Option<&str>,
         #[starlark(require = named)] adr: Option<UnpackList<String>>,
         #[starlark(require = named)] openapi: Option<&str>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<DocsRecord> {
         Ok(DocsRecord {
             prd: prd.map(str::to_owned),
             design: design.map(str::to_owned),
             adr: adr.map(|l| l.items).unwrap_or_default(),
             openapi: openapi.map(str::to_owned),
+            declared_at: crate::declarative::call_location(eval),
         })
     }
 
@@ -116,13 +120,15 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     ///
     /// See [`ConfigRecord`] for why the locator and the curation belong
     /// together and why neither restates the other.
-    fn config(
+    fn config<'v>(
         #[starlark(require = named)] rust: Option<&str>,
         #[starlark(require = named)] exposes: Option<UnpackList<String>>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ConfigRecord> {
         Ok(ConfigRecord {
             rust: rust.map(str::to_owned),
             exposes: exposes.map(|l| l.items).unwrap_or_default(),
+            declared_at: crate::declarative::call_location(eval),
         })
     }
 
@@ -130,9 +136,10 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     ///
     /// The name is positional because it is the whole subject; `kinds` is the
     /// exception rather than the rule and reads better named.
-    fn feature(
+    fn feature<'v>(
         #[starlark(require = pos)] name: &str,
         #[starlark(require = named)] kinds: Option<UnpackList<String>>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<FeatureRecord> {
         let kinds = kinds.map(|l| l.items).unwrap_or_default();
         // Checked here rather than lowered and reported later, for the reason a
@@ -151,6 +158,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         Ok(FeatureRecord {
             name: name.to_owned(),
             kinds,
+            declared_at: crate::declarative::call_location(eval),
         })
     }
 
@@ -274,6 +282,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] from_: Option<&str>,
         #[starlark(require = named)] version: Option<&str>,
         #[starlark(require = named)] kind: Option<&'v GdlEnum>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ConsumeRecord> {
         if from_.is_some() {
             return Err(restated("from_", "#[toolkit::consumes(from = ...)]"));
@@ -290,6 +299,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             sdk: sdk.clone(),
             critical,
             resolving_client: resolving_client.map(str::to_owned),
+            declared_at: crate::declarative::call_location(eval),
         })
     }
 
@@ -303,12 +313,14 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named, default = false)] process_local: bool,
         #[starlark(require = named, default = false)] needs_credentials: bool,
         #[starlark(require = named)] backend: Option<&str>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ClusterPluginRecord> {
         Ok(ClusterPluginRecord {
             package: package.clone(),
             process_local,
             needs_credentials,
             backend: backend.map(str::to_owned),
+            declared_at: crate::declarative::call_location(eval),
         })
     }
 
@@ -329,11 +341,13 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] name: &str,
         #[starlark(require = named)] directory_name: Option<&str>,
         #[starlark(require = named)] labels: Option<UnpackList<String>>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<RoleRecord> {
         Ok(RoleRecord {
             name: name.to_owned(),
             directory_name: directory_name.map(str::to_owned),
             labels: labels.map(|l| l.items).unwrap_or_default(),
+            declared_at: crate::declarative::call_location(eval),
         })
     }
 

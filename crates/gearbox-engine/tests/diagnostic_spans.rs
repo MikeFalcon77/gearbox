@@ -226,7 +226,11 @@ const DUPLICATE_SOURCE: &str = r#"product(
 fn a_duplicate_source_is_anchored_on_its_declaration() {
     let diagnostics = eval_diagnostics(DUPLICATE_SOURCE);
     let diagnostic = find(&diagnostics, "is declared twice");
-    assert_anchored(diagnostic, DUPLICATE_SOURCE, r#"source(id = "twice", at = path("./other"))"#);
+    assert_anchored(
+        diagnostic,
+        DUPLICATE_SOURCE,
+        r#"source(id = "twice", at = path("./other"))"#,
+    );
 }
 
 const CLUSTER_SCOPE_BOUND_TWICE: &str = r#"product(
@@ -435,10 +439,8 @@ const UNKNOWN_ROLE: &str = r#"product(
 /// the `application(...)` that named it.
 #[test]
 fn an_application_naming_an_unknown_role_is_anchored_on_itself() {
-    let catalogue = support::catalogue_of(vec![support::gear_with_roles(
-        "anchor-gear",
-        &["worker"],
-    )]);
+    let catalogue =
+        support::catalogue_of(vec![support::gear_with_roles("anchor-gear", &["worker"])]);
     let resolution = resolve_at(
         &catalogue,
         &intent(UNKNOWN_ROLE),
@@ -456,3 +458,112 @@ fn an_application_naming_an_unknown_role_is_anchored_on_itself() {
 
 #[path = "support/resolve_fixtures.rs"]
 mod support;
+
+// --------------------------------------------------------------------------
+// The gear side. These come out of a catalogue load, so they need a source
+// root on disk -- but not a real crate: the fixture's `cargo(path = ...)` is
+// what fails, which is the diagnostic being anchored.
+
+const BROKEN_GEAR: &str = r#"gear(
+    name = "probe-gear",
+    category = "example",
+    package = cargo(crate_name = "probe", lib = "probe", path = "/absolute/nowhere"),
+)
+"#;
+
+/// An unresolvable `cargo(path = ...)` points at the `cargo(...)` call.
+///
+/// Anchored through `merge::bad_crate_path`, which five call sites share; before
+/// the span was threaded it pointed at line 1 of whichever description
+/// referenced the crate.
+#[test]
+fn an_unresolvable_crate_path_is_anchored_on_its_cargo_call() {
+    let dir = std::env::temp_dir().join(format!("gbx-spans-{}", std::process::id()));
+    drop(std::fs::remove_dir_all(&dir));
+    std::fs::create_dir_all(&dir).expect("scratch source root");
+    std::fs::write(dir.join("gear.gdl"), BROKEN_GEAR).expect("write the description");
+
+    let root = gearbox_engine::SourceRoot::open(
+        gearbox_ir::SourceId::new("probe").unwrap(),
+        dir.clone(),
+    )
+    .expect("open the root");
+    let scan = gearbox_engine::load_catalogue(&[root]);
+    drop(std::fs::remove_dir_all(&dir));
+
+    let diagnostics: Vec<Diagnostic> = scan.catalogue.diagnostics.iter().cloned().collect();
+    let diagnostic = find(&diagnostics, "cannot be resolved");
+    let location = diagnostic
+        .location
+        .as_ref()
+        .expect("the diagnostic carries a location");
+    assert!(location.uri.ends_with("gear.gdl"), "{}", location.uri);
+    assert_ne!(
+        location.range,
+        Range::whole_file(),
+        "the `cargo(...)` call records a span; the diagnostic must use it: {diagnostic:#?}"
+    );
+    assert_eq!(
+        location.range.start.line,
+        line_of(BROKEN_GEAR, "package = cargo("),
+        "must be anchored on the `cargo(...)` line"
+    );
+}
+
+const DOCS_GEAR_RS: &str = r#"
+#[toolkit::gear(name = "probe-gear", capabilities = [system])]
+pub struct ProbeGear;
+"#;
+
+const DOCS_MANIFEST: &str = "[package]\nname = \"probe\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+     [lib]\nname = \"probe\"\npath = \"src/lib.rs\"\n";
+
+const DOCS_GEAR: &str = r#"gear(
+    name = "probe-gear",
+    category = "example",
+    package = cargo(crate_name = "probe", lib = "probe", path = "."),
+    docs = docs(prd = "missing.md"),
+)
+"#;
+
+/// A `docs(prd = ...)` naming a file that does not exist points at the
+/// `docs(...)` call.
+///
+/// Anchored through `docs::resolve_one`'s shared `at`, computed once from the
+/// `docs(...)` record; before the span was threaded it pointed at line 1 of
+/// whichever description declared it.
+#[test]
+fn a_missing_doc_path_is_anchored_on_its_docs_call() {
+    let dir = std::env::temp_dir().join(format!("gbx-spans-docs-{}", std::process::id()));
+    drop(std::fs::remove_dir_all(&dir));
+    std::fs::create_dir_all(dir.join("src")).expect("scratch source root");
+    std::fs::write(dir.join("gear.gdl"), DOCS_GEAR).expect("write the description");
+    std::fs::write(dir.join("Cargo.toml"), DOCS_MANIFEST).expect("write the manifest");
+    std::fs::write(dir.join("src/lib.rs"), DOCS_GEAR_RS).expect("write the crate");
+
+    let root = gearbox_engine::SourceRoot::open(
+        gearbox_ir::SourceId::new("probe").unwrap(),
+        dir.clone(),
+    )
+    .expect("open the root");
+    let scan = gearbox_engine::load_catalogue(&[root]);
+    drop(std::fs::remove_dir_all(&dir));
+
+    let diagnostics: Vec<Diagnostic> = scan.catalogue.diagnostics.iter().cloned().collect();
+    let diagnostic = find(&diagnostics, "points at no file");
+    let location = diagnostic
+        .location
+        .as_ref()
+        .expect("the diagnostic carries a location");
+    assert!(location.uri.ends_with("gear.gdl"), "{}", location.uri);
+    assert_ne!(
+        location.range,
+        Range::whole_file(),
+        "the `docs(...)` call records a span; the diagnostic must use it: {diagnostic:#?}"
+    );
+    assert_eq!(
+        location.range.start.line,
+        line_of(DOCS_GEAR, "docs = docs("),
+        "must be anchored on the `docs(...)` line"
+    );
+}

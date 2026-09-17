@@ -106,6 +106,7 @@ pub fn check(
                     &declared.field,
                     &declared.record.path,
                     &e,
+                    declared.record.declared_at.as_ref(),
                 ));
                 continue;
             }
@@ -127,7 +128,10 @@ pub fn check(
                              and whose manifest is not will fail the build rather than the \
                              description",
                         )
-                        .at(Location::file(identity.uri.clone()))
+                        .at(Location::or_file(
+                            declared.record.declared_at.as_ref(),
+                            &identity.uri,
+                        ))
                         .with_evidence(evidence(&dir)),
                     );
                 }
@@ -150,7 +154,10 @@ pub fn check(
                         manifest.package_name
                     ),
                 )
-                .at(Location::file(identity.uri.clone()))
+                .at(Location::or_file(
+                    declared.record.declared_at.as_ref(),
+                    &identity.uri,
+                ))
                 .with_evidence(evidence(&dir)),
             );
         }
@@ -165,7 +172,10 @@ pub fn check(
                     ),
                     help_for_lib(&manifest),
                 )
-                .at(Location::file(identity.uri.clone()))
+                .at(Location::or_file(
+                    declared.record.declared_at.as_ref(),
+                    &identity.uri,
+                ))
                 .with_evidence(evidence(&dir)),
             );
         }

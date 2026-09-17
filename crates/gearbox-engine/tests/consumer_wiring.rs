@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gearbox_engine::{SourceRoot, load_catalogue};
-use gearbox_ir::{Catalogue, DiagnosticCode, SourceId};
+use gearbox_ir::{Catalogue, DiagnosticCode, Range, SourceId};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
@@ -36,6 +36,39 @@ pub trait ThingApi: Send + Sync {}
 
 const CONSUMER_MANIFEST: &str = "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
      [lib]\nname = \"consumer\"\npath = \"src/lib.rs\"\n";
+
+const CONSUMER_GEAR_GDL: &str = r#"
+gear(
+    name = "Consumer",
+    description = "d",
+    category = "core-functionality",
+    visibility = "internal",
+    package = cargo(crate_name = "consumer", lib = "consumer", path = "."),
+    consumes = [
+        consume(
+            contract = "ThingApi",
+            rust = "thing_sdk::ThingApi",
+            sdk = cargo(crate_name = "thing-sdk", lib = "thing_sdk", path = "../thing-sdk"),
+        ),
+    ],
+)
+"#;
+
+/// The zero-based line holding `needle`, for asserting a diagnostic's anchor.
+fn line_of(text: &str, needle: &str) -> u32 {
+    let found: Vec<u32> = text
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains(needle))
+        .map(|(i, _)| u32::try_from(i).expect("fixtures are short"))
+        .collect();
+    assert_eq!(
+        found.len(),
+        1,
+        "`{needle}` must appear on exactly one line of the fixture, found {found:?}"
+    );
+    found[0]
+}
 
 /// A consumer crate whose Rust half and description half are set separately,
 /// which is the whole point: the two spellings are what this file compares.
@@ -64,26 +97,7 @@ pub struct {struct_ident};
         ),
     )
     .unwrap();
-    std::fs::write(
-        consumer.join("gear.gdl"),
-        r#"
-gear(
-    name = "Consumer",
-    description = "d",
-    category = "core-functionality",
-    visibility = "internal",
-    package = cargo(crate_name = "consumer", lib = "consumer", path = "."),
-    consumes = [
-        consume(
-            contract = "ThingApi",
-            rust = "thing_sdk::ThingApi",
-            sdk = cargo(crate_name = "thing-sdk", lib = "thing_sdk", path = "../thing-sdk"),
-        ),
-    ],
-)
-"#,
-    )
-    .unwrap();
+    std::fs::write(consumer.join("gear.gdl"), CONSUMER_GEAR_GDL).unwrap();
     root
 }
 
@@ -137,6 +151,24 @@ fn a_consumption_with_no_attribute_behind_it_is_reported() {
         found[0].message.contains("no `#[toolkit::consumes]`"),
         "{}",
         found[0].message
+    );
+
+    // Anchored on the `consume(...)` call, not the file: it is the declared
+    // half of the edge, and the only one a description-level reader could name.
+    let location = found[0]
+        .location
+        .as_ref()
+        .expect("the diagnostic carries a location");
+    assert_ne!(
+        location.range,
+        Range::whole_file(),
+        "must anchor on the consume(...) call, not the file: {:#?}",
+        found[0]
+    );
+    assert_eq!(
+        location.range.start.line,
+        line_of(CONSUMER_GEAR_GDL, "consume("),
+        "must be anchored on the consume(...) line"
     );
 }
 

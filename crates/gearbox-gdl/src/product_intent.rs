@@ -289,7 +289,13 @@ fn build_gears(
     let mut selected = Vec::new();
     let mut seen = BTreeSet::new();
     for record in &decl.gears {
-        let Some(gear) = gear_id(record.declared_at.as_ref(), uri, &record.gear, "use_gear", diagnostics) else {
+        let Some(gear) = gear_id(
+            record.declared_at.as_ref(),
+            uri,
+            &record.gear,
+            "use_gear",
+            diagnostics,
+        ) else {
             continue;
         };
         let source = match SourceId::new(record.source.clone()) {
@@ -378,7 +384,13 @@ fn build_plugins(
     let mut claimed = Claims::new();
 
     for entry in &record.plugins {
-        let Some(gear) = gear_id(record.declared_at.as_ref(), uri, &entry.gear, "plugin", diagnostics) else {
+        let Some(gear) = gear_id(
+            record.declared_at.as_ref(),
+            uri,
+            &entry.gear,
+            "plugin",
+            diagnostics,
+        ) else {
             continue;
         };
         let scoped = scoped_profiles(
@@ -416,7 +428,13 @@ fn build_bindings(
     let mut claimed = Claims::new();
 
     for record in &decl.bindings {
-        let Some(consumer) = gear_id(record.declared_at.as_ref(), uri, &record.consumer, "bind", diagnostics) else {
+        let Some(consumer) = gear_id(
+            record.declared_at.as_ref(),
+            uri,
+            &record.consumer,
+            "bind",
+            diagnostics,
+        ) else {
             continue;
         };
         let contract = match ContractId::new(record.contract.clone()) {
@@ -520,7 +538,13 @@ fn build_application_pins(
                 continue;
             }
         };
-        let Some(anchor) = gear_id(record.declared_at.as_ref(), uri, &record.anchor, "application", diagnostics) else {
+        let Some(anchor) = gear_id(
+            record.declared_at.as_ref(),
+            uri,
+            &record.anchor,
+            "application",
+            diagnostics,
+        ) else {
             continue;
         };
         let scoped = scoped_profiles(
@@ -772,7 +796,13 @@ fn deployment_profile(
             Some(DeploymentProfileDecl::SelfHosted {
                 id: id.clone(),
                 host,
-                discovery: discovery(uri, id, record.discovery.as_deref(), record.declared_at.as_ref(), diagnostics)?,
+                discovery: discovery(
+                    uri,
+                    id,
+                    record.discovery.as_deref(),
+                    record.declared_at.as_ref(),
+                    diagnostics,
+                )?,
                 target_dir: record.target_dir.clone(),
                 cargo_profile,
                 declared_at: record.declared_at.clone(),
@@ -780,7 +810,13 @@ fn deployment_profile(
         }
         "kubernetes" => Some(DeploymentProfileDecl::Kubernetes {
             id: id.clone(),
-            discovery: discovery(uri, id, record.discovery.as_deref(), record.declared_at.as_ref(), diagnostics)?,
+            discovery: discovery(
+                uri,
+                id,
+                record.discovery.as_deref(),
+                record.declared_at.as_ref(),
+                diagnostics,
+            )?,
             namespace: record.namespace.clone(),
             image_registry: record.image_registry.clone(),
             declared_at: record.declared_at.clone(),

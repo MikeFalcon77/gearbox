@@ -48,9 +48,14 @@ pub struct MergedGear {
     pub consumed: Vec<ContractDescriptor>,
 }
 
-/// An error attributable to the description.
+/// An error attributable to the description, naming the file and no position.
 fn invalid(uri: &str, message: impl Into<String>, help: impl Into<String>) -> Diagnostic {
-    Diagnostic::error(DiagnosticCode::GdlEval, message, help).at(Location::file(uri.to_owned()))
+    invalid_at(Location::file(uri.to_owned()), message, help)
+}
+
+/// The same, anchored on the declaration at fault.
+fn invalid_at(at: Location, message: impl Into<String>, help: impl Into<String>) -> Diagnostic {
+    Diagnostic::error(DiagnosticCode::GdlEval, message, help).at(at)
 }
 
 /// Merge the projected and declared halves.
@@ -282,10 +287,16 @@ pub fn merge(
     report_front_doors(uri, &id, &declared_roles, diagnostics);
     report_role_names(uri, &id, &decl.declared_roles, &declared_roles, diagnostics);
     report_role_modes(uri, &id, &declared_roles, config.as_ref(), diagnostics);
-    report_role_gaps(uri, &id, &declared_roles, diagnostics);
+    report_role_gaps(uri, &id, &declared_roles, decl.declared_at.as_ref(), diagnostics);
 
     let category = decl.category.clone();
-    report_unknown_category(uri, &id, category.as_deref(), diagnostics);
+    report_unknown_category(
+        uri,
+        &id,
+        category.as_deref(),
+        decl.declared_at.as_ref(),
+        diagnostics,
+    );
 
     let visibility = match decl.visibility.as_deref() {
         None | Some("internal") => Visibility::Internal,
@@ -401,7 +412,7 @@ fn projected_from<'a>(
                     record.rust
                 ),
             )
-            .at(Location::file(uri.to_owned()))
+            .at(Location::or_file(record.declared_at.as_ref(), uri))
             .with_evidence(
                 "libs/toolkit-contract-macros/src/consumes.rs \
                  (the registration is emitted by the attribute and by nothing else)",
@@ -457,7 +468,13 @@ pub(crate) fn cargo_ref(
     let path = match gdl_dir.resolve(&record.path) {
         Ok(path) => path,
         Err(e) => {
-            diagnostics.push(bad_crate_path(uri, field, &record.path, &e));
+            diagnostics.push(bad_crate_path(
+                uri,
+                field,
+                &record.path,
+                &e,
+                record.declared_at.as_ref(),
+            ));
             gdl_dir.clone()
         }
     };
@@ -884,7 +901,7 @@ fn report_role_names(
                 ),
                 help,
             )
-            .at(Location::file(uri.to_owned())),
+            .at(Location::or_file(record.declared_at.as_ref(), uri)),
         );
     }
 }
@@ -959,7 +976,13 @@ fn report_role_modes(
 /// one role -- and is reported at resolution as `GBX0318`. Whether its labels
 /// can be written is a statement about the gear and its generated
 /// configuration, which is knowable the moment the description is read.
-fn report_role_gaps(uri: &str, id: &GearId, roles: &[DeclaredRole], diagnostics: &mut Diagnostics) {
+fn report_role_gaps(
+    uri: &str,
+    id: &GearId,
+    roles: &[DeclaredRole],
+    declared_at: Option<&Location>,
+    diagnostics: &mut Diagnostics,
+) {
     if !roles.iter().any(|r| !r.labels.is_empty()) {
         return;
     }
@@ -971,7 +994,7 @@ fn report_role_gaps(uri: &str, id: &GearId, roles: &[DeclaredRole], diagnostics:
                  description can carry one"
             ),
         )
-        .at(Location::file(uri.to_owned()))
+        .at(Location::or_file(declared_at, uri))
         .with_evidence(
             "libs/toolkit/src/bootstrap/config/mod.rs \
              (oop_http.labels exists; the embedded profile has no instance to label)",
@@ -994,6 +1017,9 @@ fn report_unknown_category(
     uri: &str,
     id: &GearId,
     category: Option<&str>,
+    // `declared_at` is the `gear(...)` span: `category` is an argument of that
+    // call rather than a call of its own, so this is the finest anchor there is.
+    declared_at: Option<&Location>,
     diagnostics: &mut Diagnostics,
 ) {
     let Some(name) = category else { return };
@@ -1005,7 +1031,7 @@ fn report_unknown_category(
             DiagnosticCode::GdlUnknownCategory,
             format!("gear `{id}` declares category `{name}`, which no other gear uses"),
         )
-        .at(Location::file(uri.to_owned()))
+        .at(Location::or_file(declared_at, uri))
         .with_help(format!(
             "the platform's categories are: {}",
             gearbox_gdl::vocabulary::KNOWN_CATEGORIES.join(", ")
@@ -1125,14 +1151,19 @@ pub fn crate_dir(
 /// [`crate_dir`] has the same mistake to explain, and five spellings of it would
 /// drift.
 #[must_use]
+///
+/// `declared_at` is the `cargo(...)` call the path was written in. Every caller
+/// has the record in hand, and without it this pointed at line 1 of whichever
+/// description referenced the crate.
 pub fn bad_crate_path(
     uri: &str,
     field: &str,
     package_path: &str,
     error: &gearbox_ir::IdError,
+    declared_at: Option<&Location>,
 ) -> Diagnostic {
-    invalid(
-        uri,
+    invalid_at(
+        Location::or_file(declared_at, uri),
         format!(
             "`{field}` declares `path = \"{package_path}\"`, which cannot be resolved: {error}"
         ),

@@ -123,6 +123,7 @@ fn providers(
                     "cluster_plugin.package",
                     &record.package.path,
                     &e,
+                    record.package.declared_at.as_ref(),
                 ));
                 continue;
             }

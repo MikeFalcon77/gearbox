@@ -423,3 +423,103 @@ fn a_plugin_under_its_own_host_is_clean() {
         "{codes:?} {messages}"
     );
 }
+
+// --------------------------------------------------------------------------
+// `plugin_interface`, checked against the SDK at catalogue-load time -- a
+// different phase than the two sections above, which join a loaded catalogue
+// against a product. This builds its own two-crate source root rather than
+// using `check`/`product`, because the diagnostic under test
+// (`PluginPointUndetermined`) fires while the catalogue itself is built.
+
+const INTERFACE_SDK_MANIFEST: &str = "[package]\nname = \"thing-sdk\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+     [lib]\nname = \"thing_sdk\"\npath = \"src/lib.rs\"\n";
+
+const INTERFACE_SDK_RS: &str = r"
+pub trait ThingPluginClient: Send + Sync {}
+";
+
+const INTERFACE_GEAR_MANIFEST: &str = "[package]\nname = \"plugin-gear\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+     [lib]\nname = \"plugin_gear\"\npath = \"src/lib.rs\"\n";
+
+const INTERFACE_GEAR_RS: &str = r#"
+#[toolkit::gear(name = "plugin-gear", capabilities = [system])]
+pub struct PluginGear;
+"#;
+
+/// A `plugin_interface` naming no trait the sdk declares.
+const INTERFACE_GEAR_GDL: &str = r#"
+gear(
+    name = "Plugin Gear",
+    description = "d",
+    category = "core-functionality",
+    visibility = "internal",
+    package = cargo(crate_name = "plugin-gear", lib = "plugin_gear", path = "."),
+    sdk = cargo(crate_name = "thing-sdk", lib = "thing_sdk", path = "../thing-sdk"),
+    plugin_interface = "NoSuchInterface",
+)
+"#;
+
+fn line_of(text: &str, needle: &str) -> u32 {
+    let found: Vec<u32> = text
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains(needle))
+        .map(|(i, _)| u32::try_from(i).expect("fixtures are short"))
+        .collect();
+    assert_eq!(
+        found.len(),
+        1,
+        "`{needle}` must appear on exactly one line of the fixture, found {found:?}"
+    );
+    found[0]
+}
+
+/// `plugin_interface` is an argument of `gear(...)`, not a call of its own, so
+/// an unresolvable name has to fall back to the `gear(...)` span -- the finest
+/// anchor that exists for it.
+#[test]
+fn an_unresolvable_plugin_interface_is_anchored_on_its_gear_call() {
+    let root = std::env::temp_dir().join(format!("gbx-plugin-interface-{}", std::process::id()));
+    drop(std::fs::remove_dir_all(&root));
+
+    let sdk = root.join("thing-sdk");
+    std::fs::create_dir_all(sdk.join("src")).unwrap();
+    std::fs::write(sdk.join("Cargo.toml"), INTERFACE_SDK_MANIFEST).unwrap();
+    std::fs::write(sdk.join("src/lib.rs"), INTERFACE_SDK_RS).unwrap();
+
+    let gear = root.join("plugin-gear");
+    std::fs::create_dir_all(gear.join("src")).unwrap();
+    std::fs::write(gear.join("Cargo.toml"), INTERFACE_GEAR_MANIFEST).unwrap();
+    std::fs::write(gear.join("src/lib.rs"), INTERFACE_GEAR_RS).unwrap();
+    std::fs::write(gear.join("gear.gdl"), INTERFACE_GEAR_GDL).unwrap();
+
+    let source = SourceRoot::open(SourceId::new("demo").unwrap(), &root).unwrap();
+    let catalogue = load_catalogue(&[source]).catalogue;
+    drop(std::fs::remove_dir_all(&root));
+
+    let diagnostic = catalogue
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::PluginPointUndetermined)
+        .expect("GBX0xxx (PluginPointUndetermined)");
+    assert!(
+        diagnostic.message.contains("NoSuchInterface"),
+        "{}",
+        diagnostic.message
+    );
+
+    let location = diagnostic
+        .location
+        .as_ref()
+        .expect("the diagnostic carries a location");
+    assert_ne!(
+        location.range,
+        gearbox_ir::Range::whole_file(),
+        "must anchor on the gear(...) call, not the file: {diagnostic:#?}"
+    );
+    assert_eq!(
+        location.range.start.line,
+        line_of(INTERFACE_GEAR_GDL, "gear("),
+        "must be anchored on the gear(...) line"
+    );
+}

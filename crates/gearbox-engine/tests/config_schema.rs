@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gearbox_engine::{SourceRoot, load_catalogue};
-use gearbox_ir::{Catalogue, ConfigFieldType, DiagnosticCode, GearId, SourceId};
+use gearbox_ir::{Catalogue, ConfigFieldType, DiagnosticCode, GearId, Range, SourceId};
 
 const GEAR_RS: &str = r#"
 #[toolkit::gear(name = "demo", capabilities = [system])]
@@ -68,17 +68,10 @@ pub enum AuthNMode {
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
-/// One root holding one gear whose description ends with `declared`.
-fn root(declared: &str) -> PathBuf {
-    let nth = NEXT.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("gbx-config-schema-{}-{nth}", std::process::id()));
-    drop(std::fs::remove_dir_all(&root));
-    let crate_dir = root.join("demo");
-    std::fs::create_dir_all(crate_dir.join("src")).unwrap();
-    std::fs::write(
-        crate_dir.join("gear.gdl"),
-        format!(
-            r#"
+/// The `gear.gdl` text for a description ending with `declared`.
+fn source(declared: &str) -> String {
+    format!(
+        r#"
 gear(
     name = "Demo",
     description = "d",
@@ -88,9 +81,33 @@ gear(
     {declared}
 )
 "#
-        ),
     )
-    .unwrap();
+}
+
+/// The zero-based line holding `needle`, for asserting a diagnostic's anchor.
+fn line_of(text: &str, needle: &str) -> u32 {
+    let found: Vec<u32> = text
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains(needle))
+        .map(|(i, _)| u32::try_from(i).expect("fixtures are short"))
+        .collect();
+    assert_eq!(
+        found.len(),
+        1,
+        "`{needle}` must appear on exactly one line of the fixture, found {found:?}"
+    );
+    found[0]
+}
+
+/// One root holding one gear whose description ends with `declared`.
+fn root(declared: &str) -> PathBuf {
+    let nth = NEXT.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!("gbx-config-schema-{}-{nth}", std::process::id()));
+    drop(std::fs::remove_dir_all(&root));
+    let crate_dir = root.join("demo");
+    std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+    std::fs::write(crate_dir.join("gear.gdl"), source(declared)).unwrap();
     std::fs::write(
         crate_dir.join("Cargo.toml"),
         "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
@@ -184,9 +201,28 @@ fn exposing_a_field_the_struct_does_not_declare_is_refused_by_name() {
 
 #[test]
 fn a_declared_struct_that_does_not_exist_is_refused() {
-    let catalogue = catalogue(r#"config_schema = config(rust = "NoSuchConfig", exposes = ["a"]),"#);
+    let declared = r#"config_schema = config(rust = "NoSuchConfig", exposes = ["a"]),"#;
+    let catalogue = catalogue(declared);
     assert_eq!(codes(&catalogue), [DiagnosticCode::GdlConfigStructNotFound]);
     assert!(demo(&catalogue).config_schema.is_none());
+
+    // GBX0212's whole reason for anchoring on `config(...)` rather than the
+    // file: the struct name is an argument of that call, not of `gear(...)`.
+    let diagnostic = catalogue.diagnostics.iter().next().expect("one diagnostic");
+    let location = diagnostic
+        .location
+        .as_ref()
+        .expect("the diagnostic carries a location");
+    assert_ne!(
+        location.range,
+        Range::whole_file(),
+        "must anchor on the config(...) call, not the file: {diagnostic:#?}"
+    );
+    assert_eq!(
+        location.range.start.line,
+        line_of(&source(declared), "config(rust ="),
+        "must be anchored on the config(...) line"
+    );
 }
 
 /// Five of the fourteen gears in the corpus read no configuration at all. Saying

@@ -364,6 +364,7 @@ fn project_and_merge(
                     "package",
                     &package.path,
                     &e,
+                    package.declared_at.as_ref(),
                 ));
                 return None;
             }
@@ -433,6 +434,7 @@ fn project_and_merge(
                         "sdk",
                         &sdk.path,
                         &e,
+                        sdk.declared_at.as_ref(),
                     ));
                 })
                 .ok()

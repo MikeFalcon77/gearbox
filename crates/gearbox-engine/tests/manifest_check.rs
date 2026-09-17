@@ -15,7 +15,38 @@
 use std::path::{Path, PathBuf};
 
 use gearbox_engine::{SourceRoot, load_catalogue};
-use gearbox_ir::{DiagnosticCode, SourceId};
+use gearbox_ir::{DiagnosticCode, Range, SourceId};
+
+/// The `gear.gdl` text `Tree::described_as` writes, exposed so a test can find
+/// the line a diagnostic should anchor on.
+fn gear_gdl(crate_name: &str, lib: &str) -> String {
+    format!(
+        r#"
+gear(
+    name = "Thing",
+    description = "A thing.",
+    category = "core-functionality",
+    package = cargo(crate_name = "{crate_name}", lib = "{lib}", path = "."),
+)
+"#
+    )
+}
+
+/// The zero-based line holding `needle`, for asserting a diagnostic's anchor.
+fn line_of(text: &str, needle: &str) -> u32 {
+    let found: Vec<u32> = text
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains(needle))
+        .map(|(i, _)| u32::try_from(i).expect("fixtures are short"))
+        .collect();
+    assert_eq!(
+        found.len(),
+        1,
+        "`{needle}` must appear on exactly one line of the fixture, found {found:?}"
+    );
+    found[0]
+}
 
 fn gears_rust() -> Option<PathBuf> {
     // Walks up instead of counting `..`, and the difference is not cosmetic.
@@ -67,20 +98,7 @@ impl Tree {
     }
 
     fn described_as(&self, crate_name: &str, lib: &str) -> &Self {
-        std::fs::write(
-            self.0.join("thing/gear.gdl"),
-            format!(
-                r#"
-gear(
-    name = "Thing",
-    description = "A thing.",
-    category = "core-functionality",
-    package = cargo(crate_name = "{crate_name}", lib = "{lib}", path = "."),
-)
-"#
-            ),
-        )
-        .unwrap();
+        std::fs::write(self.0.join("thing/gear.gdl"), gear_gdl(crate_name, lib)).unwrap();
         self
     }
 
@@ -91,6 +109,16 @@ gear(
             .diagnostics
             .iter()
             .map(|d| (d.code, d.message.clone()))
+            .collect()
+    }
+
+    fn full_diagnostics(&self) -> Vec<gearbox_ir::Diagnostic> {
+        let source = SourceRoot::open(SourceId::new("fixture").unwrap(), self.0.clone()).unwrap();
+        load_catalogue(&[source])
+            .catalogue
+            .diagnostics
+            .iter()
+            .cloned()
             .collect()
     }
 }
@@ -144,6 +172,26 @@ fn a_wrong_lib_ident_is_reported() {
         messages[0].contains("links as `cf_thing`"),
         "the message has to name the identifier the crate really uses: {}",
         messages[0]
+    );
+
+    // Anchored on the `cargo(...)` call that declared the wrong identity, not
+    // the file: a description naming several crates must not blur which one
+    // is wrong.
+    let full = tree.full_diagnostics();
+    let d = full
+        .iter()
+        .find(|d| d.code == DiagnosticCode::ValidateLibIdentMismatch)
+        .expect("GBX0209");
+    let location = d.location.as_ref().expect("carries a location");
+    assert_ne!(
+        location.range,
+        Range::whole_file(),
+        "must anchor on the cargo(...) call, not the file: {d:#?}"
+    );
+    assert_eq!(
+        location.range.start.line,
+        line_of(&gear_gdl("cf-thing", "thing"), "cargo("),
+        "must be anchored on the cargo(...) line"
     );
 }
 

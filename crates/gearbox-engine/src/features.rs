@@ -88,7 +88,10 @@ pub fn project(
                         )
                     },
                 )
-                .at(Location::file(identity.uri.as_str().to_owned())),
+                .at(Location::or_file(
+                    declared.declared_at.as_ref(),
+                    identity.uri.as_str(),
+                )),
             );
             continue;
         }

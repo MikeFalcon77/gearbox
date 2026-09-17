@@ -34,6 +34,10 @@ pub fn project(
 ) -> Option<ConfigSchema> {
     let declared = decl.config_schema.as_ref()?;
     let uri = identity.uri.as_str();
+    // Every diagnostic in this file is about the `config(...)` call -- a struct
+    // it cannot find, or an `exposes` entry naming no field -- so the anchor is
+    // computed once and handed down.
+    let at = Location::or_file(declared.declared_at.as_ref(), uri);
 
     let root = match declared.rust.clone() {
         Some(named) => named,
@@ -45,7 +49,7 @@ pub fn project(
             Ok(None) => {
                 report(
                     diagnostics,
-                    uri,
+                    &at,
                     "`config_schema` is declared but this crate deserializes no configuration"
                         .to_owned(),
                     "drop `config_schema`, or name the struct with `config(rust = \"...\")` if \
@@ -56,7 +60,7 @@ pub fn project(
             Err(ConfigRootError::Ambiguous { roots }) => {
                 report(
                     diagnostics,
-                    uri,
+                    &at,
                     format!(
                         "this crate deserializes {} different types as its configuration: {}",
                         roots.len(),
@@ -76,7 +80,7 @@ pub fn project(
         Err(ConfigFieldsError::RootNotFound { .. }) => {
             report(
                 diagnostics,
-                uri,
+                &at,
                 format!("this crate declares no struct named `{root}`"),
                 "check the struct name against the crate; `config_schema` is a locator, not a path",
             );
@@ -85,7 +89,7 @@ pub fn project(
         Err(ConfigFieldsError::NoNamedFields { .. }) => {
             report(
                 diagnostics,
-                uri,
+                &at,
                 format!("`{root}` is a tuple or unit struct, so it has no configuration keys"),
                 "drop `config_schema`, or name the struct that actually carries the keys with \
                  `config(rust = \"...\")`",
@@ -95,7 +99,7 @@ pub fn project(
         Err(e @ ConfigFieldsError::UnreadableSerdeAttribute { .. }) => {
             report(
                 diagnostics,
-                uri,
+                &at,
                 format!("{e}"),
                 "a `#[serde(...)]` form this cannot read hides everything written after it in \
                  the same attribute, `skip` included; split it into separate `#[serde(...)]` \
@@ -107,7 +111,7 @@ pub fn project(
     if projected.is_empty() {
         report(
             diagnostics,
-            uri,
+            &at,
             format!("every field of `{root}` is `#[serde(skip)]`, so it has no configuration"),
             "drop `config_schema`, or name the struct that carries the keys with \
              `config(rust = \"...\")`",
@@ -136,7 +140,7 @@ pub fn project(
                                 .join(", ")
                         ),
                     )
-                    .at(Location::file(uri.to_owned())),
+                    .at(at.clone()),
                 );
                 return None;
             };
@@ -154,9 +158,10 @@ pub fn project(
     Some(ConfigSchema { rust: root, fields })
 }
 
-fn report(diagnostics: &mut Diagnostics, uri: &str, message: String, help: &str) {
+/// `at` rather than `uri`: every one of these is about the `config(...)` call,
+/// and the caller is the only one holding it.
+fn report(diagnostics: &mut Diagnostics, at: &Location, message: String, help: &str) {
     diagnostics.push(
-        Diagnostic::error(DiagnosticCode::GdlConfigStructNotFound, message, help)
-            .at(Location::file(uri.to_owned())),
+        Diagnostic::error(DiagnosticCode::GdlConfigStructNotFound, message, help).at(at.clone()),
     );
 }

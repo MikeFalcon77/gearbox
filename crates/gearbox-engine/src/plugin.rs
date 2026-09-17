@@ -177,7 +177,11 @@ fn declared_interface(
             "name a plugin interface the sdk crate actually declares, or drop the field and \
              let the `impl` be read",
         )
-        .at(Location::file(uri.to_owned())),
+        // `plugin_interface` is an argument of `gear(...)`, not a call of its
+        // own, so the `gear(...)` span is both the right anchor and the only one
+        // that exists -- call granularity, per
+        // `cpt-gearbox-adr-gdl-language-server`.
+        .at(Location::or_file(decl.declared_at.as_ref(), uri)),
     );
     None
 }

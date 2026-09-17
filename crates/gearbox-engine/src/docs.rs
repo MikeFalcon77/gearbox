@@ -43,6 +43,11 @@ pub fn project(
 ) -> Option<GearDocs> {
     let uri = identity.uri.as_str();
     let declared = decl.docs.as_ref();
+    // Computed once, where the record is in hand: both helpers below are handed
+    // a path string rather than the declaration, so neither can find the span
+    // for itself. The `docs(...)` call, not the individual argument -- `docs`
+    // takes one `Evaluator`, so the call is the finest span there is.
+    let at = Location::or_file(declared.and_then(|d| d.declared_at.as_ref()), uri);
 
     // Beside the description, then one level up. Order matters: a gear that
     // keeps its own `docs/` should not be shadowed by the family's.
@@ -58,7 +63,7 @@ pub fn project(
             &bases,
             declared.and_then(|d| d.prd.as_deref()),
             &["docs/PRD.md"],
-            uri,
+            &at,
             diagnostics,
         ),
         design: resolve_one(
@@ -67,17 +72,17 @@ pub fn project(
             &bases,
             declared.and_then(|d| d.design.as_deref()),
             &["docs/DESIGN.md"],
-            uri,
+            &at,
             diagnostics,
         ),
-        adr: resolve_adr(root, gdl_dir, &bases, declared, uri, diagnostics),
+        adr: resolve_adr(root, gdl_dir, &bases, declared, &at, diagnostics),
         openapi: resolve_one(
             root,
             gdl_dir,
             &bases,
             declared.and_then(|d| d.openapi.as_deref()),
             OPENAPI_CANDIDATES,
-            uri,
+            &at,
             diagnostics,
         ),
     };
@@ -114,7 +119,7 @@ fn resolve_one(
     bases: &[PathBuf],
     declared: Option<&str>,
     candidates: &[&str],
-    uri: &str,
+    at: &Location,
     diagnostics: &mut Diagnostics,
 ) -> Option<RelPath> {
     if let Some(declared) = declared {
@@ -129,7 +134,7 @@ fn resolve_one(
                 "the path is relative to the description's own directory; drop the field to \
                  let the `docs/` convention find it",
             )
-            .at(Location::file(uri.to_owned())),
+            .at(at.clone()),
         );
         return None;
     }
@@ -147,7 +152,7 @@ fn resolve_adr(
     gdl_dir: &Path,
     bases: &[PathBuf],
     declared: Option<&gearbox_gdl::records::DocsRecord>,
-    uri: &str,
+    at: &Location,
     diagnostics: &mut Diagnostics,
 ) -> Vec<RelPath> {
     if let Some(paths) = declared.map(|d| &d.adr).filter(|a| !a.is_empty()) {
@@ -163,7 +168,7 @@ fn resolve_adr(
                         format!("`docs(adr = [\"{declared}\"])` points at no file"),
                         "the path is relative to the description's own directory",
                     )
-                    .at(Location::file(uri.to_owned())),
+                    .at(at.clone()),
                 );
             }
         }
