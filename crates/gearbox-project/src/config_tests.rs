@@ -17,6 +17,7 @@ use gearbox_ir::ConfigFieldType;
 
 use super::*;
 use crate::scan::scan_crate;
+use crate::test_corpus::require;
 
 fn file(src: &str) -> RustFile {
     RustFile {
@@ -31,16 +32,8 @@ fn tree(rel: &str) -> Option<Vec<RustFile>> {
     Some(scan_crate(&dir).unwrap_or_else(|e| panic!("scan {rel}: {e}")))
 }
 
-macro_rules! require {
-    ($e:expr) => {
-        match $e {
-            Some(v) => v,
-            None => {
-                eprintln!("skipping: ../gears-rust not present");
-                return;
-            }
-        }
-    };
+fn fields(files: &[RustFile], root: &str) -> Vec<ConfigField> {
+    project_config_fields(files, root).unwrap_or_else(|e| panic!("project `{root}`: {e}"))
 }
 
 fn named<'a>(fields: &'a [ConfigField], name: &str) -> &'a ConfigField {
@@ -145,7 +138,7 @@ fn scalars_are_classified_and_everything_else_is_complex() {
         pub struct Inner { pub a: String }
         ",
     )];
-    let fields = project_config_fields(&files, "DemoConfig");
+    let fields = fields(&files, "DemoConfig");
     assert_eq!(
         names(&fields),
         ["bind_addr", "enabled", "port", "ratio", "tags", "nested"]
@@ -176,7 +169,7 @@ fn a_unit_enum_projects_its_variants_through_rename_all() {
         }
         "#,
     )];
-    let fields = project_config_fields(&files, "DemoConfig");
+    let fields = fields(&files, "DemoConfig");
     assert_eq!(
         named(&fields, "mode").ty,
         ConfigFieldType::Enum {
@@ -201,7 +194,7 @@ fn an_enum_with_data_carrying_variants_is_complex() {
         "#,
     )];
     assert_eq!(
-        named(&project_config_fields(&files, "DemoConfig"), "auth").ty,
+        named(&fields(&files, "DemoConfig"), "auth").ty,
         ConfigFieldType::Complex
     );
 }
@@ -218,7 +211,7 @@ fn an_enum_defined_outside_the_scan_degrades_instead_of_guessing() {
         ",
     )];
     assert_eq!(
-        named(&project_config_fields(&files, "DemoConfig"), "enforcement").ty,
+        named(&fields(&files, "DemoConfig"), "enforcement").ty,
         ConfigFieldType::Complex
     );
 }
@@ -236,10 +229,7 @@ fn an_unknown_serde_eq_form_does_not_drop_later_keys() {
         }
         "#,
     )];
-    assert_eq!(
-        names(&project_config_fields(&files, "TenantConfig")),
-        ["type"]
-    );
+    assert_eq!(names(&fields(&files, "TenantConfig")), ["type"]);
 }
 
 #[test]
@@ -253,7 +243,7 @@ fn a_renamed_field_projects_under_its_wire_name() {
         }
         "#,
     )];
-    let fields = project_config_fields(&files, "TenantConfig");
+    let fields = fields(&files, "TenantConfig");
     assert_eq!(names(&fields), ["type"]);
 }
 
@@ -269,7 +259,7 @@ fn a_custom_codec_is_complex_rather_than_its_rust_type() {
         "#,
     )];
     assert_eq!(
-        named(&project_config_fields(&files, "CacheSettings"), "ttl").ty,
+        named(&fields(&files, "CacheSettings"), "ttl").ty,
         ConfigFieldType::Complex
     );
 }
@@ -282,9 +272,244 @@ fn a_secret_typed_field_is_flagged() {
         pub struct TokenMapping { pub token: SecretString }
         ",
     )];
-    let fields = project_config_fields(&files, "TokenMapping");
+    let fields = fields(&files, "TokenMapping");
     assert!(named(&fields, "token").secret);
     assert_eq!(named(&fields, "token").ty, ConfigFieldType::Str);
+}
+
+/// Every `secrecy` wrapper, not just the alias. `secret` is the only gate
+/// keeping a credential out of the generated `ConfigMap`, so a field typed
+/// `Secret<String>` coming back as an ordinary value meant the generator wrote
+/// it in plaintext.
+#[test]
+fn every_secrecy_wrapper_is_flagged() {
+    let files = [file(
+        r"
+        #[derive(Deserialize)]
+        pub struct Creds {
+            pub a: SecretString,
+            pub b: Secret<String>,
+            pub c: SecretBox<str>,
+            pub d: SecretVec<u8>,
+            pub e: Secret<u16>,
+            pub plain: String,
+        }
+        ",
+    )];
+    let fields = fields(&files, "Creds");
+    for name in ["a", "b", "c", "d", "e"] {
+        assert!(
+            named(&fields, name).secret,
+            "`{name}` is a secrecy wrapper and must project as a credential"
+        );
+    }
+    assert!(!named(&fields, "plain").secret);
+    // The control follows what is wrapped, and a list of bytes has none.
+    assert_eq!(named(&fields, "b").ty, ConfigFieldType::Str);
+    assert_eq!(named(&fields, "c").ty, ConfigFieldType::Str);
+    assert_eq!(named(&fields, "d").ty, ConfigFieldType::Complex);
+    assert_eq!(named(&fields, "e").ty, ConfigFieldType::Int);
+}
+
+/// `#[serde(with)]` used to force `secret: false`, so a `SecretString` under a
+/// custom codec projected as an ordinary field and the credential went into the
+/// `ConfigMap`. The unreadable wire shape is a reason to report `Complex`, not a
+/// reason to forget what the field holds.
+#[test]
+fn a_custom_codec_hides_the_shape_but_not_the_secret() {
+    let files = [file(
+        r#"
+        #[derive(Deserialize)]
+        pub struct TokenConfig {
+            #[serde(with = "my_codec")]
+            pub token: SecretString,
+            #[serde(flatten)]
+            pub nested: SecretString,
+        }
+        "#,
+    )];
+    let fields = fields(&files, "TokenConfig");
+    for name in ["token", "nested"] {
+        let field = named(&fields, name);
+        assert_eq!(
+            field.ty,
+            ConfigFieldType::Complex,
+            "`{name}`'s wire shape is not its type's, so there is no control"
+        );
+        assert!(
+            field.secret,
+            "`{name}` is still a credential, and `secret` is the only gate"
+        );
+    }
+}
+
+/// A compiled-in credential default used to be projected verbatim and travel
+/// into the catalogue, walking straight around the `secret` flag computed a few
+/// lines away.
+#[test]
+fn a_secret_field_does_not_carry_its_compiled_in_default() {
+    let files = [file(
+        r#"
+        #[derive(Deserialize)]
+        pub struct DemoConfig {
+            #[serde(default = "default_password")]
+            pub password: SecretString,
+            #[serde(default = "default_user")]
+            pub user: String,
+        }
+        fn default_password() -> SecretString { SecretString::from("hunter2") }
+        fn default_user() -> String { "admin".to_owned() }
+        "#,
+    )];
+    let fields = fields(&files, "DemoConfig");
+    assert_eq!(
+        named(&fields, "password").default,
+        None,
+        "a credential default must not travel into the catalogue"
+    );
+    assert!(
+        !named(&fields, "password").required,
+        "the default is still what makes the field optional"
+    );
+    // The ordinary field is unaffected: this drops secrets, not defaults.
+    assert_eq!(
+        named(&fields, "user").default,
+        Some(serde_json::Value::String("admin".to_owned()))
+    );
+}
+
+/// The container-level rule, which nothing exercised: the three fixtures that
+/// use `rename_all` all put it on an enum, which goes through `variant_names`
+/// instead. This is the value an operator has to type as a YAML key.
+#[test]
+fn a_container_rename_all_spells_every_field_the_wire_way() {
+    let files = [file(
+        r#"
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        pub struct DemoConfig {
+            pub bind_addr: String,
+            pub healthcheck_timeout_ms: u32,
+            #[serde(rename = "type")]
+            pub tenant_type: String,
+        }
+        "#,
+    )];
+    assert_eq!(
+        names(&fields(&files, "DemoConfig")),
+        ["bindAddr", "healthcheckTimeoutMs", "type"],
+        "a field's own `rename` wins over the container rule"
+    );
+}
+
+/// An unrecognised rule leaves the name alone rather than guessing: a wrong
+/// rename produces a key the gear silently never reads, which is worse than no
+/// rename at all.
+#[test]
+fn an_unrecognised_rename_all_leaves_the_field_name_alone() {
+    let files = [file(
+        r#"
+        #[derive(Deserialize)]
+        #[serde(rename_all = "TitleCase")]
+        pub struct DemoConfig { pub bind_addr: String }
+        "#,
+    )];
+    assert_eq!(names(&fields(&files, "DemoConfig")), ["bind_addr"]);
+}
+
+/// The whole `rename_all` case table, which the container test above reaches one
+/// arm of. Each is a key an operator types.
+#[test]
+fn every_rename_all_rule_is_applied_as_serde_spells_it() {
+    for (rule, expected) in [
+        ("lowercase", "bind_addr"),
+        ("UPPERCASE", "BIND_ADDR"),
+        ("PascalCase", "BindAddr"),
+        ("camelCase", "bindAddr"),
+        ("snake_case", "bind_addr"),
+        ("SCREAMING_SNAKE_CASE", "BIND_ADDR"),
+        ("kebab-case", "bind-addr"),
+        ("SCREAMING-KEBAB-CASE", "BIND-ADDR"),
+    ] {
+        let files = [file(&format!(
+            r#"
+            #[derive(Deserialize)]
+            #[serde(rename_all = "{rule}")]
+            pub struct DemoConfig {{ pub bind_addr: String }}
+            "#
+        ))];
+        assert_eq!(
+            names(&fields(&files, "DemoConfig")),
+            [expected],
+            "`rename_all = \"{rule}\"`"
+        );
+    }
+}
+
+/// `#[serde(rename(serialize = "a", deserialize = "b"), skip)]` is legal serde,
+/// and `parse_nested_meta` cannot model the nested form -- so it stopped there
+/// and lost the `skip`, projecting a field serde never reads as configuration.
+#[test]
+fn a_serde_form_this_cannot_read_is_refused_rather_than_truncated() {
+    let files = [file(
+        r#"
+        #[derive(Deserialize)]
+        pub struct DemoConfig {
+            #[serde(rename(serialize = "a", deserialize = "b"), skip)]
+            pub internal: String,
+            pub kept: String,
+        }
+        "#,
+    )];
+    assert_eq!(
+        project_config_fields(&files, "DemoConfig"),
+        Err(ConfigFieldsError::UnreadableSerdeAttribute {
+            root: "DemoConfig".to_owned(),
+            field: Some("internal".to_owned()),
+        })
+    );
+}
+
+/// A config struct inside an inline `mod`. Root discovery walks inline modules,
+/// so the lookups it feeds have to as well, or the two halves of one projection
+/// disagree about which structs exist.
+#[test]
+fn a_root_inside_an_inline_module_projects_its_fields_and_defaults() {
+    let files = [file(
+        r#"
+        pub mod config {
+            #[derive(Deserialize)]
+            #[serde(default)]
+            pub struct NestedConfig {
+                pub vendor: String,
+                pub mode: Mode,
+            }
+
+            impl Default for NestedConfig {
+                fn default() -> Self {
+                    Self { vendor: "constructorfabric".to_owned(), mode: Mode::AcceptAll }
+                }
+            }
+
+            #[derive(Deserialize)]
+            #[serde(rename_all = "snake_case")]
+            pub enum Mode { AcceptAll, StaticTokens }
+        }
+        "#,
+    )];
+    let fields = fields(&files, "NestedConfig");
+    assert_eq!(names(&fields), ["vendor", "mode"]);
+    assert_eq!(
+        named(&fields, "vendor").default,
+        Some(serde_json::Value::String("constructorfabric".to_owned()))
+    );
+    assert_eq!(
+        named(&fields, "mode").ty,
+        ConfigFieldType::Enum {
+            variants: vec!["accept_all".to_owned(), "static_tokens".to_owned()],
+        },
+        "the enum is in the same inline module and must be found there"
+    );
 }
 
 #[test]
@@ -299,10 +524,7 @@ fn a_skipped_field_is_not_part_of_the_surface() {
         }
         ",
     )];
-    assert_eq!(
-        names(&project_config_fields(&files, "DemoConfig")),
-        ["kept"]
-    );
+    assert_eq!(names(&fields(&files, "DemoConfig")), ["kept"]);
 }
 
 // -- required and defaults -------------------------------------------------
@@ -323,7 +545,7 @@ fn required_follows_serde_rather_than_the_type() {
         fn d() -> String { "from-fn".to_owned() }
         "#,
     )];
-    let fields = project_config_fields(&files, "DemoConfig");
+    let fields = fields(&files, "DemoConfig");
     assert!(named(&fields, "must").required);
     assert!(!named(&fields, "has_default").required);
     assert!(!named(&fields, "has_fn").required);
@@ -341,13 +563,7 @@ fn a_container_default_makes_every_field_optional() {
         pub struct AuthNResolverConfig { pub vendor: String }
         ",
     )];
-    assert!(
-        !named(
-            &project_config_fields(&files, "AuthNResolverConfig"),
-            "vendor"
-        )
-        .required
-    );
+    assert!(!named(&fields(&files, "AuthNResolverConfig"), "vendor").required);
 }
 
 /// Both spellings of "the default", because both are in the tree -- the same
@@ -374,7 +590,7 @@ fn defaults_are_read_from_a_default_impl_and_from_a_serde_fn() {
         fn yes() -> bool { true }
         "#,
     )];
-    let fields = project_config_fields(&files, "DemoConfig");
+    let fields = fields(&files, "DemoConfig");
     assert_eq!(
         named(&fields, "vendor").default,
         Some(serde_json::Value::String("constructorfabric".to_owned()))
@@ -403,7 +619,7 @@ fn default_fn_does_not_drop_a_following_rename() {
         fn d() -> String { "x".to_owned() }
         "#,
     )];
-    let fields = project_config_fields(&files, "DemoConfig");
+    let fields = fields(&files, "DemoConfig");
     assert_eq!(named(&fields, "type").name, "type");
 }
 
@@ -436,7 +652,7 @@ fn a_path_default_is_resolved_or_omitted_but_never_reported_as_its_own_name() {
         pub enum AuthNMode { AcceptAll, StaticTokens }
         "#,
     )];
-    let fields = project_config_fields(&files, "DemoConfig");
+    let fields = fields(&files, "DemoConfig");
 
     // `None` is the absence of a default, not the string "None".
     assert_eq!(named(&fields, "advertise_addr").default, None);
@@ -456,13 +672,51 @@ fn a_unit_struct_has_no_surface() {
     let files = [file(
         r"#[derive(Deserialize)] pub struct ApiContractsConfig;",
     )];
-    assert!(project_config_fields(&files, "ApiContractsConfig").is_empty());
+    assert_eq!(
+        project_config_fields(&files, "ApiContractsConfig"),
+        Err(ConfigFieldsError::NoNamedFields {
+            root: "ApiContractsConfig".to_owned()
+        })
+    );
 }
 
+/// The two answers that used to be one empty vector. `root` can be an
+/// operator-supplied string via `config_schema = config(rust = ...)`, so "there
+/// is no such struct" and "the struct has no keys" are different mistakes and
+/// need different sentences.
 #[test]
-fn an_unknown_root_projects_nothing() {
+fn a_missing_root_and_a_keyless_struct_are_different_failures() {
     let files = [file(r"pub struct Other { pub a: String }")];
-    assert!(project_config_fields(&files, "NoSuchConfig").is_empty());
+    assert_eq!(
+        project_config_fields(&files, "NoSuchConfig"),
+        Err(ConfigFieldsError::RootNotFound {
+            root: "NoSuchConfig".to_owned()
+        })
+    );
+
+    let keyless = [file(r"pub struct Tuple(pub String);")];
+    assert_eq!(
+        project_config_fields(&keyless, "Tuple"),
+        Err(ConfigFieldsError::NoNamedFields {
+            root: "Tuple".to_owned()
+        })
+    );
+}
+
+/// Every field skipped is a third answer again: the struct is there, it has
+/// named keys, and none of them is configuration.
+#[test]
+fn a_struct_whose_every_field_is_skipped_projects_an_empty_surface() {
+    let files = [file(
+        r"
+        #[derive(Deserialize)]
+        pub struct DemoConfig {
+            #[serde(skip)]
+            pub internal: String,
+        }
+        ",
+    )];
+    assert_eq!(project_config_fields(&files, "DemoConfig"), Ok(Vec::new()));
 }
 
 #[test]
@@ -477,7 +731,7 @@ fn the_doc_comment_travels_as_the_operator_facing_prose() {
         ",
     )];
     assert_eq!(
-        named(&project_config_fields(&files, "DemoConfig"), "listen_addr")
+        named(&fields(&files, "DemoConfig"), "listen_addr")
             .doc
             .as_deref(),
         Some("Listen address for the gRPC server.")
@@ -492,7 +746,7 @@ fn api_gateway_projects_its_scalars_from_the_real_crate() {
     let root = project_config_root(&files).expect("one config type");
     assert_eq!(root.as_deref(), Some("ApiGatewayConfig"));
 
-    let fields = project_config_fields(&files, "ApiGatewayConfig");
+    let fields = fields(&files, "ApiGatewayConfig");
     assert_eq!(named(&fields, "bind_addr").ty, ConfigFieldType::Str);
     // The only field with neither a container nor a field default.
     assert!(named(&fields, "bind_addr").required);
@@ -518,7 +772,7 @@ fn grpc_hub_is_found_although_its_struct_is_not_in_config_rs() {
             .as_deref(),
         Some("GrpcHubConfig")
     );
-    let fields = project_config_fields(&files, "GrpcHubConfig");
+    let fields = fields(&files, "GrpcHubConfig");
     assert_eq!(named(&fields, "listen_addr").ty, ConfigFieldType::Str);
     assert_eq!(
         named(&fields, "internal_auth_cache_ttl_secs").ty,
@@ -531,7 +785,7 @@ fn static_authn_plugin_projects_its_mode_enum_from_the_real_crate() {
     let files = require!(tree(
         "gears/system/authn-resolver/plugins/static-authn-plugin"
     ));
-    let fields = project_config_fields(&files, "StaticAuthNPluginConfig");
+    let fields = fields(&files, "StaticAuthNPluginConfig");
     assert_eq!(
         named(&fields, "mode").ty,
         ConfigFieldType::Enum {
@@ -553,7 +807,7 @@ fn tenant_resolver_projects_its_single_vendor_field() {
             .as_deref(),
         Some("TenantResolverConfig")
     );
-    let fields = project_config_fields(&files, "TenantResolverConfig");
+    let fields = fields(&files, "TenantResolverConfig");
     assert_eq!(names(&fields), ["vendor"]);
     assert_eq!(
         named(&fields, "vendor").default,
@@ -572,7 +826,7 @@ fn tenant_resolver_projects_its_single_vendor_field() {
 #[test]
 fn a_configuration_that_is_all_collections_offers_no_controls() {
     let cluster = require!(tree("gears/system/cluster/cluster"));
-    let fields = project_config_fields(&cluster, "ClusterConfig");
+    let fields = fields(&cluster, "ClusterConfig");
     assert!(!fields.is_empty(), "the struct is found");
     assert!(
         fields.iter().all(|f| f.ty == ConfigFieldType::Complex),
@@ -585,7 +839,7 @@ fn a_configuration_that_is_all_collections_offers_no_controls() {
 #[test]
 fn a_vec_field_in_the_real_corpus_is_complex() {
     let files = require!(tree("gears/system/types-registry/types-registry"));
-    let fields = project_config_fields(&files, "TypesRegistryConfig");
+    let fields = fields(&files, "TypesRegistryConfig");
     for name in ["entity_id_fields", "schema_id_fields", "entities"] {
         assert_eq!(
             named(&fields, name).ty,

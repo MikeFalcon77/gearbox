@@ -52,8 +52,19 @@ pub struct ProjectedGear {
     /// argument it does not know -- so the platform lands one first and this
     /// parser catches up afterwards. `one_per_installation` arrived that way.
     pub unmodelled: Vec<String>,
-    /// True when the attribute sits under a `#[cfg(...)]` this crate cannot
+    /// True when the gear sits under a `#[cfg(...)]` this crate cannot
     /// evaluate, so its presence in a build is conditional.
+    ///
+    /// Read from two places, because a gear can be gated in two: a `cfg` beside
+    /// the gear attribute, and a `cfg` on a `mod` declaration on the way to the
+    /// file. The second is the one that was invisible -- `scan_crate` discovers
+    /// files by walking directories and never reads the `mod` tree, so a gear
+    /// behind `#[cfg(feature = "x")] mod gear;` carries no attribute of its own
+    /// to read and used to project as unconditional.
+    ///
+    /// The limit that remains: a file reached through an explicit `#[path]`, or
+    /// through a `mod` nested inside an inline `mod`, is not traced back, so a
+    /// `cfg` there is still unobserved. No gear crate writes either.
     pub conditional: bool,
     /// What each sibling `#[toolkit::provides]` states.
     ///
@@ -83,11 +94,19 @@ pub struct ProjectedGear {
 }
 
 /// A `lifecycle(...)` clause: a bare flag, or `key = value` pairs.
-struct LifecycleArgs(ProjectedLifecycle);
+///
+/// Carries the keys it could not model out with it, the way [`GearArgs`] does.
+/// They used to be consumed and thrown away, so the next lifecycle argument to
+/// land in the macro would have been reported by nothing at all.
+struct LifecycleArgs {
+    lifecycle: ProjectedLifecycle,
+    unmodelled: Vec<String>,
+}
 
 impl Parse for LifecycleArgs {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut out = ProjectedLifecycle::default();
+        let mut unmodelled = Vec::new();
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             let name = key.to_string();
@@ -98,7 +117,8 @@ impl Parse for LifecycleArgs {
                     "entry" => out.entry = Some(input.parse::<LitStr>()?.value()),
                     "stop_timeout" => out.stop_timeout = Some(input.parse::<LitStr>()?.value()),
                     "await_ready" => out.await_ready = input.parse::<LitBool>()?.value(),
-                    _ => {
+                    other => {
+                        unmodelled.push(format!("lifecycle.{other}"));
                         // Consume the value so parsing can continue.
                         let _: Expr = input.parse()?;
                     }
@@ -106,13 +126,18 @@ impl Parse for LifecycleArgs {
             } else if name == "await_ready" {
                 // The bare-flag form, which is how every real gear writes it.
                 out.await_ready = true;
+            } else {
+                unmodelled.push(format!("lifecycle.{name}"));
             }
 
             if input.peek(Token![,]) {
                 input.parse::<Token![,]>()?;
             }
         }
-        Ok(Self(out))
+        Ok(Self {
+            lifecycle: out,
+            unmodelled,
+        })
     }
 }
 
@@ -132,7 +157,9 @@ impl Parse for GearArgs {
             if name == "lifecycle" && input.peek(syn::token::Paren) {
                 let inner;
                 syn::parenthesized!(inner in input);
-                out.lifecycle = Some(inner.parse::<LifecycleArgs>()?.0);
+                let parsed = inner.parse::<LifecycleArgs>()?;
+                out.lifecycle = Some(parsed.lifecycle);
+                out.unmodelled.extend(parsed.unmodelled);
                 if input.peek(Token![,]) {
                     input.parse::<Token![,]>()?;
                 }
@@ -215,16 +242,6 @@ fn path_to_string(path: &syn::Path) -> String {
     format!("{leading}{}", segments.join("::"))
 }
 
-/// Whether any attribute on the same item is a `cfg`.
-///
-/// A gear behind a feature gate is genuinely conditional, and the catalogue
-/// cannot tell whether a given build enables it. Recording the fact is honest;
-/// silently treating it as unconditional would make the catalogue claim more
-/// than it knows.
-fn has_cfg(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|a| a.path().is_ident("cfg"))
-}
-
 /// Project the facts `#[toolkit::gear]` owns.
 ///
 /// # Errors
@@ -238,8 +255,9 @@ pub fn project_gear(site: &crate::attribute::AttributeSite<'_>) -> syn::Result<P
     // `AttributeSite` carries the item's whole attribute list -- the same list
     // `provides` is read from -- so the cfg is here to be read. It used to be
     // left `false` for a caller to fill in, which made the primary projection
-    // claim every cfg-gated gear was unconditional.
-    projected.conditional = has_cfg(site.item_attrs);
+    // claim every cfg-gated gear was unconditional. The module half comes from
+    // the site because answering it takes the whole scanned tree.
+    projected.conditional = crate::attribute::has_cfg(site.item_attrs) || site.module_gated;
     Ok(projected)
 }
 

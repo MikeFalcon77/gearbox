@@ -117,6 +117,26 @@ fn published(client: &Connection) -> PublishDiagnosticsParams {
     }
 }
 
+/// The message of the next `gearbox/log` on the wire.
+///
+/// Anything this server has to say that is not a diagnostic arrives this way,
+/// because the client cannot read stderr.
+fn logged(client: &Connection) -> String {
+    loop {
+        let message = client
+            .receiver
+            .try_recv()
+            .expect("the report must reach the client, not only the log");
+        if let Message::Notification(notification) = message
+            && notification.method == method::LOG
+        {
+            let params: LogParams =
+                serde_json::from_value(notification.params).expect("log params");
+            return params.message;
+        }
+    }
+}
+
 /// A gear description whose `name` is a number.
 ///
 /// It parses, so the evaluator is what rejects it, and the span it reports
@@ -387,10 +407,7 @@ fn a_percent_encoded_uri_names_the_same_file() {
         "the fixture must exercise encoding"
     );
 
-    assert_eq!(
-        lsp::path_from_uri(&encoded).as_deref(),
-        Some(path.as_path())
-    );
+    assert_eq!(lsp::path_from_uri(&encoded).local(), Some(path.as_path()));
 
     let (server, client) = Connection::memory();
     let mut state = state();
@@ -476,16 +493,25 @@ fn a_gear_is_evaluated_against_the_source_root_the_session_has_open() {
     );
 }
 
-/// Between two nested roots, the description belongs to the inner one.
+/// Between two nested roots, the description belongs to the one the catalogue
+/// would attribute it to: the first in the roots list.
 ///
-/// Not a preference: it is the only answer that does not depend on the order the
-/// client listed its roots in. The outer root would also accept this file, and
-/// with a wider `load()` boundary -- so a `load()` this server waved through
-/// would be refused the moment the gear was loaded under the root it is really
-/// declared in, and the editor would disagree with the catalogue about a file
-/// neither of them had changed.
+/// **Not the innermost, which is what this used to assert.** `load_catalogue`
+/// walks the roots in order and attributes each description to the root it was
+/// walked from, keeping the first declaration when two roots claim one gear
+/// (`gearbox_engine::owning_source_root`, ADR
+/// `cpt-gearbox-adr-multiple-source-roots`). Picking the deepest match here
+/// meant the editor evaluated a file against a `load()` boundary no catalogue
+/// entry had used -- so a `load("//...")` the catalogue resolved could be
+/// underlined in the buffer while the same file loaded clean from disk, and
+/// nothing about the file had changed between the two answers.
+///
+/// Order-dependent, therefore, and deliberately: with nested roots the answer is
+/// a property of the list the person wrote, and the engine's rule is the one that
+/// decides. Both orders are asserted so the dependence is stated rather than
+/// discovered.
 #[test]
-fn the_innermost_of_two_nested_roots_is_the_one_used() {
+fn the_first_of_two_nested_roots_is_the_one_used() {
     let (outer, _) = rooted_fixture("nested");
     let inner = outer.join("gears");
     // The inner root gets no `shared.gdl`, so a description resolving `//` against
@@ -505,12 +531,13 @@ fn the_innermost_of_two_nested_roots_is_the_one_used() {
         did_open(&uri, ROOTED_GEAR)
     ));
     assert!(
-        !published(&client).diagnostics.is_empty(),
-        "`//shared.gdl` does not exist under the inner root, and the inner root is the one \
-         this file is declared in"
+        published(&client).diagnostics.is_empty(),
+        "the outer root is listed first, so it is the root the catalogue attributes this \
+         description to, and `//shared.gdl` resolves under it"
     );
 
-    // Listed the other way round, the answer must not change.
+    // Listed the other way round, the inner root owns it -- and the same text is
+    // broken there, which is what proves the boundary really came from the list.
     state.roots.reverse();
     let (server, client) = Connection::memory();
     let mut fresh = state;
@@ -521,7 +548,8 @@ fn the_innermost_of_two_nested_roots_is_the_one_used() {
     ));
     assert!(
         !published(&client).diagnostics.is_empty(),
-        "which root a file belongs to is a property of the file, not of `Vec` order"
+        "`//shared.gdl` does not exist under the inner root, and with it listed first the \
+         inner root is the one the catalogue would use"
     );
 }
 
@@ -554,7 +582,7 @@ fn a_uri_that_climbs_is_classified_by_where_it_resolves() {
 
     let uri = gearbox_ir::file_uri(&climbing);
     assert_eq!(
-        lsp::path_from_uri(&uri).as_deref(),
+        lsp::path_from_uri(&uri).local(),
         Some(path.as_path()),
         "the `..` names the same file, and the decode must say so"
     );
@@ -616,11 +644,18 @@ fn a_change_with_no_changes_publishes_nothing() {
 /// Params this server cannot read end the notification, not the session.
 ///
 /// A notification has no id to answer, so the only thing the loop can do is say
-/// so on stderr and carry on -- and carrying on is the part that matters: a
-/// panic here would take down a language server over one malformed message from
-/// a client that is free to send another.
+/// so and carry on -- and carrying on is the part that matters: a panic here
+/// would take down a language server over one malformed message from a client
+/// that is free to send another.
+///
+/// **Said to the client, not only to stderr.** For a `didChange` the stored
+/// document keeps its previous text and nothing is republished, so an editor told
+/// nothing goes on showing markers computed from text its buffer no longer has --
+/// and stderr is not a channel it can read. The report names the document when
+/// the params said which one, because resending it is the only thing the client
+/// can do about it.
 #[test]
-fn a_malformed_notification_is_survived() {
+fn a_malformed_notification_is_reported_and_survived() {
     let (server, client) = Connection::memory();
     let mut state = state();
 
@@ -635,17 +670,94 @@ fn a_malformed_notification_is_survived() {
         "the peer is not gone; only the message was unreadable"
     );
 
+    let report = logged(&client);
+    assert!(
+        report.contains("file:///a/gear.gdl") && report.contains("not updated"),
+        "the report must name the document that was left as it was: {report}"
+    );
+
     let not_an_object = Notification {
         method: method::DID_CHANGE.to_owned(),
         params: serde_json::json!("nonsense"),
     };
     assert!(document_notification(&server, &mut state, not_an_object));
+    let report = logged(&client);
+    assert!(
+        report.contains("no document was named"),
+        "params that name nothing are still reported, and say so: {report}"
+    );
 
     assert!(
         client.receiver.try_recv().is_err(),
         "there is no document to publish about: the server was never told which one"
     );
     assert!(state.documents.is_empty(), "and nothing was stored");
+}
+
+/// A `file://` URI that cannot be decoded is reported, not called clean.
+///
+/// `%FF` is a valid escape and not valid UTF-8, so the decode has no path to
+/// answer with -- and it used to answer the same `None` an `untitled:` buffer
+/// gets, which this handler reads as "not a local file" and turns into an empty
+/// diagnostic list. That is a document the editor is showing, reported as having
+/// nothing wrong with it.
+#[test]
+fn a_document_whose_uri_cannot_be_decoded_is_reported_rather_than_published() {
+    let (server, client) = Connection::memory();
+    let mut state = state();
+    let uri = "file:///a/%FF.gdl";
+
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_open(uri, MISTYPED_GEAR)
+    ));
+
+    let report = logged(&client);
+    assert!(
+        report.contains(uri) && report.contains("UTF-8"),
+        "the client is told which document is not being diagnosed, and why: {report}"
+    );
+    assert!(
+        client.receiver.try_recv().is_err(),
+        "no diagnostic set may be claimed for it, and an empty one claims it is clean"
+    );
+}
+
+/// A `didChange` for a document that was never opened is refused, not stored.
+///
+/// `State::documents` is uncapped on the argument that LSP guarantees a
+/// `didClose` for every `didOpen`; an entry `didChange` inserted is outside that
+/// guarantee -- nothing ever removes it -- and both the key and the text are
+/// unbounded client strings, so a client that only ever sends `didChange` grew
+/// the map for the life of the process. Nothing is published either: an empty
+/// list would report a document this server has never been given as clean.
+#[test]
+fn a_change_to_a_document_that_was_never_opened_is_refused() {
+    let dir = scratch("unopened");
+    let uri = gearbox_ir::file_uri(&dir.join("gear.gdl"));
+    let (server, client) = Connection::memory();
+    let mut state = state();
+
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_change(&uri, 1, MISTYPED_GEAR)
+    ));
+
+    assert!(
+        state.documents.is_empty(),
+        "a document the editor never opened must not be held for the life of the session"
+    );
+    let report = logged(&client);
+    assert!(
+        report.contains("never opened") && report.contains(&uri),
+        "and the client is told which document to open first: {report}"
+    );
+    assert!(
+        client.receiver.try_recv().is_err(),
+        "no diagnostics are claimed for a document that was never sent"
+    );
 }
 
 /// A `didOpen` with no version publishes without one, rather than claiming zero.

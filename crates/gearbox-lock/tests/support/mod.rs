@@ -39,11 +39,18 @@ pub fn payment_api_v1() -> ContractId {
     ContractId::new("api-contracts/PaymentApi@v1").unwrap()
 }
 
+/// The in-process contract `api-gateway` consumes from `types-registry`, named
+/// by the cut candidate that carries a contract.
+#[must_use]
+pub fn type_registry_v1() -> ContractId {
+    ContractId::new("types-registry/TypeRegistry@v1").unwrap()
+}
+
 fn resolved_gear(
     id: &str,
     caps: &[RuntimeCap],
     deps: &[&str],
-    selected_by: InclusionReason,
+    selected_by: Vec<InclusionReason>,
 ) -> ResolvedGear {
     let ident = id.replace('-', "_");
     ResolvedGear {
@@ -55,7 +62,7 @@ fn resolved_gear(
         runtime_caps: caps.iter().copied().collect(),
         colocated_deps: deps.iter().map(|d| gid(d)).collect(),
         config: std::collections::BTreeMap::new(),
-        selected_by: vec![selected_by],
+        selected_by,
         // Empty, deliberately: the golden snapshot is the shape of a lock for a
         // product that asked for no features, and `skip_serializing_if` keeps
         // that lock byte-identical to the one this fixture produced before the
@@ -70,13 +77,21 @@ fn gears() -> BTreeMap<GearId, ResolvedGear> {
     BTreeMap::from([
         (
             gid("types-registry"),
+            // Two reasons, in the order they were reached rather than in
+            // canonical order: the product names this gear *and* api-gateway
+            // co-locates it, which is how a gear ends up with more than one
+            // inclusion reason at all. `canonicalize_order` sorts them, and a
+            // single-reason gear could never show that.
             resolved_gear(
                 "types-registry",
                 &[Rest],
                 &[],
-                InclusionReason::ColocatedBy {
-                    gear: gid("api-gateway"),
-                },
+                vec![
+                    InclusionReason::ColocatedBy {
+                        gear: gid("api-gateway"),
+                    },
+                    InclusionReason::Selected,
+                ],
             ),
         ),
         (
@@ -85,12 +100,17 @@ fn gears() -> BTreeMap<GearId, ResolvedGear> {
                 "api-gateway",
                 &[RestHost, Rest, Stateful],
                 &["types-registry"],
-                InclusionReason::Selected,
+                vec![InclusionReason::Selected],
             ),
         ),
         (
             gid("api-contracts"),
-            resolved_gear("api-contracts", &[Rest], &[], InclusionReason::Selected),
+            resolved_gear(
+                "api-contracts",
+                &[Rest],
+                &[],
+                vec![InclusionReason::Selected],
+            ),
         ),
         (
             gid("cluster"),
@@ -98,9 +118,9 @@ fn gears() -> BTreeMap<GearId, ResolvedGear> {
                 "cluster",
                 &[Stateful],
                 &[],
-                InclusionReason::ColocatedBy {
+                vec![InclusionReason::ColocatedBy {
                     gear: gid("payments-audit"),
-                },
+                }],
             ),
         ),
         (
@@ -109,7 +129,16 @@ fn gears() -> BTreeMap<GearId, ResolvedGear> {
                 "payments-audit",
                 &[Rest, Stateful],
                 &["cluster"],
-                InclusionReason::Selected,
+                vec![InclusionReason::Selected],
+            ),
+        ),
+        (
+            gid("audit-archive"),
+            resolved_gear(
+                "audit-archive",
+                &[Stateful],
+                &[],
+                vec![InclusionReason::Selected],
             ),
         ),
     ])
@@ -130,28 +159,54 @@ fn gateway_process() -> ResolvedApplication {
         entrypoint: Entrypoint::RunServer,
         bin_name: "gbx-gateway".to_owned(),
         crate_name: "gbx-payments-demo-gateway".to_owned(),
-        listens: vec![ResolvedEndpoint {
-            name: "rest".to_owned(),
-            gear: gid("api-gateway"),
-            config_key: "bind_addr".to_owned(),
-            address: "127.0.0.1:8087".to_owned(),
-            advertise_uri: None,
-            allow_loopback_advertise: false,
-        }],
+        // Two endpoints and two spawns, each pair listed in the order the
+        // resolver reached it rather than in canonical order: a single-element
+        // list is sorted by every implementation, including one that does not
+        // sort at all.
+        listens: vec![
+            ResolvedEndpoint {
+                name: "rest".to_owned(),
+                gear: gid("api-gateway"),
+                config_key: "bind_addr".to_owned(),
+                address: "127.0.0.1:8087".to_owned(),
+                advertise_uri: None,
+                allow_loopback_advertise: false,
+            },
+            ResolvedEndpoint {
+                name: "admin".to_owned(),
+                gear: gid("api-gateway"),
+                config_key: "admin_addr".to_owned(),
+                address: "127.0.0.1:8088".to_owned(),
+                advertise_uri: None,
+                allow_loopback_advertise: false,
+            },
+        ],
         rest_host: Some(gid("api-gateway")),
         grpc_hub: None,
         needs_db: false,
         cargo_features: BTreeSet::new(),
-        spawns: vec![SpawnSpec {
-            gear: gid("payments-audit"),
-            bin_name: "gbx-payments-audit".to_owned(),
-            args: vec![
-                "--config".to_owned(),
-                "config/payments-audit.yaml".to_owned(),
-            ],
-            working_directory: None,
-            environment: BTreeMap::new(),
-        }],
+        spawns: vec![
+            SpawnSpec {
+                gear: gid("payments-audit"),
+                bin_name: "gbx-payments-audit".to_owned(),
+                args: vec![
+                    "--config".to_owned(),
+                    "config/payments-audit.yaml".to_owned(),
+                ],
+                working_directory: None,
+                environment: BTreeMap::new(),
+            },
+            SpawnSpec {
+                gear: gid("audit-archive"),
+                bin_name: "gbx-audit-archive".to_owned(),
+                args: vec![
+                    "--config".to_owned(),
+                    "config/audit-archive.yaml".to_owned(),
+                ],
+                working_directory: None,
+                environment: BTreeMap::new(),
+            },
+        ],
         serve: None,
         image: None,
         subchart: None,
@@ -159,17 +214,18 @@ fn gateway_process() -> ResolvedApplication {
     }
 }
 
-fn payments_audit_process() -> ResolvedApplication {
+/// One of the two workers the gateway starts out of process.
+fn worker_process(name: &str, gears: &[&str]) -> ResolvedApplication {
     ResolvedApplication {
         role: None,
-        name: pid("payments-audit"),
+        name: pid(name),
         kind: ApplicationKind::Worker,
-        anchor: gid("payments-audit"),
-        gears: vec![gid("cluster"), gid("payments-audit")],
+        anchor: gid(name),
+        gears: gears.iter().map(|g| gid(g)).collect(),
         replicas: 1,
         entrypoint: Entrypoint::RunOopWithOptions,
-        bin_name: "gbx-payments-audit".to_owned(),
-        crate_name: "gbx-payments-demo-payments-audit".to_owned(),
+        bin_name: format!("gbx-{name}"),
+        crate_name: format!("gbx-payments-demo-{name}"),
         listens: vec![],
         rest_host: None,
         grpc_hub: None,
@@ -183,10 +239,12 @@ fn payments_audit_process() -> ResolvedApplication {
     }
 }
 
-fn binding() -> ResolvedBinding {
-    ResolvedBinding {
-        consumer: gid("payments-audit"),
-        consumer_application: pid("payments-audit"),
+/// The two severed contract edges, listed consumer-last-first so the binding
+/// sort has something to do.
+fn bindings() -> Vec<ResolvedBinding> {
+    let severed = |consumer: &str, application: &str| ResolvedBinding {
+        consumer: gid(consumer),
+        consumer_application: pid(application),
         contract: payment_api_v1(),
         provider: gid("api-contracts"),
         provider_application: pid("gateway"),
@@ -200,7 +258,12 @@ fn binding() -> ResolvedBinding {
             mode: BindingMode::Remote,
             transport: Some(Transport::Rest),
         }),
-    }
+    };
+
+    vec![
+        severed("payments-audit", "payments-audit"),
+        severed("audit-archive", "audit-archive"),
+    ]
 }
 
 fn cluster_bindings() -> Vec<ResolvedClusterBinding> {
@@ -208,7 +271,9 @@ fn cluster_bindings() -> Vec<ResolvedClusterBinding> {
         scope: "default".to_owned(),
         primitive: ClusterPrimitive::Cache,
         required_capabilities: BTreeSet::from([cap("cluster.cache.linearizable")]),
-        requesters: vec![gid("payments-audit")],
+        // Two requesters, out of order: with one the requester sort is a no-op
+        // and its removal would not move the written lock.
+        requesters: vec![gid("payments-audit"), gid("audit-archive")],
         selected: Selected::honoured("postgres".to_owned()),
         resolved: ClusterResolution::Provider {
             name: "postgres".to_owned(),
@@ -237,18 +302,32 @@ fn cluster_bindings() -> Vec<ResolvedClusterBinding> {
 }
 
 fn cuttable_candidates() -> Vec<CutCandidate> {
-    vec![CutCandidate {
-        consumer: gid("api-gateway"),
-        provider: gid("payments-audit"),
-        contract: None,
-        blocked_by: CutBlocker::UndeclaredHubEdge,
-        suggested_edit: Some(
-            "#[toolkit::consumes(contract = payments_audit_sdk::PaymentsAuditApi, from = \"payments-audit\")]"
-                .to_owned(),
-        ),
-        file: Some(RelPath::new("gears/api-gateway/src/gear.rs").unwrap()),
-        estimated_savings: CutSavings::default(),
-    }]
+    // Two candidates, the later-sorting one first, and one of them carries a
+    // contract: a list of one never shows the sort, and a list where every
+    // contract is `None` never renders the contract half of a summary line.
+    vec![
+        CutCandidate {
+            consumer: gid("api-gateway"),
+            provider: gid("types-registry"),
+            contract: Some(type_registry_v1()),
+            blocked_by: CutBlocker::ColocationClosure,
+            suggested_edit: None,
+            file: None,
+            estimated_savings: CutSavings::default(),
+        },
+        CutCandidate {
+            consumer: gid("api-gateway"),
+            provider: gid("payments-audit"),
+            contract: None,
+            blocked_by: CutBlocker::UndeclaredHubEdge,
+            suggested_edit: Some(
+                "#[toolkit::consumes(contract = payments_audit_sdk::PaymentsAuditApi, from = \"payments-audit\")]"
+                    .to_owned(),
+            ),
+            file: Some(RelPath::new("gears/api-gateway/src/gear.rs").unwrap()),
+            estimated_savings: CutSavings::default(),
+        },
+    ]
 }
 
 fn provenance() -> Vec<ProvenanceEdge> {
@@ -300,10 +379,15 @@ fn diagnostics() -> Diagnostics {
 }
 
 /// A resolved product for the `local` (self-hosted) profile: a gateway host
-/// process and a `payments-audit` worker, one severed binding between them,
-/// two cluster primitives, one severable-if-declared report, a handful of
-/// provenance edges (including a duplicate, to exercise dedup), and two
-/// diagnostics.
+/// process with two endpoints, the two workers it spawns, a severed binding
+/// per worker, two cluster primitives, two severable-if-declared reports (one
+/// with a contract, one without), a handful of provenance edges (including a
+/// duplicate, to exercise dedup), and two diagnostics.
+///
+/// **Every collection canonicalization sorts has at least two entries, each
+/// listed out of canonical order.** A fixture whose lists hold one element
+/// cannot tell a sort from a missing sort, and the determinism and snapshot
+/// tests then pass against a writer that imposes no ordering at all.
 #[must_use]
 pub fn fixture() -> ResolvedProduct {
     ResolvedProduct {
@@ -336,8 +420,12 @@ pub fn fixture() -> ResolvedProduct {
             },
         )]),
         gears: gears(),
-        applications: vec![gateway_process(), payments_audit_process()],
-        bindings: vec![binding()],
+        applications: vec![
+            gateway_process(),
+            worker_process("payments-audit", &["cluster", "payments-audit"]),
+            worker_process("audit-archive", &["audit-archive"]),
+        ],
+        bindings: bindings(),
         cluster: cluster_bindings(),
         cuttable_if_declared: cuttable_candidates(),
         provenance: provenance(),

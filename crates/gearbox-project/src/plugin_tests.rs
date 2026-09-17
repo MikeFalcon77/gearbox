@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::scan::scan_crate;
+use crate::test_corpus::require;
 
 fn file(src: &str) -> RustFile {
     RustFile {
@@ -25,18 +26,6 @@ fn file(src: &str) -> RustFile {
 fn tree(rel: &str) -> Option<Vec<RustFile>> {
     let dir = crate::test_corpus::corpus(rel)?;
     Some(scan_crate(&dir).unwrap_or_else(|e| panic!("scan {rel}: {e}")))
-}
-
-macro_rules! require {
-    ($e:expr) => {
-        match $e {
-            Some(v) => v,
-            None => {
-                eprintln!("skipping: ../gears-rust not present");
-                return;
-            }
-        }
-    };
 }
 
 fn idents(points: &[ExtensionPoint]) -> Vec<&str> {
@@ -189,7 +178,8 @@ fn vendor_default_from_an_impl_default_block() {
         project_vendor_default(&[file(src)]),
         VendorDefault {
             vendor: Some("constructorfabric".to_owned()),
-            priority: Some(100)
+            priority: Some(100),
+            unreadable: Vec::new(),
         }
     );
 }
@@ -213,7 +203,8 @@ fn vendor_default_from_a_serde_default_fn() {
         project_vendor_default(&[file(src)]),
         VendorDefault {
             vendor: Some("constructorfabric".to_owned()),
-            priority: Some(100)
+            priority: Some(100),
+            unreadable: Vec::new(),
         }
     );
 }
@@ -226,6 +217,66 @@ fn a_config_with_no_default_reports_none() {
     assert_eq!(
         project_vendor_default(&[file(src)]),
         VendorDefault::default()
+    );
+}
+
+/// The shape `cluster::resolve_str_const` already reads for provider names.
+/// Reporting it as "no default" would be a wrong answer, not a gap: a missing
+/// default is what the vendor-mismatch check keys on.
+#[test]
+fn a_vendor_default_behind_a_const_resolves() {
+    let src = r#"
+        pub const DEFAULT_VENDOR: &str = "constructorfabric";
+        pub struct XConfig { pub vendor: String }
+        impl Default for XConfig {
+            fn default() -> Self {
+                Self { vendor: DEFAULT_VENDOR.to_owned() }
+            }
+        }
+    "#;
+    let got = project_vendor_default(&[file(src)]);
+    assert_eq!(got.vendor.as_deref(), Some("constructorfabric"));
+    assert!(got.unreadable.is_empty(), "got {:?}", got.unreadable);
+}
+
+/// The third answer. "The config declares no default" and "the default is there
+/// and this could not read it" are different facts, and collapsing them made a
+/// gear that compiles in a vendor look like one that does not.
+#[test]
+fn an_unreadable_initializer_is_recorded_rather_than_reported_as_absent() {
+    let src = r"
+        pub struct XConfig { pub vendor: String, pub priority: i16 }
+        impl Default for XConfig {
+            fn default() -> Self {
+                Self { vendor: vendor_from_env(), priority: compute_priority() }
+            }
+        }
+    ";
+    let got = project_vendor_default(&[file(src)]);
+    assert_eq!(got.vendor, None);
+    assert_eq!(got.priority, None);
+    // Sorted, so a catalogue built from the same tree is byte-identical.
+    assert_eq!(got.unreadable, ["priority", "vendor"]);
+}
+
+/// `parse_nested_meta` stops at the first form it cannot model and loses every
+/// later item in the same attribute, so the `default = "fn"` written after a
+/// nested `rename(..)` was never seen and read as "no default fn".
+#[test]
+fn a_truncated_serde_attribute_does_not_read_as_no_default() {
+    let src = r#"
+        pub struct XConfig {
+            #[serde(rename(serialize = "v", deserialize = "vendor"), default = "default_vendor")]
+            pub vendor: String,
+        }
+        fn default_vendor() -> String { "constructorfabric".to_owned() }
+    "#;
+    let got = project_vendor_default(&[file(src)]);
+    assert_eq!(
+        got.unreadable,
+        ["vendor"],
+        "the attribute could not be read to its end, so `None` here is a gap and \
+         not an answer: {got:?}"
     );
 }
 
@@ -272,15 +323,27 @@ fn the_account_management_defaults_really_do_disagree() {
     ));
 
     let host_vendor = project_vendor_default(&host).vendor;
-    let a = project_vendor_default(&static_idp).vendor;
-    let b = project_vendor_default(&keycloak).vendor;
+    let plugin_vendors: Vec<Option<String>> = [&static_idp, &keycloak]
+        .into_iter()
+        .map(|files| project_vendor_default(files).vendor)
+        .collect();
 
-    assert_eq!(host_vendor.as_deref(), Some("constructorfabric"));
-    assert_eq!(a.as_deref(), Some("cf"));
-    assert_eq!(b.as_deref(), Some("keycloak"));
+    // What the mismatch detection keys on: every plugin default, compared
+    // against the host's selector. Spelling the three values out and then
+    // comparing the literals with each other was an assertion that could only
+    // fail if someone edited the assertion.
     assert!(
-        host_vendor != a && host_vendor != b,
-        "neither plugin default matches the host selector; this is the silent \
-         misconfiguration GBX0512 exists to catch"
+        host_vendor.is_some(),
+        "the host compiles in a selector default, or there is nothing to mismatch"
+    );
+    assert!(
+        plugin_vendors.iter().all(Option::is_some),
+        "both plugins compile in a vendor: {plugin_vendors:?}"
+    );
+    assert!(
+        plugin_vendors.iter().all(|v| *v != host_vendor),
+        "no plugin default matches the host selector {host_vendor:?}, so on defaults \
+         alone this host resolves nothing -- the silent misconfiguration GBX0512 \
+         exists to catch. Got {plugin_vendors:?}"
     );
 }

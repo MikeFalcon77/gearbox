@@ -219,9 +219,15 @@ fn every_prevented_error_still_exists_in_gears_rust() {
         .iter()
         .filter_map(|code| code.prevents().as_ref().map(|reference| (*code, reference)))
         .collect();
-    if referenced.is_empty() {
-        return;
-    }
+    // Asserted rather than a silent return. An empty reference set is exactly
+    // the regression this file exists to catch -- it means the `prevents` column
+    // stopped being populated -- and returning made losing the column read as a
+    // pass having resolved nothing.
+    assert!(
+        !referenced.is_empty(),
+        "no `DiagnosticCode` carries a `prevents()` reference, so nothing was resolved; the \
+         column this test exists for has stopped being populated"
+    );
 
     let packages = packages(&root);
     let mut scanned: BTreeMap<&str, BTreeMap<String, Vec<ProjectedErrorEnum>>> = BTreeMap::new();

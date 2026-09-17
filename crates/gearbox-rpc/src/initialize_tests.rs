@@ -172,6 +172,150 @@ fn naming_the_same_roots_drops_the_catalogue_anyway() {
     );
 }
 
+/// A root that cannot be opened is reported, with its cause, in the result.
+///
+/// **Both failure branches of `open_roots`, and the field that carries them.**
+/// Nothing opened a missing directory or a directory whose name is not a usable
+/// source id, so neither `FailedRoot` push ran and `failed_roots` was asserted
+/// nowhere -- a change back to the `.ok()` this replaced would have kept every
+/// test here green while roots vanished from the list with nothing reported to
+/// the client. The client is the only party that can fix a bad root, so the
+/// cause has to reach it rather than the log.
+#[test]
+fn a_root_that_cannot_be_opened_is_reported_with_its_cause() {
+    let dir = scratch("failed");
+    let missing = dir.join("not-here");
+    // The id is derived from the directory's own name, so an underscore in it is
+    // the shape `SourceId` refuses -- the other branch, reached without the
+    // filesystem having anything to do with it.
+    let unusable_id = dir.join("bad_root");
+    std::fs::create_dir_all(&unusable_id).unwrap();
+
+    let mut state = state_with(&dir);
+    let response = initialize(
+        &mut state,
+        RequestId::from(1),
+        &params(&[&missing, &unusable_id]),
+    );
+    let value = response
+        .response_result
+        .expect("a bad root is reported, not fatal");
+    let result: InitializeResult =
+        serde_json::from_value(value).expect("the initialize result decodes");
+
+    assert!(
+        result.roots.is_empty(),
+        "neither root opened, so none is claimed: {:?}",
+        result.roots
+    );
+    let reported: Vec<String> = result
+        .failed_roots
+        .iter()
+        .map(|failed| format!("{}: {}", failed.path, failed.error))
+        .collect();
+    assert_eq!(
+        reported.len(),
+        2,
+        "both failures must be named, not the shorter list: {reported:?}"
+    );
+    assert!(
+        reported.iter().any(|line| line.contains("not-here")
+            && (line.contains("does not exist") || line.contains("exist"))),
+        "the missing directory and why: {reported:?}"
+    );
+    assert!(
+        reported
+            .iter()
+            .any(|line| line.contains("bad_root") && line.contains("kebab")),
+        "the unusable source id and why: {reported:?}"
+    );
+
+    // And the session is then in the state the guards are about: no root is open.
+    let refusal = require_ready(&state, &RequestId::from(2)).expect("no root is open");
+    let message = match refusal.response_result {
+        Err(e) => e.message,
+        Ok(_) => panic!("a session with no open root cannot serve a request"),
+    };
+    assert!(
+        message.contains("bad_root") && message.contains("not-here"),
+        "the guard repeats the causes, so a client that ignored the result still learns \
+         them: {message}"
+    );
+}
+
+/// A completed staged load fills the cache every later answer is built from.
+///
+/// The positive half of `a_load_that_stopped_early_is_not_cached`, which asserts
+/// `state.catalogue.is_none()` -- also true of a load that never cached at all,
+/// so on its own it could not tell the guard from the bug. "It was never being
+/// filled" is a regression this repository has already had: the first
+/// `product/resolve` after a load found `None` and rescanned the whole tree
+/// non-staged, for a catalogue the client already had on screen.
+#[test]
+fn a_completed_load_is_cached() {
+    let dir = scratch("cached");
+    // A crate as well as a description: the second pass projects the gear from
+    // `#[toolkit::gear]`, and a description with nothing behind it contributes a
+    // diagnostic instead of a gear -- which would leave this asserting about an
+    // empty catalogue.
+    let crate_dir = dir.join("demo");
+    std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+    std::fs::write(
+        crate_dir.join("gear.gdl"),
+        "gear(\n  name = \"Demo\",\n  category = \"example\",\n  \
+         package = cargo(crate_name = \"demo\", lib = \"demo\", path = \".\"),\n)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        crate_dir.join("src/lib.rs"),
+        "#[toolkit::gear(\n    name = \"demo\",\n    capabilities = [stateless],\n    \
+         lifecycle(entry = \"serve\")\n)]\npub struct DemoGear;\n",
+    )
+    .unwrap();
+
+    let (server, client) = Connection::memory();
+    // A peer that reads: the load sends its boundary response and a notification
+    // per gear, and a client that never drained would be indistinguishable from
+    // one that had gone.
+    let drain = std::thread::spawn(move || client.receiver.iter().count());
+
+    let (roots, failed_roots) = open_roots(&[dir]);
+    let mut state = State {
+        roots,
+        catalogue: None,
+        failed_roots,
+        creation_boundary: None,
+        initialized: true,
+        allow_writes: false,
+        workspace: None,
+        documents: BTreeMap::new(),
+    };
+
+    assert!(
+        catalogue_load(&server, &mut state, RequestId::from(1)).is_none(),
+        "the boundary response answered the request, so the dispatcher must not send a second"
+    );
+    drop(server);
+    assert!(drain.join().expect("the draining peer") > 0);
+
+    let catalogue = state
+        .catalogue
+        .as_ref()
+        .expect("a load that ran to the end is the cache");
+    assert_eq!(
+        catalogue.sources.len(),
+        1,
+        "the scanned root is in the cached catalogue"
+    );
+    assert!(
+        catalogue
+            .gears
+            .contains_key(&gearbox_ir::GearId::new("demo").unwrap()),
+        "and so is the gear it found: {:?}",
+        catalogue.gears.keys().collect::<Vec<_>>()
+    );
+}
+
 /// A staged load that stopped early is not cached.
 ///
 /// Unreachable today: the load stops only when a notification cannot be sent,

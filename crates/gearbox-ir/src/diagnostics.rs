@@ -1254,6 +1254,16 @@ diagnostic_codes! {
     /// delete path, and a file in a tree someone has been working in is theirs
     /// to remove.
     GenOrphanedFile = "GBX0707", Generator, Warning, false, "a generated file is no longer part of the product";
+
+    /// A house template replaced a builtin for this run.
+    ///
+    /// Reported rather than only summarized, and that is the whole point of it
+    /// being a diagnostic: the overlay was named in the text output alone, so
+    /// `--format json` and every RPC client saw an unexpected Dockerfile or
+    /// chart with no visible cause and read it as a generator change. A
+    /// template is chosen by the description, so the file it produces is the
+    /// product's doing -- which is a fact an operator has to be told.
+    GenTemplateOverridden = "GBX0708", Generator, Warning, false, "a product template replaced a builtin";
 }
 
 /// A diagnostic code string that this build does not know.

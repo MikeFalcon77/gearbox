@@ -127,7 +127,11 @@ const UNKNOWN_GEAR: &str = r#"product(
 fn an_unknown_gear_is_anchored_on_its_use_gear() {
     let diagnostics = diagnostics_of(UNKNOWN_GEAR, "dev");
     let diagnostic = find(&diagnostics, "not-in-any-catalogue");
-    assert_anchored(diagnostic, UNKNOWN_GEAR, "use_gear(\"not-in-any-catalogue\"");
+    assert_anchored(
+        diagnostic,
+        UNKNOWN_GEAR,
+        "use_gear(\"not-in-any-catalogue\"",
+    );
 }
 
 const UNHONOURED_ENDPOINT: &str = r#"product(

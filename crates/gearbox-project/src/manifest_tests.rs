@@ -13,6 +13,7 @@
 use std::path::PathBuf;
 
 use super::*;
+use crate::test_corpus::require;
 
 /// Write a `Cargo.toml` into a fresh temporary directory.
 fn crate_with(manifest: &str) -> PathBuf {
@@ -141,10 +142,7 @@ fn the_real_tree_agrees_with_what_the_descriptions_declare() {
     // changed**: `gears-rust` made the target section mandatory (RUST-DEP-001,
     // enforced by its `check_packaging_metadata.py`), so the derived case is
     // gone from the corpus and every crate there names its own library.
-    let Some(base) = crate::test_corpus::corpus_root() else {
-        eprintln!("skipping: ../gears-rust not present");
-        return;
-    };
+    let base = require!(crate::test_corpus::corpus_root());
 
     let gateway = project_manifest(&base.join("gears/system/api-gateway")).unwrap();
     assert_eq!(gateway.package_name, "cf-gears-api-gateway");

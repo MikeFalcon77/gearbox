@@ -35,3 +35,48 @@ pub fn corpus_root() -> Option<PathBuf> {
 pub fn corpus(relative: &str) -> Option<PathBuf> {
     corpus_root()?.join(relative).canonicalize().ok()
 }
+
+/// Whether this run said it requires the corpus.
+///
+/// The switch `error_enum_corpus_tests`'s `decide` already turns into a failure,
+/// available to every corpus test rather than to one.
+pub fn required() -> bool {
+    std::env::var("GEARBOX_CORPUS_REQUIRED").is_ok()
+}
+
+/// Take a corpus locator's `Option`, or leave the test with a reason.
+///
+/// Four test files used to spell this themselves, and each copy printed a line
+/// and passed with no assertion run -- so on a checkout without the sibling
+/// repository the whole real-tree tier reported green having verified nothing.
+/// The locator can also come back `None` when the directory is there and the
+/// scan is unreachable, so the skip covered more than a missing checkout.
+///
+/// `GEARBOX_CORPUS_REQUIRED=1` makes it a failure, which is what an
+/// authoritative run wants. A plain `cargo test` on a machine without the corpus
+/// still passes, because refusing to run at all is not this suite's call to
+/// make.
+macro_rules! require {
+    ($e:expr) => {
+        match $e {
+            Some(value) => value,
+            None => {
+                assert!(
+                    !$crate::test_corpus::required(),
+                    "GEARBOX_CORPUS_REQUIRED is set and `{}` is not reachable, so this test \
+                     would have passed without asserting anything",
+                    stringify!($e)
+                );
+                eprintln!(
+                    "SKIP {}: `{}` is not reachable, so nothing was asserted. Set \
+                     GEARBOX_CORPUS_REQUIRED=1 to make this a failure.",
+                    module_path!(),
+                    stringify!($e)
+                );
+                return;
+            }
+        }
+    };
+}
+
+pub(crate) use require;

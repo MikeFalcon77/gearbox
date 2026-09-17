@@ -84,14 +84,22 @@ fn state() -> Option<State> {
     })
 }
 
+/// The corpus, or a failure saying what is missing.
+///
+/// **A missing corpus fails rather than returning.** This used to `return`, so
+/// every test in this file reported a pass wherever the sibling checkout was
+/// absent -- and the rule the file exists for, that a preview writes nothing, was
+/// then claimed by a suite that had never run it. Six vacuous passes are worse
+/// than six failures: a failure is read, and a pass is the answer these tests are
+/// supposed to produce only when they have actually asked the question.
 macro_rules! require_corpus {
     () => {
         match (state(), demo_copy()) {
             (Some(state), Some(path)) => (state, path),
-            _ => {
-                eprintln!("skipping: ../gears-rust or products/payments-demo is not present");
-                return;
-            }
+            _ => panic!(
+                "this test needs the gear corpus: check `gears-rust` out beside this \
+                 repository and keep `products/payments-demo/product.gdl` in it"
+            ),
         }
     };
 }
@@ -329,6 +337,113 @@ fn declaring_a_source_and_adding_a_gear_is_one_batch() {
         std::fs::read_to_string(&path).unwrap(),
         before,
         "folding writes nothing"
+    );
+}
+
+/// A product whose one gear already carries two configured plugins.
+///
+/// Written out here rather than taken from the corpus, because the assertion is
+/// about what survives an edit: the fixture has to *have* `profiles` and
+/// `config` on the entries already there, and it has to be readable beside the
+/// assertion that they are still there afterwards.
+const CONFIGURED_PLUGINS: &str = r#"product(
+    id = "demo",
+    name = "Demo",
+    version = "0.1.0",
+    sources = [source(id = "gears-rust", at = path("../gears"))],
+    profiles = [embedded(id = "dev")],
+    gears = [
+        use_gear(
+            "authn",
+            source = "gears-rust",
+            plugins = [
+                plugin("static-authn-plugin", profiles = ["dev", "local"],
+                       config = {"mode": "accept_all"}),
+                plugin("oidc-authn-plugin", profiles = ["prod"],
+                       config = {"issuer": "https://id.example.com"}),
+            ],
+        ),
+    ],
+)
+"#;
+
+/// Attaching a plugin appends, and the entries already there keep everything.
+///
+/// **The contract `ProductEdit::AddPlugin` exists for**, and it had no test while
+/// `SetPlugins`, the variant it exists to avoid, is covered above: `set_plugins`
+/// rewrites the list from bare `plugin("id")` entries, so using it to attach one
+/// silently drops the `profiles` and `config` on every entry already in it.
+/// Nothing would have failed if this arm had called `set_gear_plugins`.
+///
+/// Both halves asserted, because the point is the difference: the same fixture
+/// through `SetPlugins` loses exactly what `AddPlugin` keeps.
+#[test]
+fn attaching_a_plugin_keeps_the_config_on_the_ones_already_there() {
+    let uri = "file:///demo/product.gdl";
+
+    let after = apply_product_edits(
+        uri,
+        CONFIGURED_PLUGINS,
+        &[ProductEdit::AddPlugin {
+            gear: "authn".to_owned(),
+            plugin: "ldap-authn-plugin".to_owned(),
+        }],
+    )
+    .expect("attaching a plugin to a gear the product names")
+    .changed()
+    .expect("the product does not name this plugin yet")
+    .to_owned();
+
+    assert!(
+        after.contains(r#"plugin("ldap-authn-plugin")"#),
+        "the attached plugin is in the list: {after}"
+    );
+    assert!(
+        after.contains(r#"profiles = ["dev", "local"]"#)
+            && after.contains(r#"config = {"mode": "accept_all"}"#),
+        "the first entry kept its profiles and config: {after}"
+    );
+    assert!(
+        after.contains(r#"profiles = ["prod"]"#)
+            && after.contains(r#"config = {"issuer": "https://id.example.com"}"#),
+        "and so did the second: {after}"
+    );
+
+    // Already attached is not an edit, for the reason `add_gear` is not.
+    let again = apply_product_edits(
+        uri,
+        &after,
+        &[ProductEdit::AddPlugin {
+            gear: "authn".to_owned(),
+            plugin: "ldap-authn-plugin".to_owned(),
+        }],
+    )
+    .expect("an idempotent edit is not an error");
+    assert!(again.changed().is_none(), "the plugin is already there");
+
+    // The variant this one exists instead of, on the same fixture: it rewrites
+    // the list, and the configuration goes with it.
+    let rewritten = apply_product_edits(
+        uri,
+        CONFIGURED_PLUGINS,
+        &[ProductEdit::SetPlugins {
+            gear: "authn".to_owned(),
+            plugins: vec![
+                "static-authn-plugin".to_owned(),
+                "oidc-authn-plugin".to_owned(),
+                "ldap-authn-plugin".to_owned(),
+            ],
+        }],
+    )
+    .expect("setting the list")
+    .changed()
+    .expect("the list changed")
+    .to_owned();
+    assert!(
+        !rewritten.contains("accept_all"),
+        "`SetPlugins` is why `AddPlugin` exists: it rewrites the entries and takes their \
+         config with them, and if this ever stops being true the two variants are one: \
+         {rewritten}"
     );
 }
 

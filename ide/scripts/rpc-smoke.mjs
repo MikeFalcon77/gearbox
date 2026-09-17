@@ -72,7 +72,13 @@ try {
 
   // Deliberately *without* write capability first: read-only is the default the
   // requirement asks for, and the refusal below is what proves it.
-  const init = await connection.sendRequest("initialize", { roots: [root] });
+  //
+  // The workspace is declared even so, because it is not a write capability:
+  // it is where the generated tree lives, and `gearbox/product/lock` now runs
+  // its `out` through the same boundary check generation uses -- so a session
+  // that names no workspace has nowhere to look for a lock and is told so
+  // rather than answered with an empty path.
+  const init = await connection.sendRequest("initialize", { roots: [root], workspace: repo });
   check(init.server_info?.name === "gearbox", "initialize returns serverInfo");
   check(init.capabilities.writes === false, "writes are absent until a client asks");
   check(init.capabilities?.staged_catalogue === true, "staged loading is advertised");

@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 91, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 92, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -764,6 +764,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "warning",
     domain: "generator",
     docs: "A generated file survives that this run does not write.\n\n**The sibling claim to `GBX0706`, and it had to be one rather than a\nrewording.** That code is about a crate directory, and everything about\nit is crate-shaped: it compares the paths a run plans by stripping\n`/Cargo.toml`, looks for a manifest on disk, and says what `cargo\nmetadata` will refuse. An application renamed under a Kubernetes profile\nleaves four other things behind -- its configuration file, its\nDockerfile, and a Helm subchart of nine files -- and a `subchart = \"...\"`\nrenamed on its own leaves the subchart with no crate having moved at all.\nNone of that is a crate, and none of it was reported.\n\nMarker-gated exactly as `GBX0706` is, and that gate is what keeps it\nhonest: a file is reported only when it carries this tool's own\ngenerated header, so an operator's file in the output root is never\nnamed, and neither is `values.yaml` -- the one file generation hands\nover, which deliberately does not carry the marker.\n\nA warning with the same remedy and for the same reason: `apply` has no\ndelete path, and a file in a tree someone has been working in is theirs\nto remove.",
+    requiresEvidence: false,
+  },
+  GBX0708: {
+    code: "GBX0708",
+    title: "a product template replaced a builtin",
+    severity: "warning",
+    domain: "generator",
+    docs: "A house template replaced a builtin for this run.\n\nReported rather than only summarized, and that is the whole point of it\nbeing a diagnostic: the overlay was named in the text output alone, so\n`--format json` and every RPC client saw an unexpected Dockerfile or\nchart with no visible cause and read it as a generator change. A\ntemplate is chosen by the description, so the file it produces is the\nproduct's doing -- which is a fact an operator has to be told.",
     requiresEvidence: false,
   },
 };

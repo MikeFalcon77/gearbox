@@ -17,6 +17,7 @@ use gearbox_ir::Transport;
 
 use super::*;
 use crate::scan::scan_crate;
+use crate::test_corpus::require;
 
 fn file(src: &str) -> RustFile {
     RustFile {
@@ -100,6 +101,67 @@ fn versioned_projections_attach_to_their_own_major() {
         transports_of(&contracts, "ThingApiV2"),
         vec!["local", "rest"]
     );
+
+    // The identity fields, which no test asserted even though every fixture
+    // declares them. `gear` and `version` come from the attribute; `kind` from
+    // the trait name's suffix, through the IR so GDL and the macro cannot
+    // disagree about what `...Api` means.
+    let v2 = contracts
+        .iter()
+        .find(|c| c.trait_ident == "ThingApiV2")
+        .expect("v2 is projected");
+    assert_eq!(v2.gear, "g");
+    assert_eq!(v2.version, "v2");
+    assert_eq!(v2.kind, gearbox_ir::ContractKind::Api);
+    assert_eq!(
+        v2.base_name, "ThingApi",
+        "the trailing major is stripped, so v1 and v2 are one family"
+    );
+}
+
+/// The `# Errors` clause nothing reached: every other test calls
+/// `.expect("parse")`. Skipping the attribute would drop a contract the SDK
+/// really declares, and every `provide` and `consume` naming that trait would
+/// then read as pointing at a trait nobody wrote.
+#[test]
+fn a_contract_attribute_with_no_version_is_an_error_not_a_skip() {
+    let src = r#"
+        #[toolkit::contract(gear = "g")]
+        pub trait ThingApi: Send + Sync {}
+    "#;
+    let err = project_contracts(&[file(src)]).unwrap_err();
+    assert!(err.to_string().contains("version"), "got: {err}");
+}
+
+#[test]
+fn a_contract_attribute_with_no_gear_is_an_error_too() {
+    let src = r#"
+        #[toolkit::contract(version = "v1")]
+        pub trait ThingApi: Send + Sync {}
+    "#;
+    let err = project_contracts(&[file(src)]).unwrap_err();
+    assert!(err.to_string().contains("gear"), "got: {err}");
+}
+
+/// A transport ident this does not model used to be dropped from the set, so the
+/// provider came back with fewer transports than the attribute lists -- a
+/// provider quietly reading as local-only, which is the plausible wrong answer
+/// `project_provides` refuses everywhere else.
+#[test]
+fn an_unmodelled_transport_ident_is_reported_not_dropped() {
+    let parsed = syn::parse_file(
+        r"
+        #[toolkit::provides(contract = sdk::ThingApi, transports = [local, quic])]
+        pub struct G;
+        ",
+    )
+    .expect("fixture parses");
+    let attrs = match parsed.items.first().expect("one item") {
+        syn::Item::Struct(s) => s.attrs.clone(),
+        other => panic!("expected a struct, got {other:?}"),
+    };
+    let err = project_provides(&attrs).unwrap_err();
+    assert!(err.to_string().contains("quic"), "got: {err}");
 }
 
 #[test]
@@ -107,10 +169,7 @@ fn real_tree_v1_has_grpc_and_v2_does_not() {
     // The decisive case, and the reason transports must not be declared:
     // api-contracts-sdk has PaymentApiRest, PaymentApiGrpc and PaymentApiV2Rest
     // -- but no PaymentApiV2Grpc.
-    let Some(files) = api_contracts_sdk() else {
-        eprintln!("skipping: ../gears-rust not present");
-        return;
-    };
+    let files = require!(api_contracts_sdk());
     let contracts = project_contracts(&files).expect("parse");
 
     assert_eq!(
@@ -244,10 +303,7 @@ fn the_real_provider_offers_less_than_the_contract_allows() {
     // says `[local, rest]`, because the gRPC client is behind an opt-in feature.
     // Projecting the contract's possibilities as the provider's offer would put
     // a binding in the catalogue that the build does not produce.
-    let Some(files) = api_contracts_sdk() else {
-        eprintln!("skipping: ../gears-rust not present");
-        return;
-    };
+    let files = require!(api_contracts_sdk());
     let contracts = project_contracts(&files).expect("parse");
     assert!(
         transports_of(&contracts, "PaymentApi").contains(&"grpc"),

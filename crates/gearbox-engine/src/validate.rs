@@ -14,9 +14,7 @@
 //! beside" (GBX0208), the other is "no crate anywhere declares this"
 //! (GBX0301). Reporting them as one code would make the common case unhelpful.
 
-use gearbox_ir::{
-    Diagnostic, DiagnosticCode, Diagnostics, GearId, ProductIntent, Severity,
-};
+use gearbox_ir::{Diagnostic, DiagnosticCode, Diagnostics, GearId, ProductIntent, Severity};
 
 use crate::catalogue::CatalogueScan;
 use crate::source::SourceRoot;

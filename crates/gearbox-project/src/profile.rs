@@ -29,6 +29,8 @@
 
 use std::path::PathBuf;
 
+use gearbox_ir::{IdError, ProfileId};
+
 use crate::scan::RustFile;
 
 /// One `impl ClusterProfile`, with the location a diagnostic can point at.
@@ -45,56 +47,130 @@ pub struct ProjectedProfile {
     pub line: usize,
 }
 
-/// The `const NAME: &str = "..."` in an impl block, if it is a string literal.
-fn name_const(imp: &syn::ItemImpl) -> Option<String> {
-    imp.items.iter().find_map(|item| match item {
-        syn::ImplItem::Const(c) if c.ident == "NAME" => match &c.expr {
-            syn::Expr::Lit(syn::ExprLit {
-                lit: syn::Lit::Str(s),
-                ..
-            }) => Some(s.value()),
-            _ => None,
-        },
+/// Why a cluster profile could not be projected.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ProfileProjectionError {
+    /// `NAME` is there, as the trait requires, but not in a shape this can read.
+    ///
+    /// Reported rather than skipped: a dropped profile makes `check_profiles`
+    /// raise `ClusterProfileNotImplemented` against a crate that does implement
+    /// it, which points the reader at the wrong file entirely.
+    #[error("`impl ClusterProfile for {marker_ident}` in `{}`: {reason}", .relative.display())]
+    UnreadableName {
+        marker_ident: String,
+        relative: PathBuf,
+        reason: String,
+    },
+
+    /// `NAME` reads, but is not a profile id.
+    ///
+    /// The name becomes a `ClientScope` segment -- the SDK resolves
+    /// `ClientScope::new("cluster:{name}")` -- so one containing `:` resolves
+    /// into a different scope namespace than the one it declares.
+    /// `gearbox_ir::ProfileId` already states the shape; this is where it gets
+    /// applied.
+    #[error("`impl ClusterProfile for {marker_ident}` in `{}` declares an unusable NAME", .relative.display())]
+    InvalidName {
+        marker_ident: String,
+        relative: PathBuf,
+        #[source]
+        source: IdError,
+    },
+}
+
+/// The `const NAME` in an impl block, as a string literal or a `&str` const.
+///
+/// A const path is resolved the way [`crate::cluster::project_provider_name`]
+/// resolves a provider's `PROVIDER_NAME`: both plugins spell their names that
+/// way, and there is no reason a profile marker may not.
+fn name_const(files: &[RustFile], imp: &syn::ItemImpl) -> Result<String, String> {
+    let Some(expr) = imp.items.iter().find_map(|item| match item {
+        syn::ImplItem::Const(c) if c.ident == "NAME" => Some(&c.expr),
         _ => None,
-    })
+    }) else {
+        return Err("the trait requires `const NAME`, and this impl declares none".to_owned());
+    };
+    match expr {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(s),
+            ..
+        }) => Ok(s.value()),
+        syn::Expr::Path(p) => {
+            let ident = crate::plugin::last_segment(&p.path);
+            crate::cluster::resolve_str_const(files, &ident).ok_or_else(|| {
+                format!("`NAME` is `{ident}`, which is not a `&str` const in this crate")
+            })
+        }
+        _ => Err(
+            "`NAME` is neither a string literal nor a path to a `&str` const in this crate"
+                .to_owned(),
+        ),
+    }
 }
 
 /// Project every `impl ClusterProfile` under a crate's `src/`.
 ///
-/// Sorted by profile name so a diagnostic's candidate list is stable. An impl
-/// whose `NAME` is not a string literal is skipped rather than guessed at: the
-/// trait requires the const, so a non-literal means a shape this parser does not
-/// model, and inventing a name would be worse than reporting none.
-#[must_use]
-pub fn project_cluster_profiles(files: &[RustFile]) -> Vec<ProjectedProfile> {
-    let mut out: Vec<ProjectedProfile> = files
-        .iter()
-        .flat_map(|file| {
-            file.ast.items.iter().filter_map(move |item| {
-                let syn::Item::Impl(imp) = item else {
-                    return None;
-                };
-                let (_, trait_path, _) = imp.trait_.as_ref()?;
-                if trait_path.segments.last()?.ident != "ClusterProfile" {
-                    return None;
-                }
-                let syn::Type::Path(self_path) = &*imp.self_ty else {
-                    return None;
-                };
+/// Sorted by profile name so a diagnostic's candidate list is stable.
+///
+/// # Errors
+/// Returns [`ProfileProjectionError`] for an impl whose `NAME` cannot be read,
+/// or whose `NAME` is not a valid profile id. Both used to be silent skips, and
+/// a skip here is indistinguishable from a crate that implements no profile --
+/// which is the one answer that makes the consuming check blame the wrong
+/// crate.
+pub fn project_cluster_profiles(
+    files: &[RustFile],
+) -> Result<Vec<ProjectedProfile>, ProfileProjectionError> {
+    let mut out: Vec<ProjectedProfile> = Vec::new();
 
-                Some(ProjectedProfile {
-                    marker_ident: self_path.path.segments.last()?.ident.to_string(),
-                    name: name_const(imp)?,
+    for file in files {
+        for item in &file.ast.items {
+            let syn::Item::Impl(imp) = item else { continue };
+            let Some((_, trait_path, _)) = imp.trait_.as_ref() else {
+                continue;
+            };
+            if trait_path
+                .segments
+                .last()
+                .is_none_or(|s| s.ident != "ClusterProfile")
+            {
+                continue;
+            }
+            let syn::Type::Path(self_path) = &*imp.self_ty else {
+                continue;
+            };
+            let Some(marker_ident) = self_path.path.segments.last().map(|s| s.ident.to_string())
+            else {
+                continue;
+            };
+
+            let name = name_const(files, imp).map_err(|reason| {
+                ProfileProjectionError::UnreadableName {
+                    marker_ident: marker_ident.clone(),
                     relative: file.relative.clone(),
-                    // proc-macro2 reports 1-based lines, matching every editor.
-                    line: trait_path.segments[0].ident.span().start().line,
-                })
-            })
-        })
-        .collect();
+                    reason,
+                }
+            })?;
+            // Validated where it is read, not where it is used: by the time the
+            // name reaches `ClientScope` it is a bare string several crates away.
+            ProfileId::new(name.clone()).map_err(|source| ProfileProjectionError::InvalidName {
+                marker_ident: marker_ident.clone(),
+                relative: file.relative.clone(),
+                source,
+            })?;
+
+            out.push(ProjectedProfile {
+                marker_ident,
+                name,
+                relative: file.relative.clone(),
+                // proc-macro2 reports 1-based lines, matching every editor.
+                line: trait_path.segments[0].ident.span().start().line,
+            });
+        }
+    }
 
     out.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.line.cmp(&b.line)));
-    out
+    Ok(out)
 }
 
 #[cfg(test)]

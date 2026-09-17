@@ -12,13 +12,16 @@
 
 mod generate;
 mod lock;
+mod pipeline;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use anyhow::Context as _;
 use clap::{Parser, Subcommand, ValueEnum};
 use gearbox_engine::{SourceRoot, check_plugins, load_catalogue, load_product};
-use gearbox_ir::{Diagnostic, ProfileId, Severity, SourceId};
+use gearbox_ir::{Diagnostic, ExtensionPointDecl, GearDescriptor, Severity, SourceId};
 
 #[derive(Parser)]
 #[command(
@@ -296,7 +299,7 @@ fn plugins(
     }
 
     if let Some(file) = product_file {
-        return Ok(resolve_plugins(&scan.catalogue, file, gear));
+        return resolve_plugins(&scan.catalogue, file, gear);
     }
     if list_plugins(&scan.catalogue, gear) {
         Ok(ExitCode::SUCCESS)
@@ -305,8 +308,26 @@ fn plugins(
     }
 }
 
+/// Which gears fill each extension point, in one pass over the catalogue.
+///
+/// `Catalogue::implementations_of` scans every gear and allocates, so calling it
+/// per extension point inside the per-host loop cost one full scan per point --
+/// quadratic in catalogue size for a command whose answer is a single join.
+fn implementations_by_point(
+    catalogue: &gearbox_ir::Catalogue,
+) -> BTreeMap<&ExtensionPointDecl, Vec<&GearDescriptor>> {
+    let mut by_point: BTreeMap<&ExtensionPointDecl, Vec<&GearDescriptor>> = BTreeMap::new();
+    for gear in catalogue.gears.values() {
+        if let Some(fill) = gear.fills.as_ref() {
+            by_point.entry(&fill.point).or_default().push(gear);
+        }
+    }
+    by_point
+}
+
 /// What each host *could* use. The answer to "which implementations exist".
 fn list_plugins(catalogue: &gearbox_ir::Catalogue, only: Option<&str>) -> bool {
+    let by_point = implementations_by_point(catalogue);
     let mut any = false;
     for host in catalogue.gears.values() {
         if host.extension_points.is_empty() {
@@ -322,11 +343,10 @@ fn list_plugins(catalogue: &gearbox_ir::Catalogue, only: Option<&str>) -> bool {
 
         for point in &host.extension_points {
             println!("\n  extension point  {}", point.qualified());
-            let impls = catalogue.implementations_of(point);
-            if impls.is_empty() {
+            let Some(impls) = by_point.get(point) else {
                 println!("    (no implementation in the catalogue)");
                 continue;
-            }
+            };
             for gear in impls {
                 let fill = gear.fills.as_ref();
                 let vendor = fill
@@ -335,12 +355,14 @@ fn list_plugins(catalogue: &gearbox_ir::Catalogue, only: Option<&str>) -> bool {
                 let priority = fill
                     .and_then(|f| f.default_priority)
                     .map_or_else(|| "-".to_owned(), |p| p.to_string());
-                // Whether the compiled-in defaults already agree. A mismatch is
-                // not fatal -- the product can set `vendor` on either side --
-                // but it is what silently fails if nobody does.
-                let mark = if host.vendor_selector.as_deref()
-                    == fill.and_then(|f| f.default_vendor.as_deref())
-                {
+                // Asked of the engine, not decided here. `check_plugins` owns
+                // vendor selection -- it is where the `linked, but no vendor
+                // match` arm below comes from -- and a second copy of the rule
+                // in the CLI could tell an operator the opposite of what the
+                // resolver will do. A mismatch is not fatal, since the product
+                // can set `vendor` on either side, but it is what silently
+                // fails if nobody does.
+                let mark = if gearbox_engine::plugin_select::default_vendors_agree(host, gear) {
                     "matches"
                 } else {
                     "NEEDS vendor override"
@@ -370,7 +392,16 @@ fn resolve_plugins(
     catalogue: &gearbox_ir::Catalogue,
     file: &std::path::Path,
     only: Option<&str>,
-) -> ExitCode {
+) -> anyhow::Result<ExitCode> {
+    // Canonicalized before anything is loaded, and the failure propagated. A
+    // relative path went through `file_uri` as `file:///product.gdl` -- an
+    // absolute-looking URI pointing at the filesystem root -- so every
+    // diagnostic this command reports named a file that does not exist. That is
+    // the dead link `resolve_product` refuses outright, and the same mistyped
+    // `--product` must not be a hard error there and a wrong answer here.
+    let file = &file
+        .canonicalize()
+        .with_context(|| format!("cannot read product description `{}`", file.display()))?;
     let scan = load_product(file, None);
     // Reported whether or not the product evaluated. A warning that arrives
     // *with* a usable intent used to be dropped, so plugin resolution could exit
@@ -379,11 +410,11 @@ fn resolve_plugins(
     report(scan.diagnostics.as_slice());
     let product_failed = scan.diagnostics.has_errors();
     let Some(intent) = scan.intent else {
-        return ExitCode::FAILURE;
+        return Ok(ExitCode::FAILURE);
     };
 
     let mut diagnostics = gearbox_ir::Diagnostics::new();
-    let uri = gearbox_ir::file_uri(&file.canonicalize().unwrap_or_else(|_| file.to_path_buf()));
+    let uri = gearbox_ir::file_uri(file);
     let resolutions = check_plugins(catalogue, &intent, &uri, &mut diagnostics);
     diagnostics.finish();
     let resolutions: Vec<_> = resolutions
@@ -395,7 +426,7 @@ fn resolve_plugins(
     {
         eprintln!("no gear named `{id}` declares a plugin extension point");
         report(diagnostics.as_slice());
-        return ExitCode::FAILURE;
+        return Ok(ExitCode::FAILURE);
     }
 
     let mut last: Option<(String, String)> = None;
@@ -420,11 +451,11 @@ fn resolve_plugins(
     }
 
     report(diagnostics.as_slice());
-    if product_failed || diagnostics.has_errors() {
+    Ok(if product_failed || diagnostics.has_errors() {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
-    }
+    })
 }
 
 fn product(file: &std::path::Path, format: Format) -> anyhow::Result<ExitCode> {
@@ -630,38 +661,42 @@ fn resolve_product(
     profile: Option<&str>,
     format: ResolveFormat,
 ) -> anyhow::Result<ExitCode> {
-    let opened = open_roots(roots, source_id)?;
-    let scan = load_catalogue(&opened);
-    if let Some(code) = refuse_catalogue_errors(&scan.catalogue) {
-        return Ok(code);
-    }
+    let outcome = match pipeline::resolve(roots, source_id, product_file, profile)? {
+        pipeline::Outcome::Refused(code) => return Ok(code),
+        pipeline::Outcome::Resolved(resolved) => resolved,
+    };
+    let pipeline::Resolution {
+        lock: resolved,
+        mut diagnostics,
+        scan,
+        product_file,
+        ..
+    } = *outcome;
 
-    // Canonicalized so every diagnostic's `file://` URI points at a real path an
-    // editor can open. A relative one renders and does nothing, which is the
-    // failure the Studio's dead links already taught.
-    let product_file = &product_file
-        .canonicalize()
-        .map_err(|e| anyhow::anyhow!("cannot canonicalize `{}`: {e}", product_file.display()))?;
-    let product_scan = gearbox_engine::product::load_product(product_file, None);
-    let mut diagnostics: Vec<Diagnostic> = product_scan.diagnostics.as_slice().to_vec();
-    let Some(intent) = product_scan.intent else {
+    // Redaction has to cover every path that renders a lock, not just the one
+    // that writes it. `generate` and the RPC `lock` handler both go through
+    // `redact_product`; without it here, `resolve --format toml|json` prints a
+    // literal credential from `gears[].config` straight to stdout, which in CI
+    // means into the build log.
+    let mut replaced = gearbox_ir::Diagnostics::new();
+    let resolved = gearbox_engine::secrets::redact_product(
+        &resolved,
+        Some(&scan.catalogue),
+        product_file.parent(),
+        &mut replaced,
+    );
+    diagnostics.extend(replaced.iter().cloned());
+
+    // A lock is an artifact, and only a writable one is a valid artifact.
+    // `write_canonical` stamps a fresh valid hash, so a resolution that reported
+    // errors came out on stdout as a well formed lock: redirected into a file it
+    // passes `gearbox_lock::read`, and `gearbox lock gears` then answers from a
+    // topology the resolver could not finish deciding. `generate` refuses at
+    // this point and so does the RPC path; only the exit code said so here.
+    if format == ResolveFormat::Toml && !resolved.is_writable() {
         report(&diagnostics);
-        anyhow::bail!("`{}` could not be evaluated", product_file.display());
-    };
-
-    // The product's own default when none is named, so the common invocation is
-    // short and the answer still comes from the description rather than from a
-    // guess made here.
-    let profile = match profile {
-        Some(id) => ProfileId::new(id)?,
-        None => intent.default_profile.clone(),
-    };
-
-    let resolution =
-        gearbox_engine::resolve::resolve_at(&scan.catalogue, &intent, &profile, Some(product_file));
-    let sources = gearbox_engine::lock_sources(&opened, &scan.catalogue, product_file);
-    let resolved =
-        gearbox_engine::resolve::product::assemble(&scan.catalogue, &intent, &resolution, sources);
+        anyhow::bail!("resolution reported errors; no lock was printed");
+    }
 
     match format {
         // stdout carries the artifact; diagnostics go to stderr, so a pipe into
@@ -671,7 +706,6 @@ fn resolve_product(
         ResolveFormat::Text => print_resolution(&resolved),
     }
 
-    diagnostics.extend(resolved.diagnostics.as_slice().iter().cloned());
     report(&diagnostics);
 
     Ok(if diagnostics.iter().any(|d| d.severity.is_error()) {
@@ -945,10 +979,13 @@ const fn label(severity: Severity) -> &'static str {
 fn describe_source(source: &gearbox_ir::SourceDecl) -> String {
     match source {
         gearbox_ir::SourceDecl::Path { at } => format!("path {at}"),
-        gearbox_ir::SourceDecl::Registry { url, prefix } => match prefix {
-            Some(prefix) => format!("registry {url} (packages named {prefix}<gear>)"),
-            None => format!("registry {url}"),
-        },
+        gearbox_ir::SourceDecl::Registry { url, prefix } => {
+            let url = without_userinfo(url);
+            match prefix {
+                Some(prefix) => format!("registry {url} (packages named {prefix}<gear>)"),
+                None => format!("registry {url}"),
+            }
+        }
         gearbox_ir::SourceDecl::Git {
             url,
             tag,
@@ -961,9 +998,36 @@ fn describe_source(source: &gearbox_ir::SourceDecl) -> String {
                 .or_else(|| rev.as_ref().map(|r| format!("rev {r}")))
                 .or_else(|| branch.as_ref().map(|b| format!("branch {b}")))
                 .unwrap_or_else(|| "unpinned".to_owned());
-            format!("git {url} @ {pin}")
+            format!("git {} @ {pin}", without_userinfo(url))
         }
     }
+}
+
+/// `url` with its userinfo component replaced.
+///
+/// `https://user:TOKEN@host/repo.git` is an ordinary way to write a git or
+/// alternate-registry source, and `gearbox product` prints what it finds to
+/// stdout -- which under CI is the build log. The component is replaced rather
+/// than dropped so the operator can still see that the description carries a
+/// credential at all, and only inside the authority, so a path or query
+/// containing `@` is left alone. An scp-style `git@host:org/repo` has no `://`
+/// and no password field, so it is not touched.
+fn without_userinfo(url: &str) -> std::borrow::Cow<'_, str> {
+    let Some(scheme_end) = url.find("://") else {
+        return std::borrow::Cow::Borrowed(url);
+    };
+    let authority_start = scheme_end + "://".len();
+    let authority_end = url[authority_start..]
+        .find(['/', '?', '#'])
+        .map_or(url.len(), |i| authority_start + i);
+    let Some(at) = url[authority_start..authority_end].find('@') else {
+        return std::borrow::Cow::Borrowed(url);
+    };
+    std::borrow::Cow::Owned(format!(
+        "{}<credential>{}",
+        &url[..authority_start],
+        &url[authority_start + at..]
+    ))
 }
 
 fn describe_mode(mode: gearbox_ir::BindingMode) -> &'static str {
@@ -984,8 +1048,90 @@ fn describe_preference(preference: &gearbox_ir::Preference) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::list_plugins;
-    use gearbox_ir::Catalogue;
+    use std::collections::BTreeSet;
+    use std::path::PathBuf;
+
+    use gearbox_ir::{
+        CargoRef, Catalogue, Diagnostic, DiagnosticCode, ExtensionPointDecl, GearDescriptor,
+        GearId, PluginFill, RelPath, SourceId, Visibility,
+    };
+
+    use super::{
+        describe_source, list_plugins, open_source_roots, refuse_catalogue_errors, without_userinfo,
+    };
+
+    fn gear(id: &str) -> GearDescriptor {
+        GearDescriptor {
+            id: GearId::new(id).unwrap(),
+            display_name: id.to_owned(),
+            description: None,
+            category: None,
+            visibility: Visibility::Internal,
+            source: SourceId::new("gears-rust").unwrap(),
+            gdl_path: RelPath::new(format!("gears/{id}/gear.gdl")).unwrap(),
+            package: CargoRef::new(
+                format!("cf-gears-{id}"),
+                id.replace('-', "_"),
+                RelPath::here(),
+            ),
+            runtime_caps: BTreeSet::new(),
+            colocated_deps: BTreeSet::new(),
+            lifecycle: None,
+            provides: Vec::new(),
+            consumes: Vec::new(),
+            requires: Vec::new(),
+            serves: Vec::new(),
+            client_trait: None,
+            cluster_providers: Vec::new(),
+            extension_points: Vec::new(),
+            fills: None,
+            vendor_selector: None,
+            declared_roles: Vec::new(),
+            one_per_installation: false,
+            available_features: BTreeSet::new(),
+            cargo_features: None,
+            config_schema: None,
+            docs: None,
+            gts_types: Vec::new(),
+            declared_at: None,
+        }
+    }
+
+    fn point() -> ExtensionPointDecl {
+        ExtensionPointDecl {
+            trait_ident: "AuthNResolverPluginClient".to_owned(),
+            sdk_lib: "authn_resolver_sdk".to_owned(),
+            sdk: CargoRef::new(
+                "cf-gears-authn-resolver-sdk",
+                "authn_resolver_sdk",
+                RelPath::here(),
+            ),
+        }
+    }
+
+    /// A host declaring one point, and one plugin filling it.
+    ///
+    /// Both name filters below need a non-empty catalogue: with
+    /// `Catalogue::default()` the filter never runs at all, so an inverted
+    /// comparison in it kept every test passing.
+    fn with_a_host() -> Catalogue {
+        let mut host = gear("authn-resolver");
+        host.extension_points = vec![point()];
+        host.vendor_selector = Some("constructorfabric".to_owned());
+
+        let mut plugin = gear("static-authn-plugin");
+        plugin.fills = Some(PluginFill {
+            point: point(),
+            default_vendor: Some("constructorfabric".to_owned()),
+            default_priority: Some(10),
+        });
+
+        let mut catalogue = Catalogue::default();
+        for g in [host, plugin] {
+            catalogue.gears.insert(g.id.clone(), g);
+        }
+        catalogue
+    }
 
     #[test]
     fn a_named_gear_miss_is_failure() {
@@ -995,5 +1141,104 @@ mod tests {
     #[test]
     fn listing_with_no_hosts_is_still_success() {
         assert!(list_plugins(&Catalogue::default(), None));
+    }
+
+    #[test]
+    fn the_gear_filter_finds_the_host_it_names() {
+        assert!(list_plugins(&with_a_host(), Some("authn-resolver")));
+    }
+
+    #[test]
+    fn the_gear_filter_refuses_a_host_the_catalogue_does_not_hold() {
+        let catalogue = with_a_host();
+        assert!(
+            !list_plugins(&catalogue, Some("types-registry")),
+            "a name that matches nothing is a miss even when the catalogue has hosts"
+        );
+        assert!(
+            !list_plugins(&catalogue, Some("static-authn-plugin")),
+            "a plugin is not a host: it declares no extension point"
+        );
+    }
+
+    #[test]
+    fn an_explicit_source_id_refuses_several_roots() {
+        // No filesystem: the refusal fires before any root is opened, which is
+        // the point of it -- `--source-id x --root a --root b` gave both roots
+        // one identity and the second root's gears replaced the first's.
+        let err = open_source_roots(
+            &[
+                PathBuf::from("/nonexistent/a"),
+                PathBuf::from("/nonexistent/b"),
+            ],
+            Some("shared"),
+        )
+        .expect_err("two roots cannot share one declared identity");
+        assert!(
+            err.to_string().contains("2 roots were given"),
+            "the message should say how many roots it saw: {err}"
+        );
+    }
+
+    #[test]
+    fn a_clean_catalogue_passes_the_gate() {
+        assert!(refuse_catalogue_errors(&Catalogue::default()).is_none());
+    }
+
+    #[test]
+    fn a_catalogue_error_closes_the_gate() {
+        let mut catalogue = Catalogue::default();
+        catalogue.diagnostics.push(Diagnostic::error(
+            DiagnosticCode::GdlCardinality,
+            "gear `api-gateway` is declared twice",
+            "give one of the descriptions a different id",
+        ));
+        assert!(
+            refuse_catalogue_errors(&catalogue).is_some(),
+            "resolve and generate used to build a lock from a catalogue that failed to load"
+        );
+    }
+
+    #[test]
+    fn a_credential_in_a_source_url_is_not_printed() {
+        let git = gearbox_ir::SourceDecl::Git {
+            url: "https://ci-bot:s3cr3t-token@git.example.com/org/gears.git".to_owned(),
+            tag: Some("v1.2.3".to_owned()),
+            rev: None,
+            branch: None,
+        };
+        let rendered = describe_source(&git);
+        assert!(
+            !rendered.contains("s3cr3t-token") && !rendered.contains("ci-bot"),
+            "the userinfo component reaches stdout, and under CI the build log: {rendered}"
+        );
+        assert!(rendered.contains("git.example.com/org/gears.git"));
+        assert!(rendered.contains("tag v1.2.3"));
+
+        let registry = gearbox_ir::SourceDecl::Registry {
+            url: "https://token@registry.example.com/index".to_owned(),
+            prefix: Some("cf-gears-".to_owned()),
+        };
+        let rendered = describe_source(&registry);
+        assert!(!rendered.contains("token@"), "{rendered}");
+    }
+
+    #[test]
+    fn only_the_authority_s_userinfo_is_replaced() {
+        assert_eq!(
+            without_userinfo("https://git.example.com/org/repo.git"),
+            "https://git.example.com/org/repo.git"
+        );
+        assert_eq!(
+            without_userinfo("https://git.example.com/org/repo.git?from=a@b"),
+            "https://git.example.com/org/repo.git?from=a@b",
+            "an `@` past the authority is part of the path or query, not a credential"
+        );
+        // scp syntax has no `://` and no password field, so there is nothing to
+        // replace and dropping `git@` would only lose information.
+        assert_eq!(
+            without_userinfo("git@github.com:org/repo.git"),
+            "git@github.com:org/repo.git"
+        );
     }
 }

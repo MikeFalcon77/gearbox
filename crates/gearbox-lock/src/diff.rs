@@ -6,13 +6,17 @@
 //! is confined to what actually changed
 //! (`cpt-gearbox-nfr-lock-diff-minimal`).
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use gearbox_ir::{
-    ApplicationId, ClusterPrimitive, ContractId, GearId, NodeId, ProvenanceKind, ResolvedProduct,
+    ApplicationId, ClusterPrimitive, ContractId, CutCandidate, GearId, NodeId, ProvenanceEdge,
+    ProvenanceKind, ResolvedApplication, ResolvedBinding, ResolvedClusterBinding, ResolvedProduct,
     SourceId,
 };
 use serde::Serialize;
+
+use crate::canonical::canonicalize_order;
 
 /// The `(consumer, contract)` pair that identifies one binding.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -173,12 +177,18 @@ impl LockDiff {
         let mut lines = Vec::new();
 
         if let Some((before, after)) = &self.profile_changed {
-            lines.push(format!("~ profile: {before} -> {after}"));
+            lines.push(format!(
+                "~ profile: {} -> {}",
+                one_line(before),
+                one_line(after)
+            ));
         }
         for change in &self.fields_changed {
             lines.push(format!(
                 "~ {}: {} -> {}",
-                change.field, change.before, change.after
+                one_line(&change.field),
+                one_line(&change.before),
+                one_line(&change.after)
             ));
         }
         if let Some((before, after)) = self.diagnostics_changed {
@@ -233,7 +243,7 @@ impl LockDiff {
                 &self.cluster_removed,
                 &self.cluster_changed,
             ],
-            |key| format!("{}.{}", key.scope, key.primitive),
+            |key| format!("{}.{}", one_line(&key.scope), key.primitive),
         );
         marked(
             &mut lines,
@@ -419,41 +429,184 @@ fn marked<K>(
     }
 }
 
+/// Render a lock scalar as one line of output.
+///
+/// The ids in a lock are newtypes that refuse control characters. The values
+/// these lines interpolate -- `product.id`, `kubernetes.namespace`, a cluster
+/// scope -- are plain `String`s straight out of a parsed file, so one of them
+/// can carry a newline or an escape sequence and forge or erase a line in the
+/// summary someone reads to decide whether a lock change is acceptable.
+fn one_line(value: &str) -> String {
+    if !value.chars().any(char::is_control) {
+        return value.to_owned();
+    }
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        // `escape_debug` is the same spelling Rust prints: `\n` for a
+        // newline, `\u{1b}` for an escape byte. Applied to control characters
+        // only, so the rest of the value reads as it was written.
+        if c.is_control() {
+            out.extend(c.escape_debug());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// The added, removed, and changed keys between two ordered maps, each list
-/// sorted (an artifact of `K: Ord` and `BTreeSet`'s iteration order, not an
+/// sorted (an artifact of `K: Ord` and `BTreeMap`'s iteration order, not an
 /// extra sort pass).
+///
+/// One merge walk over two already-sorted iterators: indexing the maps again
+/// for the shared keys, or collecting their keys into sets to take a
+/// difference, would re-sort what `BTreeMap` already handed over in order.
 fn diff_keyed<K: Ord + Clone, V: PartialEq>(
     before: &BTreeMap<K, V>,
     after: &BTreeMap<K, V>,
 ) -> (Vec<K>, Vec<K>, Vec<K>) {
-    let before_keys: std::collections::BTreeSet<&K> = before.keys().collect();
-    let after_keys: std::collections::BTreeSet<&K> = after.keys().collect();
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    let mut changed = Vec::new();
 
-    let added = after_keys
-        .difference(&before_keys)
-        .map(|k| (*k).clone())
-        .collect();
-    let removed = before_keys
-        .difference(&after_keys)
-        .map(|k| (*k).clone())
-        .collect();
-    let changed = before_keys
-        .intersection(&after_keys)
-        .filter(|k| before[*k] != after[*k])
-        .map(|k| (*k).clone())
-        .collect();
+    let mut before = before.iter().peekable();
+    let mut after = after.iter().peekable();
+    loop {
+        match (before.peek(), after.peek()) {
+            (Some((before_key, before_value)), Some((after_key, after_value))) => {
+                match before_key.cmp(after_key) {
+                    Ordering::Less => {
+                        removed.push((*before_key).clone());
+                        before.next();
+                    }
+                    Ordering::Greater => {
+                        added.push((*after_key).clone());
+                        after.next();
+                    }
+                    Ordering::Equal => {
+                        if before_value != after_value {
+                            changed.push((*before_key).clone());
+                        }
+                        before.next();
+                        after.next();
+                    }
+                }
+            }
+            (Some((before_key, _)), None) => {
+                removed.push((*before_key).clone());
+                before.next();
+            }
+            (None, Some((after_key, _))) => {
+                added.push((*after_key).clone());
+                after.next();
+            }
+            (None, None) => break,
+        }
+    }
 
     (added, removed, changed)
 }
 
+/// Index a product's entries by key, keeping every entry that shares one.
+///
+/// **Not one value per key, and that is the fix for a dropped change.** None
+/// of these keys is unique over its collection: `canonicalize_order` sorts
+/// cut candidates by `(consumer, provider, contract)` and provenance edges by
+/// `(from, kind, to)`, and drops only entries equal in *all* their fields, so
+/// two entries sharing a key and differing elsewhere both reach the lock.
+/// Keeping one value per key meant a change to the shadowed entry appeared in
+/// no list and [`LockDiff::is_empty`] then said nothing had changed.
+fn grouped<'a, K: Ord, V: 'a>(
+    entries: impl Iterator<Item = (K, &'a V)>,
+) -> BTreeMap<K, Vec<&'a V>> {
+    let mut out: BTreeMap<K, Vec<&'a V>> = BTreeMap::new();
+    for (key, value) in entries {
+        out.entry(key).or_default().push(value);
+    }
+    out
+}
+
+// The five index helpers below borrow their entries rather than cloning them:
+// the maps exist only for the `!=` inside `diff_keyed`, and cloning an
+// application copies its gears, listens, spawns and feature sets -- or, for
+// provenance, every edge of the largest collection in a real lock -- for one
+// comparison.
+
+fn by_application_name(
+    product: &ResolvedProduct,
+) -> BTreeMap<ApplicationId, Vec<&ResolvedApplication>> {
+    grouped(product.applications.iter().map(|p| (p.name.clone(), p)))
+}
+
+fn by_binding_key(product: &ResolvedProduct) -> BTreeMap<BindingKey, Vec<&ResolvedBinding>> {
+    grouped(product.bindings.iter().map(|b| {
+        (
+            BindingKey {
+                consumer: b.consumer.clone(),
+                contract: b.contract.clone(),
+            },
+            b,
+        )
+    }))
+}
+
+fn by_cluster_key(product: &ResolvedProduct) -> BTreeMap<ClusterKey, Vec<&ResolvedClusterBinding>> {
+    grouped(product.cluster.iter().map(|c| {
+        (
+            ClusterKey {
+                scope: c.scope.clone(),
+                primitive: c.primitive,
+            },
+            c,
+        )
+    }))
+}
+
+fn by_cut_key(product: &ResolvedProduct) -> BTreeMap<CutKey, Vec<&CutCandidate>> {
+    grouped(product.cuttable_if_declared.iter().map(|c| {
+        (
+            CutKey {
+                consumer: c.consumer.clone(),
+                provider: c.provider.clone(),
+                contract: c.contract.clone(),
+            },
+            c,
+        )
+    }))
+}
+
+fn by_provenance_key(product: &ResolvedProduct) -> BTreeMap<ProvenanceKey, Vec<&ProvenanceEdge>> {
+    grouped(product.provenance.iter().map(|e| {
+        (
+            ProvenanceKey {
+                from: e.from.clone(),
+                kind: e.kind,
+                to: e.to.clone(),
+            },
+            e,
+        )
+    }))
+}
+
 /// Compare two resolved products structurally.
 ///
-/// Assumes each product's own invariants: at most one process per name, one
-/// binding per `(consumer, contract)`, one cluster entry per
-/// `(scope, primitive)`. A resolver that violated those would have a bug
-/// worth catching at resolution time, not silently folded into a diff here.
+/// Both sides are canonicalized first, so the answer is about content and
+/// nothing else. Ordering inside a nested collection -- `listens`, `spawns`,
+/// `selected_by`, a cluster entry's `requesters` -- is not content, and the
+/// ordinary call has one side straight from the resolver and the other from
+/// [`read`](crate::read), which returns a canonicalized product: without this
+/// pass every such pair came out as changed.
+///
+/// Entries are grouped by key rather than indexed by it, so two entries that
+/// share a key are compared instead of one shadowing the other.
 #[must_use]
 pub fn diff(before: &ResolvedProduct, after: &ResolvedProduct) -> LockDiff {
+    let mut before_canonical = before.clone();
+    canonicalize_order(&mut before_canonical);
+    let mut after_canonical = after.clone();
+    canonicalize_order(&mut after_canonical);
+    let (before, after) = (&before_canonical, &after_canonical);
+
     let profile_changed = (before.product.profile != after.product.profile).then(|| {
         (
             before.product.profile.to_string(),
@@ -468,96 +621,26 @@ pub fn diff(before: &ResolvedProduct, after: &ResolvedProduct) -> LockDiff {
 
     let (gears_added, gears_removed, gears_changed) = diff_keyed(&before.gears, &after.gears);
 
-    let by_application_name = |product: &ResolvedProduct| {
-        product
-            .applications
-            .iter()
-            .map(|p| (p.name.clone(), p.clone()))
-            .collect::<BTreeMap<_, _>>()
-    };
     let (applications_added, applications_removed, applications_changed) =
         diff_keyed(&by_application_name(before), &by_application_name(after));
 
-    let by_binding_key = |product: &ResolvedProduct| {
-        product
-            .bindings
-            .iter()
-            .map(|b| {
-                (
-                    BindingKey {
-                        consumer: b.consumer.clone(),
-                        contract: b.contract.clone(),
-                    },
-                    b.clone(),
-                )
-            })
-            .collect::<BTreeMap<_, _>>()
-    };
     let (bindings_added, bindings_removed, bindings_changed) =
         diff_keyed(&by_binding_key(before), &by_binding_key(after));
 
-    let by_cluster_key = |product: &ResolvedProduct| {
-        product
-            .cluster
-            .iter()
-            .map(|c| {
-                (
-                    ClusterKey {
-                        scope: c.scope.clone(),
-                        primitive: c.primitive,
-                    },
-                    c.clone(),
-                )
-            })
-            .collect::<BTreeMap<_, _>>()
-    };
     let (cluster_added, cluster_removed, cluster_changed) =
         diff_keyed(&by_cluster_key(before), &by_cluster_key(after));
 
-    let by_cut_key = |product: &ResolvedProduct| {
-        product
-            .cuttable_if_declared
-            .iter()
-            .map(|c| {
-                (
-                    CutKey {
-                        consumer: c.consumer.clone(),
-                        provider: c.provider.clone(),
-                        contract: c.contract.clone(),
-                    },
-                    c.clone(),
-                )
-            })
-            .collect::<BTreeMap<_, _>>()
-    };
     let (cuts_added, cuts_removed, cuts_changed) =
         diff_keyed(&by_cut_key(before), &by_cut_key(after));
 
-    let by_provenance_key = |product: &ResolvedProduct| {
-        product
-            .provenance
-            .iter()
-            .map(|e| {
-                (
-                    ProvenanceKey {
-                        from: e.from.clone(),
-                        kind: e.kind,
-                        to: e.to.clone(),
-                    },
-                    e.clone(),
-                )
-            })
-            .collect::<BTreeMap<_, _>>()
-    };
     let (provenance_added, provenance_removed, provenance_changed) =
         diff_keyed(&by_provenance_key(before), &by_provenance_key(after));
 
-    let mut before_diagnostics = before.diagnostics.clone();
-    before_diagnostics.finish();
-    let mut after_diagnostics = after.diagnostics.clone();
-    after_diagnostics.finish();
-    let diagnostics_changed = (before_diagnostics != after_diagnostics)
-        .then(|| (before_diagnostics.len(), after_diagnostics.len()));
+    // Already sorted and deduplicated by the canonicalization above, so the
+    // comparison is of content rather than of the order two runs happened to
+    // report the same advice in.
+    let diagnostics_changed = (before.diagnostics != after.diagnostics)
+        .then(|| (before.diagnostics.len(), after.diagnostics.len()));
 
     LockDiff {
         profile_changed,

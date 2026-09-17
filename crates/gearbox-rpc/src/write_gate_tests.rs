@@ -62,6 +62,15 @@ fn state_with_roots(workspace: PathBuf, roots: &[PathBuf]) -> State {
     }
 }
 
+/// The same session with the capability it never declared, which is the posture
+/// every client starts in.
+fn read_only_state(workspace: PathBuf) -> State {
+    State {
+        allow_writes: false,
+        ..write_state(workspace)
+    }
+}
+
 fn create_params(path: &Path, clone_from: Option<String>) -> CreateProductParams {
     CreateProductParams {
         path: path.display().to_string(),
@@ -221,6 +230,188 @@ fn a_blank_or_malformed_id_is_refused_before_anything_is_written() {
     );
 }
 
+/// `create` reaches its handler in a session with no source root open.
+///
+/// **Through `dispatch`, because the coupling was in the dispatch arm.** Every
+/// other test here calls `create_product` directly, so the readiness guard on
+/// the arm above it was pinned by nothing: it refused whenever `state.roots` was
+/// empty, and a start-screen session that declares a creation boundary and has
+/// opened no product is exactly that -- `WORKSPACE_NOT_OPEN` from the one method
+/// ADR `cpt-gearbox-adr-create-product` says must not be judged by the session.
+/// The boundary decides, and `initialize` is still required.
+#[test]
+fn create_is_dispatched_in_a_session_with_no_roots() {
+    let tmp = scratch("create-dispatch");
+    let workspace = tmp.join("ws");
+    std::fs::create_dir_all(workspace.join("products")).unwrap();
+    let target = workspace.join("products").join("demo").join("product.gdl");
+
+    let mut state = write_state(workspace.clone());
+    state.creation_boundary = Some(CreationBoundaryState {
+        roots: vec![],
+        workspace: Some(workspace),
+    });
+    assert!(
+        state.roots.is_empty(),
+        "the session this is about has opened nothing"
+    );
+
+    let (server, _client) = lsp_server::Connection::memory();
+    let request = lsp_server::Request {
+        id: RequestId::from(1),
+        method: crate::protocol::method::PRODUCT_CREATE.to_owned(),
+        params: serde_json::to_value(create_params(&target, None)).expect("params serialize"),
+    };
+    let response = dispatch(&server, &mut state, request).expect("create answers its own request");
+    assert!(
+        response.response_result.is_ok(),
+        "a boundary-judged create must not be refused for the session's empty roots: {:?}",
+        response.response_result
+    );
+
+    // And the other guard still stands: `initialize` comes first.
+    let mut fresh = write_state(tmp.join("ws"));
+    fresh.initialized = false;
+    let request = lsp_server::Request {
+        id: RequestId::from(2),
+        method: crate::protocol::method::PRODUCT_CREATE.to_owned(),
+        params: serde_json::to_value(create_params(&target, None)).expect("params serialize"),
+    };
+    let refused = dispatch(&server, &mut fresh, request).expect("a refusal is still an answer");
+    match refused.response_result {
+        Err(e) => assert_eq!(e.code, error_code::NOT_INITIALIZED, "{}", e.message),
+        Ok(_) => panic!("`initialize` must still come first"),
+    }
+}
+
+/// A session that declared no write capability is refused, dry run or not.
+///
+/// **`dry_run` used to be a way past this gate.** `create_product` and
+/// `scaffold_gear` both read `!state.allow_writes && !params.dry_run`, so a
+/// read-only session reached everything after it: `create`'s clone branch read
+/// the source `.gdl` and handed its whole text back in `after`, and `scaffold`
+/// reached `writable_out_root` and `out_root.exists()`, which answers "does this
+/// path exist" and "is it inside a source root" through the refusal text.
+/// `edit_gear` and `edit_with` refuse the dry run for exactly that reason, and
+/// the gate is one function now so the five copies cannot diverge again.
+#[test]
+fn a_dry_run_is_still_refused_without_write_capability() {
+    let tmp = scratch("dry-run-gate");
+    let workspace = tmp.join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    // A real description, so the clone branch would have something to hand back:
+    // a source that does not evaluate would be refused for that instead, and the
+    // test would pass without the gate.
+    let source = workspace.join("source.gdl");
+    let secret =
+        gearbox_gdl::edit::render_product_template(&gearbox_gdl::edit::CreateProductParams {
+            id: "secret-product".to_owned(),
+            name: "Confidential Sauce".to_owned(),
+            version: "0.1.0".to_owned(),
+            sources: vec![],
+            profile_kind: "embedded".to_owned(),
+            profile_id: "dev".to_owned(),
+        });
+    std::fs::write(&source, &secret).unwrap();
+
+    let mut state = read_only_state(workspace.clone());
+    let cloned = create_product(
+        &mut state,
+        RequestId::from(1),
+        &create_params(
+            &workspace.join("demo").join("product.gdl"),
+            Some(source.display().to_string()),
+        ),
+    );
+    let message = match cloned.response_result {
+        Err(e) => {
+            assert_eq!(e.code, error_code::WRITES_NOT_ALLOWED);
+            e.message
+        }
+        Ok(value) => panic!("a read-only session must not read a description back: {value}"),
+    };
+    assert!(
+        !message.contains("Confidential Sauce"),
+        "the refusal must carry nothing out of the file: {message}"
+    );
+
+    // The same for the scaffold, whose refusals answer questions about the
+    // filesystem: this destination does not exist, and a read-only session must
+    // not learn that either.
+    let scaffolded = scaffold_gear(
+        &mut state,
+        RequestId::from(1),
+        &ScaffoldGearParams {
+            id: "payments-audit".to_owned(),
+            name: "Payments Audit".to_owned(),
+            version: "0.1.0".to_owned(),
+            kind: crate::protocol::GearKind::Minimal,
+            plugin: None,
+            destination_dir: tmp.join("does-not-exist").display().to_string(),
+            dry_run: true,
+        },
+    );
+    match scaffolded.response_result {
+        Err(e) => assert_eq!(e.code, error_code::WRITES_NOT_ALLOWED, "{}", e.message),
+        Ok(value) => panic!("a read-only session must not probe destinations: {value}"),
+    }
+
+    // And with the capability declared, the same dry run is answered -- so the
+    // gate is about the capability and not about the dry run.
+    let mut allowed = write_state(workspace.clone());
+    let response = create_product(
+        &mut allowed,
+        RequestId::from(1),
+        &create_params(
+            &workspace.join("demo").join("product.gdl"),
+            Some(source.display().to_string()),
+        ),
+    );
+    assert!(
+        response.response_result.is_ok(),
+        "a declared session's dry run still works: {response:?}"
+    );
+}
+
+/// The version is checked with the two ids, before anything is written.
+///
+/// It was the one wizard field with nothing checking it: rendered into the
+/// template or stamped onto a clone, and `product()` does not check it either, so
+/// whatever arrived reached a written file. `scaffold_gear_files` has always
+/// required a triple of the same field.
+#[test]
+fn a_malformed_version_is_refused() {
+    let tmp = scratch("product-version");
+    let workspace = tmp.join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let target = workspace.join("products").join("demo").join("product.gdl");
+
+    for bad in ["", " ", "0.1", "1.0.0-rc1", "latest", "0.1.0.0"] {
+        let mut params = create_params(&target, None);
+        params.version = bad.to_owned();
+        let mut state = write_state(workspace.clone());
+        let response = create_product(&mut state, RequestId::from(1), &params);
+        let message = match response.response_result {
+            Err(e) => e.message,
+            Ok(_) => panic!("`{bad}` must not be accepted as a product version"),
+        };
+        assert!(
+            message.contains("semver triple"),
+            "`{bad}`: the refusal must name what a version is: {message}"
+        );
+        assert!(!target.exists(), "`{bad}`: nothing may be written");
+    }
+
+    let mut params = create_params(&target, None);
+    params.version = "1.2.3".to_owned();
+    let mut state = write_state(workspace);
+    let response = create_product(&mut state, RequestId::from(1), &params);
+    assert!(
+        response.response_result.is_ok(),
+        "a semver triple must be accepted: {response:?}"
+    );
+}
+
 #[test]
 fn missing_dir_plus_dotdot_is_outside_the_workspace() {
     let tmp = scratch("dotdot");
@@ -310,28 +501,43 @@ fn a_new_directory_inside_the_workspace_is_allowed() {
     assert!(!wanted.exists(), "the gate resolves; it does not create");
 }
 
+/// A clone source that is not a description is refused for being one, and
+/// refused before it is read.
+///
+/// **The source sits inside the workspace on purpose.** It used to sit outside,
+/// where it failed two gates at once, and the assertion accepted either
+/// refusal -- so deleting the extension check in `writable_path` left this test
+/// green on the message the next gate produced, which is the one thing the test
+/// is named for. Inside the workspace, only the `.gdl` rule can refuse it.
 #[test]
 fn clone_from_a_non_gdl_path_is_refused_before_read() {
     let tmp = scratch("clone-passwd");
     let workspace = tmp.join("ws");
     std::fs::create_dir_all(&workspace).unwrap();
-    let outside = tmp.join("secret.txt");
-    std::fs::write(&outside, "not a description\n").unwrap();
+    let inside = workspace.join("secret.txt");
+    std::fs::write(&inside, "not a description\n").unwrap();
 
     let mut state = write_state(workspace.clone());
     let dest = workspace.join("product.gdl");
     let response = create_product(
         &mut state,
         RequestId::from(1),
-        &create_params(&dest, Some(outside.display().to_string())),
+        &create_params(&dest, Some(inside.display().to_string())),
     );
     let message = match response.response_result {
         Err(e) => e.message,
         Ok(_) => panic!("must refuse"),
     };
     assert!(
-        message.contains("not a `.gdl`") || message.contains("outside"),
-        "{message}"
+        message.contains("is not a `.gdl` description"),
+        "the extension gate is the one that must refuse this, not the boundary: {message}"
+    );
+    // And before the read: the destination was never written, and nothing in the
+    // refusal came out of the file.
+    assert!(!dest.exists(), "a refused create must write nothing");
+    assert!(
+        !message.contains("not a description"),
+        "the file's own text must not appear in the refusal: {message}"
     );
 }
 
@@ -454,26 +660,31 @@ fn a_plugin_scaffold_with_a_host_writes_a_live_locator() {
 
     let gdl = &files
         .iter()
-        .find(|(rel, _, _)| rel == "gear.gdl")
+        .find(|(rel, _, _)| rel.as_str() == "gear.gdl")
         .expect("a gear.gdl")
         .1;
 
-    // Live, not commented: every one of these lines is `#`-prefixed without a host.
+    // **Live, not commented, and checked over lines rather than by `contains`.**
+    // The commented shape's line is `# sdk = cargo(`, which contains
+    // `sdk = cargo(` -- so the substring assertions this replaces were all true
+    // of the very thing they claimed to rule out, and commenting the whole block
+    // out inside `plugin_shape` kept the test green.
+    let live = |needle: &str| {
+        gdl.lines()
+            .any(|line| line.trim_start().starts_with(needle))
+    };
     assert!(
-        gdl.contains("sdk = cargo("),
+        live("sdk = cargo("),
         "the locator is still commented: {gdl}"
     );
     assert!(
-        gdl.contains(r#"crate_name = "cf-gears-authn-resolver-sdk""#),
+        live(r#"crate_name = "cf-gears-authn-resolver-sdk""#),
         "{gdl}"
     );
-    assert!(gdl.contains(r#"lib = "authn_resolver_sdk""#), "{gdl}");
+    assert!(live(r#"lib = "authn_resolver_sdk""#), "{gdl}");
+    assert!(live(r#"path = "../../authn-resolver-sdk""#), "{gdl}");
     assert!(
-        gdl.contains(r#"path = "../../authn-resolver-sdk""#),
-        "{gdl}"
-    );
-    assert!(
-        gdl.contains(r#"plugin_interface = "AuthNResolverPluginClient""#),
+        live(r#"plugin_interface = "AuthNResolverPluginClient""#),
         "{gdl}"
     );
 
@@ -490,6 +701,60 @@ fn a_plugin_scaffold_with_a_host_writes_a_live_locator() {
         "a live locator must still evaluate: {:?}",
         outcome.diagnostics
     );
+}
+
+/// A host path with characters escaping would change still evaluates.
+///
+/// **The hazard the test above documents and never exercised**:
+/// `../../authn-resolver-sdk` carries no backslash and no quote, so
+/// `quote_string` was handed nothing Rust-debug escaping would render
+/// differently, and rendering the locator with `{:?}` instead would have passed.
+/// A Windows-spelled sibling and a quote in the crate name are the two shapes
+/// where the two escapings part company, and the assertion that matters is the
+/// last one: the file still parses as a gear.
+#[test]
+fn a_plugin_locator_with_escapable_characters_still_evaluates() {
+    use crate::protocol::{GearKind, PluginScaffold};
+
+    for (path, lib) in [
+        (r"..\shared\authn-resolver-sdk", "authn_resolver_sdk"),
+        (r#"../"quoted"/sdk"#, "authn_resolver_sdk"),
+    ] {
+        let files = super::scaffold_gear_files(&ScaffoldGearParams {
+            id: "ldap-authn-plugin".to_owned(),
+            name: "LDAP AuthN".to_owned(),
+            version: "0.1.0".to_owned(),
+            kind: GearKind::Plugin,
+            plugin: Some(PluginScaffold {
+                crate_name: "cf-gears-authn-resolver-sdk".to_owned(),
+                lib_ident: lib.to_owned(),
+                path: path.to_owned(),
+                plugin_interface: None,
+            }),
+            destination_dir: "/tmp".to_owned(),
+            dry_run: true,
+        })
+        .expect("the shape renders");
+
+        let gdl = &files
+            .iter()
+            .find(|(rel, _, _)| rel.as_str() == "gear.gdl")
+            .expect("a gear.gdl")
+            .1;
+
+        let identity = gearbox_gdl::FileIdentity {
+            uri: "file:///tmp/ldap-authn-plugin/gear.gdl".to_owned(),
+            source: gearbox_ir::SourceId::new("scaffold").expect("kebab"),
+            gdl_path: gearbox_ir::RelPath::new("gear.gdl").expect("valid"),
+            load_paths: None,
+        };
+        let outcome = gearbox_gdl::GdlEngine::new().eval_gear(&identity, gdl);
+        assert!(
+            outcome.value.is_some(),
+            "`{path}` must survive quoting: {:?}\n{gdl}",
+            outcome.diagnostics
+        );
+    }
 }
 
 /// Without a host, the locator stays a comment.
@@ -513,7 +778,7 @@ fn a_plugin_scaffold_without_a_host_keeps_the_commented_locator() {
 
     let gdl = &files
         .iter()
-        .find(|(rel, _, _)| rel == "gear.gdl")
+        .find(|(rel, _, _)| rel.as_str() == "gear.gdl")
         .expect("a gear.gdl")
         .1;
     assert!(gdl.contains("# sdk = cargo("), "{gdl}");
@@ -550,12 +815,12 @@ fn every_scaffold_shape_evaluates_and_carries_its_own_hints() {
 
         let gdl = &files
             .iter()
-            .find(|(rel, _, _)| rel == "gear.gdl")
+            .find(|(rel, _, _)| rel.as_str() == "gear.gdl")
             .expect("a gear.gdl")
             .1;
         let lib = &files
             .iter()
-            .find(|(rel, _, _)| rel == "src/lib.rs")
+            .find(|(rel, _, _)| rel.as_str() == "src/lib.rs")
             .expect("a lib.rs")
             .1;
 

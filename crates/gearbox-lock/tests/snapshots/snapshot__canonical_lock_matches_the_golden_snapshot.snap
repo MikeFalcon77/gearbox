@@ -12,7 +12,7 @@ profile = "local"
 profile_kind = "self-hosted"
 layout = "apps"
 gearbox_version = "0.1.0"
-lock_hash = "blake3:2ad9da50a1e64272822dbbe03edcc48672eea98a66ff9acf162cd7360e1153f2"
+lock_hash = "blake3:982212c62c1d9f1bc88e8c0f301b885e63172fbb1cac2a2e7daaa7a07aabd3c9"
 
 [self_hosted]
 target_dir = "../../../gears-rust/target"
@@ -61,6 +61,23 @@ default_features = true
 link = ["api_gateway"]
 
 [[gears.api-gateway.selected_by]]
+reason = "selected"
+
+[gears.audit-archive]
+id = "audit-archive"
+source = "gears-rust"
+gdl_path = "gears/audit-archive/gear.gdl"
+crate_dir = "gears/audit-archive"
+runtime_caps = ["stateful"]
+
+[gears.audit-archive.package]
+crate_name = "cf-gears-audit-archive"
+lib_ident = "audit_archive"
+path = "."
+default_features = true
+link = ["audit_archive"]
+
+[[gears.audit-archive.selected_by]]
 reason = "selected"
 
 [gears.cluster]
@@ -117,8 +134,22 @@ default_features = true
 link = ["types_registry"]
 
 [[gears.types-registry.selected_by]]
+reason = "selected"
+
+[[gears.types-registry.selected_by]]
 reason = "colocated_by"
 gear = "api-gateway"
+
+[[applications]]
+name = "audit-archive"
+kind = "worker"
+anchor = "audit-archive"
+gears = ["audit-archive"]
+replicas = 1
+entrypoint = "run_oop_with_options"
+bin_name = "gbx-audit-archive"
+crate_name = "gbx-payments-demo-audit-archive"
+needs_db = false
 
 [[applications]]
 name = "gateway"
@@ -137,11 +168,26 @@ rest_host = "api-gateway"
 needs_db = false
 
 [[applications.listens]]
+name = "admin"
+gear = "api-gateway"
+config_key = "admin_addr"
+address = "127.0.0.1:8088"
+allow_loopback_advertise = false
+
+[[applications.listens]]
 name = "rest"
 gear = "api-gateway"
 config_key = "bind_addr"
 address = "127.0.0.1:8087"
 allow_loopback_advertise = false
+
+[[applications.spawns]]
+gear = "audit-archive"
+bin_name = "gbx-audit-archive"
+args = [
+    "--config",
+    "config/audit-archive.yaml",
+]
 
 [[applications.spawns]]
 gear = "payments-audit"
@@ -166,6 +212,25 @@ crate_name = "gbx-payments-demo-payments-audit"
 needs_db = false
 
 [[bindings]]
+consumer = "audit-archive"
+consumer_application = "audit-archive"
+contract = "api-contracts/PaymentApi@v1"
+provider = "api-contracts"
+provider_application = "gateway"
+mode = "remote"
+transport = "rest"
+mechanism = "consumes-directory"
+endpoint_source = "directory:gear-orchestrator/api-contracts"
+critical = false
+
+[bindings.selected.selected]
+choice = "explicit"
+
+[bindings.selected.selected.value]
+mode = "remote"
+transport = "rest"
+
+[[bindings]]
 consumer = "payments-audit"
 consumer_application = "payments-audit"
 contract = "api-contracts/PaymentApi@v1"
@@ -188,7 +253,10 @@ transport = "rest"
 scope = "default"
 primitive = "cache"
 required_capabilities = ["cluster.cache.linearizable"]
-requesters = ["payments-audit"]
+requesters = [
+    "audit-archive",
+    "payments-audit",
+]
 secret_ref = "existingSecret:payments-demo-pg"
 
 [cluster.selected.selected]
@@ -220,6 +288,16 @@ provider = "payments-audit"
 blocked_by = "undeclared-hub-edge"
 suggested_edit = '#[toolkit::consumes(contract = payments_audit_sdk::PaymentsAuditApi, from = "payments-audit")]'
 file = "gears/api-gateway/src/gear.rs"
+
+[cuttable_if_declared.estimated_savings]
+gears_moved = 0
+binary_gears_removed = 0
+
+[[cuttable_if_declared]]
+consumer = "api-gateway"
+provider = "types-registry"
+contract = "types-registry/TypeRegistry@v1"
+blocked_by = "colocation-closure"
 
 [cuttable_if_declared.estimated_savings]
 gears_moved = 0

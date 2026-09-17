@@ -33,6 +33,15 @@ pub struct AttributeSite<'a> {
     /// provider* actually wires up, which is a different fact from which
     /// transports the contract could support.
     pub item_attrs: &'a [syn::Attribute],
+    /// Whether a `mod` declaration on the way to this file carries a `#[cfg]`.
+    ///
+    /// Computed here rather than by the caller because it takes the whole
+    /// scanned tree to answer: [`crate::scan::scan_crate`] discovers files by
+    /// walking directories and never reads the `mod` declarations, so a gear in
+    /// a file reached by `#[cfg(feature = "x")] mod gear;` carries no `cfg` of
+    /// its own and would read as unconditional. That is precisely the claim
+    /// [`crate::gear::ProjectedGear::conditional`] exists to avoid making.
+    pub module_gated: bool,
 }
 
 // Hand-written rather than derived: deriving would dump the attribute's whole
@@ -68,22 +77,50 @@ pub enum LocateError {
     AttrEscapes(String),
 }
 
-/// Whether an attribute path is `gear` or `toolkit::gear`.
+/// Whether an attribute is one of ours, spelled `name`, `toolkit::name` or
+/// `gears_toolkit::name`.
 ///
 /// Mirrors `is_gears_module_path` in the macro crate: both spellings appear in
 /// the wild, and matching only the qualified one would miss real gears.
-fn is_gear_attribute(attr: &syn::Attribute) -> bool {
-    let segments: Vec<String> = attr
-        .path()
-        .segments
-        .iter()
-        .map(|s| s.ident.to_string())
-        .collect();
-    match segments.as_slice() {
-        [one] => one == "gear",
-        [first, second] => (first == "toolkit" || first == "gears_toolkit") && second == "gear",
+///
+/// One rule in one place. It used to be written out in four functions across
+/// two modules, so a fifth spelling had to be added four times and a copy that
+/// missed it made those facts read as absent rather than as an error. The idents
+/// are compared in place: `all_sites` asks this of every attribute on every
+/// struct and enum in the tree, doc comments included, so collecting the
+/// segments into a `Vec<String>` first allocated far more than the number of
+/// attributes that could ever match.
+pub(crate) fn is_toolkit_attribute(attr: &syn::Attribute, name: &str) -> bool {
+    let mut segments = attr.path().segments.iter();
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    match (segments.next(), segments.next()) {
+        (None, _) => first.ident == name,
+        (Some(second), None) => {
+            (first.ident == "toolkit" || first.ident == "gears_toolkit") && second.ident == name
+        }
         _ => false,
     }
+}
+
+/// Whether an attribute's *last* segment is `name`, whatever qualifies it.
+///
+/// The looser sibling of [`is_toolkit_attribute`], and deliberately a second
+/// rule rather than a divergence hiding in another module: the GTS attributes
+/// are re-exported from `toolkit_gts`, and the tree writes
+/// `#[toolkit_gts::gts_type_schema(..)]`, which the strict rule would read as
+/// somebody else's attribute. Both rules live here so the difference is a
+/// stated choice instead of two copies that drifted.
+pub(crate) fn is_attribute_named(attr: &syn::Attribute, name: &str) -> bool {
+    attr.path()
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == name)
+}
+
+fn is_gear_attribute(attr: &syn::Attribute) -> bool {
+    is_toolkit_attribute(attr, "gear")
 }
 
 /// The identifier of the item an attribute is attached to.
@@ -108,9 +145,85 @@ pub fn gear_attribute_sites(files: &[RustFile]) -> Vec<AttributeSite<'_>> {
     all_sites(files)
 }
 
+/// Whether any attribute in a list is a `cfg`.
+///
+/// A gear behind a feature gate is genuinely conditional, and the catalogue
+/// cannot tell whether a given build enables it. Recording the fact is honest;
+/// silently treating it as unconditional would make the catalogue claim more
+/// than it knows.
+pub(crate) fn has_cfg(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|a| a.path().is_ident("cfg"))
+}
+
+/// The module idents a scanned file sits under, outermost first.
+///
+/// `gear.rs` is `["gear"]`, `domain/mod.rs` is `["domain"]`, and
+/// `domain/cluster.rs` is `["domain", "cluster"]`. The crate root itself is
+/// under nothing, so `lib.rs` and `main.rs` yield an empty chain.
+fn module_chain(relative: &std::path::Path) -> Vec<String> {
+    let mut chain: Vec<String> = relative
+        .parent()
+        .into_iter()
+        .flat_map(std::path::Path::components)
+        .filter_map(|component| match component {
+            std::path::Component::Normal(part) => part.to_str().map(str::to_owned),
+            _ => None,
+        })
+        .collect();
+    match relative.file_stem().and_then(|stem| stem.to_str()) {
+        // `mod.rs` *is* the module its directory names, so it adds nothing, and
+        // a path with no stem names no module either.
+        Some("mod") | None => {}
+        // Only at the top is `lib.rs` the crate root; deeper down it is an
+        // ordinary module that happens to be spelled that way.
+        Some("lib" | "main") if chain.is_empty() => {}
+        Some(stem) => chain.push(stem.to_owned()),
+    }
+    chain
+}
+
+/// The files that may declare `mod <name>;` for a module nested under `parents`.
+///
+/// Two candidates at every depth because both spellings are legal, and the
+/// scan cannot know which one a crate chose.
+fn declaring_files(parents: &[String]) -> Vec<PathBuf> {
+    if parents.is_empty() {
+        return vec![PathBuf::from("lib.rs"), PathBuf::from("main.rs")];
+    }
+    let dir: PathBuf = parents.iter().collect();
+    let mut sibling = dir.clone().into_os_string();
+    sibling.push(".rs");
+    vec![PathBuf::from(sibling), dir.join("mod.rs")]
+}
+
+/// Whether a `mod` declaration on the path to `relative` carries a `#[cfg]`.
+///
+/// Read from the declaring file's top-level items only: reaching a file from a
+/// `mod` nested inside an inline `mod` requires an explicit `#[path]`, which no
+/// gear crate uses and which this scan does not follow anyway.
+fn module_path_is_gated(files: &[RustFile], relative: &std::path::Path) -> bool {
+    let chain = module_chain(relative);
+    (0..chain.len()).any(|depth| {
+        declaring_files(&chain[..depth]).iter().any(|candidate| {
+            files
+                .iter()
+                .filter(|file| &file.relative == candidate)
+                .any(|file| {
+                    file.ast.items.iter().any(|item| match item {
+                        syn::Item::Mod(module) => {
+                            module.ident == chain[depth].as_str() && has_cfg(&module.attrs)
+                        }
+                        _ => false,
+                    })
+                })
+        })
+    })
+}
+
 fn all_sites(files: &[RustFile]) -> Vec<AttributeSite<'_>> {
     let mut sites = Vec::new();
     for file in files {
+        let module_gated = module_path_is_gated(files, &file.relative);
         for item in &file.ast.items {
             let attrs = match item {
                 syn::Item::Struct(s) => &s.attrs,
@@ -127,6 +240,7 @@ fn all_sites(files: &[RustFile]) -> Vec<AttributeSite<'_>> {
                         attr,
                         struct_ident: item_ident(item).unwrap_or_default(),
                         item_attrs: attrs,
+                        module_gated,
                     });
                 }
             }

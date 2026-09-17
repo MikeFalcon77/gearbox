@@ -29,6 +29,10 @@ mod initialize_tests;
 mod preview_tests;
 
 #[cfg(test)]
+#[path = "serve_tests.rs"]
+mod serve_tests;
+
+#[cfg(test)]
 #[path = "write_gate_tests.rs"]
 mod write_gate_tests;
 
@@ -57,12 +61,26 @@ use crate::protocol::{
 };
 
 /// Why the server could not run.
+///
+/// Each variant holds the error it was built from rather than a sentence made
+/// out of it, so whoever prints a `ServeError` can walk the chain instead of
+/// reading one flattened line.
 #[derive(Debug, thiserror::Error)]
 pub enum ServeError {
     #[error("transport: {0}")]
-    Transport(String),
+    Transport(#[from] std::io::Error),
+    /// The channel to the client is closed, so there is nothing left to send on
+    /// and nothing left to report it to.
+    ///
+    /// Boxed because the real type is `crossbeam_channel::SendError<Message>`,
+    /// which arrives through `lsp-server`'s public API without the crate itself
+    /// being one of ours to name -- and the error carries the whole undelivered
+    /// message, which is not something a caller should have to accept a
+    /// dependency to see.
+    #[error("cannot send to the client: {0}")]
+    Send(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("protocol: {0}")]
-    Protocol(String),
+    Protocol(#[from] lsp_server::ProtocolError),
 }
 
 /// A `CreationBoundary` as this process holds it.
@@ -143,8 +161,26 @@ struct State {
 /// the framing cannot parse.
 pub fn serve_stdio(default_roots: &[PathBuf]) -> Result<(), ServeError> {
     let (connection, io_threads) = Connection::stdio();
+    let mut state = new_state(default_roots);
+
+    // **The connection is moved into the loop and dropped by it, before the
+    // join.** `IoThreads::join` waits on lsp-server's message-dropper thread,
+    // which waits on the writer thread, which is parked in
+    // `writer_receiver.into_iter()` for as long as any sender is alive -- and
+    // `connection.sender` is that sender. Joining with the connection still in
+    // scope therefore never returned: after the client sent `exit` the process
+    // hung here instead of exiting.
+    let served = serve_connection(connection, &mut state);
+    // Joined even when the loop failed, so the writer has finished flushing
+    // whatever it had; the loop's own failure is the one worth reporting.
+    let joined = io_threads.join();
+    served?;
+    joined.map_err(ServeError::from)
+}
+
+fn new_state(default_roots: &[PathBuf]) -> State {
     let (roots, failed_roots) = open_roots(default_roots);
-    let mut state = State {
+    State {
         roots,
         catalogue: None,
         failed_roots,
@@ -158,36 +194,58 @@ pub fn serve_stdio(default_roots: &[PathBuf]) -> Result<(), ServeError> {
         allow_writes: false,
         workspace: None,
         documents: BTreeMap::new(),
-    };
+    }
+}
 
-    for message in &connection.receiver {
+/// Serve `connection` until the client says `exit`, then drop it.
+///
+/// **By value.** The connection's sender is the only thing keeping lsp-server's
+/// writer thread alive, so whoever joins the io threads must not be holding one;
+/// taking ownership here is what makes that a property of the signature rather
+/// than of where a `drop` happens to sit. See [`serve_stdio`].
+fn serve_connection(connection: Connection, state: &mut State) -> Result<(), ServeError> {
+    // Messages read off the channel while coalescing a burst of edits, to be
+    // served before anything else is read. See `coalesce_did_change`.
+    let mut queued: std::collections::VecDeque<Message> = std::collections::VecDeque::new();
+    loop {
+        let message = match queued.pop_front() {
+            Some(message) => message,
+            None => match connection.receiver.recv() {
+                Ok(message) => message,
+                // The peer is gone. Not an error: it is how a client that was
+                // killed rather than shut down ends a session.
+                Err(_) => break,
+            },
+        };
         match message {
             Message::Request(request) => {
-                if connection
-                    .handle_shutdown(&request)
-                    .map_err(|e| ServeError::Protocol(e.to_string()))?
-                {
+                if connection.handle_shutdown(&request)? {
                     break;
                 }
                 // `None` means the handler already answered: only the staged
                 // load does that, and a second response with the same id would
                 // be a protocol violation.
-                if let Some(response) = dispatch(&connection, &mut state, request) {
+                if let Some(response) = dispatch(&connection, state, request) {
                     connection
                         .sender
                         .send(Message::Response(response))
-                        .map_err(|e| ServeError::Transport(e.to_string()))?;
+                        .map_err(|e| ServeError::Send(Box::new(e)))?;
                 }
             }
             Message::Notification(notification) => {
                 if notification.method == method::EXIT {
                     break;
                 }
+                let notification = if notification.method == method::DID_CHANGE {
+                    coalesce_did_change(notification, connection.receiver.try_iter(), &mut queued)
+                } else {
+                    notification
+                };
                 // A notification is never answered -- that is what makes it one --
                 // so a handler that cannot reach the client has nowhere to report
                 // it, and `false` ends the loop exactly as a failed send does for
                 // a request.
-                if !document_notification(&connection, &mut state, notification) {
+                if !document_notification(&connection, state, notification) {
                     break;
                 }
             }
@@ -196,10 +254,57 @@ pub fn serve_stdio(default_roots: &[PathBuf]) -> Result<(), ServeError> {
             }
         }
     }
+    // Explicitly, because it is the whole reason this function owns it: the
+    // writer thread ends when the last sender goes, and the caller joins on that.
+    drop(connection);
+    Ok(())
+}
 
-    io_threads
-        .join()
-        .map_err(|e| ServeError::Transport(e.to_string()))
+/// The newest `didChange` for the same document among those already queued.
+///
+/// Every `didChange` costs a full parse and evaluation on this thread, and only
+/// the last text a client sent is the document -- so a burst of keystrokes that
+/// arrived while the previous one was being evaluated is served once, by its
+/// newest member, instead of once per event. Nothing else is dropped: a message
+/// that is not a superseded edit to this document goes into `queued`, which the
+/// loop serves before reading the channel again, so ordering is preserved for
+/// everything that survives.
+///
+/// The URI is read out of the raw params rather than a decoded struct, because a
+/// notification whose params do not decode is not a superseded edit -- it is a
+/// client bug, and `document_notification` is the thing that reports it.
+fn coalesce_did_change(
+    mut newest: Notification,
+    rest: impl Iterator<Item = Message>,
+    queued: &mut std::collections::VecDeque<Message>,
+) -> Notification {
+    let Some(uri) = changed_uri(&newest).map(str::to_owned) else {
+        // No document named, so nothing can be known to supersede it. The
+        // handler reports the params it cannot read.
+        queued.extend(rest);
+        return newest;
+    };
+    for message in rest {
+        match message {
+            Message::Notification(notification)
+                if notification.method == method::DID_CHANGE
+                    && changed_uri(&notification) == Some(uri.as_str()) =>
+            {
+                newest = notification;
+            }
+            other => queued.push_back(other),
+        }
+    }
+    newest
+}
+
+/// The document a `didChange` names, as its params spell it.
+fn changed_uri(notification: &Notification) -> Option<&str> {
+    notification
+        .params
+        .get("textDocument")?
+        .get("uri")?
+        .as_str()
 }
 
 /// Open every root, keeping the failures beside the successes.
@@ -254,8 +359,9 @@ fn document_notification(
     let method = notification.method.as_str();
     match method {
         method::DID_OPEN => {
-            let Some(params) = document_params::<DidOpenTextDocumentParams>(method, params) else {
-                return true;
+            let params = match document_params::<DidOpenTextDocumentParams>(method, params) {
+                Ok(params) => params,
+                Err(report) => return report_undecodable(connection, &report),
             };
             let document = params.text_document;
             let uri = document.uri;
@@ -263,9 +369,9 @@ fn document_notification(
             publish_document_diagnostics(connection, state, &uri, document.version)
         }
         method::DID_CHANGE => {
-            let Some(params) = document_params::<DidChangeTextDocumentParams>(method, params)
-            else {
-                return true;
+            let params = match document_params::<DidChangeTextDocumentParams>(method, params) {
+                Ok(params) => params,
+                Err(report) => return report_undecodable(connection, &report),
             };
             let uri = params.text_document.uri;
             let version = params.text_document.version;
@@ -283,23 +389,37 @@ fn document_notification(
                 // file with a fragment, and the diagnostics that followed would
                 // be confident and wrong -- so the document is left as it was and
                 // the mismatch is said out loud.
-                return notify(
+                return log_to_client(
                     connection,
-                    method::LOG,
-                    &LogParams {
-                        message: format!(
-                            "ignoring an incremental change to `{uri}`: this server \
-                             advertises textDocumentSync = Full, so send the whole document"
-                        ),
-                    },
+                    &format!(
+                        "ignoring an incremental change to `{uri}`: this server advertises \
+                         textDocumentSync = Full, so send the whole document"
+                    ),
+                );
+            }
+            // **Only a document the editor said it had opened.** The argument in
+            // `State::documents` for leaving the map uncapped is that LSP
+            // guarantees a `didClose` for every `didOpen`; an entry this
+            // notification created is outside that guarantee -- nothing removes
+            // it -- and both its key and its text are unbounded client strings.
+            // Nothing is published either: an empty list would claim a document
+            // this server was never given is clean.
+            if !state.documents.contains_key(&uri) {
+                return log_to_client(
+                    connection,
+                    &format!(
+                        "ignoring a change to `{uri}`: it was never opened, so send a \
+                         `textDocument/didOpen` for it first"
+                    ),
                 );
             }
             state.documents.insert(uri.clone(), change.text);
             publish_document_diagnostics(connection, state, &uri, version)
         }
         method::DID_CLOSE => {
-            let Some(params) = document_params::<DidCloseTextDocumentParams>(method, params) else {
-                return true;
+            let params = match document_params::<DidCloseTextDocumentParams>(method, params) {
+                Ok(params) => params,
+                Err(report) => return report_undecodable(connection, &report),
             };
             let uri = params.text_document.uri;
             state.documents.remove(&uri);
@@ -315,6 +435,7 @@ fn document_notification(
                     diagnostics: Vec::new(),
                 },
             )
+            .peer_alive()
         }
         // `initialized`, `$/cancelRequest`, and anything else a client
         // volunteers: nothing to do, and answering a notification is a protocol
@@ -323,22 +444,54 @@ fn document_notification(
     }
 }
 
-/// Decode a notification's params, reporting a malformed one to stderr.
+/// Decode a notification's params, or the sentence saying why not.
 ///
-/// `None` rather than an error response, because a notification has no id to
+/// `Err` rather than an error response, because a notification has no id to
 /// answer. A client sending params this server cannot read is a bug in the
-/// client, and the loop's job is to survive it.
+/// client, and the loop's job is to survive it -- but not silently: for a
+/// `didChange` the stored document keeps its previous text and nothing is
+/// republished, so an editor left to infer this from stderr it cannot read goes
+/// on showing markers computed from text its buffer no longer has. The document
+/// is named when the params said which one, since that is the part a client
+/// needs in order to resend it.
 fn document_params<P: serde::de::DeserializeOwned>(
     method: &str,
     params: serde_json::Value,
-) -> Option<P> {
-    match serde_json::from_value(params) {
-        Ok(params) => Some(params),
-        Err(e) => {
-            eprintln!("gearbox: cannot read `{method}` params: {e}");
-            None
-        }
-    }
+) -> Result<P, String> {
+    let named = params
+        .get("textDocument")
+        .and_then(|document| document.get("uri"))
+        .and_then(serde_json::Value::as_str)
+        .map_or_else(
+            || "; no document was named, so none was updated".to_owned(),
+            |uri| format!("; `{uri}` was not updated"),
+        );
+    serde_json::from_value(params).map_err(|e| format!("cannot read `{method}` params: {e}{named}"))
+}
+
+/// Report a notification this server could not read, on both channels.
+///
+/// stderr for whoever is reading the log, and `gearbox/log` for the client,
+/// which cannot read stderr and is the only party able to send the notification
+/// again.
+fn report_undecodable(connection: &Connection, report: &str) -> bool {
+    eprintln!("gearbox: {report}");
+    log_to_client(connection, report)
+}
+
+/// Say something to the client that has no other channel to arrive on.
+///
+/// `LogParams` is one `String`, so this send cannot fail to serialize -- which
+/// is what makes it usable as the report of a notification that did.
+fn log_to_client(connection: &Connection, message: &str) -> bool {
+    notify(
+        connection,
+        method::LOG,
+        &LogParams {
+            message: message.to_owned(),
+        },
+    )
+    .peer_alive()
 }
 
 /// Evaluate one open document and send what is wrong with it.
@@ -355,13 +508,20 @@ fn publish_document_diagnostics(
     uri: &str,
     version: Option<i32>,
 ) -> bool {
-    let diagnostics = state
+    let diagnostics = match state
         .documents
         .get(uri)
-        .and_then(|text| document_diagnostics(state, uri, text))
-        .unwrap_or_default();
+        .map(|text| document_diagnostics(state, uri, text))
+    {
+        Some(Ok(diagnostics)) => diagnostics.unwrap_or_default(),
+        // A `file://` URI this server cannot decode names a document the editor
+        // *is* showing, so publishing an empty list would report a real file as
+        // clean. Said out loud instead, and no marker set is claimed.
+        Some(Err(report)) => return log_to_client(connection, &report),
+        None => Vec::new(),
+    };
 
-    notify(
+    match notify(
         connection,
         method::PUBLISH_DIAGNOSTICS,
         &PublishDiagnosticsParams {
@@ -369,49 +529,74 @@ fn publish_document_diagnostics(
             version,
             diagnostics,
         },
-    )
+    ) {
+        Delivery::Sent => true,
+        // Nothing was published, so the markers the editor is showing are the
+        // previous answer. It has no other way to learn that.
+        Delivery::Dropped => log_to_client(
+            connection,
+            &format!(
+                "diagnostics for `{uri}` could not be serialized and were not published; \
+                 the markers on screen are from an earlier version of it"
+            ),
+        ),
+        Delivery::PeerGone => false,
+    }
 }
 
 /// What is wrong with `text`, read as the description `uri` names.
 ///
+/// `Ok(None)` for a document there is nothing to say about -- not a description,
+/// or not a local file at all. `Err` carries the sentence for a `file://` URI
+/// this server could not decode, which is a document the editor really has open
+/// and must not be reported as clean.
+///
 /// Split out so the rule can be tested without a connection.
-fn document_diagnostics(state: &State, uri: &str, text: &str) -> Option<Vec<LspDiagnostic>> {
-    let path = lsp::path_from_uri(uri)?;
+fn document_diagnostics(
+    state: &State,
+    uri: &str,
+    text: &str,
+) -> Result<Option<Vec<LspDiagnostic>>, String> {
+    let path = match lsp::path_from_uri(uri) {
+        lsp::UriPath::Local(path) => path,
+        lsp::UriPath::NotLocal => return Ok(None),
+        lsp::UriPath::Undecodable => {
+            return Err(format!(
+                "cannot read `{uri}` as a path: its percent-escapes do not decode as UTF-8, \
+                 so this document is not being diagnosed"
+            ));
+        }
+    };
     // The source root this file sits in, when it sits in one: that is the
     // `load()` boundary `load_catalogue` gives a gear. `check_description`
     // ignores it for a product, which has none -- so a description is evaluated
     // the same way whether the question came from an editor or from the disk.
     //
-    // **The innermost matching root, not the first one listed.** Roots may nest,
-    // and `find` would have answered by `Vec` order -- so the same file could be
-    // evaluated against a different `load()` boundary depending on the order the
-    // client happened to pass its roots in, which is not a property of the file.
-    // Deepest wins because that is the narrowest boundary the file provably sits
-    // inside, and a `load()` allowed under a wider one would be refused when the
-    // gear is loaded from the root it is actually declared under. `path` is
-    // normalized by `path_from_uri`, which is what makes `starts_with` a
-    // containment test rather than a spelling test.
-    let source_root = state
-        .roots
-        .iter()
-        .filter(|source| path.starts_with(&source.root))
-        .max_by_key(|source| source.root.components().count())
-        .map(|source| source.root.as_path());
+    // **Which root owns a path is the engine's rule, and it answers it.** This
+    // used to pick the deepest matching root, while `load_catalogue` attributes a
+    // description to the first root in the list that contains it -- so with
+    // nested roots the editor evaluated a file against a `load()` boundary no
+    // catalogue entry had used, and a `load("//...")` the catalogue resolved was
+    // underlined here.
+    let source_root =
+        gearbox_engine::owning_source_root(&state.roots, &path).map(|source| source.root.as_path());
 
-    let diagnostics = gearbox_engine::check_description(&path, source_root, text)?;
+    let Some(diagnostics) = gearbox_engine::check_description(&path, source_root, text) else {
+        return Ok(None);
+    };
 
     // Matched against the URI *this server* would have written, not against the
     // client's spelling: `gearbox_ir::file_uri` does not percent-encode and
     // Theia's `URI.toString()` does, so comparing the two raw would drop every
     // diagnostic on a path containing a space.
     let own = gearbox_ir::file_uri(&path);
-    Some(
+    Ok(Some(
         diagnostics
             .into_iter()
             .filter(|diagnostic| lsp::publishable(diagnostic, &own))
             .map(lsp::to_lsp)
             .collect(),
-    )
+    ))
 }
 
 #[allow(clippy::cognitive_complexity)]
@@ -423,32 +608,8 @@ fn dispatch(connection: &Connection, state: &mut State, request: Request) -> Opt
             Err(e) => invalid_params(id, &e),
         }),
         method::CATALOGUE_LOAD => {
-            if !state.initialized {
-                return Some(error(
-                    id,
-                    error_code::NOT_INITIALIZED,
-                    "`initialize` must come first",
-                ));
-            }
-            if state.roots.is_empty() {
-                // Naming the failures here as well as on `initialize`: a client
-                // that ignored the `initialize` result would otherwise get
-                // "no source root is open" for a root it did pass.
-                let why = if state.failed_roots.is_empty() {
-                    "no source root is open; pass `roots` to `initialize` or `--root` to the CLI"
-                        .to_owned()
-                } else {
-                    format!(
-                        "no source root is open; every root given failed to open: {}",
-                        state
-                            .failed_roots
-                            .iter()
-                            .map(|r| format!("{}: {}", r.path, r.error))
-                            .collect::<Vec<_>>()
-                            .join("; ")
-                    )
-                };
-                return Some(error(id, error_code::WORKSPACE_NOT_OPEN, &why));
+            if let Some(refusal) = require_ready(state, &id) {
+                return Some(refusal);
             }
             catalogue_load(connection, state, id)
         }
@@ -536,7 +697,13 @@ fn dispatch(connection: &Connection, state: &mut State, request: Request) -> Opt
                 Err(e) => invalid_params(id, &e),
             },
         }),
-        method::PRODUCT_CREATE => Some(match require_ready(state, &id) {
+        // **Initialized, and nothing about the session's roots.** `create` is
+        // judged by its `creation_boundary` (ADR `cpt-gearbox-adr-create-product`),
+        // which is exactly what `require_ready` would re-couple it to: a
+        // start-screen session that declares a boundary and opens no product has
+        // no `state.roots`, and got `WORKSPACE_NOT_OPEN` from the one method that
+        // must not be judged by the session. `creation_out_root` decides.
+        method::PRODUCT_CREATE => Some(match require_initialized(state, &id) {
             Some(refusal) => refusal,
             None => match cast::<CreateProductParams>(request) {
                 Ok((id, params)) => create_product(state, id, &params),
@@ -639,19 +806,32 @@ fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Re
     )
 }
 
+/// Refuse a request that arrived before `initialize`, or `None` to go ahead.
+///
+/// The half of [`require_ready`] that every method needs, including the ones
+/// judged by something other than the session's roots.
+fn require_initialized(state: &State, id: &RequestId) -> Option<Response> {
+    (!state.initialized).then(|| {
+        error(
+            id.clone(),
+            error_code::NOT_INITIALIZED,
+            "`initialize` must come first",
+        )
+    })
+}
+
 /// Refuse a request that cannot be served yet, or `None` to go ahead.
 ///
 /// Factored out because all three of the new methods need the same two guards
 /// and a copy each would be three places for them to drift apart.
 fn require_ready(state: &State, id: &RequestId) -> Option<Response> {
-    if !state.initialized {
-        return Some(error(
-            id.clone(),
-            error_code::NOT_INITIALIZED,
-            "`initialize` must come first",
-        ));
+    if let Some(refusal) = require_initialized(state, id) {
+        return Some(refusal);
     }
     if state.roots.is_empty() {
+        // Naming the failures as well as the absence: a client that ignored the
+        // `initialize` result would otherwise get "no source root is open" for a
+        // root it did pass.
         let why = if state.failed_roots.is_empty() {
             "no source root is open; pass `roots` to `initialize` or `--root` to the CLI".to_owned()
         } else {
@@ -668,6 +848,31 @@ fn require_ready(state: &State, id: &RequestId) -> Option<Response> {
         return Some(error(id.clone(), error_code::WORKSPACE_NOT_OPEN, &why));
     }
     None
+}
+
+/// Refuse a mutating method in a session that declared no write capability.
+///
+/// **One function, because five handlers spelled this gate out and the copies
+/// diverged.** `create_product` and `scaffold_gear` had `!state.allow_writes &&
+/// !params.dry_run`, which let a read-only session past: `create`'s clone branch
+/// then read a `.gdl` and handed its whole text back in `after`, and `scaffold`
+/// reached `writable_out_root` and `exists()`, so which destinations exist and
+/// which sit inside a source root could be read off the refusals. A client
+/// without write capability must not learn anything about the filesystem, which
+/// is what `edit_gear` says above itself and what the two copies stopped doing.
+///
+/// **It takes no `dry_run`, on purpose.** The right answer does not depend on
+/// one, so a parameter for it would be the same trap with one call site: the
+/// dry run is decided after this gate, by whether anything is written.
+fn require_writes(state: &State, id: &RequestId) -> Option<Response> {
+    (!state.allow_writes).then(|| {
+        error(
+            id.clone(),
+            error_code::WRITES_NOT_ALLOWED,
+            "this session declared no write capability, so nothing will be written; \
+             pass `allow_writes: true` to `initialize` if the client is meant to change files",
+        )
+    })
 }
 
 /// Evaluate a `product.gdl`.
@@ -768,7 +973,7 @@ fn resolve_once(
     // `SourceRoot` is an id, a path and a string, and there are one or two of
     // them.
     let roots = state.roots.clone();
-    let catalogue = catalogue_for(state);
+    let (catalogue, loaded) = catalogue_for(state);
     let sources = gearbox_engine::lock_sources(&roots, catalogue, &path);
     let resolution = gearbox_engine::resolve::resolve_at(catalogue, &intent, &profile, Some(&path));
     let product =
@@ -776,7 +981,9 @@ fn resolve_once(
     let explanation = gearbox_engine::resolve::product::explain(catalogue, &intent, &resolution);
 
     // The product's own diagnostics are already inside it; the ones added here
-    // are the description's, which resolution never sees.
+    // are the description's, which resolution never sees, and the catalogue
+    // load's when this request is what triggered it.
+    diagnostics.extend(loaded);
     diagnostics.extend(resolution.diagnostics.as_slice().iter().cloned());
     Ok(Resolved {
         product,
@@ -882,31 +1089,63 @@ fn resolve_preview(state: &mut State, id: RequestId, params: &ResolvePreviewPara
 
 /// The canonical lock text for one profile.
 fn lock(state: &mut State, id: RequestId, params: &LockParams) -> Response {
-    let resolved = match resolve_once(state, &id, &params.path, params.profile.as_deref(), None) {
+    let mut resolved = match resolve_once(state, &id, &params.path, params.profile.as_deref(), None)
+    {
         Err(refusal) => return refusal,
         Ok(resolved) => resolved,
     };
     // The same rule generation uses, so the lock compared against is the lock in
     // the tree generation writes. A different directory would be a diff nobody
     // could act on.
-    let lock_path = default_out_root(state, params.out.as_deref(), &resolved)
-        .map(|root| root.join("product.lock"));
+    //
+    // **And through the same gate.** `out` is a client field, `compare_to_disk`
+    // reads `<out>/product.lock` and returns its bytes verbatim in
+    // `on_disk.canonical`, so unchecked it read any `product.lock` on the machine
+    // through a method that cannot write one. `prepare_generate` runs the same
+    // field through `writable_out_root`; this is the same rule applied to the
+    // same value, and its "a test can point somewhere else" docstring is not a
+    // reason to accept it off the wire.
+    let lock_root = match default_out_root(state, params.out.as_deref(), &resolved)
+        .and_then(|root| writable_out_root(state, &root))
+    {
+        Ok(root) => root,
+        Err(refusal) => return error(id, error_code::EDIT_REFUSED, &refusal),
+    };
+    let lock_path = lock_root.join("product.lock");
+
+    // The same redaction generation runs, and for the same reason:
+    // `write_canonical` renders `gears[].config` verbatim, so a lock written by
+    // an earlier build that still carries a literal credential would have it
+    // sent to the client and shown in the Lock widget. `GBX0705` says out loud
+    // that a value was replaced.
+    let product_dir = Path::new(&params.path).parent().map(Path::to_path_buf);
+    let mut reported = gearbox_ir::Diagnostics::new();
+    let (catalogue, loaded) = catalogue_for(state);
+    let redacted = match gearbox_engine::secrets::redact_product(
+        &resolved.product,
+        Some(catalogue),
+        product_dir.as_deref(),
+        &mut reported,
+    ) {
+        std::borrow::Cow::Borrowed(_) => None,
+        std::borrow::Cow::Owned(product) => Some(product),
+    };
+    if let Some(product) = redacted {
+        resolved.product = product;
+    }
+    resolved.diagnostics.extend(loaded);
+    resolved.diagnostics.extend(reported.iter().cloned());
 
     match gearbox_lock::write_canonical(&resolved.product) {
         Ok(canonical) => {
-            let on_disk = lock_path
-                .as_deref()
-                .and_then(|path| compare_to_disk(path, &resolved.product));
+            let on_disk = compare_to_disk(&lock_path, &resolved.product);
             ok(
                 id,
                 &LockResult {
                     canonical,
                     lock_hash: resolved.product.product.lock_hash.clone(),
                     profile: resolved.profile.to_string(),
-                    lock_path: lock_path
-                        .as_deref()
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_default(),
+                    lock_path: lock_path.display().to_string(),
                     on_disk,
                     diagnostics: resolved.diagnostics,
                 },
@@ -938,13 +1177,8 @@ fn lock(state: &mut State, id: RequestId, params: &LockParams) -> Response {
 /// asks for transactional writes, and for one file that is what transactional
 /// means.
 fn edit_gear(state: &mut State, id: RequestId, params: &EditGearParams, add: bool) -> Response {
-    if !state.allow_writes {
-        return error(
-            id,
-            error_code::WRITES_NOT_ALLOWED,
-            "this session declared no write capability, so nothing will be written; \
-             pass `allow_writes: true` to `initialize` if the client is meant to edit files",
-        );
+    if let Some(refusal) = require_writes(state, &id) {
+        return refusal;
     }
 
     let requested = PathBuf::from(&params.path);
@@ -1136,13 +1370,8 @@ fn edit_with(
     dry_run: bool,
     apply: impl FnOnce(&str, &str) -> Result<gearbox_gdl::edit::Edit, gearbox_ir::Diagnostics>,
 ) -> Response {
-    if !state.allow_writes {
-        return error(
-            id,
-            error_code::WRITES_NOT_ALLOWED,
-            "this session declared no write capability, so nothing will be written; \
-             pass `allow_writes: true` to `initialize` if the client is meant to edit files",
-        );
+    if let Some(refusal) = require_writes(state, &id) {
+        return refusal;
     }
     let requested = PathBuf::from(path_str);
     let path = match writable_path(state, &requested) {
@@ -1207,13 +1436,8 @@ fn respond_edit(
 }
 
 fn create_product(state: &mut State, id: RequestId, params: &CreateProductParams) -> Response {
-    if !state.allow_writes && !params.dry_run {
-        return error(
-            id,
-            error_code::WRITES_NOT_ALLOWED,
-            "this session declared no write capability, so nothing will be written; \
-             pass `allow_writes: true` to `initialize` if the client is meant to create files",
-        );
+    if let Some(refusal) = require_writes(state, &id) {
+        return refusal;
     }
 
     // **The ids, before anything touches the filesystem.** This function stamped
@@ -1236,6 +1460,20 @@ fn create_product(state: &mut State, id: RequestId, params: &CreateProductParams
             id,
             error_code::EDIT_REFUSED,
             &format!("{refusal}; a profile id looks like `dev`"),
+        );
+    }
+    // The third field a person types, and the one that had nothing checking it:
+    // `version` is rendered into the template or stamped onto a clone, and
+    // `product()` does not check it either, so whatever arrived reached a written
+    // file. `scaffold_gear_files` already requires a triple of the same field.
+    if !is_semver(params.version.trim()) {
+        return error(
+            id,
+            error_code::EDIT_REFUSED,
+            &format!(
+                "`{}` is not a version; a product version is a semver triple like `0.1.0`",
+                params.version
+            ),
         );
     }
 
@@ -1377,21 +1615,25 @@ fn create_product(state: &mut State, id: RequestId, params: &CreateProductParams
 /// ADR-0010 tier 0 / `GeneratedOnce`: preview via `FilePlan[]`, refuse when the
 /// destination already exists, write only under `writable_out_root`.
 fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) -> Response {
-    if !state.allow_writes && !params.dry_run {
-        return error(
-            id,
-            error_code::WRITES_NOT_ALLOWED,
-            "this session declared no write capability, so nothing will be written; \
-             pass `allow_writes: true` to `initialize` if the client is meant to create files",
-        );
+    if let Some(refusal) = require_writes(state, &id) {
+        return refusal;
     }
 
-    let Ok(gear_id) = GearId::new(params.id.trim()) else {
-        return error(
-            id,
-            error_code::EDIT_REFUSED,
-            "gear id must be kebab-case (a single path segment, not `.` or `..`)",
-        );
+    let gear_id = match GearId::new(params.id.trim()) {
+        Ok(gear_id) => gear_id,
+        // The validator's own sentence, not a restatement of the rule: a client
+        // needs to know what was wrong with the id it sent, not only what the
+        // shape is. `create_product` formats the refusal the same way.
+        Err(refusal) => {
+            return error(
+                id,
+                error_code::EDIT_REFUSED,
+                &format!(
+                    "{refusal}; a gear id is kebab-case, a single path segment, and not `.` \
+                     or `..`"
+                ),
+            );
+        }
     };
 
     let dest_dir = PathBuf::from(&params.destination_dir);
@@ -1431,7 +1673,7 @@ fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) 
     // Refuse to scaffold text that does not evaluate as a gear declaration.
     let gdl = files
         .iter()
-        .find(|(rel, _, _)| rel == "gear.gdl")
+        .find(|(rel, _, _)| rel.as_str() == "gear.gdl")
         .map_or("", |(_, body, _)| body.as_str());
     let uri = gearbox_ir::file_uri(&out_root.join("gear.gdl"));
     let identity = gearbox_gdl::FileIdentity {
@@ -1453,15 +1695,14 @@ fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) 
 
     let mut plans = Vec::with_capacity(files.len());
     for (rel, body, kind) in &files {
-        let path = RelPath::new(rel).unwrap_or_else(|_| unreachable!("scaffold paths are valid"));
         let entry = gearbox_ir::FileEntry::text(
-            path.clone(),
+            rel.clone(),
             body.clone(),
             *kind,
             gearbox_ir::Ownership::GeneratedOnce,
         );
         plans.push(gearbox_ir::FilePlan {
-            path,
+            path: rel.clone(),
             action: gearbox_ir::FileAction::Create,
             ownership: gearbox_ir::Ownership::GeneratedOnce,
             kind: *kind,
@@ -1479,7 +1720,7 @@ fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) 
             );
         }
         for (rel, body, _) in &files {
-            let path = out_root.join(rel);
+            let path = out_root.join(rel.as_str());
             if let Err(e) = write_atomically(&path, body) {
                 return error(
                     id,
@@ -1513,14 +1754,23 @@ fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) 
 /// and what kind of file it is.
 ///
 /// Named rather than left as a triple because it is threaded through the plan,
-/// the preview and the write, and `(String, String, FileKind)` says nothing about
-/// which `String` is the path.
-type ScaffoldFile = (String, String, gearbox_ir::FileKind);
+/// the preview and the write, and `(RelPath, String, FileKind)` says nothing
+/// about which field is the path.
+///
+/// A [`RelPath`] rather than a `String`, because the plan needs one: built here,
+/// where a path `RelPath` rejects is a refusal this function can return, instead
+/// of in the request handler, where it was an `unreachable!()` resting on an
+/// invariant established in this function -- and a fourth scaffold file with an
+/// unusable path would have turned one client request into a process panic,
+/// taking the stdio server down for the whole editor session.
+type ScaffoldFile = (RelPath, String, gearbox_ir::FileKind);
 
 /// Minimal gear scaffold contents: description, stub crate, empty lib.
 fn scaffold_gear_files(params: &ScaffoldGearParams) -> Result<Vec<ScaffoldFile>, String> {
     let crate_name = GearId::new(params.id.trim())
-        .map_err(|_| "gear id must be kebab-case".to_owned())?
+        // The validator's sentence, not a substitute for it: the client needs to
+        // know what was wrong with the id it sent.
+        .map_err(|e| format!("{e}; a gear id is kebab-case"))?
         .to_string();
     let lib_name = crate_name.replace('-', "_");
     if !is_semver(&params.version) {
@@ -1565,14 +1815,19 @@ path = "src/lib.rs"
     );
 
     Ok(vec![
-        ("gear.gdl".to_owned(), gdl, gearbox_ir::FileKind::Text),
-        ("Cargo.toml".to_owned(), cargo, gearbox_ir::FileKind::Toml),
+        (rel_path("gear.gdl")?, gdl, gearbox_ir::FileKind::Text),
+        (rel_path("Cargo.toml")?, cargo, gearbox_ir::FileKind::Toml),
         (
-            "src/lib.rs".to_owned(),
+            rel_path("src/lib.rs")?,
             lib_stub(params.kind),
             gearbox_ir::FileKind::Rust,
         ),
     ])
+}
+
+/// One scaffold path, or the refusal saying it is not a usable relative path.
+fn rel_path(path: &str) -> Result<RelPath, String> {
+    RelPath::new(path).map_err(|e| format!("`{path}` is not a usable path for a scaffold: {e}"))
 }
 
 /// The declarations one shape of gear needs, after `package`.
@@ -2069,27 +2324,40 @@ fn compare_to_disk(path: &Path, resolved: &ResolvedProduct) -> Option<LockOnDisk
 }
 
 /// Where a product's generated tree lives: `out` if the caller named one, else
-/// `.gearbox/<product>/<profile>/` under the declared workspace.
+/// the engine's default layout under the declared workspace.
 ///
 /// One function because two things need the same answer -- generation writes the
 /// tree and `product/lock` compares against the lock inside it -- and a lock
 /// compared against a different directory than the one generation writes would be
-/// a diff nobody could act on.
+/// a diff nobody could act on. The layout itself is
+/// `gearbox_engine::generate::default_out_root`, so this crate and the CLI cannot
+/// disagree about where the tree is; it also validates the product id, which
+/// reaches the lock as a plain `String` and would otherwise `join` its way out of
+/// `.gearbox/`.
 ///
-/// `None` means no workspace was declared and no `out` was given, so there is no
-/// default to compute.
-fn default_out_root(state: &State, out: Option<&str>, resolved: &Resolved) -> Option<PathBuf> {
+/// `Err` when there is nothing to compute an answer from, with the sentence
+/// saying which declaration is missing.
+fn default_out_root(
+    state: &State,
+    out: Option<&str>,
+    resolved: &Resolved,
+) -> Result<PathBuf, String> {
     if let Some(path) = out {
-        return Some(PathBuf::from(path));
+        return Ok(PathBuf::from(path));
     }
-    Some(
-        state
-            .workspace
-            .as_ref()?
-            .join(".gearbox")
-            .join(&resolved.product.product.id)
-            .join(resolved.profile.as_str()),
-    )
+    let Some(workspace) = state.workspace.as_ref() else {
+        return Err("no workspace was declared, so there is no default output root".to_owned());
+    };
+    let product = gearbox_ir::ProductId::new(&resolved.product.product.id).map_err(|e| {
+        format!(
+            "`{}` cannot name a directory under the generated tree: {e}",
+            resolved.product.product.id
+        )
+    })?;
+    Ok(workspace.join(gearbox_engine::generate::default_out_root(
+        &product,
+        &resolved.profile,
+    )))
 }
 
 /// The nearest ancestor of `path` that exists, including `path` itself.
@@ -2141,12 +2409,11 @@ fn prepare_generate(
         ));
     }
 
-    let Some(requested) = default_out_root(state, out, &resolved) else {
-        return Err(error(
-            id.clone(),
-            error_code::GENERATE_REFUSED,
-            "no workspace was declared, so there is no default output root",
-        ));
+    let requested = match default_out_root(state, out, &resolved) {
+        Ok(requested) => requested,
+        Err(refusal) => {
+            return Err(error(id.clone(), error_code::GENERATE_REFUSED, &refusal));
+        }
     };
     let out_root = match writable_out_root(state, &requested) {
         Ok(root) => root,
@@ -2267,13 +2534,8 @@ fn generate_plan(state: &mut State, id: RequestId, params: &GenerateParams) -> R
 }
 
 fn generate_apply(state: &mut State, id: RequestId, params: &GenerateParams) -> Response {
-    if !state.allow_writes {
-        return error(
-            id,
-            error_code::WRITES_NOT_ALLOWED,
-            "this session declared no write capability, so nothing will be written; \
-             pass `allow_writes: true` to `initialize` if the client is meant to write files",
-        );
+    if let Some(refusal) = require_writes(state, &id) {
+        return refusal;
     }
 
     let prepared = match prepare_generate(
@@ -2340,20 +2602,25 @@ fn generate_file(state: &mut State, id: RequestId, params: &GenerateFileParams) 
         );
     };
 
-    let (plans, _) = match gearbox_engine::generate::plan(
-        &prepared.files,
-        &prepared.out_root,
-        &prepared.base_root,
-    ) {
-        Ok(planned) => planned,
-        Err(e) => {
-            return error(
-                id,
-                error_code::GENERATE_REFUSED,
-                &format!("cannot plan generation: {e}"),
-            );
-        }
-    };
+    // **This one entry, not the whole tree.** `plan` stages every file it is
+    // given: each target is read off disk and its bytes cloned, and an
+    // `OperatorOwned` one is three-way merged against the base. The diff view
+    // calls this method once per file a person opens, and all it needs is the
+    // action and ownership of the file it asked about, so the set it plans is a
+    // set of one.
+    let mut requested = gearbox_ir::FileSet::new();
+    drop(requested.insert(entry.clone()));
+    let (plans, _) =
+        match gearbox_engine::generate::plan(&requested, &prepared.out_root, &prepared.base_root) {
+            Ok(planned) => planned,
+            Err(e) => {
+                return error(
+                    id,
+                    error_code::GENERATE_REFUSED,
+                    &format!("cannot plan generation: {e}"),
+                );
+            }
+        };
     let Some(plan) = plans.iter().find(|p| p.path == file) else {
         return error(
             id,
@@ -2386,12 +2653,7 @@ fn generate_file(state: &mut State, id: RequestId, params: &GenerateFileParams) 
     )
 }
 
-/// Replace a file's contents without ever leaving it half-written.
-///
-/// Temp file in the same directory, then rename: a rename within one filesystem
-/// is atomic, so a crash leaves either the old description or the new one and
-/// never a truncated one. The same directory matters -- across filesystems a
-/// rename is a copy, and the guarantee is gone.
+/// Whether `value` is a semver triple: three dot-separated runs of digits.
 fn is_semver(value: &str) -> bool {
     let mut parts = value.split('.');
     let Some(major) = parts.next() else {
@@ -2425,16 +2687,76 @@ fn toml_basic_string(value: &str) -> String {
     out
 }
 
+/// Replace a file's contents without ever leaving it half-written.
+///
+/// Temp file in the same directory, then rename: a rename within one filesystem
+/// is atomic, so a crash leaves either the old description or the new one and
+/// never a truncated one. The same directory matters -- across filesystems a
+/// rename is a copy, and the guarantee is gone.
 fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+
     let directory = path.parent().unwrap_or(Path::new("."));
-    let temporary = directory.join(format!(
-        ".{}.gearbox-tmp",
+    let temporary = directory.join(temporary_name(path));
+
+    // **`create_new`, not `write`.** The old name was
+    // `.<file name>.gearbox-tmp`, fully predictable, and `fs::write` follows a
+    // symlink at the path it is given -- so anything able to create that one name
+    // in the product directory had this method write the description's new text
+    // wherever the link pointed, outside every boundary `writable_path` had just
+    // enforced. `create_new` refuses an existing path of any kind, symlink
+    // included, and the name carries the process and a counter so two writes in
+    // one directory cannot collide on it.
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
+    let written = file
+        .write_all(contents.as_bytes())
+        .and_then(|()| file.sync_all());
+    drop(file);
+    if let Err(e) = written {
+        drop(std::fs::remove_file(&temporary));
+        return Err(e);
+    }
+
+    // The destination's own permissions, carried onto the replacement. A fresh
+    // temp file gets the process umask, and the rename would hand that to the
+    // description -- so editing a `product.gdl` that was deliberately not 0644
+    // silently widened it.
+    if let Ok(existing) = std::fs::metadata(path)
+        && let Err(e) = std::fs::set_permissions(&temporary, existing.permissions())
+    {
+        drop(std::fs::remove_file(&temporary));
+        return Err(e);
+    }
+
+    if let Err(e) = std::fs::rename(&temporary, path) {
+        drop(std::fs::remove_file(&temporary));
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// A temp name in the destination's directory that nothing can predict.
+///
+/// The directory has to be the destination's own: a rename within one filesystem
+/// is atomic, and across two it is a copy with the guarantee gone.
+fn temporary_name(path: &Path) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
+    format!(
+        ".{}.{}-{}-{nanos}.gearbox-tmp",
         path.file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("product.gdl")
-    ));
-    std::fs::write(&temporary, contents)?;
-    std::fs::rename(&temporary, path)
+            .unwrap_or("description"),
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed),
+    )
 }
 
 /// Everything checkable without resolving.
@@ -2482,11 +2804,24 @@ fn validate(state: &mut State, id: RequestId, params: &ValidateParams) -> Respon
     )
 }
 
-/// The catalogue, loaded once and reused.
-fn catalogue_for(state: &mut State) -> &gearbox_ir::Catalogue {
-    state
-        .catalogue
-        .get_or_insert_with(|| gearbox_engine::load_catalogue(&state.roots).catalogue)
+/// The catalogue, loaded once and reused, and the diagnostics of a load this
+/// call had to do.
+///
+/// **The diagnostics are returned rather than kept.** A `product/resolve` that
+/// arrives before any `gearbox/catalogue/load` triggers the load here, and
+/// dropping what it reported answered as though the catalogue had loaded clean --
+/// while the same load through `gearbox/catalogue/load` sent every one of those
+/// diagnostics to the client. They are the load's, not the resolution's, so the
+/// caller folds them into its own answer; an empty `Vec` means the cache
+/// answered and nothing was read.
+fn catalogue_for(state: &mut State) -> (&gearbox_ir::Catalogue, Vec<Diagnostic>) {
+    let mut loaded = Vec::new();
+    let catalogue = state.catalogue.get_or_insert_with(|| {
+        let scan = gearbox_engine::load_catalogue(&state.roots);
+        loaded = scan.catalogue.diagnostics.as_slice().to_vec();
+        scan.catalogue
+    });
+    (catalogue, loaded)
 }
 
 /// Run a staged load, answering at the boundary and streaming the rest.
@@ -2501,6 +2836,11 @@ fn catalogue_for(state: &mut State) -> &gearbox_ir::Catalogue {
 /// request loop to be reading anyway. Moving the load to a worker is a change to
 /// make when there is a second concurrent request worth serving.
 fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> Option<Response> {
+    /// How often a load in progress reports itself. Short enough to look live,
+    /// long enough that a registry's worth of gears is tens of messages.
+    const PROGRESS_STEP: std::time::Duration = std::time::Duration::from_millis(100);
+
+    let mut last_progress = std::time::Instant::now();
     let mut pending = Vec::new();
     let mut total = 0_u32;
     let mut completed = 0_u32;
@@ -2550,17 +2890,30 @@ fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> 
                         gear: gear.clone(),
                         replaces: gear.gdl_path.as_str().to_owned(),
                     },
-                );
-                disconnected |= !notify(
-                    connection,
-                    method::PROGRESS,
-                    &ProgressParams {
-                        token: "catalogue".to_owned(),
-                        completed,
-                        total,
-                        done: false,
-                    },
-                );
+                )
+                .peer_alive();
+                // **On a time step, not once per gear.** The stdio channel is
+                // `bounded(0)`, so every send parks the load until the writer
+                // thread has pushed it to stdout -- and a progress line per
+                // projected gear doubled the message count during the most
+                // expensive thing this server does, to tell a UI something it
+                // cannot render that often anyway. The first one goes out
+                // immediately so a bar appears at once, and `done: true` below is
+                // unconditional, which is the message a client waits on.
+                if completed == 1 || last_progress.elapsed() >= PROGRESS_STEP {
+                    last_progress = std::time::Instant::now();
+                    disconnected |= !notify(
+                        connection,
+                        method::PROGRESS,
+                        &ProgressParams {
+                            token: "catalogue".to_owned(),
+                            completed,
+                            total,
+                            done: false,
+                        },
+                    )
+                    .peer_alive();
+                }
             }
         }
         // A client that is gone will not read the rest of the load, and the
@@ -2582,7 +2935,7 @@ fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> 
         .cloned()
         .collect();
     if answered && !remaining.is_empty() {
-        notify(
+        notify_last(
             connection,
             method::CATALOGUE_DIAGNOSTICS,
             &CatalogueDiagnostics {
@@ -2591,7 +2944,7 @@ fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> 
         );
     }
 
-    notify(
+    notify_last(
         connection,
         method::PROGRESS,
         &ProgressParams {
@@ -2601,7 +2954,7 @@ fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> 
             done: true,
         },
     );
-    notify(
+    notify_last(
         connection,
         method::LOG,
         &LogParams {
@@ -2656,29 +3009,63 @@ fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> 
     ))
 }
 
-/// Send one notification. `false` means the peer is gone.
+/// What became of a notification.
 ///
-/// A serialization failure is logged rather than encoded as `Null`: a
-/// notification whose params are `null` is one the client cannot tell from a
-/// well-formed empty one, so it would read as "nothing happened".
-fn notify<T: serde::Serialize>(connection: &Connection, method: &str, params: &T) -> bool {
+/// Three states rather than a `bool`, because two of them used to answer
+/// `true`: a notification whose params could not be serialized was logged to
+/// stderr and reported to the caller as delivered. For `publishDiagnostics` that
+/// meant the client kept the markers it already had, with the only trace on a
+/// channel it cannot read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Delivery {
+    Sent,
+    /// Nothing went out, and the peer is still there to be told so.
+    Dropped,
+    /// The channel is closed: nothing will go out, now or later.
+    PeerGone,
+}
+
+impl Delivery {
+    /// Whether there is still somebody to talk to, which is what the request
+    /// loop turns on.
+    const fn peer_alive(self) -> bool {
+        !matches!(self, Self::PeerGone)
+    }
+}
+
+/// Send one notification.
+///
+/// A serialization failure drops the notification rather than encoding it as
+/// `Null`: a notification whose params are `null` is one the client cannot tell
+/// from a well-formed empty one, so it would read as "nothing happened".
+fn notify<T: serde::Serialize>(connection: &Connection, method: &str, params: &T) -> Delivery {
     let params = match serde_json::to_value(params) {
         Ok(params) => params,
         Err(e) => {
             eprintln!("gearbox: cannot serialize `{method}` params: {e}");
-            return true;
+            return Delivery::Dropped;
         }
     };
     match connection.sender.send(Message::Notification(Notification {
         method: method.to_owned(),
         params,
     })) {
-        Ok(()) => true,
+        Ok(()) => Delivery::Sent,
         Err(e) => {
             eprintln!("gearbox: cannot send `{method}`: {e}");
-            false
+            Delivery::PeerGone
         }
     }
+}
+
+/// Send a notification after the work it is about is over.
+///
+/// The one place a [`Delivery`] is genuinely unusable: these go out once the
+/// load has finished, so there is no request left to refuse, nothing left to
+/// re-send, and a peer that has gone will be noticed by the request loop on its
+/// next read. `notify` has already said so on stderr.
+fn notify_last<T: serde::Serialize>(connection: &Connection, method: &str, params: &T) {
+    let _ = notify(connection, method, params);
 }
 
 fn cast<P: serde::de::DeserializeOwned>(
@@ -2694,9 +3081,14 @@ fn ok<T: serde::Serialize>(id: RequestId, value: &T) -> Response {
             id,
             response_result: Ok(result),
         },
+        // **`InternalError`, not `LOAD_FAILED`.** A result that cannot be
+        // serialized is a defect in this server, on whatever method was called;
+        // answering with the catalogue-load code told a client mapping codes to
+        // causes that its load had failed. `protocol.rs` makes this exact
+        // argument about not reusing `-32002`.
         Err(e) => error(
             id,
-            error_code::LOAD_FAILED,
+            lsp_server::ErrorCode::InternalError as i32,
             &format!("cannot serialize result: {e}"),
         ),
     }

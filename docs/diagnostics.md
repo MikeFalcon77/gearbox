@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **91**.
+Codes: **92**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -1244,6 +1244,7 @@ reading.
 | [GBX0705](#gbx0705) | warning | the lock carries a credential, which generation replaced |
 | [GBX0706](#gbx0706) | warning | a generated crate directory is no longer part of the product |
 | [GBX0707](#gbx0707) | warning | a generated file is no longer part of the product |
+| [GBX0708](#gbx0708) | warning | a product template replaced a builtin |
 
 ### GBX0701
 
@@ -1324,4 +1325,17 @@ over, which deliberately does not carry the marker.
 A warning with the same remedy and for the same reason: `apply` has no
 delete path, and a file in a tree someone has been working in is theirs
 to remove.
+
+### GBX0708
+
+**a product template replaced a builtin**
+
+A house template replaced a builtin for this run.
+
+Reported rather than only summarized, and that is the whole point of it
+being a diagnostic: the overlay was named in the text output alone, so
+`--format json` and every RPC client saw an unexpected Dockerfile or
+chart with no visible cause and read it as a generator change. A
+template is chosen by the description, so the file it produces is the
+product's doing -- which is a fact an operator has to be told.
 

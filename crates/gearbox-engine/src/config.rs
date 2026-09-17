@@ -19,7 +19,7 @@ use gearbox_gdl::engine::FileIdentity;
 use gearbox_ir::{
     ConfigFieldDecl, ConfigSchema, Diagnostic, DiagnosticCode, Diagnostics, Location,
 };
-use gearbox_project::{ConfigRootError, RustFile};
+use gearbox_project::{ConfigFieldsError, ConfigRootError, RustFile};
 
 /// Build the configuration surface for one gear, or `None` if it declares none.
 ///
@@ -69,13 +69,48 @@ pub fn project(
         },
     };
 
-    let projected = gearbox_project::project_config_fields(files, &root);
+    // Three answers where there used to be one empty vector, so the message can
+    // say which happened instead of offering the reader both.
+    let projected = match gearbox_project::project_config_fields(files, &root) {
+        Ok(fields) => fields,
+        Err(ConfigFieldsError::RootNotFound { .. }) => {
+            report(
+                diagnostics,
+                uri,
+                format!("this crate declares no struct named `{root}`"),
+                "check the struct name against the crate; `config_schema` is a locator, not a path",
+            );
+            return None;
+        }
+        Err(ConfigFieldsError::NoNamedFields { .. }) => {
+            report(
+                diagnostics,
+                uri,
+                format!("`{root}` is a tuple or unit struct, so it has no configuration keys"),
+                "drop `config_schema`, or name the struct that actually carries the keys with \
+                 `config(rust = \"...\")`",
+            );
+            return None;
+        }
+        Err(e @ ConfigFieldsError::UnreadableSerdeAttribute { .. }) => {
+            report(
+                diagnostics,
+                uri,
+                format!("{e}"),
+                "a `#[serde(...)]` form this cannot read hides everything written after it in \
+                 the same attribute, `skip` included; split it into separate `#[serde(...)]` \
+                 attributes so each is read on its own",
+            );
+            return None;
+        }
+    };
     if projected.is_empty() {
         report(
             diagnostics,
             uri,
-            format!("`{root}` declares no configuration fields, or this crate does not declare it"),
-            "check the struct name against the crate; `config_schema` is a locator, not a path",
+            format!("every field of `{root}` is `#[serde(skip)]`, so it has no configuration"),
+            "drop `config_schema`, or name the struct that carries the keys with \
+             `config(rust = \"...\")`",
         );
         return None;
     }

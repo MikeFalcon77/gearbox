@@ -51,10 +51,26 @@ pub fn project(
     scans: &mut crate::scans::CrateScans,
     diagnostics: &mut Diagnostics,
 ) -> ClusterProjection {
-    let profiles = gearbox_project::project_cluster_profiles(files)
-        .into_iter()
-        .map(|p| p.name)
-        .collect();
+    // An unreadable or invalid `const NAME` is reported rather than dropped: a
+    // dropped profile reads as a crate that implements none, which makes
+    // `check_profiles` raise ClusterProfileNotImplemented against a crate that
+    // does implement it.
+    let profiles = match gearbox_project::project_cluster_profiles(files) {
+        Ok(found) => found.into_iter().map(|p| p.name).collect(),
+        Err(e) => {
+            diagnostics.push(
+                Diagnostic::error(
+                    DiagnosticCode::ClusterProviderUnprojectable,
+                    format!("a cluster profile marker cannot be read: {e}"),
+                    "`ClusterProfile::NAME` must be a string literal or a `&str` const in the \
+                     same crate, and must be a valid profile id (kebab-case): the SDK turns it \
+                     into `ClientScope::new(\"cluster:{name}\")`",
+                )
+                .at(Location::file(identity.uri.as_str().to_owned())),
+            );
+            Vec::new()
+        }
+    };
 
     if decl.cluster_plugins.is_empty() {
         return ClusterProjection {
@@ -139,7 +155,7 @@ fn providers(
         }
     }
 
-    let registrations = match gearbox_project::project_provider_registry(files) {
+    let registrations = match gearbox_project::project_provider_registry(files, uri) {
         Ok(registrations) => registrations,
         Err(e) => {
             diagnostics.push(

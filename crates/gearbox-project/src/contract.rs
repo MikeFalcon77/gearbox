@@ -9,7 +9,7 @@
 //! [`gearbox_ir::ContractKind::from_trait_name`] so GDL and the macro cannot
 //! disagree about what `...Api` means.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use gearbox_ir::contract::strip_version_suffix;
 use gearbox_ir::{ContractKind, Transport};
@@ -99,17 +99,7 @@ pub struct ProjectedProvide {
 
 /// Whether an attribute path is `provides` or `toolkit::provides`.
 fn is_provides_attribute(attr: &syn::Attribute) -> bool {
-    let segments: Vec<String> = attr
-        .path()
-        .segments
-        .iter()
-        .map(|s| s.ident.to_string())
-        .collect();
-    match segments.as_slice() {
-        [one] => one == "provides",
-        [first, second] => (first == "toolkit" || first == "gears_toolkit") && second == "provides",
-        _ => false,
-    }
+    crate::attribute::is_toolkit_attribute(attr, "provides")
 }
 
 /// Every `#[toolkit::provides]` on one gear item.
@@ -147,14 +137,29 @@ pub fn project_provides(attrs: &[syn::Attribute]) -> syn::Result<Vec<ProjectedPr
                         &content,
                     )?;
                 for ident in idents {
-                    match ident.to_string().as_str() {
-                        "local" => transports.insert(Transport::Local),
-                        "rest" => transports.insert(Transport::Rest),
-                        "grpc" => transports.insert(Transport::Grpc),
-                        // Unknown spellings are a compile error in the macro, so
-                        // seeing one here means the crate does not build.
-                        _ => false,
+                    let transport = match ident.to_string().as_str() {
+                        "local" => Transport::Local,
+                        "rest" => Transport::Rest,
+                        "grpc" => Transport::Grpc,
+                        // Reported, not dropped. The macro rejects an unknown
+                        // spelling today, but `one_per_installation` shows the
+                        // platform lands the new one first and this parser
+                        // catches up afterwards -- and in that window a dropped
+                        // ident makes a provider read as offering fewer
+                        // transports than it states, which is the plausible
+                        // wrong answer `project_provides` refuses everywhere
+                        // else.
+                        other => {
+                            return Err(syn::Error::new_spanned(
+                                &ident,
+                                format!(
+                                    "#[toolkit::provides] names transport `{other}`, which this \
+                                     projection does not model"
+                                ),
+                            ));
+                        }
                     };
+                    transports.insert(transport);
                 }
             } else if let Ok(value) = meta.value() {
                 // `local`, `policies`, and anything added later: consumed so the
@@ -206,17 +211,7 @@ pub struct ProjectedConsume {
 
 /// Whether an attribute path is `consumes` or `toolkit::consumes`.
 fn is_consumes_attribute(attr: &syn::Attribute) -> bool {
-    let segments: Vec<String> = attr
-        .path()
-        .segments
-        .iter()
-        .map(|s| s.ident.to_string())
-        .collect();
-    match segments.as_slice() {
-        [one] => one == "consumes",
-        [first, second] => (first == "toolkit" || first == "gears_toolkit") && second == "consumes",
-        _ => false,
-    }
+    crate::attribute::is_toolkit_attribute(attr, "consumes")
 }
 
 /// Every `#[toolkit::consumes]` on one gear item.
@@ -279,17 +274,7 @@ pub fn project_consumes(attrs: &[syn::Attribute]) -> syn::Result<Vec<ProjectedCo
 
 /// Whether an attribute path is `contract` or `toolkit::contract`.
 fn is_contract_attribute(attr: &syn::Attribute) -> bool {
-    let segments: Vec<String> = attr
-        .path()
-        .segments
-        .iter()
-        .map(|s| s.ident.to_string())
-        .collect();
-    match segments.as_slice() {
-        [one] => one == "contract",
-        [first, second] => (first == "toolkit" || first == "gears_toolkit") && second == "contract",
-        _ => false,
-    }
+    crate::attribute::is_toolkit_attribute(attr, "contract")
 }
 
 /// Whether `item_trait` extends `base` -- i.e. names it as a supertrait.
@@ -305,15 +290,14 @@ fn extends(item_trait: &syn::ItemTrait, base: &str) -> bool {
     })
 }
 
-/// Which transports a contract can be bound over, from the traits beside it.
+/// Every `*Rest` / `*Grpc` projection trait in the crate, keyed by the base
+/// ident it projects.
 ///
-/// `Local` is unconditional: the base trait is the in-process binding, and a
-/// compile-time implementation always satisfies it. Each remote transport is
-/// present only if its projection trait exists *and* extends the base.
-fn project_transports(files: &[RustFile], base: &str) -> BTreeSet<Transport> {
-    let mut out = BTreeSet::new();
-    out.insert(Transport::Local);
-
+/// Collected in one pass before the contract loop. Asking each contract to walk
+/// every item of every file made `project_contracts` quadratic in contract
+/// count, and an SDK crate with n contracts scanned its whole tree n times.
+fn projection_traits(files: &[RustFile]) -> BTreeMap<String, BTreeSet<Transport>> {
+    let mut out: BTreeMap<String, BTreeSet<Transport>> = BTreeMap::new();
     for file in files {
         for item in &file.ast.items {
             let syn::Item::Trait(candidate) = item else {
@@ -321,18 +305,37 @@ fn project_transports(files: &[RustFile], base: &str) -> BTreeSet<Transport> {
             };
             let ident = candidate.ident.to_string();
             // `PaymentApi` -> `PaymentApiRest`; `PaymentApiV2` -> `PaymentApiV2Rest`.
-            let Some(suffix) = ident.strip_prefix(base) else {
+            let (base, transport) = if let Some(base) = ident.strip_suffix("Rest") {
+                (base, Transport::Rest)
+            } else if let Some(base) = ident.strip_suffix("Grpc") {
+                (base, Transport::Grpc)
+            } else {
                 continue;
             };
-            let transport = match suffix {
-                "Rest" => Transport::Rest,
-                "Grpc" => Transport::Grpc,
-                _ => continue,
-            };
+            // Checked rather than trusting the name, for the reason `extends`
+            // gives: a coincidentally-named trait that does not extend the base
+            // is not a projection.
             if extends(candidate, base) {
-                out.insert(transport);
+                out.entry(base.to_owned()).or_default().insert(transport);
             }
         }
+    }
+    out
+}
+
+/// Which transports a contract can be bound over, from the traits beside it.
+///
+/// `Local` is unconditional: the base trait is the in-process binding, and a
+/// compile-time implementation always satisfies it. Each remote transport is
+/// present only if its projection trait exists *and* extends the base.
+fn transports_of(
+    projections: &BTreeMap<String, BTreeSet<Transport>>,
+    base: &str,
+) -> BTreeSet<Transport> {
+    let mut out = BTreeSet::new();
+    out.insert(Transport::Local);
+    if let Some(found) = projections.get(base) {
+        out.extend(found.iter().copied());
     }
     out
 }
@@ -353,6 +356,7 @@ fn project_transports(files: &[RustFile], base: &str) -> BTreeSet<Transport> {
 /// Returns the [`syn::Error`] from the first `#[toolkit::contract]` whose
 /// arguments do not parse.
 pub fn project_contracts(files: &[RustFile]) -> syn::Result<Vec<ProjectedContract>> {
+    let projections = projection_traits(files);
     let mut out = Vec::new();
     for file in files {
         for item in &file.ast.items {
@@ -371,7 +375,7 @@ pub fn project_contracts(files: &[RustFile]) -> syn::Result<Vec<ProjectedContrac
                 let base_name = strip_version_suffix(&trait_ident).to_owned();
                 // Projections are named after the versioned ident, not the base:
                 // `PaymentApiV2Rest`, not `PaymentApiRest`.
-                let transports = project_transports(files, &trait_ident);
+                let transports = transports_of(&projections, &trait_ident);
                 out.push(ProjectedContract {
                     trait_ident,
                     base_name,

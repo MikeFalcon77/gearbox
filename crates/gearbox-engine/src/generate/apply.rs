@@ -621,6 +621,30 @@ fn clear_tree(path: &Path) {
     }
 }
 
+/// The directory a generated tree lives under when nobody names one.
+pub const OUTPUT_DIR: &str = ".gearbox";
+
+/// `.gearbox/<product>/<profile>/`, the default generated tree for a product.
+///
+/// Here rather than in each client because two of them compare against it: the
+/// CLI writes the tree and `gearbox/product/lock` diffs the lock inside it. Two
+/// spellings match until one of them changes, and then the lock is compared
+/// against a directory nothing writes and reported as missing rather than stale.
+///
+/// Validated ids rather than strings, and that is the safety half: a product id
+/// reaches the lock as a plain `String` lowered from `product(id = ...)`, and
+/// [`Path::join`] on an absolute or `..`-bearing segment walks straight out of
+/// `.gearbox/`.
+#[must_use]
+pub fn default_out_root(
+    product: &gearbox_ir::ProductId,
+    profile: &gearbox_ir::ProfileId,
+) -> PathBuf {
+    Path::new(OUTPUT_DIR)
+        .join(product.as_str())
+        .join(profile.as_str())
+}
+
 /// The base cache directory for a product, given its output root.
 ///
 /// `.gearbox/<product>/<profile>/` -> `.gearbox/<product>/.base/`. Returns the

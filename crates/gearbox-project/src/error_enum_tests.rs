@@ -15,6 +15,61 @@ fn projected(source: &str) -> Vec<ProjectedErrorEnum> {
     project_error_enums(std::slice::from_ref(&file))
 }
 
+fn rust_file(relative: &str, source: &str) -> RustFile {
+    RustFile {
+        path: std::path::PathBuf::from(relative),
+        relative: std::path::PathBuf::from(relative),
+        ast: syn::parse_file(source).expect("fixture parses"),
+    }
+}
+
+/// Two enums of one name in one crate is legal, and the consumer must refuse
+/// rather than guess -- which it can only do if the order is stable.
+/// `error_enum_corpus_tests::complain` relies on `declared.first()` being
+/// deterministic, and that path only runs when the sibling checkout is
+/// reachable, so nothing pinned the ordering here.
+#[test]
+fn two_enums_of_one_name_arrive_in_a_stable_order() {
+    // Declared with the later path first, so a projection that preserved scan
+    // order rather than sorting would come back the other way round.
+    let files = [
+        rust_file("zulu.rs", "pub enum RegistryError { FromZulu }"),
+        rust_file("alpha.rs", "pub enum RegistryError { FromAlpha }"),
+    ];
+    let found = project_error_enums(&files);
+    assert_eq!(found.len(), 2, "both are kept, and neither is collapsed");
+    assert_eq!(
+        found
+            .iter()
+            .map(|e| e.relative.display().to_string())
+            .collect::<Vec<_>>(),
+        ["alpha.rs", "zulu.rs"],
+        "ordered by relative path within one identifier"
+    );
+}
+
+#[test]
+fn two_enums_of_one_name_in_one_file_order_by_line() {
+    let files = [rust_file(
+        "lib.rs",
+        r"
+        pub mod later { pub enum RegistryError { Second } }
+        pub enum RegistryError { First }
+        ",
+    )];
+    let found = project_error_enums(&files);
+    assert_eq!(found.len(), 2);
+    assert_eq!(
+        found
+            .iter()
+            .map(|e| e.variants[0].ident.as_str())
+            .collect::<Vec<_>>(),
+        ["Second", "First"],
+        "same identifier, same file: ordered by line, so the nested one -- \
+         declared first -- comes first"
+    );
+}
+
 #[test]
 fn a_plain_thiserror_enum_is_projected_with_no_domain() {
     // `ClusterError`'s shape: the variants a diagnostic names, and no wire

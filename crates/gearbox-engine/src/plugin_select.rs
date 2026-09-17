@@ -53,7 +53,10 @@ fn report_plugin_config_types(intent: &ProductIntent, uri: &str, diagnostics: &m
                     format!("gear `{}`: `vendor` must be a string", selection.gear),
                     "set `vendor` to a string, or drop the key to use the crate default",
                 )
-                .at(gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri)),
+                .at(gearbox_ir::Location::or_file(
+                    selection.declared_at.as_ref(),
+                    uri,
+                )),
             );
         }
         for plugin in &selection.plugins {
@@ -64,7 +67,10 @@ fn report_plugin_config_types(intent: &ProductIntent, uri: &str, diagnostics: &m
                         format!("plugin `{}`: {msg}", plugin.gear),
                         "set `vendor` to a string, or drop the key to use the crate default",
                     )
-                    .at(gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri)),
+                    .at(gearbox_ir::Location::or_file(
+                        selection.declared_at.as_ref(),
+                        uri,
+                    )),
                 );
             }
             if let Err(msg) = plugin.configured_priority() {
@@ -74,7 +80,10 @@ fn report_plugin_config_types(intent: &ProductIntent, uri: &str, diagnostics: &m
                         format!("plugin `{}`: {msg}", plugin.gear),
                         "set `priority` to an integer, or drop the key to use the crate default",
                     )
-                    .at(gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri)),
+                    .at(gearbox_ir::Location::or_file(
+                        selection.declared_at.as_ref(),
+                        uri,
+                    )),
                 );
             }
         }
@@ -92,14 +101,33 @@ fn host_vendor<'a>(gear: &'a GearDescriptor, intent: &'a ProductIntent) -> Optio
         .or(gear.vendor_selector.as_deref())
 }
 
+/// The vendor a plugin registers itself under with nothing configured.
+fn default_vendor(gear: &GearDescriptor) -> Option<&str> {
+    gear.fills
+        .as_ref()
+        .and_then(|f| f.default_vendor.as_deref())
+}
+
+/// Whether a host and one implementation would find each other with no `vendor`
+/// set anywhere in the product.
+///
+/// Public because the CLI's `plugins` listing asks exactly this question and had
+/// its own copy of the comparison. The rule is the one [`check`] applies -- the
+/// selector against what the plugin registers under -- and two spellings of it
+/// can disagree, which for a listing means telling an operator the opposite of
+/// what the resolver will do.
+#[must_use]
+pub fn default_vendors_agree(host: &GearDescriptor, implementation: &GearDescriptor) -> bool {
+    host.vendor_selector.as_deref() == default_vendor(implementation)
+}
+
 /// The vendor a plugin will register itself under.
 fn plugin_vendor<'a>(selection: &'a PluginSelection, catalogue: &'a Catalogue) -> Option<&'a str> {
-    selection.configured_vendor().ok().flatten().or_else(|| {
-        catalogue
-            .gear(&selection.gear)
-            .and_then(|g| g.fills.as_ref())
-            .and_then(|f| f.default_vendor.as_deref())
-    })
+    selection
+        .configured_vendor()
+        .ok()
+        .flatten()
+        .or_else(|| catalogue.gear(&selection.gear).and_then(default_vendor))
 }
 
 /// Lower wins. A plugin that states no priority sorts last, so an explicit
@@ -222,7 +250,10 @@ fn report_misplaced_plugins(
                         fills.point.qualified()
                     ),
                 )
-                .at(gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri)),
+                .at(gearbox_ir::Location::or_file(
+                    selection.declared_at.as_ref(),
+                    uri,
+                )),
             );
         }
     }
@@ -421,7 +452,10 @@ fn report_orphan_plugins(
                     "select the host gear and list this one under its `plugins = [...]`, or \
                      drop it",
                 )
-                .at(gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri)),
+                .at(gearbox_ir::Location::or_file(
+                    selection.declared_at.as_ref(),
+                    uri,
+                )),
             );
         }
     }

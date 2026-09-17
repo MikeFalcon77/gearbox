@@ -82,15 +82,33 @@ pub fn project_manifest(dir: &Path) -> Result<CrateManifest, ManifestError> {
     let path = dir.join("Cargo.toml");
     let display = path.display().to_string();
 
-    if let Ok(meta) = std::fs::symlink_metadata(&path)
-        && meta.file_type().is_symlink()
-    {
-        return Err(ManifestError::Unreadable {
-            path: display,
-            message: "Cargo.toml is a symlink; a crate may only be read through a real \
-                      manifest inside its source root"
-                .to_owned(),
-        });
+    // Matched rather than `if let Ok(..)`: an `lstat` that fails for any other
+    // reason used to skip the guard and then read the path anyway through
+    // `read_to_string`, which *does* follow the link. `scan_crate` refuses on
+    // the same call, and the doc above promises a crate is only ever read
+    // through a real manifest, so this fails closed too.
+    match std::fs::symlink_metadata(&path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err(ManifestError::Unreadable {
+                path: display,
+                message: "Cargo.toml is a symlink; a crate may only be read through a real \
+                          manifest inside its source root"
+                    .to_owned(),
+            });
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ManifestError::Unreadable {
+                path: display,
+                message: e.to_string(),
+            });
+        }
+        Err(e) => {
+            return Err(ManifestError::Unreadable {
+                path: display,
+                message: format!("the symlink guard could not be applied: {e}"),
+            });
+        }
     }
 
     let text = std::fs::read_to_string(&path).map_err(|e| ManifestError::Unreadable {

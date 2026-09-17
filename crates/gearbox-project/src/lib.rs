@@ -37,7 +37,9 @@ pub use cluster::{
     ClusterProjectionError, ProjectedClusterProvider, SdkDefaultRule, project_backend_capabilities,
     project_provider_name, project_provider_registry, project_sdk_defaults,
 };
-pub use config::{ConfigField, ConfigRootError, project_config_fields, project_config_root};
+pub use config::{
+    ConfigField, ConfigFieldsError, ConfigRootError, project_config_fields, project_config_root,
+};
 pub use contract::{
     ProjectedConsume, ProjectedContract, ProjectedProvide, project_consumes, project_contracts,
     project_provides,
@@ -50,5 +52,5 @@ pub use plugin::{
     ExtensionPoint, PluginImplError, VendorDefault, project_extension_points, project_plugin_impl,
     project_vendor_default,
 };
-pub use profile::{ProjectedProfile, project_cluster_profiles};
-pub use scan::{RustFile, ScanError, scan_crate};
+pub use profile::{ProfileProjectionError, ProjectedProfile, project_cluster_profiles};
+pub use scan::{MAX_FILE_BYTES, MAX_FILES, RustFile, ScanError, items, scan_crate};

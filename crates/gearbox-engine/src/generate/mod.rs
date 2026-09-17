@@ -52,9 +52,14 @@ mod workspace;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use gearbox_ir::{ApplicationKind, Catalogue, Diagnostics, FileSet, ResolvedProduct, SourceId};
+use gearbox_ir::{
+    ApplicationKind, Catalogue, Diagnostic, DiagnosticCode, Diagnostics, FileSet, ResolvedProduct,
+    SourceId,
+};
 
-pub use apply::{ApplyOutcome, apply_generate, base_root_for, plan, summarize};
+pub use apply::{
+    ApplyOutcome, OUTPUT_DIR, apply_generate, base_root_for, default_out_root, plan, summarize,
+};
 pub use templates::TemplateSet;
 
 /// Numeric uid the image and the chart agree on.
@@ -321,10 +326,24 @@ pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
         insert(&mut files, entry)?;
     }
 
+    // One per key rather than one line listing them all: the text output
+    // already prints the summary, and a diagnostic is what carries the fact to
+    // `--format json` and to every RPC client, which saw nothing at all.
+    let overridden_templates = input.templates.overridden();
+    for key in &overridden_templates {
+        diagnostics.push(Diagnostic::new(
+            DiagnosticCode::GenTemplateOverridden,
+            format!(
+                "template `{key}` came from the product's own overlay rather than from this \
+                 build's builtin"
+            ),
+        ));
+    }
+
     Ok(Generated {
         files,
         diagnostics,
-        overridden_templates: input.templates.overridden(),
+        overridden_templates,
     })
 }
 

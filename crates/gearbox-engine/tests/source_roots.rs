@@ -155,3 +155,56 @@ fn two_roots_with_distinct_gears_both_load() {
         scan.catalogue.gears.keys().collect::<Vec<_>>()
     );
 }
+
+/// Which root owns a path is the same question the loader answers, so one
+/// function answers it.
+///
+/// **Nested roots, where the two possible answers differ.** `load_catalogue`
+/// walks the roots in order and keeps the first declaration, so the root that
+/// owns a description is the earliest one containing it -- and the `load()`
+/// boundary a consumer evaluates that file against has to be the same one, or it
+/// judges the file by a boundary no catalogue entry uses. `gearbox-rpc` used to
+/// pick the deepest match from its own copy of the rule, which underlined a
+/// `load("//...")` in the editor that loaded clean from disk.
+#[test]
+fn the_owning_root_is_the_first_one_that_contains_the_path() {
+    let outer = root("in the outer root");
+    let inner = outer.join("demo");
+    let description = inner.join("gear.gdl");
+
+    let listed = [open("outer", &outer), open("inner", &inner)];
+    let owner = gearbox_engine::owning_source_root(&listed, &description.canonicalize().unwrap())
+        .expect("the description is inside both roots");
+    assert_eq!(
+        owner.id.as_str(),
+        "outer",
+        "the earliest root in the list is the one the catalogue attributes it to"
+    );
+
+    // And it is the same answer the loader gives, which is the only reason this
+    // function is in the engine rather than in each caller.
+    let scan = load_catalogue(&listed);
+    let kept = scan
+        .catalogue
+        .gear(&GearId::new("demo").unwrap())
+        .expect("the gear loads");
+    assert_eq!(
+        kept.source.as_str(),
+        owner.id.as_str(),
+        "the function and the loader must not disagree about who owns a description"
+    );
+
+    // Reversed, the answer reverses with it: it is a property of the list.
+    let reversed = [open("inner", &inner), open("outer", &outer)];
+    assert_eq!(
+        gearbox_engine::owning_source_root(&reversed, &description.canonicalize().unwrap())
+            .map(|root| root.id.as_str().to_owned()),
+        Some("inner".to_owned())
+    );
+
+    // A path under no root has no owner, which is what a file opened outside the
+    // corpus is.
+    assert!(
+        gearbox_engine::owning_source_root(&listed, Path::new("/elsewhere/gear.gdl")).is_none()
+    );
+}

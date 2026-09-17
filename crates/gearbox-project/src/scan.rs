@@ -14,14 +14,44 @@ pub enum ScanError {
     #[error("cannot parse `{}`", .0.display())]
     Parse(PathBuf, #[source] syn::Error),
 
-    /// A `src/` that is a symlink, or a directory under it that could not be
-    /// walked.
+    /// A `src/` that is a symlink, or a `.rs` file that is one.
     ///
     /// Separate from [`ScanError::Read`] because the remedy is different: a read
     /// failure is about one file, this is about the shape of the tree.
     #[error("cannot walk `{}`", .0.display())]
     Walk(PathBuf, String),
+
+    /// A directory under `src/` that could not be traversed.
+    ///
+    /// Keeps `walkdir`'s own error as the source, the way [`ScanError::Read`]
+    /// and [`ScanError::Parse`] keep theirs. Flattening it into a `String` lost
+    /// the `io::ErrorKind` behind it, so a permission-denied subdirectory and a
+    /// symlink loop both arrived as prose.
+    #[error("cannot walk `{}`", .0.display())]
+    WalkDir(PathBuf, #[source] walkdir::Error),
+
+    /// A source file larger than [`MAX_FILE_BYTES`], or a `src/` holding more
+    /// than [`MAX_FILES`] of them.
+    ///
+    /// This crate is pointed at trees it does not own, and `syn::parse_file`
+    /// needs the whole file in memory, so an unbounded read makes one oversized
+    /// file in a scanned crate the projector's problem.
+    #[error("{}", .0)]
+    TooLarge(String),
 }
+
+/// The largest source file this will read, in bytes.
+///
+/// An order of magnitude above anything in the corpus: the largest `.rs` file in
+/// `gears-rust` is a few hundred kilobytes, so this refuses only a file that is
+/// not source in any ordinary sense.
+pub const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+
+/// The largest number of `.rs` files this will collect from one crate's `src/`.
+///
+/// The biggest gear crate in the corpus has a few hundred, so this refuses only
+/// a tree that is not one crate's source.
+pub const MAX_FILES: usize = 20_000;
 
 /// One parsed Rust file, with the path to blame in a diagnostic.
 pub struct RustFile {
@@ -80,7 +110,7 @@ pub fn scan_crate(crate_dir: &Path) -> Result<Vec<RustFile>, ScanError> {
     {
         let entry = entry.map_err(|e| {
             let at = e.path().unwrap_or(&src).to_path_buf();
-            ScanError::Walk(at, e.to_string())
+            ScanError::WalkDir(at, e)
         })?;
         // `follow_links(false)` already refuses to descend a symlink directory
         // or read a symlink-to-non-rs. The hole is a `.rs` symlink: walkdir
@@ -98,6 +128,13 @@ pub fn scan_crate(crate_dir: &Path) -> Result<Vec<RustFile>, ScanError> {
             continue;
         }
         if entry.file_type().is_file() && entry.path().extension().is_some_and(|x| x == "rs") {
+            if paths.len() >= MAX_FILES {
+                return Err(ScanError::TooLarge(format!(
+                    "`{}` holds more than {MAX_FILES} `.rs` files; a crate's `src/` is not \
+                     that, so this is a path pointing somewhere it should not",
+                    src.display()
+                )));
+            }
             paths.push(entry.into_path());
         }
     }
@@ -116,6 +153,16 @@ pub fn scan_crate(crate_dir: &Path) -> Result<Vec<RustFile>, ScanError> {
                     .to_owned(),
             ));
         }
+        // Checked before the read, off the metadata already fetched: the whole
+        // file goes into memory and then into `syn`, so the size has to be
+        // refused rather than discovered.
+        if meta.len() > MAX_FILE_BYTES {
+            return Err(ScanError::TooLarge(format!(
+                "`{}` is {} bytes, over the {MAX_FILE_BYTES}-byte limit for a source file",
+                path.display(),
+                meta.len()
+            )));
+        }
         let text = std::fs::read_to_string(&path).map_err(|e| ScanError::Read(path.clone(), e))?;
         let ast = syn::parse_file(&text).map_err(|e| ScanError::Parse(path.clone(), e))?;
         let relative = path.strip_prefix(&src).unwrap_or(&path).to_path_buf();
@@ -126,6 +173,36 @@ pub fn scan_crate(crate_dir: &Path) -> Result<Vec<RustFile>, ScanError> {
         });
     }
     Ok(files)
+}
+
+/// Every item in a scanned file, descending into inline `mod` blocks.
+///
+/// One traversal, because two projectors with different ideas of which items
+/// exist disagree about the same crate: `config::project_config_root` walks
+/// inline modules to find the root, so the struct, enum, `Default` impl and
+/// free-function lookups it feeds have to walk them too, or the annotation form
+/// drops a nested root entirely while the turbofish form records one and then
+/// yields no fields.
+///
+/// `mod foo;` is not followed: its body is a separate file the directory walk
+/// reaches on its own, and following it here would be a second traversal with a
+/// different idea of the tree.
+#[must_use]
+pub fn items(file: &RustFile) -> Vec<&syn::Item> {
+    let mut out = Vec::new();
+    push_items(&file.ast.items, &mut out);
+    out
+}
+
+fn push_items<'a>(items: &'a [syn::Item], out: &mut Vec<&'a syn::Item>) {
+    for item in items {
+        out.push(item);
+        if let syn::Item::Mod(module) = item
+            && let Some((_, inner)) = &module.content
+        {
+            push_items(inner, out);
+        }
+    }
 }
 
 /// Interpret a description's narrowing path against a crate's scanned files.
@@ -153,27 +230,26 @@ pub fn narrowing_path(spec: &str) -> Result<PathBuf, String> {
 mod tests {
     use super::*;
 
+    // Gated on the `#[test]` itself rather than inside it. The `cfg(not(unix))`
+    // arm these used to carry removed the directory and asserted nothing, so
+    // off unix the suite reported the symlink cases as covered on a platform
+    // where `scan_crate` was never called.
+    #[cfg(unix)]
     #[test]
     fn a_symlink_rs_file_is_a_walk_error() {
         let dir = std::env::temp_dir().join(format!("gearbox-scan-symlink-{}", std::process::id()));
         drop(std::fs::remove_dir_all(&dir));
         std::fs::create_dir_all(dir.join("src")).unwrap();
         std::fs::write(dir.join("real.rs"), "pub fn f() {}\n").unwrap();
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(dir.join("real.rs"), dir.join("src/lib.rs")).unwrap();
-            let Err(err) = scan_crate(&dir) else {
-                panic!("symlink must be refused");
-            };
-            drop(std::fs::remove_dir_all(&dir));
-            assert!(matches!(err, ScanError::Walk(_, _)), "got {err}");
-        }
-        #[cfg(not(unix))]
-        {
-            drop(std::fs::remove_dir_all(&dir));
-        }
+        std::os::unix::fs::symlink(dir.join("real.rs"), dir.join("src/lib.rs")).unwrap();
+        let Err(err) = scan_crate(&dir) else {
+            panic!("symlink must be refused");
+        };
+        drop(std::fs::remove_dir_all(&dir));
+        assert!(matches!(err, ScanError::Walk(_, _)), "got {err}");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_symlink_non_rs_file_is_ignored() {
         let dir =
@@ -182,17 +258,38 @@ mod tests {
         std::fs::create_dir_all(dir.join("src")).unwrap();
         std::fs::write(dir.join("src/lib.rs"), "pub fn f() {}\n").unwrap();
         std::fs::write(dir.join("thing.json"), "{}\n").unwrap();
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(dir.join("thing.json"), dir.join("src/thing.json")).unwrap();
-            let files =
-                scan_crate(&dir).unwrap_or_else(|e| panic!("json symlink must be ignored: {e}"));
-            drop(std::fs::remove_dir_all(&dir));
-            assert_eq!(files.len(), 1);
-        }
-        #[cfg(not(unix))]
-        {
-            drop(std::fs::remove_dir_all(&dir));
-        }
+        std::os::unix::fs::symlink(dir.join("thing.json"), dir.join("src/thing.json")).unwrap();
+        let files =
+            scan_crate(&dir).unwrap_or_else(|e| panic!("json symlink must be ignored: {e}"));
+        drop(std::fs::remove_dir_all(&dir));
+        assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn an_oversized_source_file_is_refused_before_it_is_read() {
+        let dir = std::env::temp_dir().join(format!("gearbox-scan-huge-{}", std::process::id()));
+        drop(std::fs::remove_dir_all(&dir));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        // Sparse: the point is that the size is read off the metadata, so the
+        // bytes never have to exist for the guard to fire.
+        let file = std::fs::File::create(dir.join("src/lib.rs")).unwrap();
+        file.set_len(MAX_FILE_BYTES + 1).unwrap();
+        drop(file);
+        let Err(err) = scan_crate(&dir) else {
+            panic!("an oversized file must be refused");
+        };
+        drop(std::fs::remove_dir_all(&dir));
+        assert!(matches!(err, ScanError::TooLarge(_)), "got {err}");
+    }
+
+    #[test]
+    fn a_file_at_the_limit_is_still_read() {
+        let dir = std::env::temp_dir().join(format!("gearbox-scan-ok-size-{}", std::process::id()));
+        drop(std::fs::remove_dir_all(&dir));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/lib.rs"), "pub fn f() {}\n").unwrap();
+        let files = scan_crate(&dir).unwrap_or_else(|e| panic!("an ordinary file: {e}"));
+        drop(std::fs::remove_dir_all(&dir));
+        assert_eq!(files.len(), 1);
     }
 }

@@ -42,12 +42,14 @@ pub struct ExtensionPoint {
 pub struct VendorDefault {
     pub vendor: Option<String>,
     pub priority: Option<i64>,
-}
-
-impl VendorDefault {
-    fn is_empty(&self) -> bool {
-        self.vendor.is_none() && self.priority.is_none()
-    }
+    /// Initializers that are there but could not be read, by field name.
+    ///
+    /// The distinction `None` alone cannot carry. A missing default is what the
+    /// vendor-mismatch check keys on, so "the config declares none" and "the
+    /// default is there and this parser could not read it" have to be different
+    /// answers -- otherwise a field written as `vendor: some_call()` reports as
+    /// a gear that compiled in no vendor at all.
+    pub unreadable: Vec<String>,
 }
 
 /// Why a plugin's extension point could not be determined.
@@ -199,13 +201,61 @@ pub fn project_plugin_impl(
 /// first would silently report "no default" for them -- and a missing default is
 /// what the vendor-mismatch check keys on, so that would be a wrong answer, not
 /// a gap.
+///
+/// The same argument is why [`VendorDefault::unreadable`] exists rather than a
+/// `Result`: an initializer that is there and cannot be read is a third answer,
+/// and it must not collapse into either of the other two. A failure to read one
+/// field is no reason to withhold the other, which a `Result` would force.
 #[must_use]
 pub fn project_vendor_default(files: &[RustFile]) -> VendorDefault {
-    let from_impl = vendor_from_default_impl(files);
-    if !from_impl.is_empty() {
+    let mut from_impl = vendor_from_default_impl(files);
+    if from_impl.vendor.is_some() || from_impl.priority.is_some() {
+        // Sorted and deduplicated wherever it is returned, so a catalogue built
+        // from the same tree is byte-identical.
+        from_impl.unreadable.sort();
+        from_impl.unreadable.dedup();
         return from_impl;
     }
-    vendor_from_serde_default(files)
+    // Nothing readable in an `impl Default`: the other spelling may still carry
+    // it. An initializer this could not read travels either way, so "the config
+    // declares no default" is never reported for a default that is there.
+    let mut from_serde = vendor_from_serde_default(files);
+    from_serde.unreadable.extend(from_impl.unreadable);
+    from_serde.unreadable.sort();
+    from_serde.unreadable.dedup();
+    from_serde
+}
+
+/// The string a `const` initializer yields, through the wrappers
+/// [`str_literal`] peels.
+///
+/// `vendor: DEFAULT_VENDOR.to_owned()` is the shape, and the one `str_literal`
+/// has to refuse: a path is a name, not a value.
+/// [`crate::cluster::resolve_str_const`] already resolves exactly this for
+/// provider names, so the same shape is readable here rather than reported as
+/// "no default".
+fn str_const(files: &[RustFile], expr: &syn::Expr) -> Option<String> {
+    match expr {
+        syn::Expr::Path(p) => crate::cluster::resolve_str_const(files, &last_segment(&p.path)),
+        syn::Expr::MethodCall(call)
+            if matches!(
+                call.method.to_string().as_str(),
+                "to_owned" | "to_string" | "into"
+            ) =>
+        {
+            str_const(files, &call.receiver)
+        }
+        syn::Expr::Call(call) => {
+            let is_from = matches!(&*call.func, syn::Expr::Path(p) if p.path.segments.last()
+                    .is_some_and(|s| s.ident == "from"));
+            if is_from && call.args.len() == 1 {
+                str_const(files, call.args.first()?)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Shape 1: `impl Default for XConfig { fn default() -> Self { Self { vendor: .. } } }`
@@ -226,8 +276,16 @@ fn vendor_from_default_impl(files: &[RustFile]) -> VendorDefault {
 
         for field in struct_literal_fields(imp) {
             match field.0.as_str() {
-                "vendor" => out.vendor = out.vendor.or_else(|| str_literal(field.1)),
-                "priority" => out.priority = out.priority.or_else(|| int_literal(field.1)),
+                "vendor" if out.vendor.is_none() => {
+                    match str_literal(field.1).or_else(|| str_const(files, field.1)) {
+                        Some(value) => out.vendor = Some(value),
+                        None => out.unreadable.push("vendor".to_owned()),
+                    }
+                }
+                "priority" if out.priority.is_none() => match int_literal(field.1) {
+                    Some(value) => out.priority = Some(value),
+                    None => out.unreadable.push("priority".to_owned()),
+                },
                 _ => {}
             }
         }
@@ -268,15 +326,31 @@ fn vendor_from_serde_default(files: &[RustFile]) -> VendorDefault {
             if ident != "vendor" && ident != "priority" {
                 continue;
             }
-            let Some(fn_name) = serde_default_fn(&field.attrs) else {
+            let read = serde_default_fn(&field.attrs);
+            let Some(fn_name) = read.name else {
+                // A `serde` attribute this could not read to its end may have
+                // carried the `default = "fn"` past the point it stopped, and
+                // that is not the same answer as a field with no default.
+                if read.truncated {
+                    out.unreadable.push(ident);
+                }
                 continue;
             };
             let Some(body) = free_fn_body(files, &fn_name) else {
+                out.unreadable.push(ident);
                 continue;
             };
             match ident.as_str() {
-                "vendor" => out.vendor = out.vendor.or_else(|| str_literal(body)),
-                "priority" => out.priority = out.priority.or_else(|| int_literal(body)),
+                "vendor" if out.vendor.is_none() => {
+                    match str_literal(body).or_else(|| str_const(files, body)) {
+                        Some(value) => out.vendor = Some(value),
+                        None => out.unreadable.push(ident),
+                    }
+                }
+                "priority" if out.priority.is_none() => match int_literal(body) {
+                    Some(value) => out.priority = Some(value),
+                    None => out.unreadable.push(ident),
+                },
                 _ => {}
             }
         }
@@ -284,17 +358,29 @@ fn vendor_from_serde_default(files: &[RustFile]) -> VendorDefault {
     out
 }
 
+/// What reading `#[serde(default = "name")]` off a field yielded.
+pub(crate) struct SerdeDefault {
+    pub name: Option<String>,
+    /// True when a `serde` attribute could not be read to its end.
+    ///
+    /// `parse_nested_meta` stops at the first meta form it cannot model and
+    /// everything after it in the same attribute is lost with it, so a
+    /// `default = "fn"` written after such a form is never seen. Dropping the
+    /// error made that look like "no default fn" -- and a missing default is
+    /// exactly what the vendor-mismatch check keys on, so it came back as a
+    /// wrong answer rather than a gap.
+    pub truncated: bool,
+}
+
 /// The function name in `#[serde(default = "name")]`, if present.
-pub(crate) fn serde_default_fn(attrs: &[syn::Attribute]) -> Option<String> {
+pub(crate) fn serde_default_fn(attrs: &[syn::Attribute]) -> SerdeDefault {
+    let mut truncated = false;
     for attr in attrs {
         if !attr.path().is_ident("serde") {
             continue;
         }
         let mut found = None;
-        // `parse_nested_meta` returns Err on the forms it does not understand
-        // (`#[serde(default)]` with no value, `rename_all = ...`); that is not a
-        // failure worth reporting, it just means this attribute has no fn name.
-        drop(attr.parse_nested_meta(|meta| {
+        let read = attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("default")
                 && let Ok(value) = meta.value()
                 && let Ok(lit) = value.parse::<syn::LitStr>()
@@ -307,19 +393,32 @@ pub(crate) fn serde_default_fn(attrs: &[syn::Attribute]) -> Option<String> {
                 let _ = meta.value()?.parse::<syn::Expr>()?;
             }
             Ok(())
-        }));
+        });
+        // A bare `#[serde(default)]` also lands here, which is why this is a
+        // signal and not an error: the caller decides whether a truncated read
+        // matters for what it was looking for.
+        truncated |= read.is_err() && found.is_none();
         if found.is_some() {
-            return found;
+            return SerdeDefault {
+                name: found,
+                truncated,
+            };
         }
     }
-    None
+    SerdeDefault {
+        name: None,
+        truncated,
+    }
 }
 
 /// The trailing expression of a free `fn name() -> _`.
 pub(crate) fn free_fn_body<'a>(files: &'a [RustFile], name: &str) -> Option<&'a syn::Expr> {
+    // Inline `mod` blocks included: the config projection's root discovery walks
+    // them, so a lookup that stopped at the file's top level would disagree with
+    // it about which functions exist.
     files
         .iter()
-        .flat_map(|f| f.ast.items.iter())
+        .flat_map(crate::scan::items)
         .find_map(|item| match item {
             syn::Item::Fn(f) if f.sig.ident == name => match f.block.stmts.last() {
                 Some(syn::Stmt::Expr(expr, None)) => Some(expr),

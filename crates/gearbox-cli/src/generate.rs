@@ -9,13 +9,19 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use anyhow::Context as _;
 use gearbox_engine::generate::{GenerateInput, TemplateSet, base_root_for, summarize};
-use gearbox_ir::{Diagnostic, FileAction, FilePlan, ProfileId};
+use gearbox_ir::{FileAction, FilePlan, ProductId, ProfileId};
 
-use crate::{Format, open_roots, report};
+use crate::pipeline::{Outcome, Resolution};
+use crate::{Format, report};
 
 /// Where generated output goes, relative to the working directory.
-const OUTPUT_DIR: &str = ".gearbox";
+///
+/// The engine owns the layout because `gearbox/product/lock` diffs the lock
+/// inside the tree this writes: two spellings match until one of them changes,
+/// and then the lock is compared against a directory nothing writes.
+use gearbox_engine::generate::OUTPUT_DIR;
 
 /// Resolve `product` for `profile` and generate its artefacts.
 ///
@@ -36,37 +42,19 @@ pub fn run(
     dry_run: bool,
     format: Format,
 ) -> anyhow::Result<ExitCode> {
-    let opened = open_roots(roots, source_id)?;
-    let scan = gearbox_engine::load_catalogue(&opened);
-    if let Some(code) = crate::refuse_catalogue_errors(&scan.catalogue) {
-        return Ok(code);
-    }
-
-    let product_file = product_file
-        .canonicalize()
-        .map_err(|e| anyhow::anyhow!("cannot canonicalize `{}`: {e}", product_file.display()))?;
-    let product_scan = gearbox_engine::load_product(&product_file, None);
-    let mut diagnostics: Vec<Diagnostic> = product_scan.diagnostics.as_slice().to_vec();
-    let Some(intent) = product_scan.intent else {
-        report(&diagnostics);
-        anyhow::bail!("`{}` could not be evaluated", product_file.display());
+    let resolved = match crate::pipeline::resolve(roots, source_id, product_file, profile)? {
+        Outcome::Refused(code) => return Ok(code),
+        Outcome::Resolved(resolved) => resolved,
     };
-
-    let profile = match profile {
-        Some(id) => ProfileId::new(id)?,
-        None => intent.default_profile.clone(),
-    };
-
-    let resolution = gearbox_engine::resolve::resolve_at(
-        &scan.catalogue,
-        &intent,
-        &profile,
-        Some(&product_file),
-    );
-    let sources = gearbox_engine::lock_sources(&opened, &scan.catalogue, &product_file);
-    let lock =
-        gearbox_engine::resolve::product::assemble(&scan.catalogue, &intent, &resolution, sources);
-    diagnostics.extend(lock.diagnostics.as_slice().iter().cloned());
+    let Resolution {
+        opened,
+        scan,
+        product_file,
+        intent,
+        profile,
+        lock,
+        mut diagnostics,
+    } = *resolved;
 
     // A lock with errors in it describes a topology the resolver could not
     // finish deciding. Generating from it would produce a tree that compiles
@@ -76,14 +64,10 @@ pub fn run(
         anyhow::bail!("resolution reported errors; nothing was generated");
     }
 
-    let out_root = absolute(out.map_or_else(
-        || {
-            Path::new(OUTPUT_DIR)
-                .join(lock.product.id.as_str())
-                .join(profile.as_str())
-        },
-        Path::to_path_buf,
-    ))?;
+    let out_root = absolute(match out {
+        Some(dir) => dir.to_path_buf(),
+        None => default_out_root(&lock.product.id, &profile)?,
+    })?;
     let base_root = base_root_for(&out_root);
 
     let source_roots: BTreeMap<_, _> = opened
@@ -138,6 +122,23 @@ pub fn run(
     })
 }
 
+/// Where generation writes when `--out` names nowhere.
+///
+/// The product id is validated before it names a directory. It reaches the lock
+/// as a plain `String` lowered from `product(id = ...)`, and `Path::join` on an
+/// absolute or `..`-bearing segment walks straight out of `.gearbox/`: an id of
+/// `/tmp/x` put the whole artefact tree wherever the description asked. The GDL
+/// boundary refuses `layout` for exactly this reason, and the RPC's product
+/// create already refuses an id `ProductId` rejects.
+fn default_out_root(product_id: &str, profile: &ProfileId) -> anyhow::Result<PathBuf> {
+    let id = ProductId::new(product_id).with_context(|| {
+        format!(
+            "`{OUTPUT_DIR}/<product>/<profile>/` cannot be named from product id `{product_id}`"
+        )
+    })?;
+    Ok(gearbox_engine::generate::default_out_root(&id, profile))
+}
+
 /// Resolve a path against the working directory without requiring it to exist.
 ///
 /// `canonicalize` is not usable here: the output root is usually a directory
@@ -179,5 +180,131 @@ fn print_plans(plans: &[FilePlan], out_root: &Path, dry_run: bool, written: usiz
     }
     if counts.contains_key(&FileAction::Conflict) {
         println!("  nothing was written: resolve the conflicts above and re-run");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+    use std::process::ExitCode;
+
+    use gearbox_ir::ProfileId;
+
+    use super::{OUTPUT_DIR, default_out_root, run};
+    use crate::Format;
+
+    fn dev() -> ProfileId {
+        ProfileId::new("dev").unwrap()
+    }
+
+    /// A scratch directory of this test's own, qualified by pid so two runs of
+    /// the suite cannot collide.
+    fn scratch(marker: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("gbx-cli-generate-{marker}-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("root")).unwrap();
+        dir
+    }
+
+    /// A product that resolves cleanly and selects nothing.
+    ///
+    /// Enough to generate a tree -- a workspace manifest, a toolchain file and
+    /// the lock -- without a source root holding any gear, which keeps this a
+    /// test of the command rather than of the corpus.
+    fn product(dir: &Path, gears: &str) -> PathBuf {
+        let path = dir.join("product.gdl");
+        std::fs::write(
+            &path,
+            format!(
+                "product(\n\
+                 \x20   id = \"gen-test\",\n\
+                 \x20   name = \"Gen Test\",\n\
+                 \x20   version = \"0.1.0\",\n\
+                 \x20   sources = [source(id = \"local\", at = path(\"root\"))],\n\
+                 \x20   profiles = [embedded(id = \"dev\")],\n\
+                 \x20   default_profile = \"dev\",\n\
+                 \x20   gears = [{gears}],\n\
+                 )\n"
+            ),
+        )
+        .unwrap();
+        path
+    }
+
+    #[test]
+    fn a_product_id_that_is_not_one_segment_cannot_name_the_output_root() {
+        for id in ["../../..", "/tmp/x", "", ".", "..", "a/b"] {
+            let refusal = default_out_root(id, &dev());
+            assert!(
+                refusal.is_err(),
+                "`{id}` would put the artefact tree outside `{OUTPUT_DIR}`"
+            );
+        }
+    }
+
+    #[test]
+    fn a_kebab_case_product_id_names_the_documented_output_root() {
+        assert_eq!(
+            default_out_root("payments-demo", &dev()).unwrap(),
+            Path::new(OUTPUT_DIR).join("payments-demo").join("dev")
+        );
+    }
+
+    #[test]
+    fn a_dry_run_writes_nothing() {
+        let dir = scratch("dry-run");
+        let product = product(&dir, "");
+        let out = dir.join("out");
+
+        let code = run(
+            &[dir.join("root")],
+            None,
+            &product,
+            None,
+            Some(&out),
+            true,
+            Format::Text,
+        )
+        .expect("the product resolves");
+
+        assert!(
+            !out.exists(),
+            "`--dry-run` reported a plan and then created `{}`",
+            out.display()
+        );
+        // `ExitCode` has no `PartialEq`, so the rendering is the comparison.
+        assert_eq!(
+            format!("{code:?}"),
+            format!("{:?}", ExitCode::SUCCESS),
+            "a clean resolution previewed is a success"
+        );
+    }
+
+    #[test]
+    fn a_resolution_that_reported_errors_generates_nothing() {
+        let dir = scratch("unwritable");
+        // A gear no open source describes: the resolver reports GBX0301, so the
+        // lock is not writable and the tree would describe a topology nobody
+        // decided on.
+        let product = product(&dir, "use_gear(\"no-such-gear\", source = \"local\")");
+        let out = dir.join("out");
+
+        let err = run(
+            &[dir.join("root")],
+            None,
+            &product,
+            None,
+            Some(&out),
+            false,
+            Format::Text,
+        )
+        .expect_err("a lock carrying errors must not be generated from");
+
+        assert!(
+            err.to_string().contains("nothing was generated"),
+            "{}",
+            err.to_string()
+        );
+        assert!(!out.exists(), "the refusal came after a write");
     }
 }

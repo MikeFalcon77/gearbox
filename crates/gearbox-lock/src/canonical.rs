@@ -8,14 +8,31 @@
 //! order. Callers that skip this module and serialize a [`ResolvedProduct`]
 //! themselves get none of that guarantee.
 
-use gearbox_ir::{ContractId, LOCK_SCHEMA_VERSION, ResolvedProduct};
+use gearbox_ir::{ContractId, CutCandidate, GearId, LOCK_SCHEMA_VERSION, ResolvedProduct};
 
 use crate::error::LockError;
 
+/// The documented order of `cuttable_if_declared`, borrowed rather than
+/// cloned: an owned key built inside the comparator would allocate three
+/// Strings per operand on every one of the sort's comparisons.
+fn cut_key(candidate: &CutCandidate) -> (&GearId, &GearId, &str) {
+    (
+        &candidate.consumer,
+        &candidate.provider,
+        candidate.contract.as_ref().map_or("", ContractId::as_str),
+    )
+}
+
 /// Sort every collection on `product` into the order documented on
-/// [`ResolvedProduct`]'s fields, and drop the duplicate diagnostics and
-/// provenance edges that resolution naturally produces (the same structural
-/// fact is often reached from more than one direction).
+/// [`ResolvedProduct`]'s fields, and drop the duplicate entries that
+/// resolution naturally produces (the same structural fact is often reached
+/// from more than one direction).
+///
+/// Every keyed collection is deduplicated, not only provenance and
+/// diagnostics: a duplicate that survived here would be hashed and written
+/// into the lock, and [`diff`](crate::diff) -- which groups its entries by
+/// key -- would then have to report a change inside a duplicate nobody can
+/// address.
 ///
 /// Idempotent: canonicalizing an already-canonical product changes nothing,
 /// which is what lets [`read`](crate::read) re-canonicalize a parsed lock and
@@ -30,37 +47,31 @@ pub fn canonicalize_order(product: &mut ResolvedProduct) {
     product
         .bindings
         .sort_by(|a, b| (&a.consumer, &a.contract).cmp(&(&b.consumer, &b.contract)));
+    product.bindings.dedup();
+
+    for gear in product.gears.values_mut() {
+        gear.selected_by.sort();
+    }
+    // Before the cluster sort, so two entries that differ only in the order
+    // their requesters arrived in are equal by the time `dedup` looks at them.
+    for binding in &mut product.cluster {
+        binding.requesters.sort();
+    }
 
     product
         .cluster
         .sort_by(|a, b| (&a.scope, a.primitive).cmp(&(&b.scope, b.primitive)));
+    product.cluster.dedup();
 
-    product.cuttable_if_declared.sort_by(|a, b| {
-        let key = |c: &gearbox_ir::CutCandidate| {
-            (
-                c.consumer.clone(),
-                c.provider.clone(),
-                c.contract
-                    .as_ref()
-                    .map(ContractId::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
-            )
-        };
-        key(a).cmp(&key(b))
-    });
+    product
+        .cuttable_if_declared
+        .sort_by(|a, b| cut_key(a).cmp(&cut_key(b)));
+    product.cuttable_if_declared.dedup();
 
     product.provenance.sort_by(|a, b| {
         (a.from.as_str(), a.kind, a.to.as_str()).cmp(&(b.from.as_str(), b.kind, b.to.as_str()))
     });
     product.provenance.dedup();
-
-    for gear in product.gears.values_mut() {
-        gear.selected_by.sort();
-    }
-    for binding in &mut product.cluster {
-        binding.requesters.sort();
-    }
 
     product.diagnostics.finish();
 }
@@ -78,10 +89,21 @@ fn to_toml(product: &ResolvedProduct) -> Result<String, LockError> {
 /// Returns [`LockError`] when the product cannot be serialized to TOML, which a
 /// value the lock schema does not admit would cause.
 pub fn compute_hash(canonical: &ResolvedProduct) -> Result<String, LockError> {
-    let mut blanked = canonical.clone();
-    blanked.product.lock_hash.clear();
-    let body = to_toml(&blanked)?;
-    Ok(format!("blake3:{}", blake3::hash(body.as_bytes()).to_hex()))
+    let mut owned = canonical.clone();
+    hash_in_place(&mut owned)
+}
+
+/// [`compute_hash`] for a caller that already owns its product: the hash field
+/// is blanked and restored in place, so neither the write nor the read path
+/// deep-copies every gear, binding and provenance edge a second time.
+pub fn hash_in_place(product: &mut ResolvedProduct) -> Result<String, LockError> {
+    let recorded = std::mem::take(&mut product.product.lock_hash);
+    let body = to_toml(product);
+    product.product.lock_hash = recorded;
+    Ok(format!(
+        "blake3:{}",
+        blake3::hash(body?.as_bytes()).to_hex()
+    ))
 }
 
 /// The two-line comment prepended to every written lock.
@@ -100,6 +122,14 @@ fn header(gearbox_version: &str) -> String {
 /// `OperatorOwned` concern that belongs to the generator, not the lock
 /// format).
 ///
+/// **Renders `gears[].config` verbatim, and every caller owes it a redacted
+/// product.** Which config field is a credential is declared by the gear's
+/// `config_schema`, which lives in the catalogue -- a thing this crate cannot
+/// see -- so a literal password in a lock written by an older build can only
+/// be stripped by a caller holding that catalogue
+/// (`gearbox_engine::secrets::redact_product`). Rendering a product straight
+/// from disk or from the resolver without that pass prints the credential.
+///
 /// # Errors
 /// Returns [`LockError::UnsupportedSchemaVersion`] if `product.schema_version`
 /// is not one this build understands, or [`LockError::Serialize`] if the
@@ -115,8 +145,7 @@ pub fn write_canonical(product: &ResolvedProduct) -> Result<String, LockError> {
     let mut canonical = product.clone();
     canonicalize_order(&mut canonical);
 
-    let hash = compute_hash(&canonical)?;
-    canonical.product.lock_hash = hash;
+    canonical.product.lock_hash = hash_in_place(&mut canonical)?;
 
     let body = to_toml(&canonical)?;
     Ok(format!(

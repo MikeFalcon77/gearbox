@@ -26,6 +26,7 @@
 //! meanwhile is to say the shape is not scalar rather than to invent a control
 //! that would write the wrong thing.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::plugin::{
@@ -56,7 +57,15 @@ pub struct ConfigField {
     pub default: Option<serde_json::Value>,
     /// The field's doc comment, which is the only prose an operator gets.
     pub doc: Option<String>,
-    /// The value is a credential slot (`secrecy::SecretString`).
+    /// The value is a credential slot: any `secrecy` wrapper.
+    ///
+    /// Read from the field's type and from nothing else, and never overridden by
+    /// what the wire shape turns out to be. This is the only gate
+    /// `gearbox-engine` has for keeping a credential out of the generated
+    /// `ConfigMap` (`cpt-gearbox-fr-no-secrets-in-values`), so a field whose shape
+    /// cannot be rendered is still a secret if its type says so -- the
+    /// unreadable shape is a reason to report [`ConfigFieldType::Complex`], not
+    /// a reason to forget what the field holds.
     pub secret: bool,
     /// Path relative to the crate's `src/`, and the line of the field.
     pub relative: PathBuf,
@@ -69,6 +78,38 @@ pub enum ConfigRootError {
     /// Several distinct types are deserialized as this gear's config, so which
     /// one *is* the configuration has no single answer.
     Ambiguous { roots: Vec<String> },
+}
+
+/// Why a configuration struct's fields could not be projected.
+///
+/// Three answers that used to be one empty vector. A caller could not tell a
+/// root naming nothing in this crate from a struct with no named keys, so
+/// `gearbox-engine` had to emit the merged sentence "`{root}` declares no
+/// configuration fields, or this crate does not declare it" -- and the root can
+/// be an operator-supplied string via `config_schema = config(rust = ...)`, so
+/// which of the two happened is exactly what the reader needs.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ConfigFieldsError {
+    #[error("`{root}` is not a struct this crate declares")]
+    RootNotFound { root: String },
+
+    /// A tuple or unit struct. `ApiContractsConfig` is exactly this.
+    #[error("`{root}` is not a struct with named fields, so it has no keys an operator can set")]
+    NoNamedFields { root: String },
+
+    /// A `#[serde(...)]` this parser could not read to its end.
+    ///
+    /// `parse_nested_meta` stops at the first meta form it cannot model and
+    /// every later item in the same attribute is lost with it, so
+    /// `#[serde(rename(serialize = "a", deserialize = "b"), skip)]` -- legal
+    /// serde -- used to leave `skip` false and project a field serde never
+    /// reads into the values schema.
+    #[error("a `#[serde(...)]` on `{root}`{} could not be read to its end", .field.as_ref().map(|f| format!("::{f}")).unwrap_or_default())]
+    UnreadableSerdeAttribute {
+        root: String,
+        /// The field it sits on, or `None` for the container's own attribute.
+        field: Option<String>,
+    },
 }
 
 /// The methods on `GearCtx` that deserialize a gear's configuration.
@@ -134,7 +175,7 @@ fn calls_config(expr: &syn::Expr) -> bool {
     struct Search(bool);
     impl<'ast> syn::visit::Visit<'ast> for Search {
         fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
-            if CONFIG_METHODS.contains(&call.method.to_string().as_str()) {
+            if CONFIG_METHODS.iter().any(|m| call.method == *m) {
                 self.0 = true;
             }
             syn::visit::visit_expr_method_call(self, call);
@@ -147,7 +188,7 @@ fn calls_config(expr: &syn::Expr) -> bool {
 
 impl<'ast> syn::visit::Visit<'ast> for RootVisitor<'_> {
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
-        if CONFIG_METHODS.contains(&call.method.to_string().as_str())
+        if CONFIG_METHODS.iter().any(|m| call.method == *m)
             && let Some(turbofish) = call.turbofish.as_ref()
             && let Some(syn::GenericArgument::Type(ty)) = turbofish.args.first()
             && let Some(ident) = type_ident(ty)
@@ -200,18 +241,24 @@ struct SerdeAttrs {
     with: bool,
     flatten: bool,
     skip: bool,
+    /// True when an attribute could not be read to its end, so the flags above
+    /// are what was seen rather than what was written.
+    partial: bool,
 }
 
 fn serde_attrs(attrs: &[syn::Attribute]) -> SerdeAttrs {
+    let read = serde_default_fn(attrs);
     let mut out = SerdeAttrs {
-        default_fn: serde_default_fn(attrs),
+        default_fn: read.name,
+        partial: read.truncated,
         ..SerdeAttrs::default()
     };
     for attr in attrs.iter().filter(|a| a.path().is_ident("serde")) {
-        // `parse_nested_meta` errors on forms it does not understand; each arm
-        // records what it recognises and the rest is not a failure worth
-        // reporting, exactly as `serde_default_fn` treats it.
-        drop(attr.parse_nested_meta(|meta| {
+        // `parse_nested_meta` stops at the first form it does not understand and
+        // loses every later item in the same attribute with it. Recorded rather
+        // than dropped: a truncated read is not the same as a fully-read
+        // attribute that happened to say nothing.
+        let read = attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("default") {
                 // Bare `default` is followed by a comma or by the end of the
                 // list; `default = "fn"` by an `=`. Testing for an empty input
@@ -231,6 +278,10 @@ fn serde_attrs(attrs: &[syn::Attribute]) -> SerdeAttrs {
                 out.skip = true;
             } else if meta.path.is_ident("with") {
                 out.with = true;
+                // `with = "path::to::codec"`. The path itself is not read --
+                // only that there is one -- but it still has to be consumed, or
+                // the walk stops here and everything after it is lost.
+                let _ = meta.value()?.parse::<syn::Expr>()?;
             } else if meta.path.is_ident("rename")
                 && let Ok(value) = meta.value()
                 && let Ok(lit) = value.parse::<syn::LitStr>()
@@ -249,7 +300,8 @@ fn serde_attrs(attrs: &[syn::Attribute]) -> SerdeAttrs {
                 let _ = meta.value()?.parse::<syn::Expr>()?;
             }
             Ok(())
-        }));
+        });
+        out.partial |= read.is_err();
     }
     out
 }
@@ -277,28 +329,50 @@ fn rename_all(value: &str, ident: &str) -> String {
     }
 }
 
-/// Find a named item by ident across the scanned files.
-fn find_item<'a>(files: &'a [RustFile], ident: &str) -> Option<&'a syn::Item> {
-    files
-        .iter()
-        .flat_map(|f| f.ast.items.iter())
-        .find(|item| match item {
-            syn::Item::Struct(s) => s.ident == ident,
-            syn::Item::Enum(e) => e.ident == ident,
-            _ => false,
-        })
+/// The named structs and enums a scan declares, by ident.
+///
+/// Built once per projection instead of scanning `files` per field.
+/// `find_item` was a linear pass over every item of every file, run once for
+/// every config field that is not a known scalar and again in `enum_default` for
+/// one with a default -- so a struct like `OidcAuthNGearConfig` with ten-plus
+/// non-scalar fields cost ten-plus full passes over the crate's AST for what is
+/// a lookup by ident.
+type ItemIndex<'a> = HashMap<String, &'a syn::Item>;
+
+/// Index the named items in `files`, inline `mod` blocks included.
+fn item_index<'a>(files: &'a [RustFile]) -> ItemIndex<'a> {
+    let mut out: ItemIndex<'a> = HashMap::new();
+    for item in files.iter().flat_map(crate::scan::items) {
+        let ident = match item {
+            syn::Item::Struct(s) => s.ident.to_string(),
+            syn::Item::Enum(e) => e.ident.to_string(),
+            _ => continue,
+        };
+        // First wins, matching the linear scan this replaces. Two items of one
+        // name in one crate is legal across modules, and picking the later one
+        // would change which of them a field's type resolves to.
+        out.entry(ident).or_insert(item);
+    }
+    out
 }
 
 /// The struct an ident names, together with the file it was found in.
+///
+/// Descends into inline `mod` blocks, because [`project_config_root`]'s visitor
+/// does: a root declared inside one used to be dropped by the annotation form's
+/// `find_struct` gate and then yield no fields under the turbofish form, so the
+/// two halves of one projection disagreed about which structs exist.
 fn find_struct<'a>(
     files: &'a [RustFile],
     ident: &str,
 ) -> Option<(&'a RustFile, &'a syn::ItemStruct)> {
-    files.iter().find_map(|f| {
-        f.ast.items.iter().find_map(|item| match item {
-            syn::Item::Struct(s) if s.ident == ident => Some((f, s)),
-            _ => None,
-        })
+    files.iter().find_map(|file| {
+        crate::scan::items(file)
+            .into_iter()
+            .find_map(|item| match item {
+                syn::Item::Struct(s) if s.ident == ident => Some((file, s)),
+                _ => None,
+            })
     })
 }
 
@@ -353,21 +427,47 @@ fn option_inner(ty: &syn::Type) -> Option<&syn::Type> {
     })
 }
 
+/// The first generic argument of a path type, if it has one.
+fn first_type_argument(ty: &syn::Type) -> Option<&syn::Type> {
+    let syn::Type::Path(p) = ty else { return None };
+    let syn::PathArguments::AngleBracketed(args) = &p.path.segments.last()?.arguments else {
+        return None;
+    };
+    args.args.iter().find_map(|arg| match arg {
+        syn::GenericArgument::Type(inner) => Some(inner),
+        _ => None,
+    })
+}
+
 /// Classify a field's Rust type into the control it admits.
-fn classify(ty: &syn::Type, files: &[RustFile]) -> (ConfigFieldType, bool) {
+fn classify(ty: &syn::Type, items: &ItemIndex<'_>) -> (ConfigFieldType, bool) {
     let Some(ident) = type_ident(ty) else {
         return (ConfigFieldType::Complex, false);
     };
     match ident.as_str() {
         // A path is a string on the wire, and an operator types one.
         "String" | "str" | "PathBuf" | "Path" => (ConfigFieldType::Str, false),
-        // The point of the type is that its value is a credential.
+        // Every `secrecy` wrapper, not the one alias. The point of all of them
+        // is that the value is a credential, and a field typed `Secret<String>`
+        // or `SecretBox<str>` used to fall through to the item lookup and come
+        // back `Complex` with `secret: false` -- so a properly wrapped
+        // credential projected as an ordinary value and the generator wrote it
+        // into the ConfigMap in plaintext.
         "SecretString" => (ConfigFieldType::Str, true),
+        "Secret" | "SecretBox" => (
+            // The control follows the wrapped type, so `Secret<u16>` is still a
+            // number box; a wrapper with no argument to read is a string, which
+            // is what every spelling in the tree amounts to.
+            first_type_argument(ty).map_or(ConfigFieldType::Str, |inner| classify(inner, items).0),
+            true,
+        ),
+        // A list of bytes has no control, but it is still a credential.
+        "SecretVec" | "SecretSlice" => (ConfigFieldType::Complex, true),
         "bool" => (ConfigFieldType::Bool, false),
         "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128"
         | "usize" => (ConfigFieldType::Int, false),
         "f32" | "f64" => (ConfigFieldType::Float, false),
-        _ => match find_item(files, &ident) {
+        _ => match items.get(&ident) {
             Some(syn::Item::Enum(e)) => unit_enum_variants(e)
                 .map_or((ConfigFieldType::Complex, false), |v| {
                     (ConfigFieldType::Enum { variants: v }, false)
@@ -415,13 +515,17 @@ fn literal_value(expr: &syn::Expr) -> Option<serde_json::Value> {
 /// Needed because a default is written in Rust (`AuthNMode::AcceptAll`) and read
 /// in YAML (`accept_all`). Showing the Rust ident as a placeholder would offer a
 /// value the gear rejects.
-fn enum_default(files: &[RustFile], ty: &syn::Type, expr: &syn::Expr) -> Option<serde_json::Value> {
+fn enum_default(
+    items: &ItemIndex<'_>,
+    ty: &syn::Type,
+    expr: &syn::Expr,
+) -> Option<serde_json::Value> {
     let syn::Expr::Path(path) = expr else {
         return None;
     };
     let variant = last_segment(&path.path);
     let ident = type_ident(ty)?;
-    let syn::Item::Enum(item) = find_item(files, &ident)? else {
+    let syn::Item::Enum(item) = items.get(&ident)? else {
         return None;
     };
     let wire = variant_names(item)?;
@@ -432,9 +536,12 @@ fn enum_default(files: &[RustFile], ty: &syn::Type, expr: &syn::Expr) -> Option<
 
 /// The `Self { .. }` of `impl Default for <ident>`, as field name to expression.
 fn default_impl_fields<'a>(files: &'a [RustFile], ident: &str) -> Vec<(String, &'a syn::Expr)> {
+    // Inline `mod` blocks included, for the reason `find_struct` walks them: a
+    // config struct declared in one would otherwise find its own `Default` impl
+    // invisible and report every field as having no default.
     files
         .iter()
-        .flat_map(|f| f.ast.items.iter())
+        .flat_map(crate::scan::items)
         .filter_map(|item| match item {
             syn::Item::Impl(imp) => Some(imp),
             _ => None,
@@ -467,81 +574,119 @@ fn doc_of(attrs: &[syn::Attribute]) -> Option<String> {
 /// Every scalar-or-not field of the gear's configuration struct.
 ///
 /// `root` is the struct ident, from [`project_config_root`] or from a
-/// description's `config_schema = config(rust = ...)` escape hatch. Returns an
-/// empty vector when the ident names nothing here, which is what a caller should
-/// report as "not found" rather than as "no configuration".
-#[must_use]
-pub fn project_config_fields(files: &[RustFile], root: &str) -> Vec<ConfigField> {
+/// description's `config_schema = config(rust = ...)` escape hatch. An `Ok` that
+/// is empty means every field the struct declares is `#[serde(skip)]`, which is
+/// a third answer again: the struct is there, it has named keys, and none of
+/// them is configuration.
+///
+/// # Errors
+/// Returns [`ConfigFieldsError`] when `root` names nothing this crate declares,
+/// when it names something with no named fields, or when a `#[serde(...)]` on it
+/// could not be read to its end.
+pub fn project_config_fields(
+    files: &[RustFile],
+    root: &str,
+) -> Result<Vec<ConfigField>, ConfigFieldsError> {
     let Some((file, item)) = find_struct(files, root) else {
-        return Vec::new();
+        return Err(ConfigFieldsError::RootNotFound {
+            root: root.to_owned(),
+        });
     };
     let syn::Fields::Named(named) = &item.fields else {
-        // A tuple or unit struct has no named keys, so it has no surface an
-        // operator can set. `ApiContractsConfig` is exactly this.
-        return Vec::new();
+        return Err(ConfigFieldsError::NoNamedFields {
+            root: root.to_owned(),
+        });
     };
 
     let container = serde_attrs(&item.attrs);
+    if container.partial {
+        return Err(ConfigFieldsError::UnreadableSerdeAttribute {
+            root: root.to_owned(),
+            field: None,
+        });
+    }
     let defaults = default_impl_fields(files, root);
+    let items = item_index(files);
 
-    named
-        .named
-        .iter()
-        .filter_map(|field| {
-            let ident = field.ident.as_ref()?.to_string();
-            let attrs = serde_attrs(&field.attrs);
-            if attrs.skip {
-                return None;
-            }
-
-            let name = attrs.rename.clone().unwrap_or_else(|| {
-                container
-                    .rename_all
-                    .as_deref()
-                    .map_or(ident.clone(), |rule| rename_all(rule, &ident))
+    let mut out = Vec::new();
+    for field in &named.named {
+        let Some(ident) = field.ident.as_ref().map(ToString::to_string) else {
+            continue;
+        };
+        let attrs = serde_attrs(&field.attrs);
+        // Refused rather than read past. `skip` is the flag a truncated read
+        // most often loses, and a field serde never deserializes would then be
+        // projected as configuration and land in the values schema.
+        if attrs.partial {
+            return Err(ConfigFieldsError::UnreadableSerdeAttribute {
+                root: root.to_owned(),
+                field: Some(ident),
             });
+        }
+        if attrs.skip {
+            continue;
+        }
 
-            let optional = option_inner(&field.ty);
-            let (ty, secret) = if attrs.with || attrs.flatten {
-                // A custom codec or a flattened map: the wire shape is not this
-                // type's, so there is nothing honest to render.
-                (ConfigFieldType::Complex, false)
-            } else {
-                classify(optional.unwrap_or(&field.ty), files)
-            };
-
-            let required = !container.default_bare
-                && !attrs.default_bare
-                && attrs.default_fn.is_none()
-                && optional.is_none();
-
-            let default_expr = attrs
-                .default_fn
+        let name = attrs.rename.clone().unwrap_or_else(|| {
+            container
+                .rename_all
                 .as_deref()
-                .and_then(|name| free_fn_body(files, name))
-                .or_else(|| {
-                    defaults
-                        .iter()
-                        .find(|(f, _)| *f == ident)
-                        .map(|(_, expr)| *expr)
-                });
-            let default = default_expr.and_then(|expr| {
-                literal_value(expr)
-                    .or_else(|| enum_default(files, optional.unwrap_or(&field.ty), expr))
-            });
+                .map_or(ident.clone(), |rule| rename_all(rule, &ident))
+        });
 
-            Some(ConfigField {
-                name,
-                ty,
-                required,
-                default,
-                doc: doc_of(&field.attrs),
-                secret,
-                relative: file.relative.clone(),
-                line: field.ident.as_ref().map_or(0, |i| i.span().start().line),
+        let optional = option_inner(&field.ty);
+        let (classified, secret) = classify(optional.unwrap_or(&field.ty), &items);
+        // A custom codec or a flattened map: the wire shape is not this type's,
+        // so there is nothing honest to render. That overrides the *control* and
+        // nothing else -- `secret` comes from the type either way, since it is
+        // the only gate keeping a credential out of the generated ConfigMap.
+        let ty = if attrs.with || attrs.flatten {
+            ConfigFieldType::Complex
+        } else {
+            classified
+        };
+
+        let required = !container.default_bare
+            && !attrs.default_bare
+            && attrs.default_fn.is_none()
+            && optional.is_none();
+
+        let default_expr = attrs
+            .default_fn
+            .as_deref()
+            .and_then(|name| free_fn_body(files, name))
+            .or_else(|| {
+                defaults
+                    .iter()
+                    .find(|(f, _)| *f == ident)
+                    .map(|(_, expr)| *expr)
+            });
+        // Dropped for a secret. A compiled-in credential read off
+        // `#[serde(default = "default_password")]` used to land verbatim in the
+        // catalogue, which walks straight around the `secret` flag computed
+        // above: the redaction in `gearbox-engine`'s `secrets.rs` rewrites
+        // configured values, not projected defaults.
+        let default = if secret {
+            None
+        } else {
+            default_expr.and_then(|expr| {
+                literal_value(expr)
+                    .or_else(|| enum_default(&items, optional.unwrap_or(&field.ty), expr))
             })
-        })
-        .collect()
+        };
+
+        out.push(ConfigField {
+            name,
+            ty,
+            required,
+            default,
+            doc: doc_of(&field.attrs),
+            secret,
+            relative: file.relative.clone(),
+            line: field.ident.as_ref().map_or(0, |i| i.span().start().line),
+        });
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

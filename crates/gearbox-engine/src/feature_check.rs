@@ -26,9 +26,7 @@
 //! here would fire on that legitimate case, and an error nobody can act on is
 //! worse than a build error that names the feature.
 
-use gearbox_ir::{
-    Catalogue, Diagnostic, DiagnosticCode, Diagnostics, ProductIntent, ProfileId,
-};
+use gearbox_ir::{Catalogue, Diagnostic, DiagnosticCode, Diagnostics, ProductIntent, ProfileId};
 
 /// Report every selected feature that belongs to none of `profiles`' kinds.
 ///
@@ -96,7 +94,10 @@ pub fn check(
                          it runs"
                     ),
                 )
-                .at(gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri)),
+                .at(gearbox_ir::Location::or_file(
+                    selection.declared_at.as_ref(),
+                    uri,
+                )),
             );
         }
     }

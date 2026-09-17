@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::scan::scan_crate;
+use crate::test_corpus::require;
 
 fn file(src: &str) -> RustFile {
     RustFile {
@@ -110,18 +111,79 @@ fn an_unreadable_type_id_is_reported() {
 
 #[test]
 fn declarations_are_sorted_and_deduplicated() {
+    // The third declaration repeats `cf.a.v1~`, so the `dedup()` half actually
+    // runs. Two distinct ids only ever exercised the sort.
     let src = r#"
         #[gts_type_schema(type_id = gts_id!("cf.b.v1~"))]
         pub struct B;
         #[gts_type_schema(type_id = gts_id!("cf.a.v1~"))]
         pub struct A;
+        #[gts_type_schema(type_id = gts_id!("cf.a.v1~"))]
+        pub struct AlsoA;
     "#;
     let got = project_gts_types(&[file(src)]).unwrap();
     assert_eq!(
         got.iter().map(|t| t.type_id.as_str()).collect::<Vec<_>>(),
         vec!["cf.a.v1~", "cf.b.v1~"],
-        "sorted, so the catalogue is byte-identical across runs"
+        "sorted, so the catalogue is byte-identical across runs, and one entry \
+         per id however many structs declare it"
     );
+}
+
+/// The `$id` of a `.schema.json` used to be accepted on the prefix check alone
+/// and carried verbatim into `GtsTypeDecl`, which does not validate it either --
+/// so this was the one identifier source with no charset or length check behind
+/// it, while the Rust path gets `gts_id!`'s compile-time one.
+#[test]
+fn a_json_id_that_is_not_a_gts_identifier_is_not_a_declaration() {
+    for id in [
+        "cf.core.thing.v1~/../etc/passwd",
+        "cf.core.Thing.v1~",
+        "cf.core.thing-name.v1~",
+        "cf.core..thing.v1~",
+        "cf.core.thing.v1~~",
+        "cf.core.thing.v1~ cf.other.v1~",
+    ] {
+        let text = format!(r#"{{"$id": "{id}"}}"#);
+        assert!(
+            gts_type_from_schema("thing.schema.json", &text)
+                .expect("valid json")
+                .is_none(),
+            "`{id}` is not a GTS identifier and must not be projected as one"
+        );
+    }
+}
+
+#[test]
+fn an_over_long_json_id_is_refused() {
+    let id = format!("cf.core.{}.v1~", "a".repeat(1100));
+    let text = format!(r#"{{"$id": "{id}"}}"#);
+    assert!(
+        gts_type_from_schema("thing.schema.json", &text)
+            .expect("valid json")
+            .is_none()
+    );
+}
+
+/// The spellings the corpus actually carries, so the validation is not stricter
+/// than the grammar it mirrors.
+#[test]
+fn the_real_json_id_spellings_are_accepted() {
+    for id in [
+        "gts://gts.cf.core.graph.edge.v1~",
+        "gts://gts.cf.core.events.event.v1~cf.bss.ledger.entry_posted.v1",
+        "gts://gts.cf.core.graph.edge.v1~cf.core.graph.analysis_edge.v1~",
+        "cf.toolkit.plugins.plugin.v1~cf.core.cluster.plugin.v1~",
+        "gts.cf.core.events.type.v1~x.commerce.orders.order_placed.v1.0~",
+    ] {
+        let text = format!(r#"{{"$id": "{id}"}}"#);
+        assert!(
+            gts_type_from_schema("thing.schema.json", &text)
+                .expect("valid json")
+                .is_some(),
+            "`{id}` is a spelling the corpus uses"
+        );
+    }
 }
 
 // ---------------------------------------------------------------- json schema
@@ -191,10 +253,7 @@ fn nested_struct_to_gts_schema_is_refused() {
 
 #[test]
 fn the_real_cluster_sdk_declares_its_plugin_type() {
-    let Some(files) = tree("gears/system/cluster/cluster-sdk") else {
-        eprintln!("skipping: ../gears-rust not present");
-        return;
-    };
+    let files = require!(tree("gears/system/cluster/cluster-sdk"));
     let got = project_gts_types(&files).unwrap();
     assert!(
         got.iter()
@@ -209,9 +268,6 @@ fn a_gear_crate_full_of_references_declares_nothing() {
     // file-storage's tests are where `gts_id!` piles up. The main crate declares
     // no schema, and must therefore come back empty rather than with a dozen
     // spurious types.
-    let Some(files) = tree("gears/system/authn-resolver/authn-resolver") else {
-        eprintln!("skipping: ../gears-rust not present");
-        return;
-    };
+    let files = require!(tree("gears/system/authn-resolver/authn-resolver"));
     assert!(project_gts_types(&files).unwrap().is_empty());
 }

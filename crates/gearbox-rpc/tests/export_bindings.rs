@@ -23,6 +23,7 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gearbox_ir::{Catalogue, ExplanationGraph, PendingGear, ProductIntent, ResolvedProduct};
 use gearbox_rpc::protocol::{
@@ -158,7 +159,18 @@ fn export_typescript_bindings() {
 fn export_is_deterministic() {
     // Two exports of the same model must be byte-identical, or the anti-drift
     // check would fail spuriously and get switched off.
-    let base = std::env::temp_dir().join("gearbox-ts-determinism");
+    //
+    // **Namespaced by process and counter**, as every other test file in this
+    // crate does: the path was fixed, so two runs sharing a temp directory --
+    // two worktrees, or two CI jobs -- cleared and rewrote each other's exports
+    // and the byte comparison failed for a reason that has nothing to do with
+    // drift, which is the surest way to get a determinism check switched off.
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let base = std::env::temp_dir().join(format!(
+        "gearbox-ts-determinism-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
     let (first, second) = (base.join("a"), base.join("b"));
 
     for dir in [&first, &second] {

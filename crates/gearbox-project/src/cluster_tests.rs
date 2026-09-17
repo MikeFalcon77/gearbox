@@ -14,6 +14,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::scan::scan_crate;
+use crate::test_corpus::require;
 
 fn file(src: &str) -> RustFile {
     RustFile {
@@ -34,18 +35,6 @@ fn cluster_crate() -> Option<Vec<RustFile>> {
     Some(scan_crate(&dir).unwrap_or_else(|e| panic!("scan cluster: {e}")))
 }
 
-macro_rules! require {
-    ($e:expr) => {
-        match $e {
-            Some(v) => v,
-            None => {
-                eprintln!("skipping: ../gears-rust not present");
-                return;
-            }
-        }
-    };
-}
-
 // ---------------------------------------------------------------- registry
 
 /// Mirrors `ClusterGear::provider_registry()` verbatim.
@@ -64,7 +53,7 @@ impl ClusterGear {
 
 #[test]
 fn registry_projects_in_source_order() {
-    let got = project_provider_registry(&[file(REGISTRY)]).expect("project");
+    let got = project_provider_registry(&[file(REGISTRY)], "fixture").expect("project");
     let shape: Vec<(ClusterPrimitive, &str, &str)> = got
         .iter()
         .map(|p| (p.primitive, p.plugin_lib.as_str(), p.provider_type.as_str()))
@@ -106,7 +95,7 @@ fn registry_projects_in_source_order() {
 
 #[test]
 fn registry_registers_no_leader_election_provider() {
-    let got = project_provider_registry(&[file(REGISTRY)]).expect("project");
+    let got = project_provider_registry(&[file(REGISTRY)], "fixture").expect("project");
     assert!(
         !got.iter()
             .any(|p| p.primitive == ClusterPrimitive::LeaderElection),
@@ -118,12 +107,71 @@ fn registry_registers_no_leader_election_provider() {
 #[test]
 fn registry_projects_from_the_real_tree() {
     let files = require!(cluster_crate());
-    let got = project_provider_registry(&files).expect("project");
+    let got = project_provider_registry(&files, "cluster").expect("project");
     assert_eq!(
         got,
-        project_provider_registry(&[file(REGISTRY)]).expect("project"),
+        project_provider_registry(&[file(REGISTRY)], "fixture").expect("project"),
         "the fixture has drifted from the real provider_registry()"
     );
+}
+
+/// The case the doc on `walk_chain` calls out, and the one nothing reached: a
+/// chain of three whose middle registration is unreadable yields two, which
+/// looks exactly like a chain of two.
+#[test]
+fn an_unreadable_registration_in_the_middle_of_the_chain_is_an_error() {
+    let src = r"
+impl ClusterGear {
+    fn provider_registry() -> ProviderRegistry {
+        ProviderRegistry::new()
+            .with_cache_provider(Arc::new(standalone_cluster_plugin::StandaloneCacheProvider))
+            .with_cache_provider(make_provider())
+            .with_lock_provider(Arc::new(redis_cluster_plugin::RedisLockProvider))
+    }
+}
+";
+    let err = project_provider_registry(&[file(src)], "fixture").unwrap_err();
+    match &err {
+        ClusterProjectionError::ProviderRegistration { setter, .. } => {
+            assert_eq!(setter, "with_cache_provider");
+        }
+        other => panic!("expected ProviderRegistration, got {other}"),
+    }
+    assert!(
+        err.to_string().contains("is not a path"),
+        "the message must say what it could not read: {err}"
+    );
+}
+
+/// Hop 1 used to accept silently what hop 3 reports as a caller error: two
+/// impls with a `provider_registry` came back as one merged registry with
+/// nothing saying there were two.
+#[test]
+fn two_provider_registry_impls_are_ambiguous_not_merged() {
+    let src = r"
+impl ClusterGear {
+    fn provider_registry() -> ProviderRegistry {
+        ProviderRegistry::new()
+            .with_cache_provider(Arc::new(standalone_cluster_plugin::StandaloneCacheProvider))
+    }
+}
+impl TestDoubleGear {
+    fn provider_registry() -> ProviderRegistry {
+        ProviderRegistry::new()
+            .with_cache_provider(Arc::new(fake_plugin::FakeCacheProvider))
+    }
+}
+";
+    let err = project_provider_registry(&[file(src)], "fixture").unwrap_err();
+    match err {
+        ClusterProjectionError::RegistryAmbiguous { candidates, .. } => {
+            assert_eq!(
+                candidates,
+                vec!["ClusterGear".to_owned(), "TestDoubleGear".to_owned()]
+            );
+        }
+        other => panic!("expected RegistryAmbiguous, got {other}"),
+    }
 }
 
 // ---------------------------------------------------------------- names
@@ -323,7 +371,119 @@ fn capabilities_come_from_the_real_plugins() {
     );
 }
 
+/// A backend that reads its flag from a field contributes no capability and
+/// says so, rather than being refused. Refusing used to make a configurable
+/// backend unusable, and nothing pinned the behaviour that replaced it.
+#[test]
+fn a_field_read_features_body_is_recorded_as_runtime_determined() {
+    let src = r"
+        impl DistributedLockBackend for Configurable {
+            fn features(&self) -> LockFeatures { LockFeatures::new(self.linearizable) }
+        }
+    ";
+    let got = project_backend_capabilities(&[file(src)], ClusterPrimitive::Lock, "fixture", None)
+        .expect("a computed flag is not an error");
+    assert_eq!(got.runtime_determined, vec!["features"]);
+    assert!(
+        got.declared.is_empty(),
+        "a flag decided at run time is no capability at composition time: {:?}",
+        got.declared
+    );
+}
+
+/// The redis cache's shape: `consistency()` returns a field its preflight set,
+/// so there is no composition-time fact to read.
+#[test]
+fn a_non_path_consistency_body_is_recorded_as_runtime_determined() {
+    let src = r"
+        impl ClusterCacheBackend for RedisCache {
+            fn consistency(&self) -> CacheConsistency { self.consistency }
+            fn features(&self) -> CacheFeatures { CacheFeatures::new(false) }
+        }
+    ";
+    let got = project_backend_capabilities(&[file(src)], ClusterPrimitive::Cache, "fixture", None)
+        .expect("a computed consistency is not an error");
+    assert_eq!(got.runtime_determined, vec!["consistency"]);
+    assert!(got.declared.is_empty(), "got {:?}", got.declared);
+}
+
+/// A declared capability is *not* runtime-determined, which is the other half of
+/// the distinction and the one a regression would quietly invert.
+#[test]
+fn a_declared_capability_is_not_runtime_determined() {
+    let src = r"
+        impl ClusterCacheBackend for StandaloneCache {
+            fn consistency(&self) -> CacheConsistency { CacheConsistency::Linearizable }
+            fn features(&self) -> CacheFeatures { CacheFeatures::new(true) }
+        }
+    ";
+    let got = project_backend_capabilities(&[file(src)], ClusterPrimitive::Cache, "fixture", None)
+        .expect("project");
+    assert!(
+        got.runtime_determined.is_empty(),
+        "got {:?}",
+        got.runtime_determined
+    );
+}
+
 // ---------------------------------------------------------------- SDK defaults
+
+/// The inline half of the SDK-default rule. Its only other test sits behind
+/// `require!`, so on a checkout without the corpus the function had no coverage
+/// at all.
+#[test]
+fn a_derived_features_body_yields_an_sdk_default_rule() {
+    let src = r"
+        impl DistributedLockBackend for CasLock {
+            fn features(&self) -> LockFeatures {
+                LockFeatures::new(self.cache.consistency() == CacheConsistency::Linearizable)
+            }
+        }
+        impl LeaderElectionBackend for CasElection {
+            fn features(&self) -> LeaderElectionFeatures {
+                LeaderElectionFeatures::new(
+                    self.cache.consistency() == CacheConsistency::Linearizable,
+                )
+            }
+        }
+    ";
+    let got = project_sdk_defaults(&[file(src)]);
+    assert_eq!(
+        got,
+        vec![
+            SdkDefaultRule {
+                primitive: ClusterPrimitive::LeaderElection,
+                linearizable_from_cache: true,
+            },
+            SdkDefaultRule {
+                primitive: ClusterPrimitive::Lock,
+                linearizable_from_cache: true,
+            },
+        ],
+        "both fall-back primitives inherit the bound cache's capability"
+    );
+}
+
+/// The negative case, which was untested: a `features()` body that is not a
+/// cache-consistency comparison declares its own capability and is no SDK
+/// default, so no rule may be emitted for it.
+#[test]
+fn a_features_body_that_is_not_derived_yields_no_rule() {
+    let src = r"
+        impl DistributedLockBackend for PostgresLock {
+            fn features(&self) -> LockFeatures { LockFeatures::new(true) }
+        }
+        impl LeaderElectionBackend for Whatever {
+            fn features(&self) -> LeaderElectionFeatures {
+                LeaderElectionFeatures::new(self.linearizable)
+            }
+        }
+    ";
+    assert!(
+        project_sdk_defaults(&[file(src)]).is_empty(),
+        "a declared or run-time flag is not the inheritance rule"
+    );
+}
 
 #[test]
 fn sdk_defaults_are_recognised_as_derived_from_the_cache() {

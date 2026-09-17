@@ -61,6 +61,39 @@ pub enum ClusterProjectionError {
         reason: String,
     },
 
+    /// A `with_*_provider` whose argument is not a readable provider path.
+    ///
+    /// Typed rather than a bare `String`, which is what this used to be: the
+    /// caller could only interpolate a sentence, so this case could not be told
+    /// apart from anything added to the projection later.
+    #[error("`{setter}(..)` registers a {primitive} provider, but its argument {reason}")]
+    ProviderRegistration {
+        setter: String,
+        primitive: &'static str,
+        reason: String,
+    },
+
+    /// Several impls carry a `provider_registry` method.
+    ///
+    /// Refused for the reason [`Self::BackendAmbiguous`] is: the cluster crate
+    /// holds SDK defaults plus test doubles, and merging two registries into one
+    /// list loses the fact that there were two. Hop 1 used to accept silently
+    /// what hop 3 reports as a caller error.
+    #[error("{scanned} has {} impls with a `provider_registry` method: {}", .candidates.len(), .candidates.join(", "))]
+    RegistryAmbiguous {
+        scanned: String,
+        candidates: Vec<String>,
+    },
+
+    /// `backend = "..."` is absolute or climbs out of the crate.
+    ///
+    /// Its own variant, mirroring `LocateError::AttrEscapes`. It used to be
+    /// reported as [`Self::Capability`] with the path stuffed into `ty`, so the
+    /// message read "cannot read `features` on `<a path>`" and a caller matching
+    /// on `Capability` saw a path mistake.
+    #[error("`backend = \"{0}\"` is absolute or climbs out of the crate")]
+    BackendEscapes(String),
+
     #[error(transparent)]
     Id(#[from] IdError),
 }
@@ -177,7 +210,10 @@ fn wrapped_path(expr: &syn::Expr) -> Option<&syn::Path> {
 /// skip. The caller is documented to treat a short list as a projection failure,
 /// and it cannot: a chain of three registrations where the middle one is
 /// unreadable yields two, which looks exactly like a chain of two.
-fn walk_chain(expr: &syn::Expr, out: &mut Vec<ProjectedClusterProvider>) -> Result<(), String> {
+fn walk_chain(
+    expr: &syn::Expr,
+    out: &mut Vec<ProjectedClusterProvider>,
+) -> Result<(), ClusterProjectionError> {
     let syn::Expr::MethodCall(call) = expr else {
         return Ok(());
     };
@@ -188,10 +224,11 @@ fn walk_chain(expr: &syn::Expr, out: &mut Vec<ProjectedClusterProvider>) -> Resu
         return Ok(());
     };
     let unreadable = |what: &str| {
-        Err(format!(
-            "`{setter}(..)` registers a {} provider, but its argument {what}",
-            primitive.slug()
-        ))
+        Err(ClusterProjectionError::ProviderRegistration {
+            setter: setter.clone(),
+            primitive: primitive.slug(),
+            reason: what.to_owned(),
+        })
     };
 
     let Some(path) = call.args.first().and_then(wrapped_path) else {
@@ -221,24 +258,49 @@ fn walk_chain(expr: &syn::Expr, out: &mut Vec<ProjectedClusterProvider>) -> Resu
 /// always registers at least one.
 ///
 /// # Errors
-/// Returns a description of the first `with_*_provider` argument that cannot be
-/// read as a provider path.
+/// Returns [`ClusterProjectionError::ProviderRegistration`] for the first
+/// `with_*_provider` argument that cannot be read as a provider path, and
+/// [`ClusterProjectionError::RegistryAmbiguous`] when more than one impl in
+/// `files` carries a `provider_registry` method.
 pub fn project_provider_registry(
     files: &[RustFile],
-) -> Result<Vec<ProjectedClusterProvider>, String> {
-    let mut out = Vec::new();
-    for (_, imp) in impls(files) {
-        if let Some(func) = method(imp, "provider_registry")
-            && let Some(expr) = tail_expr(&func.block)
-        {
-            walk_chain(expr, &mut out)?;
+    scanned: &str,
+) -> Result<Vec<ProjectedClusterProvider>, ClusterProjectionError> {
+    let found: Vec<&syn::ItemImpl> = impls(files)
+        .filter(|(_, imp)| method(imp, "provider_registry").is_some())
+        .map(|(_, imp)| imp)
+        .collect();
+
+    let imp = match found.as_slice() {
+        [] => return Ok(Vec::new()),
+        [only] => *only,
+        many => {
+            let mut candidates: Vec<String> = many
+                .iter()
+                .map(|imp| match &*imp.self_ty {
+                    syn::Type::Path(p) => last_segment(&p.path),
+                    _ => "<non-path type>".to_owned(),
+                })
+                .collect();
+            candidates.sort();
+            return Err(ClusterProjectionError::RegistryAmbiguous {
+                scanned: scanned.to_owned(),
+                candidates,
+            });
         }
+    };
+
+    let mut out = Vec::new();
+    if let Some(func) = method(imp, "provider_registry")
+        && let Some(expr) = tail_expr(&func.block)
+    {
+        walk_chain(expr, &mut out)?;
     }
     Ok(out)
 }
 
 /// Resolve a `const NAME: &str = "..."` anywhere in `files`.
-fn resolve_str_const(files: &[RustFile], ident: &str) -> Option<String> {
+pub(crate) fn resolve_str_const(files: &[RustFile], ident: &str) -> Option<String> {
     files.iter().find_map(|file| {
         file.ast.items.iter().find_map(|item| match item {
             syn::Item::Const(c) if c.ident == ident => match &*c.expr {
@@ -401,13 +463,9 @@ pub fn project_backend_capabilities(
     // the gear attribute. This is what resolves an ambiguity report, so the help
     // text that suggests it has to actually work.
     let narrowed = match narrow {
-        Some(spec) => Some(crate::scan::narrowing_path(spec).map_err(|spec| {
-            ClusterProjectionError::Capability {
-                method: "features",
-                ty: spec.clone(),
-                reason: format!("`backend = \"{spec}\"` is absolute or climbs out of the crate"),
-            }
-        })?),
+        Some(spec) => Some(
+            crate::scan::narrowing_path(spec).map_err(ClusterProjectionError::BackendEscapes)?,
+        ),
         None => None,
     };
 

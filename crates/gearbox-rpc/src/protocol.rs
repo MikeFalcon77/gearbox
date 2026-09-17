@@ -65,6 +65,14 @@ pub mod method {
 pub mod error_code {
     pub const NOT_INITIALIZED: i32 = -32050;
     pub const WORKSPACE_NOT_OPEN: i32 = -32051;
+    /// A catalogue load failed outright.
+    ///
+    /// Reserved rather than live: the only thing that ever answered with it was
+    /// a result that could not be *serialized*, on whatever method had been
+    /// called, which told a client its load had failed. That now answers
+    /// `InternalError`. A catalogue load that goes wrong today reports its
+    /// diagnostics with a successful response, so this is the code for the day
+    /// one cannot -- kept because it is part of the wire contract clients map.
     pub const LOAD_FAILED: i32 = -32052;
     /// The product description could not be evaluated.
     ///
@@ -88,6 +96,26 @@ pub mod error_code {
     /// Generation was refused: the output root is not writable, resolution
     /// reported errors, or the engine could not produce a tree.
     pub const GENERATE_REFUSED: i32 = -32057;
+
+    /// Every code above, so the guard that checks them against LSP's reserved
+    /// window sees all of them.
+    ///
+    /// Here rather than in the test, because the test's own array had four of
+    /// the nine in it: half the codes had nothing checking them, and a new one
+    /// outside the window would have been caught only if whoever added it
+    /// remembered to extend a list in another file. A code added here and left
+    /// out of this slice is still possible, and it is one line away from the
+    /// constant instead of one file away.
+    pub const ALL: &[i32] = &[
+        NOT_INITIALIZED,
+        WORKSPACE_NOT_OPEN,
+        LOAD_FAILED,
+        PRODUCT_LOAD_FAILED,
+        RESOLVE_FAILED,
+        WRITES_NOT_ALLOWED,
+        EDIT_REFUSED,
+        GENERATE_REFUSED,
+    ];
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

@@ -207,6 +207,30 @@ pub fn content_digest(root: &Path, files: &[PathBuf]) -> String {
     format!("blake3:{}", hasher.finalize().to_hex())
 }
 
+/// Which source root owns `path`, by the rule the catalogue loader applies.
+///
+/// **The first root in the list that contains the path, not the innermost one.**
+/// [`crate::load_catalogue`] walks the roots in the order they were given and
+/// attributes each `gear.gdl` it finds to the root it was walked from; two roots
+/// that both contain one description therefore declare the same gear twice, and
+/// the first declaration is the one that stays in the catalogue (the second is
+/// `GBX0203`). So the earliest root is the boundary a `load()` in that file is
+/// really resolved against, and anything else -- an editor picking the deepest
+/// match, say -- evaluates the file against a boundary no catalogue entry uses,
+/// which shows up as a `load()` underlined in the editor and accepted on disk.
+///
+/// Here rather than in each caller because it is the loader's rule: a second
+/// spelling of it is a second answer, and the two diverge without either side
+/// changing.
+///
+/// `path` must already be absolute and free of `..`, which is what makes
+/// [`Path::starts_with`] a containment test rather than a spelling test.
+/// Roots opened by [`SourceRoot::open`] are canonical.
+#[must_use]
+pub fn owning_source_root<'a>(roots: &'a [SourceRoot], path: &Path) -> Option<&'a SourceRoot> {
+    roots.iter().find(|root| path.starts_with(&root.root))
+}
+
 /// The `sources` map a lock records.
 ///
 /// Two differences from what a catalogue carries, and both exist so that the same

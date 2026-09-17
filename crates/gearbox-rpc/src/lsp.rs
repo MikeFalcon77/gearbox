@@ -40,12 +40,20 @@ mod lsp_tests;
 /// because an editor asks about buffers that are not on disk yet, and a path
 /// that cannot be resolved is still a path this has to answer for.
 ///
-/// `None` for anything that is not a local file. A `untitled:` buffer has no
-/// directory for `load()` to resolve against, and inventing one would make the
-/// answer about a file that does not exist.
+/// [`UriPath::NotLocal`] for anything that is not a `file:` URI. An `untitled:`
+/// buffer has no directory for `load()` to resolve against, and inventing one
+/// would make the answer about a file that does not exist.
+///
+/// [`UriPath::Undecodable`] is the other non-answer, and it is deliberately not
+/// the same one: a `file://` URI whose escapes decode to bytes that are not UTF-8
+/// names a document the editor really has open, and the caller published an empty
+/// diagnostic list for it -- reporting a real file as clean -- back when both
+/// came back as `None`.
 #[must_use]
-pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
-    let rest = uri.strip_prefix("file://")?;
+pub fn path_from_uri(uri: &str) -> UriPath {
+    let Some(rest) = uri.strip_prefix("file://") else {
+        return UriPath::NotLocal;
+    };
     let encoded = match rest.strip_prefix('/') {
         // `file:///C:/src`: the first slash belongs to the URI grammar, not to
         // the path.
@@ -80,7 +88,36 @@ pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
         out.push(bytes[i]);
         i += 1;
     }
-    Some(normalized(Path::new(&String::from_utf8(out).ok()?)))
+    match String::from_utf8(out) {
+        Ok(decoded) => UriPath::Local(normalized(Path::new(&decoded))),
+        Err(_) => UriPath::Undecodable,
+    }
+}
+
+/// What a `textDocument` URI names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UriPath {
+    /// A path on this machine, lexically normalized.
+    Local(PathBuf),
+    /// Not a `file:` URI at all, so there is no path to answer with.
+    NotLocal,
+    /// A `file:` URI whose percent-escapes do not decode as UTF-8.
+    ///
+    /// Separate from [`Self::NotLocal`] because the two need different answers:
+    /// this one is about a document the editor is showing, so it is reported
+    /// rather than treated as somebody else's file.
+    Undecodable,
+}
+
+impl UriPath {
+    /// The path, when the URI named one.
+    #[must_use]
+    pub fn local(&self) -> Option<&Path> {
+        match self {
+            Self::Local(path) => Some(path),
+            Self::NotLocal | Self::Undecodable => None,
+        }
+    }
 }
 
 /// `path` with `.` dropped and `..` collapsed, without asking the filesystem.

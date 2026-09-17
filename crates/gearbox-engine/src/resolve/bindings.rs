@@ -108,7 +108,10 @@ fn report_unhonoured_endpoints(
                  is read by nothing. Pointing at a provider outside the product is not \
                  expressible yet",
             )
-            .at(gearbox_ir::Location::or_file(binding.declared_at.as_ref(), uri)),
+            .at(gearbox_ir::Location::or_file(
+                binding.declared_at.as_ref(),
+                uri,
+            )),
         );
     }
 }

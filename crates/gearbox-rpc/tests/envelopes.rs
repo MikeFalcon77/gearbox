@@ -16,12 +16,10 @@ fn application_error_codes_avoid_the_ones_lsp_defines() {
     // Reusing -32002 for "no workspace" would collide with LSP's
     // ServerNotInitialized, and a client mapping codes to messages would report
     // the wrong cause. -32001 is UnknownErrorCode for the same reason.
-    for code in [
-        error_code::NOT_INITIALIZED,
-        error_code::WORKSPACE_NOT_OPEN,
-        error_code::LOAD_FAILED,
-        error_code::GENERATE_REFUSED,
-    ] {
+    //
+    // Over `error_code::ALL`, which lives beside the constants: this loop used to
+    // name four of them, so the other half of the module was unchecked.
+    for &code in error_code::ALL {
         assert_ne!(code, lsp_server::ErrorCode::ServerNotInitialized as i32);
         assert_ne!(code, -32001, "-32001 is LSP's UnknownErrorCode");
         assert!(
@@ -29,6 +27,18 @@ fn application_error_codes_avoid_the_ones_lsp_defines() {
             "{code} must stay inside LSP's server-error window"
         );
     }
+
+    // And each means one thing. A code copied onto a second constant would make
+    // two causes indistinguishable to a client, which is the same failure the
+    // window check is about.
+    let mut seen = error_code::ALL.to_vec();
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(
+        seen.len(),
+        error_code::ALL.len(),
+        "two application error codes share a value"
+    );
 }
 
 #[test]
