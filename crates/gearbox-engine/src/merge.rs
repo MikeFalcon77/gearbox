@@ -287,7 +287,13 @@ pub fn merge(
     report_front_doors(uri, &id, &declared_roles, diagnostics);
     report_role_names(uri, &id, &decl.declared_roles, &declared_roles, diagnostics);
     report_role_modes(uri, &id, &declared_roles, config.as_ref(), diagnostics);
-    report_role_gaps(uri, &id, &declared_roles, decl.declared_at.as_ref(), diagnostics);
+    report_role_gaps(
+        uri,
+        &id,
+        &declared_roles,
+        decl.declared_at.as_ref(),
+        diagnostics,
+    );
 
     let category = decl.category.clone();
     report_unknown_category(

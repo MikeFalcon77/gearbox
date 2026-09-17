@@ -68,7 +68,7 @@ fn report_plugin_config_types(intent: &ProductIntent, uri: &str, diagnostics: &m
                         "set `vendor` to a string, or drop the key to use the crate default",
                     )
                     .at(gearbox_ir::Location::or_file(
-                        selection.declared_at.as_ref(),
+                        plugin.declared_at.as_ref(),
                         uri,
                     )),
                 );
@@ -81,7 +81,7 @@ fn report_plugin_config_types(intent: &ProductIntent, uri: &str, diagnostics: &m
                         "set `priority` to an integer, or drop the key to use the crate default",
                     )
                     .at(gearbox_ir::Location::or_file(
-                        selection.declared_at.as_ref(),
+                        plugin.declared_at.as_ref(),
                         uri,
                     )),
                 );
@@ -251,7 +251,7 @@ fn report_misplaced_plugins(
                     ),
                 )
                 .at(gearbox_ir::Location::or_file(
-                    selection.declared_at.as_ref(),
+                    plugin.declared_at.as_ref(),
                     uri,
                 )),
             );

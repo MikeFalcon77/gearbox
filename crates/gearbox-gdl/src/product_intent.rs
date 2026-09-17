@@ -402,7 +402,10 @@ fn build_plugins(
         );
         if !claim(&mut claimed, host.as_str(), gear.as_str(), &scoped) {
             diagnostics.push(collision(
-                Location::or_file(record.declared_at.as_ref(), uri),
+                // The `plugin(...)` entry, now that it carries its own span:
+                // the host's `use_gear(...)` contains it, but the duplicate is
+                // the thing at fault.
+                Location::or_file(entry.declared_at.as_ref(), uri),
                 format!("plugin `{gear}` is selected twice for `{host}` in the same profile"),
                 "list each implementation once; per-profile differences belong in \
                  `profiles = [...]`",
@@ -413,6 +416,7 @@ fn build_plugins(
             gear,
             config: entry.config.iter().cloned().collect(),
             profiles: scoped,
+            declared_at: entry.declared_at.clone(),
         });
     }
     out

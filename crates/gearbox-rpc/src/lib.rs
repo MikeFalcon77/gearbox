@@ -46,8 +46,9 @@ use gearbox_ir::{
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
 
 use crate::lsp::{
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    LspDiagnostic, PublishDiagnosticsParams,
+    CompletionItem, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, Hover, LspDiagnostic, PublishDiagnosticsParams,
+    TextDocumentPositionParams,
 };
 use crate::protocol::{
     AddProfileParams, ApplyEditsParams, Capabilities, CatalogueChanged, CatalogueDiagnostics,
@@ -727,12 +728,116 @@ fn dispatch(connection: &Connection, state: &mut State, request: Request) -> Opt
         method::GENERATE_PLAN | method::GENERATE_APPLY | method::GENERATE_FILE => {
             Some(dispatch_generate(state, request))
         }
+        // **No `require_ready`, and that is deliberate.** These two answer from
+        // the client's own buffer and the interpreter's vocabulary; neither needs
+        // a source root, so the gate every other request arm uses would refuse
+        // completion in exactly the session that wants it most -- a `gear.gdl`
+        // opened on its own. They belong to the `textDocument/*` surface, which
+        // is gated on whether the document is known rather than on `initialize`,
+        // and `document_notification` skips the gate for the same reason.
+        method::COMPLETION => Some(match cast::<TextDocumentPositionParams>(request) {
+            Ok((id, params)) => ok(id, &completion(connection, state, &params)),
+            Err(e) => invalid_params(id, &e),
+        }),
+        method::HOVER => Some(match cast::<TextDocumentPositionParams>(request) {
+            Ok((id, params)) => ok(id, &hover(connection, state, &params)),
+            Err(e) => invalid_params(id, &e),
+        }),
         other => Some(error(
             id,
             lsp_server::ErrorCode::MethodNotFound as i32,
             &format!("unknown method `{other}`"),
         )),
     }
+}
+
+/// What can be typed where the caret is.
+///
+/// Answered from the buffer this server holds, not from disk: the question is
+/// about text that has not been saved and usually does not parse
+/// (`cpt-gearbox-adr-gdl-completion-and-hover`). The language's own answer is
+/// `gearbox_gdl::assist`; this only turns a position into an offset and the
+/// answer into LSP's shape.
+///
+/// An empty list for a document this server does not have. That is ordinary --
+/// an editor may ask before its `didOpen` has been forwarded -- so it is not an
+/// error.
+fn completion(
+    connection: &Connection,
+    state: &State,
+    params: &TextDocumentPositionParams,
+) -> Vec<CompletionItem> {
+    let uri = params.text_document.uri.as_str();
+    let Some(source) = state.documents.get(uri) else {
+        return Vec::new();
+    };
+    let Some(path) = assistable_path(connection, uri, "completion") else {
+        return Vec::new();
+    };
+    let offset =
+        gearbox_gdl::assist::offset_of(source, params.position.line, params.position.character);
+    let answer = gearbox_gdl::assist::completion(&path, source, offset);
+    let kind = if answer.in_call {
+        lsp::COMPLETION_FIELD
+    } else {
+        lsp::COMPLETION_FUNCTION
+    };
+    answer
+        .suggestions
+        .into_iter()
+        .map(|suggestion| CompletionItem {
+            label: suggestion.label,
+            kind,
+            // `detail` is the one line an editor shows beside the label, and for
+            // a parameter that is its type. A construct has no second line worth
+            // spending there: putting the summary in both fields, which this did
+            // at first, shows the same sentence twice in the same popup.
+            detail: suggestion.type_name,
+            documentation: suggestion.detail,
+        })
+        .collect()
+}
+
+/// The path behind a URI an assist request names, or `None` with the reason
+/// said out loud when it deserves one.
+///
+/// **The three `UriPath` cases are not the same answer.** `NotLocal` is an
+/// `untitled:` buffer or a scheme this server has no business reading -- nothing
+/// to offer, and nothing worth saying. `Undecodable` is a `file://` URI whose
+/// percent-escapes are not UTF-8: the editor really does have that document
+/// open, so answering it as though there were nothing there is the same shape of
+/// wrong answer that `document_diagnostics` refuses to give for the same case.
+/// Collapsing the two was how the first version of these handlers lost that
+/// distinction.
+fn assistable_path(connection: &Connection, uri: &str, what: &str) -> Option<PathBuf> {
+    match lsp::path_from_uri(uri) {
+        lsp::UriPath::Local(path) => Some(path),
+        lsp::UriPath::NotLocal => None,
+        lsp::UriPath::Undecodable => {
+            log_to_client(
+                connection,
+                &format!(
+                    "cannot read `{uri}` as a path: its percent-escapes do not decode as \
+                     UTF-8, so {what} is not being offered for this document"
+                ),
+            );
+            None
+        }
+    }
+}
+
+/// The documentation for whatever the caret is inside.
+fn hover(
+    connection: &Connection,
+    state: &State,
+    params: &TextDocumentPositionParams,
+) -> Option<Hover> {
+    let uri = params.text_document.uri.as_str();
+    let source = state.documents.get(uri)?;
+    let path = assistable_path(connection, uri, "hover")?;
+    let offset =
+        gearbox_gdl::assist::offset_of(source, params.position.line, params.position.character);
+    gearbox_gdl::assist::hover(&path, source, offset).map(|contents| Hover { contents })
 }
 
 fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Response {
@@ -790,6 +895,10 @@ fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Re
                 writes: state.allow_writes,
                 // The LSP half of the same object. See `Capabilities`.
                 text_document_sync: crate::lsp::SYNC_FULL,
+                completion_provider: crate::protocol::CompletionOptions {
+                    resolve_provider: false,
+                },
+                hover_provider: true,
             },
             // `SourceRoot::root` is already canonicalized, which is what makes
             // it safe to join a `gdl_path` onto without `..` ambiguity.

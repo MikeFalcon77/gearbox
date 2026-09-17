@@ -483,11 +483,9 @@ fn an_unresolvable_crate_path_is_anchored_on_its_cargo_call() {
     std::fs::create_dir_all(&dir).expect("scratch source root");
     std::fs::write(dir.join("gear.gdl"), BROKEN_GEAR).expect("write the description");
 
-    let root = gearbox_engine::SourceRoot::open(
-        gearbox_ir::SourceId::new("probe").unwrap(),
-        dir.clone(),
-    )
-    .expect("open the root");
+    let root =
+        gearbox_engine::SourceRoot::open(gearbox_ir::SourceId::new("probe").unwrap(), dir.clone())
+            .expect("open the root");
     let scan = gearbox_engine::load_catalogue(&[root]);
     drop(std::fs::remove_dir_all(&dir));
 
@@ -541,11 +539,9 @@ fn a_missing_doc_path_is_anchored_on_its_docs_call() {
     std::fs::write(dir.join("Cargo.toml"), DOCS_MANIFEST).expect("write the manifest");
     std::fs::write(dir.join("src/lib.rs"), DOCS_GEAR_RS).expect("write the crate");
 
-    let root = gearbox_engine::SourceRoot::open(
-        gearbox_ir::SourceId::new("probe").unwrap(),
-        dir.clone(),
-    )
-    .expect("open the root");
+    let root =
+        gearbox_engine::SourceRoot::open(gearbox_ir::SourceId::new("probe").unwrap(), dir.clone())
+            .expect("open the root");
     let scan = gearbox_engine::load_catalogue(&[root]);
     drop(std::fs::remove_dir_all(&dir));
 
@@ -565,5 +561,81 @@ fn a_missing_doc_path_is_anchored_on_its_docs_call() {
         location.range.start.line,
         line_of(DOCS_GEAR, "docs = docs("),
         "must be anchored on the `docs(...)` line"
+    );
+}
+
+const PLUGIN_SPANS: &str = r#"product(
+    id = "spans-probe",
+    name = "Spans Probe",
+    version = "0.1.0",
+    sources = [source(id = "somewhere", at = path("."))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [
+        use_gear(
+            "host-gear",
+            source = "somewhere",
+            plugins = [
+                plugin("filler", config = {"vendor": 5}),
+            ],
+        ),
+    ],
+)
+"#;
+
+/// A plugin's bad `vendor` points at the `plugin(...)`, not the host's `use_gear`.
+///
+/// The anchor moved when `PluginSelection` gained a span. The host's
+/// `use_gear(...)` contains the entry, so the old anchor was true but coarse --
+/// on a `use_gear` spanning six lines it underlined all of them.
+#[test]
+fn a_plugin_config_type_error_is_anchored_on_its_plugin_entry() {
+    // Through `plugin_select::check` directly: this check runs in `validate`,
+    // not in `resolve`, so `diagnostics_of` would never reach it.
+    let mut diagnostics = gearbox_ir::Diagnostics::new();
+    let uri = gearbox_ir::file_uri(Path::new(PRODUCT_PATH));
+    drop(gearbox_engine::check_plugins(
+        &Catalogue::default(),
+        &intent(PLUGIN_SPANS),
+        &uri,
+        &mut diagnostics,
+    ));
+    let all: Vec<Diagnostic> = diagnostics.iter().cloned().collect();
+    let diagnostic = find(&all, "`vendor` must be a string");
+    assert_anchored(diagnostic, PLUGIN_SPANS, r#"plugin("filler", config ="#);
+}
+
+const PLUGIN_TWICE: &str = r#"product(
+    id = "spans-probe",
+    name = "Spans Probe",
+    version = "0.1.0",
+    sources = [source(id = "somewhere", at = path("."))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [
+        use_gear(
+            "host-gear",
+            source = "somewhere",
+            plugins = [
+                plugin("filler"),
+                plugin("filler", config = {"priority": 2}),
+            ],
+        ),
+    ],
+)
+"#;
+
+/// The same plugin listed twice points at the second entry.
+///
+/// This diagnostic had no test at all before -- its message appeared in no test
+/// in the repository -- so neither the collision nor its anchor was pinned.
+#[test]
+fn a_plugin_selected_twice_is_anchored_on_the_duplicate() {
+    let diagnostics = eval_diagnostics(PLUGIN_TWICE);
+    let diagnostic = find(&diagnostics, "is selected twice for");
+    assert_anchored(
+        diagnostic,
+        PLUGIN_TWICE,
+        r#"plugin("filler", config = {"priority": 2})"#,
     );
 }

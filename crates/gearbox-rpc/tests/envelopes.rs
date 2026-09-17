@@ -52,6 +52,10 @@ fn capabilities_report_what_is_absent_rather_than_omitting_it() {
         generate: false,
         writes: false,
         text_document_sync: gearbox_rpc::lsp::SYNC_FULL,
+        completion_provider: gearbox_rpc::protocol::CompletionOptions {
+            resolve_provider: false,
+        },
+        hover_provider: true,
     })
     .unwrap();
 
@@ -72,6 +76,17 @@ fn capabilities_report_what_is_absent_rather_than_omitting_it() {
     // and nothing would be underlined with no error anywhere to say why.
     assert_eq!(json["textDocumentSync"], serde_json::json!(1));
     assert!(json.get("text_document_sync").is_none());
+
+    // Same rule for the two providers: a client that does not see these never
+    // sends the request, so a snake_case key here is a feature that silently
+    // does not exist.
+    assert_eq!(
+        json["completionProvider"],
+        serde_json::json!({ "resolveProvider": false })
+    );
+    assert_eq!(json["hoverProvider"], serde_json::json!(true));
+    assert!(json.get("completion_provider").is_none());
+    assert!(json.get("hover_provider").is_none());
 }
 
 #[test]

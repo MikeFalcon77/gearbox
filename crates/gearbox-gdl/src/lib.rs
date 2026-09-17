@@ -25,6 +25,19 @@
 // `globals` and `product` are the exception, and only for their `#[starlark_module]`
 // vocabularies, which `tests/export_grammar.rs` reads to generate the editor's
 // syntax highlighting. That test lives in this crate, so the containment holds.
+/// The name a product description must have.
+///
+/// Here rather than in `gearbox-engine` because both crates need it and
+/// `gearbox-gdl` is the one they share: the engine's `check_description` decides
+/// which evaluator runs by this name, and `assist::vocabulary_for` decides which
+/// vocabulary answers by the same name. Two copies meant a rename or a third
+/// description kind would get diagnostics and silently no completion.
+pub const PRODUCT_FILE: &str = "product.gdl";
+
+/// The name a gear description must have. See [`PRODUCT_FILE`].
+pub const GEAR_FILE: &str = "gear.gdl";
+
+pub mod assist;
 pub mod declarative;
 pub mod edit;
 pub mod engine;

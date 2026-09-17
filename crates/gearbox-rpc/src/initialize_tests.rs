@@ -364,3 +364,35 @@ fn a_load_that_stopped_early_is_not_cached() {
         "a partial catalogue must not become the cache every later answer is built from"
     );
 }
+
+/// `initialize` advertises the two assist providers.
+///
+/// The spelling of these keys is pinned in `tests/envelopes.rs`, but that test
+/// builds a `Capabilities` literal -- it says how the field serialises, not that
+/// this handler sets it. Setting `hover_provider: false` here would keep every
+/// other test green while, per the field's own doc comment, a language client
+/// then never sends the request and the feature silently does not exist.
+#[test]
+fn initialize_advertises_completion_and_hover() {
+    let dir = scratch("capabilities");
+    let mut state = state_with(&dir);
+
+    let response = initialize(&mut state, RequestId::from(1), &params(&[&dir]));
+    let value = response.response_result.expect("initialize answers");
+    let result: crate::protocol::InitializeResult =
+        serde_json::from_value(value).expect("the result decodes");
+
+    assert!(
+        result.capabilities.hover_provider,
+        "a client that does not see this never sends `textDocument/hover`"
+    );
+    assert!(
+        !result.capabilities.completion_provider.resolve_provider,
+        "every label is already the text to insert, so there is nothing to resolve"
+    );
+    assert_eq!(
+        result.capabilities.text_document_sync,
+        crate::lsp::SYNC_FULL,
+        "and the sync mode the document surface depends on"
+    );
+}

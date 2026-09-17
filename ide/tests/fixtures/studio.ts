@@ -514,7 +514,7 @@ base.afterEach(async ({}, testInfo) => {
   throw new Error(
     `"${testInfo.title}" left the product descriptions changed:\n${dirty}\n\n${diff}\n\n` +
       traceBlock +
-      `The tree has been restored. Two claims edit a description on purpose and put ` +
+      `The tree has been restored. Three claims edit a description on purpose and put ` +
       `it back; anything else writing there is the defect this guard exists to name.`,
   );
 });

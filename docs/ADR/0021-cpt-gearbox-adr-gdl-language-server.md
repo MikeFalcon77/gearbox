@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-09-17
 decision-makers: Mike Yastrebtsov
 ---
@@ -127,8 +127,13 @@ range is not `Range::whole_file`.**
 
 `Location::file(uri)` builds `Range::whole_file`, which is `(0,0)-(0,0)`. It is a
 sentinel meaning "this file", not a position, and 81 diagnostics in
-`gearbox-engine` carry it. That is what `in product.gdl:1` in the UI has always
-been: not line 1, but *no span*, rendered as `0 + 1` by four separate callers.
+`gearbox-engine` carried it when this was written. That is what
+`in product.gdl:1` in the UI has always been: not line 1, but *no span*,
+rendered as `0 + 1` by four separate callers.
+
+**Read the count as of 2026-09-17.** The amendment below moved most of them, and
+the number is not maintained here — it is a fact about a moment, not part of the
+decision. The decision is the rule above, which does not mention a count.
 
 The alternative is to underline those too and accept the marker landing at the
 start of the file. That is worse than publishing nothing for them, and not
@@ -258,9 +263,119 @@ rule exists to prevent. The native path needs no new package at all.
   fixed the diagnostic shape as "four severities, an LSP range in a `.gdl` file,
   related locations" — this decision consumes that shape rather than extending
   it.
-* **Does not decide** whether `completion`, `hover`, `documentSymbol` or
-  `definition` are served, though the vocabulary they would need is already
-  generated and pinned by `export_grammar.rs`; whether the catalogue becomes
-  incrementally loadable; whether `$/cancelRequest` is implemented, though the
-  `Continue::Stop` hook it would need exists; or how diagnostics with no location
-  at all should be anchored.
+* **Does not decide** whether `documentSymbol` or `definition` are served —
+  `completion` and `hover` since arrived in
+  `cpt-gearbox-adr-gdl-completion-and-hover`, which carries `definition`'s own
+  open questions; nor whether the catalogue becomes incrementally loadable. The
+  two remaining tails are below.
+
+## Amendment 2026-09-18: the semantic ranges arrived, and they stop at the call
+
+**Status: accepted. This closes the consequence below rather than reversing
+anything.**
+
+The Consequences said semantic diagnostics were not underlined and that the fix
+was "to give those diagnostics real locations". That work is done, in two passes,
+and it changed nothing about the decisions above.
+
+**What was built.** Diagnostics across the engine and the GDL layer now carry
+the span of the declaration they are about, at **52** call sites — several of
+them shared constructors that fan out to more diagnostics than that. A count of
+*diagnostics* is deliberately not given here: the first version of this file
+carried one, it drifted within a day of being written, and a number nobody
+recomputes is worse than no number. All of them reach the span through one rule —
+`gearbox_ir::Location::or_file(declared_at, uri)`, which sits next to the
+`Location::file` sentinel it falls back to. The first pass used spans that
+already existed and touched no IR at all; the second added `declared_at` to
+`SourceDecl`, `ApplicationPin`, `ClusterScopeIntent`, `ProviderBinding` and
+`PluginSelection`, and gave `application`, `provider`, `cluster_profile`,
+`plugin`, `cargo`, `docs`, `config`, `feature`, `consume`, `cluster_plugin` and
+`role` the `Evaluator` parameter that `call_location` needs.
+
+**Three URI defects had to be fixed first**, because
+`lsp::publishable` matches a diagnostic's URI against the document's: a wrong URI
+discards a diagnostic however good its range is. `resolve/closure.rs` and
+`resolve/profile.rs` each built `format!("file://{}", gdl_path)` from a
+*root-relative* path, so the first path segment was read as the URI's host;
+`secrets.rs` put a product **id** in the field that holds a URI.
+
+### The ceiling is the call, and that is now a decision rather than a gap
+
+**Precision stops at the enclosing call.** The whole `use_gear(...)` is
+underlined, not the bad key inside it, and the same for every other construct.
+
+Rejected: going deeper. It is reachable — starlark's AST is fully spanned
+(`Spanned<T>`) and public through `AstModule::statement()`, and `edit.rs` and
+`edit_call.rs` already walk it in six places, `set_dict_key_on_call` locating an
+individual dict key's span. Three things argue against it. It needs the source
+text threaded to `product_intent::build`, which has only a `FileIdentity` and a
+`ProductDecl`. It works on literal forms only, so a `use_gear` inside a
+comprehension would lose the span it has today. And the benefit is one
+diagnostic, `GdlLiteralSecret`.
+
+Call granularity is also what the rest of the industry gives on this
+architecture: Buck2 uses the same `starlark-rs` crate the same way, and a Bazel
+error names the `cc_library(...)` call rather than the attribute inside it. The
+reason is structural, not a shortcut — `call_location` reads the evaluator's
+call-stack frame, and a starlark `Value` carries no provenance at all, so by the
+time a config map is a `Value` there is nothing to ask.
+
+**What stays anchorless, deliberately.** A diagnostic about an
+`application(...)` was left on the file until `ApplicationPin` carried a span,
+rather than anchored on the enclosing profile — the profile is the context, not
+the thing at fault. `plugin_select`'s `resolve_point` holds the *host gear's*
+descriptor, a declaration in a different file, so its three diagnostics stay
+file-level. A co-location dependency that names nothing is projected from
+`#[toolkit::gear(deps = [...])]` in Rust, where no `.gdl` span is true of it.
+`ClusterStatefulReplicasWithoutElection` has two candidate anchors and no way to
+choose between them.
+
+### Confirmation
+
+`crates/gearbox-engine/tests/diagnostic_spans.rs` — fifteen claims, each
+asserting the *exact* line a diagnostic lands on, built from description text
+rather than from literal IR structs. That distinction is the point: every
+fixture in `tests/support/resolve_fixtures.rs` sets `declared_at: None`, so a
+test built that way exercises the fallback and would pass unchanged if every
+span in the engine were deleted. One claim pins the fallback itself, and one
+pins that a declaration recording no span still answers with the file.
+
+Plus a span assertion in `self_hosted_says_it_is_one_machine`
+(`tests/resolve_structural.rs`), and record-level line assertions in
+`crates/gearbox-gdl/tests/product.rs` for each construct that learned to record
+one.
+## Open: cancellation, and diagnostics with no location at all
+
+**`$/cancelRequest`.** The hook exists — `Continue::Stop`
+([catalogue.rs:88](crates/gearbox-engine/src/catalogue.rs#L88)) is honoured at
+four points in the staged load — and the notification is currently swallowed by
+`document_notification`'s fallback arm. Two things have to be settled first, and
+both are already written down in the code rather than here:
+
+* the request loop is single-threaded, and `catalogue_load`'s own comment says
+  cancellation "needs the request loop to be reading anyway" — so this is the
+  same work item as moving the load off that thread, not a separate one;
+* today `Continue::Stop` means *the client died*, and the handler answers it with
+  `state.catalogue = None`. [lib.rs:3097](crates/gearbox-rpc/src/lib.rs#L3097)
+  says what happens when that stops being true: "stopping early stops being
+  fatal and starts being routine, and this becomes the line that poisons the
+  session." A cancelled load would drop a valid cache, and every later `resolve`
+  would report unknown gears for gears that are on disk.
+
+**Diagnostics with no location at all.**
+[catalogue.rs:635](crates/gearbox-engine/src/catalogue.rs#L635) sets one
+conditionally, so some occurrences carry none. The client anchors a
+location-less resolution diagnostic on the open description
+(`resolution-markers.ts`), which is why this has never shown; whether the engine
+should anchor them instead is undecided.
+
+**`Preference` is the one span the amendment above did not thread.** GBX0410
+(`prefer.fewer_applications` is recorded but not honoured) still reports at
+`Location::file` — the only diagnostic left whose anchor a person would notice.
+`Preference` is an enum with two unit variants, matched in twelve places outside
+its own module, and it is compared as a *value*; adding a span field would make
+two otherwise-equal preferences unequal and change every pattern. The fix is a
+wrapper carrying the preference and its span, which is a change to the type's
+shape rather than to a diagnostic, and it is not worth making as a side effect of
+anything else.
+

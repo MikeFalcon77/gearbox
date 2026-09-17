@@ -312,11 +312,13 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = pos)] gear: &str,
         #[starlark(require = named)] config: Option<Value<'v>>,
         #[starlark(require = named)] profiles: Option<UnpackList<String>>,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<PluginRecord> {
         Ok(PluginRecord {
             gear: gear.to_owned(),
             config: config_map("config", config)?,
             profiles: strings(profiles),
+            declared_at: call_location(eval),
         })
     }
 

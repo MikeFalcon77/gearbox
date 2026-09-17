@@ -374,6 +374,10 @@ pub struct PluginSelection {
     /// Profiles this choice applies to. Empty means every profile.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub profiles: BTreeSet<ProfileId>,
+
+    /// Where `plugin(...)` was written in the product description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_at: Option<Location>,
 }
 
 impl PluginSelection {

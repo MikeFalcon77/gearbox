@@ -14,7 +14,9 @@ use gearbox_ir::{
 };
 
 /// The name a product description must have, so discovery is a filename match.
-pub const PRODUCT_FILE: &str = "product.gdl";
+/// Re-exported from `gearbox_gdl`, not declared here. See
+/// [`crate::catalogue::GEAR_FILE`] for why there is only one copy.
+pub use gearbox_gdl::PRODUCT_FILE;
 
 /// A product intent plus everything that went wrong building it.
 #[derive(Debug)]

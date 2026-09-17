@@ -313,8 +313,8 @@ fn closing_a_document_publishes_an_empty_list_and_forgets_it() {
 /// A diagnostic that names a file but no position is **not** underlined.
 ///
 /// `no gear() declaration` is built with `Location::file`, which is
-/// `Range::whole_file` -- 81 diagnostics in `gearbox-engine` are, and this is the
-/// one reachable from a description alone.
+/// `Range::whole_file`. Many diagnostics are, and this is the one reachable from
+/// a description alone -- see `lsp::publishable` for why no count is given.
 ///
 /// Both halves matter. That the diagnostic exists is asserted directly, so this
 /// cannot pass because the check stopped running; that it is not published is
@@ -789,5 +789,240 @@ fn a_document_opened_without_a_version_is_published_without_one() {
     assert!(
         !params.diagnostics.is_empty(),
         "and the diagnostics are published anyway: the text is what they are about"
+    );
+}
+
+// --------------------------------------------------------------------------
+// Completion and hover. Requests, unlike everything above, so they go through
+// `dispatch` and come back as a `Response` rather than a notification.
+
+/// Ask one request against a state holding `text` for `uri`.
+fn answer<T: serde::de::DeserializeOwned>(
+    method: &str,
+    uri: &str,
+    text: &str,
+    line: u32,
+    character: u32,
+) -> T {
+    let (server, _client) = Connection::memory();
+    let mut state = state();
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_open(uri, text)
+    ));
+    let request = lsp_server::Request {
+        id: RequestId::from(1),
+        method: method.to_owned(),
+        params: serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character },
+        }),
+    };
+    let response = dispatch(&server, &mut state, request).expect("a request is answered");
+    let value = match response.response_result {
+        Ok(value) => value,
+        Err(e) => panic!("{method} failed: {e:?}"),
+    };
+    serde_json::from_value(value).expect("the answer decodes")
+}
+
+/// Completion inside a half-written call offers that call's parameters.
+///
+/// The end-to-end shape of the decision: the buffer does not parse, the server
+/// answers anyway, and what it offers comes from the interpreter's own
+/// vocabulary (`cpt-gearbox-adr-gdl-completion-and-hover`).
+#[test]
+fn completion_inside_an_unparseable_call_offers_its_parameters() {
+    let dir = scratch("completion");
+    let uri = gearbox_ir::file_uri(&dir.join("gear.gdl"));
+    // Deliberately unfinished: this is the state a person completes from.
+    let text = "gear(\n  name = \"demo\",\n  ";
+    let items: Vec<CompletionItem> = answer(method::COMPLETION, &uri, text, 2, 2);
+
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(labels.contains(&"package"), "{labels:?}");
+    assert!(
+        !labels.contains(&"name"),
+        "`name` is already written, so offering it restates the file: {labels:?}"
+    );
+    assert!(
+        items.iter().all(|i| i.kind == lsp::COMPLETION_FIELD),
+        "a parameter is a Field, not a Function: {items:?}"
+    );
+}
+
+/// At the top of a file, the constructs that file kind admits.
+#[test]
+fn completion_at_the_top_level_offers_the_file_s_own_constructs() {
+    let dir = scratch("completion-top");
+    let uri = gearbox_ir::file_uri(&dir.join("product.gdl"));
+    let items: Vec<CompletionItem> = answer(method::COMPLETION, &uri, "", 0, 0);
+
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(labels.contains(&"product"), "{labels:?}");
+    assert!(labels.contains(&"use_gear"), "{labels:?}");
+    assert!(
+        !labels.contains(&"gear"),
+        "a product description cannot declare a gear: {labels:?}"
+    );
+    assert!(items.iter().all(|i| i.kind == lsp::COMPLETION_FUNCTION));
+}
+
+/// Hover returns the doc comment the builtin carries.
+#[test]
+fn hover_inside_a_call_explains_that_call() {
+    let dir = scratch("hover");
+    let uri = gearbox_ir::file_uri(&dir.join("gear.gdl"));
+    let text = "gear(\n  package = cargo(crate_name = \"c\", \n";
+    let hover: Option<Hover> = answer(method::HOVER, &uri, text, 1, 38);
+    let hover = hover.expect("the caret is inside `cargo(...)`");
+    assert!(
+        hover
+            .contents
+            .contains("where a gear's or SDK's crate lives"),
+        "the summary from globals.rs must reach the editor: {}",
+        hover.contents
+    );
+}
+
+/// A document this server has never been told about answers empty, not an error.
+///
+/// An editor can ask before its `didOpen` has crossed the wire, and a failed
+/// request there would surface to the person as a broken feature rather than as
+/// the ordinary race it is.
+#[test]
+fn a_document_the_server_does_not_hold_answers_empty() {
+    let (server, _client) = Connection::memory();
+    let mut state = state();
+    let uri = gearbox_ir::file_uri(&scratch("unknown").join("gear.gdl"));
+    let request = lsp_server::Request {
+        id: RequestId::from(1),
+        method: method::COMPLETION.to_owned(),
+        params: serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 0, "character": 0 },
+        }),
+    };
+    let response = dispatch(&server, &mut state, request).expect("answered");
+    let value = response.response_result.expect("not an error");
+    let items: Vec<CompletionItem> = serde_json::from_value(value).expect("decodes");
+    assert!(items.is_empty());
+}
+
+/// Hover answers a successful `null` rather than an error in both empty cases.
+///
+/// A document the server does not hold, and a caret at the top level with no
+/// enclosing call. Both are ordinary, and an error in either would surface to
+/// the person as a broken feature rather than as "nothing to say here".
+#[test]
+fn hover_answers_null_rather_than_failing_when_it_has_nothing() {
+    let dir = scratch("hover-empty");
+    let held = gearbox_ir::file_uri(&dir.join("gear.gdl"));
+
+    // Held, but the caret is outside every call.
+    let outside: Option<Hover> = answer(method::HOVER, &held, "gear(\n)\n", 1, 1);
+    assert_eq!(outside, None, "the top level is inside no call");
+
+    // Not held at all.
+    let (server, _client) = Connection::memory();
+    let mut state = state();
+    let unknown = gearbox_ir::file_uri(&scratch("hover-unknown").join("gear.gdl"));
+    let request = lsp_server::Request {
+        id: RequestId::from(1),
+        method: method::HOVER.to_owned(),
+        params: serde_json::json!({
+            "textDocument": { "uri": unknown },
+            "position": { "line": 0, "character": 0 },
+        }),
+    };
+    let response = dispatch(&server, &mut state, request).expect("answered");
+    let value = response
+        .response_result
+        .expect("an unopened document is not an error");
+    assert!(
+        serde_json::from_value::<Option<Hover>>(value)
+            .expect("decodes")
+            .is_none()
+    );
+}
+
+/// A parameter carries its type in `detail` and its prose in `documentation`.
+///
+/// Both fields, because swapping them would leave every other test green: the
+/// three above check `label` and `kind` only. A construct carries no `detail` at
+/// all -- putting the summary in both fields showed the same sentence twice.
+#[test]
+fn a_completion_item_separates_its_type_from_its_prose() {
+    let dir = scratch("completion-detail");
+    let gear_uri = gearbox_ir::file_uri(&dir.join("gear.gdl"));
+    let items: Vec<CompletionItem> = answer(method::COMPLETION, &gear_uri, "cargo(", 0, 6);
+    let param = items
+        .iter()
+        .find(|i| i.label == "crate_name")
+        .expect("`cargo` takes `crate_name`");
+    assert!(
+        param.detail.as_deref().is_some_and(|d| d.contains("str")),
+        "`detail` is the parameter's type: {:?}",
+        param.detail
+    );
+
+    let top: Vec<CompletionItem> = answer(method::COMPLETION, &gear_uri, "", 0, 0);
+    let construct = top
+        .iter()
+        .find(|i| i.label == "cargo")
+        .expect("`cargo` is a top-level construct");
+    assert_eq!(
+        construct.detail, None,
+        "a construct has no type to show beside its name"
+    );
+    assert!(
+        construct
+            .documentation
+            .as_deref()
+            .is_some_and(|d| d.contains("crate lives")),
+        "`documentation` is the summary from globals.rs: {:?}",
+        construct.documentation
+    );
+}
+
+/// Completion and hover answer before `initialize`, deliberately.
+///
+/// Every other request arm goes through `require_ready`, which needs a source
+/// root. These two need none -- they read the client's buffer and the
+/// interpreter's vocabulary -- so the gate would refuse completion in exactly
+/// the session that wants it most, a `gear.gdl` opened on its own. Pinned so the
+/// asymmetry reads as a decision rather than an omission.
+#[test]
+fn the_assist_requests_need_no_initialize_and_no_source_root() {
+    let (server, _client) = Connection::memory();
+    let mut state = state();
+    state.initialized = false;
+    assert!(state.roots.is_empty(), "the fixture opens no root");
+
+    let dir = scratch("uninitialised");
+    let uri = gearbox_ir::file_uri(&dir.join("gear.gdl"));
+    assert!(document_notification(
+        &server,
+        &mut state,
+        did_open(&uri, "cargo(")
+    ));
+
+    let request = lsp_server::Request {
+        id: RequestId::from(1),
+        method: method::COMPLETION.to_owned(),
+        params: serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 0, "character": 6 },
+        }),
+    };
+    let response = dispatch(&server, &mut state, request).expect("answered");
+    let value = response
+        .response_result
+        .expect("not refused for want of `initialize`");
+    let items: Vec<CompletionItem> = serde_json::from_value(value).expect("decodes");
+    assert!(
+        items.iter().any(|i| i.label == "crate_name"),
+        "the vocabulary answers without a root: {items:?}"
     );
 }

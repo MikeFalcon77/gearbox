@@ -631,3 +631,41 @@ fn rendered_product_templates_evaluate() {
         );
     }
 }
+
+/// `plugin(...)` records the line it was written on.
+///
+/// Every other span-carrying record has this test -- `use_gear` and `source` in
+/// this file, the profiles beside them -- and without it a `call_location` that
+/// returned the wrong line, or `None`, would look exactly like the file-level
+/// fallback to every downstream test.
+#[test]
+fn plugin_on_the_fifth_line_records_line_four() {
+    let src = r#"
+product(
+    id = "demo", version = "0.1.0",
+    sources = [source(id = "s", at = path("."))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [
+        use_gear("host", source = "s", plugins = [plugin("filler")]),
+    ],
+)
+"#;
+    let (intent, codes, messages) = eval(src);
+    assert!(codes.is_empty(), "{codes:?} {messages}");
+    let intent = intent.expect("the description evaluates");
+    let plugin = &intent.selected_gears[0].plugins[0];
+    let at = plugin
+        .declared_at
+        .as_ref()
+        .expect("`plugin(...)` records where it was written");
+    let expected = src
+        .lines()
+        .position(|line| line.contains("plugin(\"filler\")"))
+        .expect("the fixture writes one");
+    assert_eq!(
+        at.range.start.line as usize, expected,
+        "the span must be the `plugin(...)` call, not the enclosing `use_gear`"
+    );
+    assert!(at.uri.contains("product.gdl"), "{}", at.uri);
+}

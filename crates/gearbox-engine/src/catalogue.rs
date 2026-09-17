@@ -14,7 +14,12 @@ use crate::source::SourceRoot;
 
 /// The name a gear's description must have, so discovery is a filename match
 /// rather than a heuristic.
-pub const GEAR_FILE: &str = "gear.gdl";
+/// Re-exported from `gearbox_gdl`, not declared here.
+///
+/// Two copies of the name meant the engine and the language server could
+/// disagree about which files are descriptions: a rename would have given one
+/// of them diagnostics and the other silence.
+pub use gearbox_gdl::GEAR_FILE;
 
 /// Directory names never worth descending into.
 ///

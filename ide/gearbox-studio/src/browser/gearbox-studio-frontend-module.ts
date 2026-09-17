@@ -95,6 +95,7 @@ import { GearAuthorWidget } from "./gear/gear-author-widget";
 import { StartWidget } from "./start/start-widget";
 import { AddGearWidget } from "./add-gear/add-gear-widget";
 import { DescriptionMarkers } from "./gdl/description-markers";
+import { GdlAssistContribution } from "./gdl/gdl-assist-contribution";
 import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
 import { FabricThemeContribution } from "./theme/fabric-theme-contribution";
 import { GearboxPerspectives } from "./shell/gearbox-perspectives";
@@ -222,6 +223,11 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // contributions have started.
   bind(DescriptionMarkers).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(DescriptionMarkers);
+
+  // Completion and hover for `.gdl`, answered by the engine. A contribution
+  // because the providers are registered in `onStart`; nothing injects it.
+  bind(GdlAssistContribution).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(GdlAssistContribution);
 
   // Opens the directories Studio already knows it works on. Without a workspace
   // the Explorer is empty, a generated `product.lock` cannot be opened at all,

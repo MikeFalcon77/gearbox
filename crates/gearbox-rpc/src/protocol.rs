@@ -48,6 +48,8 @@ pub mod method {
     pub const DID_CHANGE: &str = "textDocument/didChange";
     pub const DID_CLOSE: &str = "textDocument/didClose";
     pub const PUBLISH_DIAGNOSTICS: &str = "textDocument/publishDiagnostics";
+    pub const COMPLETION: &str = "textDocument/completion";
+    pub const HOVER: &str = "textDocument/hover";
     pub const CATALOGUE_CHANGED: &str = "gearbox/catalogueChanged";
     pub const CATALOGUE_DIAGNOSTICS: &str = "gearbox/catalogueDiagnostics";
     pub const PROGRESS: &str = "$/progress";
@@ -293,6 +295,32 @@ pub struct Capabilities {
     /// bookkeeping here.
     #[serde(rename = "textDocumentSync")]
     pub text_document_sync: u8,
+
+    /// LSP's `ServerCapabilities.completionProvider`, in LSP's spelling.
+    ///
+    /// A language client that does not see this never sends
+    /// `textDocument/completion`, so an unadvertised provider is a silent
+    /// no-feature -- the same failure mode `textDocumentSync` has.
+    #[serde(rename = "completionProvider")]
+    pub completion_provider: CompletionOptions,
+
+    /// LSP's `ServerCapabilities.hoverProvider`.
+    #[serde(rename = "hoverProvider")]
+    pub hover_provider: bool,
+}
+
+/// LSP's `CompletionOptions`.
+///
+/// No `triggerCharacters`: completion here is asked for explicitly or on an
+/// identifier, and Monaco's trigger characters are single characters only. `(`
+/// as a trigger would open the list on every call in the file, including the
+/// ones a person has finished writing.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct CompletionOptions {
+    /// Whether a chosen item needs a second round trip to complete. It does not:
+    /// every label is already the text to insert.
+    #[serde(rename = "resolveProvider")]
+    pub resolve_provider: bool,
 }
 
 /// `gearbox/product/load` -- evaluate a `product.gdl` and return what it says.

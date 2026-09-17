@@ -11,7 +11,11 @@
 // below from `vscode-languageserver-protocol`, written by neither side and
 // therefore unable to drift from either (cpt-gearbox-adr-gdl-language-server).
 
-import type { PublishDiagnosticsParams } from "@theia/core/shared/vscode-languageserver-protocol";
+import type {
+  CompletionItem,
+  Hover,
+  PublishDiagnosticsParams,
+} from "@theia/core/shared/vscode-languageserver-protocol";
 
 import type { CatalogueChanged } from "./generated/CatalogueChanged";
 import type { CatalogueDiagnostics } from "./generated/CatalogueDiagnostics";
@@ -80,6 +84,8 @@ export const method = {
   DID_OPEN: "textDocument/didOpen",
   DID_CHANGE: "textDocument/didChange",
   DID_CLOSE: "textDocument/didClose",
+  COMPLETION: "textDocument/completion",
+  HOVER: "textDocument/hover",
   PUBLISH_DIAGNOSTICS: "textDocument/publishDiagnostics",
 } as const;
 
@@ -464,6 +470,28 @@ export interface GearboxService {
    * outliving its buffer, pointing at text nobody can see.
    */
   didCloseDocument(uri: string): Promise<void>;
+
+  /**
+   * What may be typed at one position in an open description.
+   *
+   * The first *request* on the document surface, unlike the three notifications
+   * above. The engine answers from the buffer it was last told about, so a
+   * caller must have sent `didOpenDocument` first -- an unknown document answers
+   * with an empty list rather than failing, because an editor can legitimately
+   * ask before the open has crossed the wire.
+   *
+   * `CompletionItem` is LSP's, imported rather than generated, for the reason
+   * the header of this file gives.
+   */
+  completion(uri: string, line: number, character: number): Promise<CompletionItem[]>;
+
+  /**
+   * The documentation for whatever call the caret is inside.
+   *
+   * `null` when the caret is not inside a known construct, which is most of a
+   * file.
+   */
+  hover(uri: string, line: number, character: number): Promise<Hover | null>;
 
   dispose(): void;
   setClient(client: GearboxClient | undefined): void;

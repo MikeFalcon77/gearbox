@@ -23,6 +23,7 @@ export * from "./ClusterPrimitive";
 export * from "./ClusterProviderDecl";
 export * from "./ClusterResolution";
 export * from "./ClusterScopeIntent";
+export * from "./CompletionOptions";
 export * from "./ConfigFieldDecl";
 export * from "./ConfigFieldType";
 export * from "./ConfigSchema";

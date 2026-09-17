@@ -493,5 +493,8 @@ gdl_record! {
         /// The reason this exists: the canonical case is static auth in dev and
         /// real OIDC in prod, and that has to be one product file, not two.
         pub profiles: Vec<String>,
+        /// Where `plugin(...)` was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
     }
 }

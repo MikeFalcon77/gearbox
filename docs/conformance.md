@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **177** — 174 built, 0 not built, 2 broken, 1 not observed.
+Claims: **178** — 177 built, 0 not built, 0 broken, 1 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -100,7 +100,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | both repositories are workspace roots | `ADR-0011 §Consequences: Explorer remains` | ✅ built |  |
 | the watcher does not walk the Rust target directories | `ADR-0011 §Scope: which packages are present` | ✅ built |  |
 | Source Control lists both repositories | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
-| the change count is the repository's, not a placeholder | `ADR-0011 §Consequences: Git remains` | ❌ broken | Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m |
+| the change count is the repository's, not a placeholder | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
 | git decorates the Explorer | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
 | a product.lock opened as a file is read-only | `PRD cpt-gearbox-fr-lock-read-only` | ✅ built |  |
 
@@ -137,7 +137,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Clone keeps the source comment line count | `ADR-0013 §Confirmation` | ✅ built |  |
 | Create Gear declares its folder as a source and adds the gear | `ADR-0013 §Amendment: create for a product` | ✅ built |  |
 | a config edit changes one line | `ADR-0013 §Confirmation` | ✅ built |  |
-| draft edits two config keys with one Apply preview; Discard restores | `ADR-0013 §Confirmation` | ❌ broken | [31mTest timeout of 120000ms exceeded.[39m |
+| draft edits two config keys with one Apply preview; Discard restores | `ADR-0013 §Confirmation` | ✅ built |  |
 | a config key named password is refused with an explanation | `ADR-0013 §Confirmation` | ✅ built |  |
 | an added embedded profile appears in the switcher and resolves | `ADR-0013 §Confirmation` | ✅ built |  |
 | an added self_hosted profile appears in the switcher and resolves | `ADR-0013 §Confirmation` | ✅ built |  |
@@ -153,6 +153,12 @@ Rust, and the ADRs' own Confirmation sections say which.
 | opening the chat after a selection still shows the chip | `ADR-0017 context from the services` | ✅ built |  |
 | a catalogue row dropped on the chat becomes a chip | `ADR-0017 context from the services` | ✅ built |  |
 | a conflict row dropped on the chat becomes a chip | `ADR-0017 context from the services` | ✅ built |  |
+
+## `conformance/adr-0022-gdl-assist.spec.ts`
+
+| Claim | Source | Status | Note |
+|---|---|---|---|
+| completion offers a construct's parameters inside an unfinished call | `ADR-0022 §Decision Outcome` | ✅ built |  |
 
 ## `conformance/plan-widgets.spec.ts`
 

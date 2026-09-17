@@ -2,9 +2,11 @@
 //!
 //! The language server's whole engine-side surface. One function rather than
 //! two because the rule deciding which evaluator runs is the file's *name*, and
-//! that rule is already written down twice -- `PRODUCT_FILE` and `GEAR_FILE`.
-//! A caller applying it itself would be a third place for the two names to live,
-//! and the editor's language registration would be a fourth.
+//! those two names are `gearbox_gdl::PRODUCT_FILE` and `GEAR_FILE` -- one copy,
+//! in the crate that owns the language, consumed by this and by
+//! `gearbox_gdl::assist::vocabulary_for`. A caller applying the rule itself
+//! would be a third place for it to live, and the editor's language
+//! registration would be a fourth.
 //!
 //! Reads nothing. The text belongs to the client's buffer, which is the point:
 //! what is on disk is the question `load_product` and `load_catalogue` answer,

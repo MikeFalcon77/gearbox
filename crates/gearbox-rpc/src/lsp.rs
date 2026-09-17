@@ -19,7 +19,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use gearbox_ir::{Diagnostic, Location, Range, Severity};
+use gearbox_ir::{Diagnostic, Location, Position, Range, Severity};
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
@@ -147,10 +147,15 @@ fn normalized(path: &Path) -> PathBuf {
 /// (`cpt-gearbox-adr-gdl-language-server`): the diagnostic must be about *this*
 /// document, and it must say *where* in it.
 ///
-/// 81 diagnostics in `gearbox-engine` are built with `Location::file`, which is
-/// `Range::whole_file` -- the sentinel meaning "this file", not "here". Publishing those would put a marker at the very start of
-/// the document, and that is not a less precise claim about where the error is,
-/// it is a false one. They still reach the person through the Problems panel by
+/// Many diagnostics are built with `Location::file`, which is
+/// `Range::whole_file` -- the sentinel meaning "this file", not "here".
+/// Publishing those would put a marker at the very start of the document, and
+/// that is not a less precise claim about where the error is, it is a false one.
+///
+/// **No count here on purpose.** This comment used to give one, and it was
+/// stale within a day: the number moves every time a declaration learns to
+/// record its span. `grep -c 'Location::file('` answers it for whoever needs
+/// it today. They still reach the person through the Problems panel by
 /// way of the resolution, anchored to the file without pretending to a position.
 ///
 /// **A zero-width range is not the same thing as that sentinel**, and the
@@ -288,6 +293,49 @@ pub struct TextDocumentContentChangeEvent {
 pub struct DidChangeTextDocumentParams {
     pub text_document: VersionedTextDocumentIdentifier,
     pub content_changes: Vec<TextDocumentContentChangeEvent>,
+}
+
+/// LSP's `TextDocumentPositionParams`, which both requests take.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextDocumentPositionParams {
+    pub text_document: TextDocumentIdentifier,
+    pub position: Position,
+}
+
+/// One completion item.
+///
+/// A deliberate subset of LSP's: `label`, what it is, and the two texts an
+/// editor shows beside it. `insertText` is omitted because every label here is
+/// already exactly what gets typed -- a construct name or a parameter name --
+/// and an `insertText` equal to the label is a field that can only drift.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionItem {
+    pub label: String,
+    /// LSP's `CompletionItemKind`: 3 is Function, 5 is Field. Parameters are
+    /// Field rather than Variable because an editor shows Field with the icon a
+    /// person reads as "part of this call".
+    pub kind: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub documentation: Option<String>,
+}
+
+/// LSP's `CompletionItemKind` for a callable.
+pub const COMPLETION_FUNCTION: u8 = 3;
+/// LSP's `CompletionItemKind` for a named argument.
+pub const COMPLETION_FIELD: u8 = 5;
+
+/// What `textDocument/hover` answers.
+///
+/// `contents` as a plain string is LSP's `MarkedString` in its simplest legal
+/// form. The prose comes from a Rust doc comment, which is Markdown already.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Hover {
+    pub contents: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

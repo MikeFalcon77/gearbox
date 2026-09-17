@@ -10,7 +10,11 @@
 import { ILogger } from "@theia/core/lib/common/logger";
 import { ResponseError } from "@theia/core/lib/common/message-rpc/rpc-message-encoder";
 import { inject, injectable } from "@theia/core/shared/inversify";
-import type { PublishDiagnosticsParams } from "@theia/core/shared/vscode-languageserver-protocol";
+import type {
+  CompletionItem,
+  Hover,
+  PublishDiagnosticsParams,
+} from "@theia/core/shared/vscode-languageserver-protocol";
 import { randomBytes } from "crypto";
 import { execFile } from "child_process";
 import * as fs from "fs";
@@ -619,6 +623,45 @@ export class GearboxServiceImpl implements GearboxService {
       // and refuses a change carrying a `range` rather than half-applying it.
       contentChanges: [{ text }],
     });
+  }
+
+  async completion(uri: string, line: number, character: number): Promise<CompletionItem[]> {
+    return this.documentRequest<CompletionItem[]>(method.COMPLETION, uri, line, character, []);
+  }
+
+  async hover(uri: string, line: number, character: number): Promise<Hover | null> {
+    return this.documentRequest<Hover | null>(method.HOVER, uri, line, character, null);
+  }
+
+  /**
+   * One position-based request, or the empty answer.
+   *
+   * **Swallows the failure deliberately, unlike `request`.** These two are asked
+   * on a keystroke, so a dead or restarting engine would otherwise surface as a
+   * dialog per character typed. The features silently do nothing until the
+   * engine is back, which is what an editor does when a language server is down
+   * -- and `didOpenDocument` is replayed on the next `initialize`, so recovery
+   * needs no action from the person.
+   */
+  private async documentRequest<T>(
+    engineMethod: string,
+    uri: string,
+    line: number,
+    character: number,
+    empty: T,
+  ): Promise<T> {
+    const engine = this.engine;
+    if (!engine || engine.dead) return empty;
+    try {
+      return await engine.request<T>(
+        engineMethod,
+        { textDocument: { uri }, position: { line, character } },
+        PRODUCT_TIMEOUT_MS,
+      );
+    } catch (error) {
+      this.logger.warn(`gearbox: ${engineMethod} failed: ${String(error)}`);
+      return empty;
+    }
   }
 
   async didCloseDocument(uri: string): Promise<void> {
