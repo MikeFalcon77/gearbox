@@ -17,6 +17,9 @@
 // visibility with no reveal anywhere.
 
 import { readFileSync, writeFileSync } from "node:fs";
+
+import { restoreCorpus } from "../fixtures/corpus-files";
+import { restoreProducts } from "../fixtures/products-tree";
 import { join } from "node:path";
 
 /** The repository root, for the one claim that edits a description on disk. */
@@ -606,7 +609,13 @@ test.describe("opening a product is one act", () => {
         timeout: 30_000,
       });
     } finally {
-      writeFileSync(gdl, original);
+      // **From `git`, not from the snapshot above.** Writing `original` back
+      // assumes it was the committed text, and when it is not -- because an
+      // earlier run or an earlier claim left its own edit behind -- the restore
+      // re-writes the damage instead of undoing it. One leftover then survives
+      // every later cleanup, which is how a single failure became three in
+      // `prd-diagnostics`.
+      restoreProducts(REPO);
     }
   });
 
@@ -646,8 +655,10 @@ test.describe("opening a product is one act", () => {
       await expect(page.locator(".gbx-detail")).toContainText(probe, { timeout: 60_000 });
     } finally {
       // Load-bearing: `global-setup` guards `products/` only, so nothing else
-      // in this suite would notice a `gear.gdl` left rewritten.
-      writeFileSync(gdl, original);
+      // in this suite would notice a `gear.gdl` left rewritten. Restored from
+      // `git` for the reason given on the claim above -- this file is one of
+      // `GUARDED_CORPUS_FILES`, so the helper already knows about it.
+      restoreCorpus(REPO);
     }
   });
 });

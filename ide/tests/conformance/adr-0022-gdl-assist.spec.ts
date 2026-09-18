@@ -8,6 +8,8 @@
 // copy, or a provider registered too late, fails silently.
 
 import { readFileSync, writeFileSync } from "node:fs";
+
+import { restoreProducts } from "../fixtures/products-tree";
 import { join } from "node:path";
 
 import { expect, revealInExplorer, test } from "../fixtures/studio";
@@ -74,7 +76,13 @@ or registered after `onLanguage` fired, shows nothing and reports nothing",
         `the engine's vocabulary must reach the widget; it offered: ${offered}`,
       ).toContain("source");
     } finally {
-      writeFileSync(PRODUCT_GDL, original);
+      // **From `git`, not from the snapshot above.** Writing `original` back
+      // assumes it was the committed text, and when it is not -- because an
+      // earlier run or an earlier claim left its own edit behind -- the restore
+      // re-writes the damage instead of undoing it. One leftover then survives
+      // every later cleanup, which is how a single failure became three in
+      // `prd-diagnostics`.
+      restoreProducts(REPO);
     }
   });
 });

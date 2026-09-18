@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **179** — 178 built, 0 not built, 0 broken, 1 not observed.
+Claims: **180** — 179 built, 0 not built, 0 broken, 1 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -140,6 +140,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | a config edit changes one line | `ADR-0013 §Confirmation` | ✅ built |  |
 | draft edits two config keys with one Apply preview; Discard restores | `ADR-0013 §Confirmation` | ✅ built |  |
 | a config key named password is refused with an explanation | `ADR-0013 §Confirmation` | ✅ built |  |
+| one connection is edited without touching the one beside it | `ADR-0013 §Amendment: a plugin is not a selected gear` | ✅ built |  |
 | an added embedded profile appears in the switcher and resolves | `ADR-0013 §Confirmation` | ✅ built |  |
 | an added self_hosted profile appears in the switcher and resolves | `ADR-0013 §Confirmation` | ✅ built |  |
 | an added kubernetes profile appears in the switcher and resolves | `ADR-0013 §Confirmation` | ✅ built |  |

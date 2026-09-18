@@ -13,6 +13,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { corpusStatus, restoreCorpus } from "../fixtures/corpus-files";
+import { productsStatus, restoreProducts } from "../fixtures/products-tree";
 import {
   expect,
   openConflicts,
@@ -96,6 +98,15 @@ test.describe("diagnostics reach a person", () => {
     // matches HEAD (`fixtures/corpus-files.ts`). Before that guard existed a
     // crash here left the corpus rewritten and nothing said so.
     const { page } = freshStudio;
+    // **Committed before it is broken.** A claim that rewrites a file and puts it
+    // back has to start from the version it intends to put back; starting from
+    // somebody's leftover means restoring the leftover. Asked of `git` rather
+    // than of the text, because the committed *value* belongs to another
+    // repository and pinning it here is the mistake `config_tests.rs` records.
+    expect(
+      corpusStatus(REPO),
+      "this claim rewrites a gear description, so it must start from the committed one",
+    ).toBe("");
     const original = readFileSync(GEAR_GDL, "utf8");
     expect(original, "the file this claim rewrites must declare a category").toMatch(
       /category = "[^"]*"/,
@@ -121,7 +132,13 @@ test.describe("diagnostics reach a person", () => {
         page.locator(".gbx-widget-catalogue").locator('[data-conflict-code="GBX0108"]'),
       ).toHaveCount(1);
     } finally {
-      writeFileSync(GEAR_GDL, original);
+      // **Put back by `git`, not by the snapshot read above.** Writing `original`
+      // back assumes it was the committed text -- and when it is not, the restore
+      // re-writes the damage instead of undoing it, so one run's leftover
+      // survives every later run's cleanup. That cascade is what turned a single
+      // failure into three, and it is why the remedy here is the same one the
+      // guards use.
+      restoreCorpus(REPO);
     }
   });
 
@@ -136,8 +153,18 @@ test.describe("diagnostics reach a person", () => {
     // the markers against what a person is shown.
     await openProduct(studio.page, "dev");
     await openConflicts(studio.page);
-    const shown = await studio.page.locator(".gbx-conflicts .gbx-conflict").count();
-    expect(shown, "the dev profile produces no diagnostic to surface").toBeGreaterThan(0);
+    // **Waited for, not sampled.** `count()` resolves immediately against
+    // whatever is rendered at that instant, and the screen is empty for as long
+    // as a resolution is in flight -- which it can be here for a reason outside
+    // this test, because a description saved anywhere in the tree re-resolves the
+    // open product. Read once with no wait, that made "the profile produces no
+    // diagnostic" a statement about timing rather than about the profile.
+    const list = studio.page.locator(".gbx-conflicts .gbx-conflict");
+    await expect(
+      list.first(),
+      "the dev profile produces no diagnostic to surface",
+    ).toBeVisible({ timeout: 60_000 });
+    const shown = await list.count();
 
     const { files, markers } = await problems(studio.page);
     // Anchored to the product description. The wire type says resolution
@@ -154,15 +181,25 @@ test.describe("diagnostics reach a person", () => {
     // dev, so going prod → dev is the direction that would leave leftovers: a
     // per-file `setMarkers` replaces one file's markers and says nothing about a
     // file the new resolution no longer mentions.
+    // Both counts wait for the screen to hold something first, for the reason
+    // given in the claim above: a `count()` taken while a resolution is in flight
+    // reads zero, and zero here would look like the leak this asserts against
+    // rather than like a read taken too early. The comparison itself is left
+    // exactly as sharp as it was -- what is waited for is the resolution, not the
+    // agreement between the two numbers.
+    const listed = studio.page.locator(".gbx-conflicts .gbx-conflict");
+
     await openProduct(studio.page, "prod");
     await openConflicts(studio.page);
-    const prodShown = await studio.page.locator(".gbx-conflicts .gbx-conflict").count();
+    await expect(listed.first()).toBeVisible({ timeout: 60_000 });
+    const prodShown = await listed.count();
     const prod = await problems(studio.page);
     expect(prod.markers.length).toBe(prodShown);
 
     await openProduct(studio.page, "dev");
     await openConflicts(studio.page);
-    const devShown = await studio.page.locator(".gbx-conflicts .gbx-conflict").count();
+    await expect(listed.first()).toBeVisible({ timeout: 60_000 });
+    const devShown = await listed.count();
     const dev = await problems(studio.page);
 
     expect(devShown).not.toBe(prodShown);
@@ -199,6 +236,11 @@ test.describe("diagnostics reach a person", () => {
     // `product.gdl`, which `prd-explain` locates by `data-uri` and would then
     // match twice.
     const { page } = freshStudio;
+    // The same precondition as the corpus claim above, and for the same reason.
+    expect(
+      productsStatus(REPO),
+      "this claim rewrites the description, so it must start from the committed one",
+    ).toBe("");
     const original = readFileSync(PRODUCT_GDL, "utf8");
     // A typo in a profile constructor: the evaluator reports the name it could
     // not resolve, and the span it gives is the token itself rather than the
@@ -234,16 +276,26 @@ test.describe("diagnostics reach a person", () => {
       // line of the file, and this one is drawn on the line with the typo in it.
       const typoLine = editor.locator(".view-line", { hasText: TYPO });
       await expect(typoLine, "the broken line must be on screen to compare against").toHaveCount(1);
-      const lineBox = await typoLine.boundingBox();
-      const underline = await squiggle.first().boundingBox();
-      expect(lineBox, "the line has no box to measure").not.toBeNull();
-      expect(underline, "the squiggle has no box to measure").not.toBeNull();
-      // A couple of pixels of slack in each direction: the squiggle is drawn
-      // under the glyphs rather than around them, so its box is inset within the
-      // line's row by a rounding amount that depends on the font metrics.
-      expect(underline!.y).toBeGreaterThanOrEqual(lineBox!.y - 2);
-      expect(underline!.y).toBeLessThanOrEqual(lineBox!.y + lineBox!.height + 2);
-      expect(underline!.width, "a squiggle with no width underlines nothing").toBeGreaterThan(0);
+      // **Measured as one retried step, because two boxes are two samples.**
+      // Monaco recycles `.view-line` nodes on every relayout, so a line that is
+      // there when it is counted can be detached by the time it is measured --
+      // and `boundingBox()` answers `null` for a detached node rather than
+      // waiting for it to come back. That is a read losing a race, not a
+      // diagnostic drawn in the wrong place, and it read as the latter.
+      // Retrying re-resolves both nodes together, so the two boxes always come
+      // from the same layout.
+      await expect(async () => {
+        const lineBox = await typoLine.boundingBox();
+        const underline = await squiggle.first().boundingBox();
+        expect(lineBox, "the line has no box to measure").not.toBeNull();
+        expect(underline, "the squiggle has no box to measure").not.toBeNull();
+        // A couple of pixels of slack in each direction: the squiggle is drawn
+        // under the glyphs rather than around them, so its box is inset within
+        // the line's row by a rounding amount that depends on the font metrics.
+        expect(underline!.y).toBeGreaterThanOrEqual(lineBox!.y - 2);
+        expect(underline!.y).toBeLessThanOrEqual(lineBox!.y + lineBox!.height + 2);
+        expect(underline!.width, "a squiggle with no width underlines nothing").toBeGreaterThan(0);
+      }).toPass({ timeout: 30_000 });
 
       // And the marker's own position, which the Problems view renders from
       // `range.start`. `Ln 1, Col 1` is what a diagnostic with no span looks
@@ -254,7 +306,8 @@ test.describe("diagnostics reach a person", () => {
       expect(markers.some((marker) => marker.includes(`Ln ${line}`)), shown).toBe(true);
       expect(markers.some((marker) => marker.includes(TYPO)), shown).toBe(true);
     } finally {
-      writeFileSync(PRODUCT_GDL, original);
+      // From `git`, for the reason given on the corpus restore above.
+      restoreProducts(REPO);
     }
   });
 });
