@@ -179,6 +179,9 @@ re-parses shared crates cannot be cheap however it is scheduled. Before the cach
 
 ## 3. GDL surface
 
+> This section is the surface as planned. The surface as built is `docs/gdl.md`,
+> which is normative where the two differ.
+
 ### 3.1 Host API (globals; no `load()` needed for the vocabulary)
 
 Functions: `gear`, `product`, `cargo`, `provide`, `consume`, `rest`, `grpc`, `lifecycle`,

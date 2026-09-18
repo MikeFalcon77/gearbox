@@ -388,6 +388,9 @@ Display text may change without breaking references.
 
 # 10. GDL: Gears Description Language
 
+> This section is the argument for the language. The language as it is actually
+> evaluated is `docs/gdl.md`, which is normative where the two differ.
+
 The proposed authoring language is called **GDL — Gears Description Language**.
 
 GDL is **not a new parser or programming language**.

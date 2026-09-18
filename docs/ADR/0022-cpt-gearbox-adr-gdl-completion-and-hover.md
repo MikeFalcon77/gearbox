@@ -244,6 +244,33 @@ Also settled here: the two description filenames live once, in
 `assist::vocabulary_for` and `gearbox_engine::check_description`. Two copies
 meant a rename would have given one of them diagnostics and the other silence.
 
+## Amendment 2026-09-18: the reference came back into this repository
+
+`docs/gdl.md` was moved into this repository, out of the `gears-rust` checkout.
+
+Two passages above lean on the layout that has just changed, and are left as
+written because they record why this was built rather than where a file sits.
+The Context says a parameter name "has to be remembered or looked up in
+`docs/gdl.md`, which lives in a different checkout (`gears-rust`) and is
+reachable only when that checkout is present". The Consequences say the document
+"stops being the only way to learn a parameter list, which matters because it is
+in another checkout". Both were true when this was decided; neither describes the
+tree now.
+
+**The decision stands, and the better reason for it is the one that did not
+change.** Reachability was the weaker half of the argument: it would have been
+answered just as well by moving the file, which is what happened. The half that
+survives is drift. Completion and hover are answered from the interpreter's own
+globals, so they cannot describe a parameter the engine does not have. A
+reference document cannot make that promise, and moving it next to the
+interpreter does not give it one — a hand-written page and an evaluator in the
+same repository drift exactly as easily as in two. What stops that is
+generation, not proximity.
+
+So the case for answering from the interpreter is unchanged, and the case
+against a document as the only source is now the whole case rather than half
+of it.
+
 ## Open: `definition`, and the two questions it has to answer first
 
 Not started. `use_gear("x")` should open that gear's `gear.gdl`, and the mapping

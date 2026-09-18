@@ -1,12 +1,5 @@
 //! The worked examples in the GDL reference are executed, not just printed.
 //!
-//! **The reference moved to `gears-rust/docs/gdl.md`**, beside the gears it
-//! describes and the people who write them. The document went; this check
-//! followed it, because a reference whose examples nobody runs is how the two
-//! below rotted in the first place. The cost is that a checkout without the
-//! corpus can no longer run them, which is the same gate the product example
-//! already had.
-//!
 //! They had rotted, and the way they rotted is the argument for this file. The
 //! product example declared `provider("postgres", …)` with no `secret_ref` --
 //! which the same document calls `GBX0506` one page earlier -- and left
@@ -22,11 +15,17 @@
 //! time. A copy pasted into this file would pass forever while the document
 //! drifted, which is the failure being fixed rather than a different one.
 //!
-//! The two examples can claim different things and are checked differently. The
-//! gear example names a crate that does not exist on disk, so it is *evaluated*
-//! -- syntax, refused arguments, records -- and no more. The product example is
+//! **The reference is in this repository**, beside the interpreter it describes.
+//! It spent a while in the corpus checkout, and reading it was gated on that
+//! checkout being present; it is tracked here now, so that gate is gone along
+//! with the three-way decision that expressed it.
+//!
+//! The two examples claim different things and are checked differently. The gear
+//! example names a crate that does not exist on disk, so it is *evaluated* --
+//! syntax, refused arguments, records -- and no more. The product example is
 //! evaluated and then **resolved against the real corpus**, which is what makes
-//! `GBX0505` and `GBX0506` observable at all.
+//! `GBX0505` and `GBX0506` observable at all, and is the only part of this file
+//! that still wants `gears-rust` on disk.
 
 #![allow(
     clippy::unwrap_used,
@@ -41,84 +40,21 @@ use gearbox_gdl::GdlEngine;
 use gearbox_gdl::engine::FileIdentity;
 use gearbox_ir::{Diagnostic, RelPath, Severity, SourceId};
 
-/// The reference, in the corpus checkout that now holds it.
+/// The reference, in this repository.
 ///
-/// `None` when there is no checkout -- the same condition the product example
-/// already skipped on, now reaching the document itself.
-fn gdl_md() -> Option<PathBuf> {
-    corpus()?.join("docs/gdl.md").canonicalize().ok()
+/// `CARGO_MANIFEST_DIR` is `crates/gearbox-engine`, so the document is two
+/// levels up. It is tracked beside the interpreter, so unlike the corpus it
+/// cannot be absent from a checkout: no `Option`, and nothing to skip on.
+fn gdl_md() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/gdl.md")
 }
 
 /// Whether this run demanded the corpus rather than merely preferring it.
+///
+/// Only the product example asks: it is the one that resolves.
 fn required() -> bool {
     std::env::var("GEARBOX_CORPUS_REQUIRED").is_ok()
 }
-
-/// What to do about the reference.
-///
-/// Separated from *finding* it so the decision can be tested. On a machine that
-/// has the checkout -- which is every machine this test is interesting on -- the
-/// skip arm is unreachable, and an unreachable arm that decides whether a suite
-/// reports anything is exactly the kind that quietly stops working. Same shape,
-/// and the same reasoning, as `decide` in `gearbox-project`'s error-enum corpus
-/// test.
-#[derive(Debug, PartialEq, Eq)]
-enum Reference {
-    /// Read the examples out of this file.
-    Read(PathBuf),
-    /// No checkout, and none was demanded: say so and pass.
-    Skip,
-    /// No checkout, and the run said it required one.
-    Demanded,
-}
-
-fn decide(found: Option<PathBuf>, required: bool) -> Reference {
-    match (found, required) {
-        (Some(path), _) => Reference::Read(path),
-        (None, true) => Reference::Demanded,
-        (None, false) => Reference::Skip,
-    }
-}
-
-/// The examples, or `None` after announcing the skip.
-///
-/// One place, because three tests need the same decision and a skip spelled
-/// differently in each is a skip somebody will eventually get wrong.
-fn examples_or_skip(test: &str) -> Option<Vec<String>> {
-    match decide(gdl_md(), required()) {
-        Reference::Read(path) => Some(examples(&path)),
-        Reference::Demanded => panic!(
-            "GEARBOX_CORPUS_REQUIRED is set and no `gears-rust` checkout is reachable, \
-             so the GDL reference could not be read"
-        ),
-        Reference::Skip => {
-            eprintln!(
-                "SKIP {test}: no `gears-rust` checkout reachable, so `docs/gdl.md` could \
-                 not be read. Set GEARBOX_CORPUS_REQUIRED=1 to make this a failure."
-            );
-            None
-        }
-    }
-}
-
-#[test]
-fn a_reachable_reference_is_read_whether_or_not_it_was_demanded() {
-    let path = PathBuf::from("/somewhere/gears-rust/docs/gdl.md");
-    assert_eq!(
-        decide(Some(path.clone()), false),
-        Reference::Read(path.clone())
-    );
-    assert_eq!(decide(Some(path.clone()), true), Reference::Read(path));
-}
-
-#[test]
-fn a_missing_reference_skips_unless_the_run_demanded_one() {
-    // The arm no machine with a checkout can reach, which is why it is tested
-    // here rather than left to the filesystem to exercise.
-    assert_eq!(decide(None, false), Reference::Skip);
-    assert_eq!(decide(None, true), Reference::Demanded);
-}
-
 /// The fenced blocks under `## Examples`, in document order.
 ///
 /// Deliberately anchored on the heading rather than taking the last two blocks
@@ -177,9 +113,7 @@ fn corpus() -> Option<PathBuf> {
 
 #[test]
 fn the_examples_are_where_the_test_expects_them() {
-    let Some(found) = examples_or_skip("the_examples_are_where_the_test_expects_them") else {
-        return;
-    };
+    let found = examples(&gdl_md());
     assert_eq!(
         found.len(),
         2,
@@ -200,9 +134,7 @@ fn the_examples_are_where_the_test_expects_them() {
 
 #[test]
 fn the_gear_example_evaluates() {
-    let Some(found) = examples_or_skip("the_gear_example_evaluates") else {
-        return;
-    };
+    let found = examples(&gdl_md());
     let source = &found[0];
     let outcome = GdlEngine::new().eval_gear(&identity("payments-audit/gear.gdl"), source);
     assert_eq!(
@@ -215,12 +147,23 @@ fn the_gear_example_evaluates() {
 
 #[test]
 fn the_product_example_evaluates_and_resolves() {
-    // Against the corpus, because the faults this exists for are resolution
-    // faults: a missing `secret_ref` and an unselected `cluster` gear are both
-    // invisible to evaluation.
-    let Some(found) = examples_or_skip("the_product_example_evaluates_and_resolves") else {
-        return;
-    };
+    let found = examples(&gdl_md());
+    let source = &found[1];
+
+    // Evaluating needs nothing but the file, so it happens on every machine.
+    let outcome = GdlEngine::new().eval_product(&identity("products/demo/product.gdl"), source);
+    assert_eq!(
+        errors(outcome.diagnostics.as_slice()),
+        Vec::<String>::new(),
+        "the product example in the GDL reference does not evaluate"
+    );
+    let intent = outcome.value.expect("it produced no intent");
+
+    // Resolving is what the faults this test exists for require: a missing
+    // `secret_ref` and an unselected `cluster` gear are both invisible to
+    // evaluation, and only the real corpus makes them observable. So the
+    // corpus is asked for here rather than at the top -- everything above
+    // this point is a claim about the document, and the document is local.
     let Some(root) = corpus() else {
         assert!(
             !required(),
@@ -233,15 +176,6 @@ fn the_product_example_evaluates_and_resolves() {
         );
         return;
     };
-
-    let source = &found[1];
-    let outcome = GdlEngine::new().eval_product(&identity("products/demo/product.gdl"), source);
-    assert_eq!(
-        errors(outcome.diagnostics.as_slice()),
-        Vec::<String>::new(),
-        "the product example in the GDL reference does not evaluate"
-    );
-    let intent = outcome.value.expect("it produced no intent");
 
     // **The example text is not rewritten**, which is what makes this a test of
     // the document rather than of a doctored copy. Its `at = path("…")` only

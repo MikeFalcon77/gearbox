@@ -127,9 +127,9 @@ drift guard, and `DiagnosticCode::title()` had no caller outside its own test: i
 was declared for a reference page nobody built. `make diagnostics` now generates
 `docs/diagnostics.md` from `DiagnosticCode::ALL`, guarded by
 `make diagnostics-check` exactly as the editor's grammar vocabulary is. The
-curated table in the GDL reference (since moved to `gears-rust/docs/gdl.md`) stays
-hand-written, because it carries a column —
-which stage reports the code — that the catalogue does not know.
+curated table in the GDL reference, `docs/gdl.md`, stays hand-written, because it
+carries a column — which stage reports the code — that the catalogue does not
+know.
 
 ### Not localized
 

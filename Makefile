@@ -137,10 +137,9 @@ grammar-check: grammar
 # The diagnostics reference is generated from the one catalogue that declares
 # the codes, so the documents cannot describe a code the engine does not have
 # nor miss one it does (cpt-gearbox-nfr-no-type-drift, applied to the documents'
-# view of the catalogue). The curated table in the GDL reference (now
-# gears-rust/docs/gdl.md) stays hand-written:
-# it carries a column -- which stage reports the code -- that the catalogue does
-# not know.
+# view of the catalogue). The curated table in the GDL reference, docs/gdl.md,
+# stays hand-written: it carries a column -- which stage reports the code --
+# that the catalogue does not know.
 #
 # Two outputs, one generator. Studio sees a diagnostic code as the opaque string
 # the wire carries, so it cannot answer "what does GBX0410 mean" without an
