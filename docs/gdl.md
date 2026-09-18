@@ -1,9 +1,5 @@
 # GDL
 
-> The reference for `gear.gdl` and `product.gdl`: the language, as the interpreter in this
-> repository evaluates it. New to these files? Read
-> [GEARBOX.md](../../gears-rust/docs/GEARBOX.md) in the `gears-rust` checkout first.
-
 GDL (Gears Description Language) is a declarative DSL. A file states facts. The resolver decides.
 
 Two file kinds, two vocabularies. `gear()` is not callable in a product file; `product()` is not callable in a gear file.
