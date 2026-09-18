@@ -68,6 +68,14 @@ product(
         # are projected from `ClusterGear::provider_registry()`, so the gear has
         # to be in the closure for them to exist at all.
         use_gear("cluster", source = "gears-rust"),
+
+        # **Not here for a claim -- here because the others cannot resolve
+        # without it.** `cluster`, `event-broker` and `types-registry` all
+        # declare the `rest` capability, and a `rest` gear registers its routes
+        # with the application's REST host; with no `rest_host` in the
+        # application the routes exist and nothing serves them (GBX0305).
+        # `api-gateway` is the one gear in the corpus that provides it.
+        use_gear("api-gateway", source = "gears-rust"),
     ],
 
     cluster_profiles = [

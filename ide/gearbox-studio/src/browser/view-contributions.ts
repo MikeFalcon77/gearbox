@@ -22,7 +22,6 @@ import { CreateProductWidget, type CreateProductState } from "./create/create-pr
 import { CreateGearWidget, type CreateGearState } from "./create/create-gear-widget";
 import { AddGearDialog, type AddGearChoice } from "./add-gear/add-gear-dialog";
 import { ProductEditService } from "./product-edit-service";
-import { AddGearWidget, type AddGearState } from "./add-gear/add-gear-widget";
 import { GraphWidget } from "./graph/graph-widget";
 import { InspectorWidget } from "./inspector/inspector-widget";
 import { GenerateWidget } from "./generate/generate-widget";
@@ -505,7 +504,7 @@ export class GearAuthorViewContribution extends ScopedViewContribution<GearAutho
 }
 
 @injectable()
-export class AddGearViewContribution extends ScopedViewContribution<AddGearWidget> {
+export class AddGearViewContribution extends ScopedViewContribution<Widget> {
   @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
   @inject(ProductEditService) protected readonly edits!: ProductEditService;
   @inject(SelectionService) protected readonly selection!: SelectionService;
@@ -514,10 +513,27 @@ export class AddGearViewContribution extends ScopedViewContribution<AddGearWidge
   @inject(ProductStore) protected readonly products!: ProductStore;
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
 
+  /**
+   * **A contribution with no widget of its own, deliberately.**
+   *
+   * Adding a gear is a modal dialog now, so there is nothing for the layout to
+   * restore and nothing for `openView` to build -- `revealView` below opens the
+   * dialog instead, and that is every entrance this contribution has.
+   *
+   * `widgetId` stays `gearbox.add-gear` all the same, because it is the key the
+   * scoping tables are written against and what they scope is the *entrance*,
+   * which still exists: `availableIn` and `whenClauseFor` read it to keep
+   * `View > Add Gear` and `Open View...` off Home. An id absent from `SCREENS`
+   * reads as "not ours" and is permitted everywhere, which is the hole this
+   * pair was written to close.
+   *
+   * `defaultWidgetOptions` is required by Theia's own options type and means
+   * nothing here: only `openView` reads it, and `revealView` never reaches it.
+   */
   constructor() {
     super({
-      widgetId: AddGearWidget.ID,
-      widgetName: AddGearWidget.LABEL,
+      widgetId: "gearbox.add-gear",
+      widgetName: "Add Gear",
       defaultWidgetOptions: { area: "main" },
       toggleCommandId: "gearbox.product.addGear.toggle",
     });
@@ -532,7 +548,7 @@ export class AddGearViewContribution extends ScopedViewContribution<AddGearWidge
   override registerCommands(commands: CommandRegistry): void {
     super.registerCommands(commands);
     commands.registerCommand(ADD_GEAR, {
-      execute: (state?: AddGearState) => void this.openAdd(state),
+      execute: (state?: AddGearChoice) => void this.openAdd(state),
       isEnabled: () => this.products.current.open !== undefined && this.engine.isConnected,
     });
   }
@@ -550,7 +566,6 @@ export class AddGearViewContribution extends ScopedViewContribution<AddGearWidge
   async openAdd(state?: AddGearChoice): Promise<void> {
     if (!this.products.current.open || !this.engine.isConnected) return;
     if (this.dialog && !this.dialog.isDisposed) { this.dialog.activate(); return; }
-    this.tryGetWidget()?.close();
     const dialog = new AddGearDialog(this.catalogue, this.products, this.edits, this.selection, this.compositionCommands, state);
     this.dialog = dialog;
     try { await dialog.open(); } finally { dialog.dispose(); if (this.dialog === dialog) this.dialog = undefined; }

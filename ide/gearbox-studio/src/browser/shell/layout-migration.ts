@@ -91,6 +91,11 @@ export const CLOSED_ON_MIGRATION: readonly string[] = [
   // `WidgetFactory`, and it re-creates the widget when its cached one has been
   // disposed. Version 7.
   "chat-view-widget",
+  // Adding a gear became a modal dialog, so the panel and its `WidgetFactory`
+  // are gone. A saved layout that still names it has nothing to build from, and
+  // Theia leaves the empty tab this list exists to prevent -- the same failure
+  // as `gearbox.detail` above, from the same cause. Version 8.
+  "gearbox.add-gear",
   // **No `terminal-` here, and that was learned the hard way.** Closing the boot
   // terminal broke the capability: `widget.close()` disposes the widget while
   // `WidgetManager` keeps its entry under the same id, so the next
@@ -104,7 +109,7 @@ export const CLOSED_ON_MIGRATION: readonly string[] = [
 const MIGRATION_KEY = "gearbox.layoutMigration";
 
 /** Bump when `CLOSED_ON_MIGRATION` changes, so the sweep runs again -- once. */
-const MIGRATION_VERSION = 7;
+const MIGRATION_VERSION = 8;
 
 /**
  * Prefixes detached on **every** perspective switch, not once.

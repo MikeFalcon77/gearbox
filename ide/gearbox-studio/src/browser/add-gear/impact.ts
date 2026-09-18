@@ -167,16 +167,3 @@ export function impactOf(
     newDiagnostics,
   };
 }
-
-/** Whether the proposal changes anything a person would want to see. */
-export function isEmpty(impact: Impact): boolean {
-  return (
-    impact.arriving.length === 0 &&
-    impact.applicationsAdded.length === 0 &&
-    impact.applicationsRemoved.length === 0 &&
-    impact.moved.length === 0 &&
-    impact.bindingsAdded.length === 0 &&
-    impact.bindingsChanged.length === 0 &&
-    impact.newDiagnostics.length === 0
-  );
-}

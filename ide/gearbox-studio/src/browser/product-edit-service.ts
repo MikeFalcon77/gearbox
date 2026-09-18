@@ -631,11 +631,6 @@ export class ProductEditService {
     });
   }
 
-  /** Line-oriented preview text for an edit dry-run. */
-  formatDiff(preview: EditGearResult): string {
-    return this.diffText(preview);
-  }
-
   /**
    * Add or remove `gear`, asking first.
    *

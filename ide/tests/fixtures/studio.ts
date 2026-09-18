@@ -991,6 +991,74 @@ export async function productSection(
   await expect(tab).toHaveAttribute("aria-selected", "true");
 }
 
+/**
+ * Open a *named* product, whichever one is open now.
+ *
+ * **Why this is not `openProduct` with an argument.** That helper short-circuits
+ * entirely when the context is already `product`, which is right for it -- the
+ * shared worker session usually has `payments-demo` open and re-opening it every
+ * time cost minutes -- and fatal here: it would silently leave the wrong product
+ * open and every assertion below would read the wrong description.
+ *
+ * So this one closes first when something else is open. That routes through Home,
+ * which is *not* what a claim about a product-to-product transition may do; such
+ * a claim has to drive the picker itself. This helper is for reading a second
+ * product, not for observing the switch.
+ *
+ * `fragment` matches the picker's path column (`products/<name>/product.gdl`)
+ * rather than the display label, because the label is prose -- `Configurable
+ * Gears` for `configurable-gears` -- and the id is what a test knows.
+ */
+export async function openProductById(
+  page: Page,
+  fragment: string,
+  profile: string,
+): Promise<void> {
+  const open = await page.locator(".gbx-toolbar").getAttribute("data-context");
+  if (open === "product") {
+    const already = await page
+      .locator("[data-product-name]")
+      .getAttribute("data-product-name")
+      .catch(() => null);
+    if (already !== fragment) {
+      await runCommand(page, "Close Product");
+      await expectContext(page, "home");
+    }
+  }
+  if ((await page.locator(".gbx-toolbar").getAttribute("data-context")) !== "product") {
+    await runCommand(page, "Open Product…");
+    const options = page.locator(`.quick-input-list [role="option"]`);
+    await options.first().waitFor({ state: "visible", timeout: 30_000 });
+    // Never `.first()` blindly: the list opens with a `Choose product.gdl…`
+    // entry, so an unfiltered first click picks the file dialog.
+    await options.filter({ hasText: fragment }).first().click();
+    await expect(page.locator(".gbx-toolbar")).toHaveAttribute("data-context", "product", {
+      timeout: 90_000,
+    });
+  }
+  await revealView(page, "Gearbox Product", ".gbx-product");
+  await productSection(page, "overview");
+  await page.locator("[data-resolved-profile]").waitFor({ state: "visible", timeout: 60_000 });
+  await page.locator(`[data-profile="${profile}"]`).click();
+  await page
+    .locator(`[data-resolved-profile="${profile}"]`)
+    .waitFor({ state: "visible", timeout: 60_000 });
+}
+
+/**
+ * Select a gear in the Composition tree and wait for its settings form.
+ *
+ * The click is `Configure <gear>`, which is what sets the selection the settings
+ * half renders from -- not the `<summary>`, which only folds the branch.
+ */
+export async function configureGear(page: Page, gear: string): Promise<void> {
+  await productSection(page, "composition");
+  await page.locator(`[data-composition-gear="${gear}"]`).click();
+  await page
+    .locator(`[data-gear-config="${gear}"]`)
+    .waitFor({ state: "visible", timeout: 60_000 });
+}
+
 export async function openProduct(page: Page, profile: string): Promise<void> {
   // **A product is opened here, not inherited from boot.** Studio used to open
   // the only product it could find whenever the Product widget was constructed,

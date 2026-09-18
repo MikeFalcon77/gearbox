@@ -12,11 +12,13 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
 import {
+  configureGear,
   expect,
   expectContext,
   openGenerate,
   openPalette,
   openProduct,
+  openProductById,
   productSection,
   resetCatalogueView,
   revealCatalogue,
@@ -458,19 +460,21 @@ test.describe("typed config from schema (Phase 7)", () => {
   });
 
   test("a projected string field renders as a typed control [Phase 7]", async ({ studio }) => {
+    // **In the product, on a description that names the gear.** The projection
+    // is the claim, not the surface: `ConfigFields` is one component and the
+    // add dialog no longer renders it, because a gear's settings belong to the
+    // gear once it is in the product.
     const page = studio.page;
-    await openProduct(page, "dev");
-    const add = page.locator("[data-add-gear]");
-    await expect(add).toBeVisible({ timeout: 60_000 });
-    await add.click();
-    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
-    await page.locator('[data-add-gear-select="tenant-resolver"]').click();
+    await openProductById(page, "configurable-gears", "dev");
+    await configureGear(page, "tenant-resolver");
 
     const field = page.locator('[data-config-field="vendor"]');
     await expect(field).toBeVisible({ timeout: 60_000 });
     await expect(field).toHaveAttribute("data-config-field-kind", "str");
-    // The default is projected from `impl Default`, not typed into the gdl.
+    // The default is projected from `impl Default`, not typed into the gdl --
+    // the description sets no `vendor`, so a placeholder here can only have come
+    // from the struct.
     await expect(field.locator("input")).toHaveAttribute("placeholder", "constructorfabric");
-    await page.locator("[data-add-gear-cancel]").click();
+    await expect(field).toHaveAttribute("data-config-provenance", "default");
   });
 });

@@ -93,7 +93,6 @@ import { LockWidget } from "./lock/lock-widget";
 import { ProductWidget } from "./product/product-widget";
 import { GearAuthorWidget } from "./gear/gear-author-widget";
 import { StartWidget } from "./start/start-widget";
-import { AddGearWidget } from "./add-gear/add-gear-widget";
 import { DescriptionMarkers } from "./gdl/description-markers";
 import { GdlAssistContribution } from "./gdl/gdl-assist-contribution";
 import { GdlLanguageContribution } from "./gdl/gdl-language-contribution";
@@ -356,7 +355,6 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bindWidget(bind, CreateProductWidget);
   bindWidget(bind, CreateGearWidget);
   bindWidget(bind, GearAuthorWidget);
-  bindWidget(bind, AddGearWidget);
   bindWidget(bind, LockWidget);
   bindWidget(bind, GenerateWidget);
 

@@ -58,8 +58,18 @@ export class AddGearDialog extends ReactDialog<boolean> {
     const accept = this.appendAcceptButton("Add to product");
     accept.setAttribute("data-add-gear-submit", "");
     accept.setAttribute("data-add-gear-apply", "");
+    // **One notion of "still my product", shared with the write boundary.**
+    // This compared raw paths while `previewStagedAdd` and `commitAddGear`
+    // compare `productIdentity(...)`, which canonicalises. Both were right
+    // because both sides came from the same store field, but a guard and the
+    // boundary it guards should not be able to disagree about identity.
+    const mine = productIdentity(this.path);
     this.toDispose.push(products.onChanged(() => {
-      if (products.current.open?.path !== this.path) { this.token++; this.close(); }
+      const open = products.current.open;
+      if (open === undefined || productIdentity(open.path) !== mine) {
+        this.token++;
+        this.close();
+      }
       this.update();
     }));
     this.toDispose.push(catalogue.onChanged(() => this.update()));
@@ -242,7 +252,7 @@ export class AddGearDialog extends ReactDialog<boolean> {
               is the serialization itself rather than a description of it. */}
           <section data-add-gear-section="closure">
             {this.preview?.changed
-              ? <details open data-add-gear-change><summary>What will be written</summary><pre className="gbx-edit-preview">{this.preview.after}</pre></details>
+              ? <details open><summary>What will be written</summary><pre className="gbx-edit-preview">{this.preview.after}</pre></details>
               : <p>{this.pending()}</p>}
           </section>
           <p>Configuration continues in the product after adding.</p>

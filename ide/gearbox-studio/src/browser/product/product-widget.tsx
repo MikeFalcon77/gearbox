@@ -371,7 +371,12 @@ export class ProductWidget extends ReactWidget {
 
     return (
       <div className="gbx-product">
-        <div className="gbx-detail-title">
+        {/* **The id, on the panel, as a marker.** Which *kind* of context is
+            current is on the toolbar (`data-context`), but which product is
+            open was nowhere a reader could ask -- the display name is prose and
+            the path is long. The id is the thing the description names itself
+            by, so it is the thing to expose. */}
+        <div className="gbx-detail-title" data-product-name={intent?.id}>
           {intent?.display_name ?? state.open.label}{" "}
           <span className="gbx-id">{intent?.id}</span>
         </div>

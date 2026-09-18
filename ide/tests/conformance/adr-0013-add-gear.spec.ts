@@ -3,9 +3,11 @@
 import type { Page } from "@playwright/test";
 
 import {
+  configureGear,
   expect,
   openAdvancedKeys,
   openProduct,
+  openProductById,
   resetCatalogueView,
   revealCatalogue,
   test,
@@ -152,16 +154,20 @@ test.describe("Add Gear shows consequences before the write", () => {
     const preview = page.locator("[data-add-gear-flow] .gbx-edit-preview");
     await expect(preview).toContainText("tenant-resolver", { timeout: 60_000 });
 
-    // Free keys live under "Other keys" now -- see `openAdvancedKeys`.
-    await openAdvancedKeys(page, "[data-add-gear-config]");
-    await page.locator("[data-add-gear-config-key]").fill("namespace");
-    await page.locator("[data-add-gear-config-value]").fill("demo");
-    await page.locator("[data-add-gear-config-add]").click();
+    // **A plugin is what this batch can still stage, and config is not.**
+    // Attaching a plugin is a consequence of *this* addition -- a plugin is a
+    // gear, so it joins the closure -- which is why it belongs to the preview.
+    // Config and features change nothing about which gears arrive, so they wait
+    // for the product; `[plan §9.1: checked where the caret is]` reads them
+    // there now. What this claim is about is unchanged: the review is the exact
+    // serialization of the whole batch, not of the gear alone.
     await page.locator("[data-add-gear-plugin-pick]").selectOption("single-tenant-tr-plugin");
     await page.locator("[data-add-gear-plugin-add]").click();
 
-    await expect(preview).toContainText("namespace", { timeout: 60_000 });
-    await expect(preview).toContainText("single-tenant-tr-plugin");
+    await expect(preview).toContainText("single-tenant-tr-plugin", { timeout: 60_000 });
+    await expect(preview, "the gear is still named beside what was staged onto it").toContainText(
+      "tenant-resolver",
+    );
     await page.locator("[data-add-gear-cancel]").click();
   });
 
@@ -186,24 +192,31 @@ test.describe("Add Gear shows consequences before the write", () => {
       // not of the corpus: `event-broker.mode` is a `DeploymentMode`, and
       // `ux-navigation.spec.ts` already adds that gear. A claim skipped by its
       // own choice of subject is a claim nobody was watching.
+      // In the product, on the description that names `event-broker`: the
+      // advanced disclosure and the typed controls are `GearSettings`, and the
+      // add dialog stopped rendering them when configuration moved to the gear.
       const { page } = studio;
-      await openProduct(page, "dev");
-      await revealCatalogue(page);
-      await resetCatalogueView(page);
-      await page.locator('[data-toggle-gear="event-broker"]').click();
-      await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+      await openProductById(page, "configurable-gears", "dev");
+      await configureGear(page, "event-broker");
+      const config = '[data-gear-config="event-broker"]';
 
       // Folded, and the free-key input is not reachable until it is opened.
-      const advanced = page.locator("[data-add-gear-config] details.gbx-advanced");
-      await expect(advanced).toHaveCount(1);
+      //
+      // **Two disclosures, not one.** `GearSettings` has a second
+      // `details.gbx-advanced` for a feature name outside the projected table,
+      // so the count is 2 here where the panel had 1. `openAdvancedKeys` takes
+      // the first, which is the config one -- the order is the claim's, and
+      // asserting the count keeps a third from appearing unnoticed.
+      const advanced = page.locator(`${config} details.gbx-advanced`);
+      await expect(advanced).toHaveCount(2);
       expect(
-        await advanced.evaluate((e) => (e as HTMLDetailsElement).open),
+        await advanced.first().evaluate((e) => (e as HTMLDetailsElement).open),
         "free-form keys should start folded",
       ).toBe(false);
-      await expect(page.locator("[data-add-gear-config-key]")).toBeHidden();
+      await expect(page.locator("[data-config-new-key]")).toBeHidden();
 
-      await openAdvancedKeys(page, "[data-add-gear-config]");
-      await expect(page.locator("[data-add-gear-config-key]")).toBeVisible();
+      await openAdvancedKeys(page, config);
+      await expect(page.locator("[data-config-new-key]")).toBeVisible();
 
       // An enum whose value is not one of its variants is refused where it was
       // typed, and the variants come from the engine's own list rather than from
@@ -222,8 +235,11 @@ test.describe("Add Gear shows consequences before the write", () => {
       await field.locator("select").selectOption(String(options[0]));
       await expect(page.locator(`[data-config-field-error="${String(name)}"]`)).toHaveCount(0);
 
-      await page.locator("[data-add-gear-cancel]").click();
-      await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0);
+      // Selecting a variant queues a draft, so it has to be dropped: the suite
+      // refuses to start when `products/` differs from HEAD, and teardown
+      // restores it -- a test that applied here would fail the next run.
+      await page.locator(".gbx-toolbar [data-draft-discard]").click();
+      await expect(page.locator(".gbx-toolbar [data-draft-apply]")).toHaveCount(0);
     },
   );
 
@@ -291,7 +307,12 @@ test.describe("Add Gear shows consequences before the write", () => {
       // **And the host does not survive a change of plugin.** It used to: the
       // next plugin was reported as "already attached to authn-resolver" while
       // the section above correctly said that host declares no point it fills.
-      await page.locator("[data-add-gear-change]").click();
+      //
+      // Straight to the next candidate, with no "choose a different gear" step.
+      // The panel needed one because the picker and the overview shared a slot,
+      // so choosing put the list off screen; the dialog's list never leaves.
+      // That makes this the more direct assertion: one click, and the host it
+      // was holding is gone.
       await page.locator('[data-add-gear-select="rg-tr-plugin"]').click();
       const blocked = "Nothing in this product declares";
       await expect(page.locator("[data-add-gear-host-none]")).toContainText(blocked, {
@@ -379,16 +400,25 @@ test.describe("Add Gear shows consequences before the write", () => {
     // `bad key = "secret-looking"` was accepted and written cleanly -- a config
     // key is a quoted dict key, so the span surgeon has no opinion -- and refused
     // three steps later at resolve, as GBX0115.
+    // **Read in the product, because that is where free keys are typed now.**
+    // The add dialog chooses a gear and says what adding it would do; config is
+    // the gear's own setting and belongs to the gear once it is in the product.
+    // The control is the same `ConfigFields`/`GearSettings` pair either way, so
+    // the claim -- a key checked where the caret is -- is unchanged.
     const page = studio.page;
-    await configure(page, "tenant-resolver");
-    await openAdvancedKeys(page, "[data-add-gear-config]");
-    await page.locator("[data-add-gear-config-key]").fill("bad key");
+    await openProductById(page, "configurable-gears", "dev");
+    await configureGear(page, "tenant-resolver");
+    const config = '[data-gear-config="tenant-resolver"]';
+    await openAdvancedKeys(page, config);
+    await page.locator("[data-config-new-key]").fill("bad key");
     await expect(page.locator("[data-config-key-error]")).toContainText("spaces");
-    await expect(page.locator("[data-add-gear-config-add]")).toBeDisabled();
-    await page.locator("[data-add-gear-config-key]").fill("namespace");
+    await expect(page.locator('[data-add-config="tenant-resolver"]')).toBeDisabled();
+    await page.locator("[data-config-new-key]").fill("namespace");
     await expect(page.locator("[data-config-key-error]")).toHaveCount(0);
-    await expect(page.locator("[data-add-gear-config-add]")).toBeEnabled();
-    await page.locator("[data-add-gear-cancel]").click();
+    await expect(page.locator('[data-add-config="tenant-resolver"]')).toBeEnabled();
+    // Nothing was queued -- the key was never added -- so there is no draft to
+    // discard, and `global-teardown` finds `products/` as it left it.
+    await expect(page.locator(".gbx-toolbar [data-draft-apply]")).toHaveCount(0);
   });
 
   test("features are curated, and one that is not for this deployment says so [plan §9.1: features are projected]", async ({
@@ -402,31 +432,32 @@ test.describe("Add Gear shows consequences before the write", () => {
     // projected `[features]` table answered that -- 7 of 14 gear crates declare
     // one -- but uncurated, and `integration` wants a Docker daemon while
     // `default` is not a choice anyone makes. `cargo_features` is the curation.
+    // **Read in the product, on a description that names all three gears.**
+    // Features belong to a `use_gear` entry -- `set_features` is span surgery on
+    // one -- so the surface that edits them is the product's. `payments-demo`
+    // could not carry this claim: all three of these gears reach it through the
+    // closure, and a gear nothing named has no entry to edit.
     const page = studio.page;
+    await openProductById(page, "configurable-gears", "dev");
 
-    // (1) The crate declares no features at all.
-    await configure(page, "tenant-resolver");
-    await expect(page.locator("[data-add-gear-features-none]")).toContainText(
-      "no Cargo features",
-      { timeout: 60_000 },
-    );
-    await expect(page.locator("[data-add-gear-feature-option]")).toHaveCount(0);
+    // (1) The crate declares no features at all: `cargo_features` absent *and*
+    // `available_features` absent, so there is nothing to fall back to either.
+    await configureGear(page, "tenant-resolver");
+    await expect(page.locator("[data-features-none]")).toContainText("no Cargo features", {
+      timeout: 60_000,
+    });
+    await expect(page.locator("[data-feature-option]")).toHaveCount(0);
 
     // (2) The crate declares one and the gear offers none of them.
     // `types-registry`'s only feature is `integration`; `cargo_features = []`
     // says so deliberately, which is not the same as saying nothing -- and the
     // wording separates it from (1).
     //
-    // Through "Choose a different gear", because the picker is not on screen once
-    // a gear is chosen -- the overview replaces it, which is also what makes the
-    // staged features, config and plugins safe to clear on a change of subject.
-    await page.locator("[data-add-gear-change]").click();
-    await page.locator('[data-add-gear-select="types-registry"]').click();
-    await expect(page.locator("[data-add-gear-features-none]")).toContainText(
-      "offers no Cargo features",
-      { timeout: 60_000 },
-    );
-    await expect(page.locator("[data-add-gear-feature-option]")).toHaveCount(0);
+    await configureGear(page, "types-registry");
+    await expect(page.locator("[data-features-none]")).toContainText("offers no Cargo features", {
+      timeout: 60_000,
+    });
+    await expect(page.locator("[data-feature-option]")).toHaveCount(0);
 
     // (3) The feature exists, is offered, and belongs to another deployment.
     // `grpc-hub` declares `k8s-auth` for `kubernetes`; this product is being
@@ -434,13 +465,23 @@ test.describe("Add Gear shows consequences before the write", () => {
     // than hidden, because someone looking for it needs to be told it exists and
     // why it is not on offer here -- a list that silently omitted it would read
     // as a missing feature.
-    await page.locator("[data-add-gear-change]").click();
-    await page.locator('[data-add-gear-select="grpc-hub"]').click();
-    await expect(
-      page.locator('[data-add-gear-feature-elsewhere="k8s-auth"]'),
-    ).toContainText("kubernetes", { timeout: 60_000 });
-    await expect(page.locator('[data-add-gear-feature-option="k8s-auth"]')).toHaveCount(0);
-    await page.locator("[data-add-gear-cancel]").click();
+    await configureGear(page, "grpc-hub");
+    await expect(page.locator('[data-feature-elsewhere="k8s-auth"]')).toContainText("kubernetes", {
+      timeout: 60_000,
+    });
+    await expect(page.locator('[data-feature-option="k8s-auth"]')).toHaveCount(0);
+
+    // And the mirror: on the kubernetes profile the same feature is *offered*,
+    // which is what makes "not for this deployment" a statement about the view
+    // rather than about the gear.
+    await page.locator('[data-profile="prod"]').click();
+    await page
+      .locator('[data-resolved-profile="prod"]')
+      .waitFor({ state: "visible", timeout: 60_000 });
+    await configureGear(page, "grpc-hub");
+    await expect(page.locator('[data-feature-option="k8s-auth"]')).toHaveCount(1);
+    await expect(page.locator('[data-feature-elsewhere="k8s-auth"]')).toHaveCount(0);
+    await expect(page.locator(".gbx-toolbar [data-draft-apply]")).toHaveCount(0);
   });
 
   test("errors warn beside the button and never disable it", async ({ studio }) => {
@@ -453,24 +494,23 @@ test.describe("Add Gear shows consequences before the write", () => {
     // nothing". The warning reads `newDiagnostics`, so the error must be one the
     // proposal introduces.
     //
-    // A free config key the gear does not declare is exactly that, and the
-    // mechanism is already recorded next door: a syntactically valid key is
-    // written cleanly and "refused three steps later at resolve, as GBX0115".
+    // **The gear itself is the error now, because config left the dialog.**
+    // Staging an undeclared free key was the mechanism; configuration belongs to
+    // the product, so the diagnostic has to come from the addition alone.
+    // `event-broker` supplies it: `EventBrokerConfig` declares no default for
+    // `mode` or `default_storage_backend` and nothing in `payments-demo` sets
+    // them, so adding it introduces GBX0120 that the current resolution does not
+    // have -- which is exactly what `newDiagnostics` subtracts to.
+    //
     // Staged, not written -- Cancel ends the test and nothing reaches the file.
     const page = studio.page;
-    await configure(page, "tenant-resolver");
+    await configure(page, "event-broker");
     await expect(page.locator("[data-add-gear-impact]")).toBeVisible({ timeout: 60_000 });
 
     // Decision 1 of the phase: building a product is add-a-gear-then-bind-it, so a
     // resolution that fails in between is a waypoint, not a refusal.
     const submit = page.locator("[data-add-gear-submit]");
     await expect(submit).toBeEnabled();
-
-    await openAdvancedKeys(page, "[data-add-gear-config]");
-    await page.locator("[data-add-gear-config-key]").fill("not_a_field_this_gear_reads");
-    await page.locator("[data-add-gear-config-value]").fill("x");
-    await expect(page.locator("[data-config-key-error]")).toHaveCount(0);
-    await page.locator("[data-add-gear-config-add]").click();
 
     const warning = page.locator("[data-add-gear-error-warning]");
     await expect(warning, "an error the proposal introduces must be said").toBeVisible({

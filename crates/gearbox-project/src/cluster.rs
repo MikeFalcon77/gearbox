@@ -370,11 +370,26 @@ pub fn project_provider_name(
     }
 }
 
-/// Read the single `bool` literal argument of a `*Features::new(..)` call.
+/// Read the flag a backend's `features()` states, when it states one.
 ///
-/// The feature structs are `#[non_exhaustive]` with a positional constructor, so
-/// a new flag changes the arity. That must be an error rather than a defaulted
-/// `false`: silently reading the wrong flag is worse than refusing to read.
+/// Three answers, and they are not interchangeable. `Some(flag)` is a fact the
+/// description can be resolved against. `None` is "the backend decides at run
+/// time", which contributes no capability -- see [`BackendCapabilities`]. An
+/// error is "this parser cannot tell which flag it is reading", and that has to
+/// stay an error: the feature structs are `#[non_exhaustive]` with positional
+/// constructors, so a flag added upstream changes the arity, and silently
+/// reading the wrong one would claim a capability the backend does not have.
+///
+/// The shapes, all of them from the SDK's own constructors:
+///
+/// * `new(true)` / `new(false)` -- stated outright.
+/// * `new(self.something())` -- computed, so `None`.
+/// * `without_watch()` -- states the answer in its name: the SDK sets both
+///   `watch` and `prefix_watch` to `false`. Zero arguments, so the arity rule
+///   below cannot be the one that judges it.
+/// * an `if`/`else` whose branches are any of the above -- the backend picks a
+///   shape from its own configuration, so the answer is whatever the branches
+///   agree on and `None` when they do not.
 fn features_flag(expr: &syn::Expr, ty: &str) -> Result<Option<bool>, ClusterProjectionError> {
     let fail = |reason: String| ClusterProjectionError::Capability {
         method: "features",
@@ -382,33 +397,84 @@ fn features_flag(expr: &syn::Expr, ty: &str) -> Result<Option<bool>, ClusterProj
         reason,
     };
 
-    let syn::Expr::Call(call) = expr else {
-        return Err(fail("body is not a `*Features::new(..)` call".to_owned()));
-    };
-    if call.args.len() != 1 {
-        return Err(fail(format!(
-            "`*Features::new` takes {} arguments here; this parser models exactly 1, \
-             so a flag was added and the projection must be updated",
-            call.args.len()
-        )));
-    }
-    match call.args.first() {
-        Some(syn::Expr::Lit(syn::ExprLit {
-            lit: syn::Lit::Bool(b),
-            ..
-        })) => Ok(Some(b.value)),
-        // The SDK-default derivation, pointed at by the wrong projector. Still an
-        // error: this shape *has* a readable meaning, and reading it here would
-        // attribute the default's capability to a plugin backend.
-        Some(arg) if is_cache_consistency_check(arg) => Err(fail(
-            "argument is not a `bool` literal (a computed flag belongs to \
-             `project_sdk_defaults`, not a plugin backend)"
-                .to_owned(),
+    match expr {
+        // **Both branches are read, and an error in either one still fails.**
+        // A conditional body is the backend saying the flag depends on how it
+        // was configured -- redis serves prefix watch only with a subscriber
+        // registry and a single node. Agreement is worth keeping (`if` around
+        // two identical literals states a fact); disagreement is `None`, which
+        // is exactly "decided at run time".
+        syn::Expr::If(conditional) => {
+            let then = tail_expr(&conditional.then_branch)
+                .ok_or_else(|| fail("`if` branch has no trailing expression".to_owned()))?;
+            let Some((_, otherwise)) = conditional.else_branch.as_ref() else {
+                // No `else` means the `if` yields `()` unless every path
+                // returns, which is not a shape this parser models.
+                return Err(fail(
+                    "`features` is an `if` with no `else`, so it has no single value to read"
+                        .to_owned(),
+                ));
+            };
+            let taken = features_flag(then, ty)?;
+            let untaken = features_flag(otherwise, ty)?;
+            Ok(if taken == untaken { taken } else { None })
+        }
+        // An `else` arm, or a braced body inside one. `else if` arrives as
+        // `Expr::If` above and recurses without help.
+        syn::Expr::Block(block) => {
+            let tail = tail_expr(&block.block)
+                .ok_or_else(|| fail("block has no trailing expression".to_owned()))?;
+            features_flag(tail, ty)
+        }
+        syn::Expr::Call(call) => features_call_flag(call, &fail),
+        _ => Err(fail(
+            "body is not a `*Features::` constructor call, or an `if` over them".to_owned(),
         )),
-        // Anything else computed: the backend decides the flag at run time, from
-        // what it connected to. `None`, not an error -- see
-        // [`BackendCapabilities`] for why those are different failures.
-        _ => Ok(None),
+    }
+}
+
+/// One `*Features::` constructor call, by name and arity.
+///
+/// Split out so [`features_flag`]'s recursion stays readable; the arity refusal
+/// is the whole reason this is fussy, so it names the constructor it refused.
+fn features_call_flag(
+    call: &syn::ExprCall,
+    fail: &impl Fn(String) -> ClusterProjectionError,
+) -> Result<Option<bool>, ClusterProjectionError> {
+    let syn::Expr::Path(path) = &*call.func else {
+        return Err(fail(
+            "body is not a `*Features::` constructor call".to_owned(),
+        ));
+    };
+    let constructor = last_segment(&path.path);
+
+    match (constructor.as_str(), call.args.len()) {
+        // The name is the statement. Checked before the arity rule, which
+        // exists for `new` and would otherwise refuse this for taking none.
+        ("without_watch", 0) => Ok(Some(false)),
+        ("new", 1) => match call.args.first() {
+            Some(syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Bool(b),
+                ..
+            })) => Ok(Some(b.value)),
+            // The SDK-default derivation, pointed at by the wrong projector.
+            // Still an error: this shape *has* a readable meaning, and reading
+            // it here would attribute the default's capability to a plugin
+            // backend.
+            Some(arg) if is_cache_consistency_check(arg) => Err(fail(
+                "argument is not a `bool` literal (a computed flag belongs to \
+                 `project_sdk_defaults`, not a plugin backend)"
+                    .to_owned(),
+            )),
+            // Anything else computed: the backend decides the flag at run time,
+            // from what it connected to.
+            _ => Ok(None),
+        },
+        (name, arity) => Err(fail(format!(
+            "`*Features::{name}` takes {arity} arguments here; this parser models \
+             `new(bool)` and `without_watch()`, so the constructors changed and the \
+             projection must be updated"
+        ))),
     }
 }
 

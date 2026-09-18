@@ -14,11 +14,14 @@ import { join } from "node:path";
 import {
   expect,
   expectContext,
+  openGraph,
   openProduct,
   paletteOffers,
   revealCatalogue,
+  revealLockView,
   productSection,
   runCommand,
+  settled,
   test,
 } from "../fixtures/studio";
 
@@ -680,6 +683,65 @@ test.describe("structural claims", () => {
     const idOf = (path: string): string =>
       screens.identityOf({ kind: "product", product: { path, label: "x" } });
     expect(idOf("/a/./b/product.gdl")).toBe(idOf("/a/b/product.gdl"));
+  });
+
+  test("opening a second product withdraws the first one's screens [ADR-0011 §Amendment: a screen belongs to a subject]", async ({
+    freshStudio,
+  }) => {
+    // **The claim above, observed.** It asked the module because the corpus had
+    // one product and the transition could not be reached; `configurable-gears`
+    // exists now, so the rule can be read where it acts.
+    //
+    // **No Close in between, and that is the whole point.** Closing routes
+    // through Home, where every product screen goes on the *kind* rule -- the
+    // half that already had a visible symptom. Scoping by kind would pass that
+    // and still write a proposal composed for the first product into the second.
+    // So this drives the picker directly rather than through a helper that
+    // closes first.
+    //
+    // A fresh app because the `studio` fixture is worker-scoped: a test that
+    // leaves the second product open changes where every later one starts.
+    const { page } = freshStudio;
+    await settled(page);
+    await openProduct(page, "dev");
+    await expect(page.locator("[data-product-name]")).toHaveAttribute(
+      "data-product-name",
+      "payments-demo",
+    );
+
+    // One screen that is withdrawn and one that is not, in the same transition.
+    // The Lock is `context-instance` and `reassertPrimary` does not reopen it,
+    // so its absence is unambiguous; the Graph is `context-kind` and reads the
+    // catalogue, so withdrawing it would destroy a screen the new context can
+    // hold -- and without that half the rule cannot be told apart from "close
+    // everything on any reconcile".
+    await revealLockView(page);
+    await openGraph(page);
+
+    await runCommand(page, "Open Product…");
+    const options = page.locator(`.quick-input-list [role="option"]`);
+    await options.first().waitFor({ state: "visible", timeout: 30_000 });
+    // Filtered, never `.first()`: the list opens with a `Choose product.gdl…`
+    // entry and an unfiltered click picks the file dialog.
+    await options.filter({ hasText: "configurable-gears" }).first().click();
+
+    await expect(page.locator("[data-product-name]")).toHaveAttribute(
+      "data-product-name",
+      "configurable-gears",
+      { timeout: 90_000 },
+    );
+    await expect(
+      page.locator(".gbx-lock"),
+      "a screen composed for the first product outlived it",
+    ).toHaveCount(0, { timeout: 60_000 });
+    await expect(
+      page.locator(".gbx-widget-graph"),
+      "the Graph is cleared rather than withdrawn -- it is valid with no product",
+    ).toHaveCount(1);
+
+    // And the shell is still a product context rather than having fallen Home,
+    // which is what makes this a *change of subject* and not a close.
+    await expectContext(page, "product");
   });
 
   test("exactly one @theia/core is installed [ADR-0011 §Confirmation]", () => {

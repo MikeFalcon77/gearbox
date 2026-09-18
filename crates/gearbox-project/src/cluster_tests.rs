@@ -584,3 +584,124 @@ fn backend_narrowing_cannot_climb_out_of_the_crate() {
         "got {err}"
     );
 }
+
+/// `without_watch()` states its answer in its name.
+///
+/// The SDK added it so a backend with `watch_mode: disabled` could say "no watch
+/// at all" rather than `new(false)`, which means "exact watch yes, prefix watch
+/// no". It takes no arguments, so the arity rule that guards `new` would have
+/// refused it -- and refusing a constructor the SDK ships made every product
+/// that reaches this backend unresolvable.
+#[test]
+fn a_without_watch_body_declares_no_prefix_watch() {
+    let src = r"
+        impl ClusterCacheBackend for Quiet {
+            fn consistency(&self) -> CacheConsistency { CacheConsistency::Linearizable }
+            fn features(&self) -> CacheFeatures { CacheFeatures::without_watch() }
+        }
+    ";
+    let got = project_backend_capabilities(&[file(src)], ClusterPrimitive::Cache, "fixture", None)
+        .expect("a named constructor is readable");
+    assert_eq!(
+        got.runtime_determined,
+        Vec::<&str>::new(),
+        "the name states the flag, so nothing is left to run time"
+    );
+    assert_eq!(
+        caps(&[file(src)], ClusterPrimitive::Cache),
+        vec!["cluster.cache.linearizable"],
+        "`without_watch` forces prefix watch off as well as watch"
+    );
+}
+
+#[test]
+fn a_conditional_features_body_whose_branches_agree_is_read() {
+    // An `if` around one answer is still that answer. Worth reading rather than
+    // refusing: a backend may branch on configuration that cannot change the
+    // flag, and the projection should not punish the shape.
+    let src = r"
+        impl ClusterCacheBackend for Either {
+            fn consistency(&self) -> CacheConsistency { CacheConsistency::Linearizable }
+            fn features(&self) -> CacheFeatures {
+                if self.clustered { CacheFeatures::new(true) } else { CacheFeatures::new(true) }
+            }
+        }
+    ";
+    assert_eq!(
+        caps(&[file(src)], ClusterPrimitive::Cache),
+        vec!["cluster.cache.linearizable", "cluster.cache.prefix-watch"]
+    );
+}
+
+/// The shape the redis cache actually has, and the reason this branch exists.
+///
+/// One arm computes the flag from the topology found at connect time, the other
+/// names it. They disagree, so there is no composition-time fact -- which is
+/// `runtime_determined`, not an error and not a claimed capability.
+#[test]
+fn a_conditional_features_body_whose_branches_disagree_is_runtime_determined() {
+    let src = r"
+        impl ClusterCacheBackend for Redis {
+            fn consistency(&self) -> CacheConsistency { CacheConsistency::Linearizable }
+            fn features(&self) -> CacheFeatures {
+                if self.watchers.is_some() {
+                    CacheFeatures::new(self.offers_prefix_watch())
+                } else {
+                    CacheFeatures::without_watch()
+                }
+            }
+        }
+    ";
+    let got = project_backend_capabilities(&[file(src)], ClusterPrimitive::Cache, "fixture", None)
+        .expect("a backend that decides at run time is not an error");
+    assert_eq!(got.runtime_determined, vec!["features"]);
+    assert_eq!(
+        caps(&[file(src)], ClusterPrimitive::Cache),
+        vec!["cluster.cache.linearizable"],
+        "prefix watch is undecided here, so it is not declared"
+    );
+}
+
+/// The arity guard survives the new shapes, including inside a branch.
+///
+/// This is the whole reason the parser is fussy: the feature structs are
+/// `#[non_exhaustive]` with positional constructors, so a flag added upstream
+/// changes the arity, and reading the wrong one would claim a capability the
+/// backend does not have. A conditional must not become a way around that.
+#[test]
+fn a_conditional_branch_with_the_wrong_arity_is_still_refused() {
+    let src = r"
+        impl ClusterCacheBackend for Future {
+            fn consistency(&self) -> CacheConsistency { CacheConsistency::Linearizable }
+            fn features(&self) -> CacheFeatures {
+                if self.clustered {
+                    CacheFeatures::new(true, false)
+                } else {
+                    CacheFeatures::new(true)
+                }
+            }
+        }
+    ";
+    let err = project_backend_capabilities(&[file(src)], ClusterPrimitive::Cache, "fixture", None)
+        .expect_err("an unreadable branch is unreadable");
+    let message = err.to_string();
+    assert!(
+        message.contains("takes 2 arguments here"),
+        "the refusal must name what it found: {message}"
+    );
+}
+
+#[test]
+fn an_if_with_no_else_is_refused() {
+    // It yields `()` unless every path returns, and this parser reads a value.
+    let src = r"
+        impl ClusterCacheBackend for Partial {
+            fn consistency(&self) -> CacheConsistency { CacheConsistency::Linearizable }
+            fn features(&self) -> CacheFeatures {
+                if self.clustered { CacheFeatures::new(true) }
+            }
+        }
+    ";
+    project_backend_capabilities(&[file(src)], ClusterPrimitive::Cache, "fixture", None)
+        .expect_err("an `if` with no `else` has no single value");
+}

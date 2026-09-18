@@ -229,7 +229,7 @@ function ConfigField(
  * A missing required value is worth *mentioning*, which [`valueMissing`] does,
  * and is not worth blocking on.
  */
-export function valueProblem(
+function valueProblem(
   field: ConfigFieldDecl,
   value: ConfigValue | undefined,
 ): string | undefined {

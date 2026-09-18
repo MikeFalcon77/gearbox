@@ -88,12 +88,14 @@ const ALL_KINDS: readonly ContextKind[] = ["home", "product", "gear"];
 export const SCREENS: readonly Screen[] = [
   { widgetId: "gearbox.start", availableIn: ["home"], lifetime: "context-kind" },
   { widgetId: "gearbox.product", availableIn: ["product"], lifetime: "context-instance" },
-  {
-    widgetId: "gearbox.add-gear",
-    availableIn: ["product"],
-    lifetime: "context-instance",
-    focus: true,
-  },
+  // **An entrance, not a widget.** Adding a gear is a modal dialog; the row
+  // stays because what these tables scope is where the entrance may appear, and
+  // an id absent from here reads as "not ours" and is permitted everywhere --
+  // which is how `View > Add Gear` reached Home before they existed.
+  //
+  // No `focus`: a dialog does not fold the side panels and give them back, it
+  // takes the screen and returns it. `focusScreens()` is the three that do.
+  { widgetId: "gearbox.add-gear", availableIn: ["product"], lifetime: "context-instance" },
   { widgetId: "gearbox.lock", availableIn: ["product"], lifetime: "context-instance" },
   { widgetId: "gearbox.conflicts", availableIn: ["product"], lifetime: "context-instance" },
   { widgetId: "gearbox.generate", availableIn: ["product"], lifetime: "context-instance" },
