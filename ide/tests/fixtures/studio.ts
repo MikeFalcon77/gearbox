@@ -827,15 +827,20 @@ function escapeForRegExp(text: string): string {
  * exists -- most callers arrive with one.
  */
 export async function ensureSelection(page: Page): Promise<void> {
-  // **`data-inspecting`, not a selected catalogue row.** The first version of
-  // this asked whether a *row* was selected, which is false for every selection
-  // made anywhere else -- a process, a binding, a conflict's subject -- so it
-  // helpfully clicked a row and destroyed the selection the caller had just
-  // made. The Inspector publishes what it is inspecting; that is the question.
-  const inspecting = page.locator(".gbx-inspector[data-inspecting]:not([data-inspecting=''])");
-  if ((await inspecting.count()) > 0) return;
-  const selectedRow = page.locator(".gbx-widget-catalogue .gbx-row[aria-selected='true']");
-  if ((await selectedRow.count()) > 0) return;
+  // **The toolbar, not the Inspector, and the difference is a whole class of
+  // silent failure.** This asked whether a *row* was selected first, which is
+  // false for every selection made anywhere else -- a process, a binding, a
+  // conflict's subject -- so it helpfully clicked a row and destroyed the
+  // selection the caller had just made. The fix was to ask the Inspector what it
+  // was inspecting, which is the right question asked of the wrong witness: the
+  // Inspector is a panel a person can close, and one that no longer opens itself
+  // on a selection. Asked of it, "is anything selected" silently means "is the
+  // Inspector attached" -- and the fall-through is that same row click, against
+  // callers that reveal the Inspector *after* selecting in the product.
+  //
+  // The toolbar is always attached and publishes the fact directly.
+  const selected = page.locator('.gbx-toolbar[data-has-selection="true"]');
+  if ((await selected.count()) > 0) return;
   await revealCatalogue(page);
   const row = page.locator(".gbx-widget-catalogue .gbx-row").first();
   await row.waitFor({ state: "visible", timeout: 60_000 });

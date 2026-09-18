@@ -30,6 +30,7 @@ import { RESOLVE_PRODUCT } from "../view-contributions";
 import { EngineConnectionService } from "./engine-connection-service";
 import { CLOSE_GEAR, CLOSE_PRODUCT, SWITCH_PRODUCT } from "./session-command-ids";
 import { StudioContextService } from "./studio-context-service";
+import { SelectionService } from "./selection-service";
 import { GearSessionService } from "./gear-session-service";
 
 /**
@@ -77,6 +78,7 @@ export class ToolbarWidget extends ReactWidget {
   @inject(GearSessionService) protected readonly gears!: GearSessionService;
   @inject(ProductEditService) protected readonly edits!: ProductEditService;
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
+  @inject(SelectionService) protected readonly selection!: SelectionService;
 
   @postConstruct()
   protected init(): void {
@@ -94,6 +96,8 @@ export class ToolbarWidget extends ReactWidget {
     // Same for New Product / Resolve / Generate vs the engine: Theia does not
     // re-query `isEnabled` when `EngineConnectionService` flips.
     this.toDispose.push(this.engine.onDidChange(() => this.update()));
+    // Not for anything this bar draws: see `data-has-selection` in `render`.
+    this.toDispose.push(this.selection.onDidChange(() => this.update()));
     this.update();
   }
 
@@ -101,7 +105,22 @@ export class ToolbarWidget extends ReactWidget {
     const context = this.context.current;
     const actions = ACTIONS[context.kind] ?? [];
     return (
-      <div className="gbx-toolbar" data-context={context.kind}>
+      <div
+        className="gbx-toolbar"
+        data-context={context.kind}
+        // **Whether anything is selected, published where it does not move.**
+        // Nothing on this bar draws from it; it is here because the question is
+        // asked from outside and every other answer to it is a widget that may
+        // not be attached. The suite used to ask the Inspector -- which is a
+        // panel a person can close, and one that is about to stop opening itself
+        // -- so "is anything selected" quietly became "is the Inspector on
+        // screen", and the helper that asked went on to click a catalogue row
+        // and destroy the selection its caller had just made.
+        //
+        // `gearbox.hasSelection` is the same fact as a context key
+        // (`studio-context-service.ts`), but a context key is not in the DOM.
+        data-has-selection={this.selection.current !== undefined ? "true" : "false"}
+      >
         <div className="gbx-toolbar-subject">
           {context.kind === "product"
             ? this.renderProduct()
