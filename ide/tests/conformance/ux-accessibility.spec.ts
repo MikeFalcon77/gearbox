@@ -73,20 +73,42 @@ test.describe("controls that can be operated can be named", () => {
     expect(offenders).toEqual([]);
   });
 
-  test("the catalogue's add control says which gear and which product [ADR-0011 §Confirmation]", async ({
+  test("the catalogue's action names the act it performs, in both states [ADR-0011 §Confirmation]", async ({
     studio,
   }) => {
-    // The control the pass actually found. Its name is the whole sentence, and it
-    // has to be: the button repeats down a list of fourteen rows, so "Add" alone
-    // is fourteen buttons a screen reader cannot tell apart.
+    // The control the pass found, and then the defect the *next* pass found in
+    // it. Its name is the whole sentence, and it has to be: the button repeats
+    // down a list of fourteen rows, so "Add" alone is fourteen buttons a screen
+    // reader cannot tell apart.
+    //
+    // **And the sentence has to be true.** For a gear already in the product it
+    // read `Remove <gear> from <product>` -- over a handler that focuses the
+    // gear and shows the product, and removes nothing. A stale tooltip costs a
+    // sighted reader a second look; the accessible name is the only thing a
+    // screen-reader user has, so that one promised an act the button does not
+    // perform. Both states are read here because only one of them was wrong,
+    // and a claim that read the other would have gone on passing.
     await openProduct(studio.page, "dev");
     await revealCatalogue(studio.page);
     await resetCatalogueView(studio.page);
-    const toggle = studio.page.locator('[data-toggle-gear="tenant-resolver"]');
-    await expect(toggle).toBeVisible({ timeout: 60_000 });
-    const label = await toggle.getAttribute("aria-label");
-    expect(label).toMatch(/^(Add|Remove) .+ (to|from) .+$/);
-    expect(label).toContain("Tenant Resolver");
-    expect(await toggle.getAttribute("type")).toBe("button");
+
+    const outside = studio.page.locator('[data-toggle-gear="tenant-resolver"]');
+    await expect(outside).toBeVisible({ timeout: 60_000 });
+    await expect(outside).toHaveAttribute("data-in-product", "false");
+    expect(await outside.getAttribute("aria-label")).toMatch(/^Add Tenant Resolver to .+$/);
+    expect(await outside.getAttribute("type")).toBe("button");
+
+    // `api-gateway` is named by `payments-demo` itself, so this is the in-product
+    // state without writing anything to reach it.
+    const inside = studio.page.locator('[data-toggle-gear="api-gateway"]');
+    await expect(inside).toHaveAttribute("data-in-product", "true", { timeout: 60_000 });
+    const label = await inside.getAttribute("aria-label");
+    expect(label).toMatch(/^Show API Gateway in .+$/);
+    expect(label, "nothing here removes, so nothing here may say it does").not.toMatch(/Remove/);
+    // The status is a badge beside the button rather than half of its label, so
+    // "already in the product" is legible without reading the control.
+    await expect(
+      studio.page.locator('[data-in-product-badge="api-gateway"]'),
+    ).toBeVisible();
   });
 });

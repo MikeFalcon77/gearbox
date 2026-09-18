@@ -159,56 +159,70 @@ export class CatalogueWidget extends ReactWidget {
    * because otherwise the control would promise something it cannot do, which is
    * the mistake the Product view's fake links already made once.
    *
-   * `+` opens the Add Gear configurator with this gear preselected. The check
-   * (already named) still removes via `toggle`, with its preview and confirm.
+   * **Status and action are two things, and the row shows them as two.** A gear
+   * already in the product wears a badge saying so and the button offers the one
+   * thing the click does; a gear that is not wears the button alone. One control
+   * carrying both used to read `In product · Show in product`, which is a
+   * sentence, not a label.
    *
    * `stopPropagation`, because the row's own click selects it and this button
    * sits inside the row: without it, adding a gear would also move the selection.
    */
   protected renderInProduct(row: Row): React.ReactNode {
     if (row.kind !== "projected" || !this.edits.editable) {
-      return undefined;
+      // **Rendered empty rather than omitted.** The slot reserves the space, so
+      // a list where only some rows carry a control does not step in and out at
+      // the right margin.
+      return <span className="gbx-row-action" />;
     }
     const id = row.gear.id;
     const inside = this.edits.inProduct(id);
     const product = this.product.current.open?.label ?? "the product";
-    // **The whole sentence, as the accessible name.** This was a `title` and an
-    // icon: a screen reader announced the glyph's nothing, and the tooltip only
-    // appeared after a hover nobody using a keyboard performs. The name says
-    // which gear and which product, because the button repeats down a list of
-    // fourteen and "Add" alone is fourteen identical buttons.
+    // **The whole sentence, as the accessible name, and it has to describe what
+    // the click does.** It read `Remove <gear> from <product>` while inside --
+    // over a handler that focuses the gear and shows the product, and never
+    // removed anything. A tooltip that is merely stale costs a reader a second
+    // look; an accessible name is the *only* thing a screen-reader user has, so
+    // that one promised an action the button does not have.
     const label = inside
-      ? `Remove ${row.gear.display_name} from ${product}`
+      ? `Show ${row.gear.display_name} in ${product}`
       : `Add ${row.gear.display_name} to ${product}`;
     return (
-      <button
-        type="button"
-        aria-label={label}
-        className={`gbx-in-product ${inside ? "gbx-in-product-on" : ""}`}
-        data-in-product={inside ? "true" : "false"}
-        // `data-toggle-gear` rather than `data-gear`: the graph widget's nodes
-        // carry `data-gear`, and the co-location tests reach them with an
-        // unscoped `querySelector`. Reusing the name here made a click meant for
-        // a graph node land on a catalogue button instead -- and that button
-        // opens a write confirmation, so the collision was worse than a wrong
-        // selection. One attribute, one meaning per document.
-        data-toggle-gear={id}
-        title={label}
-        // No `aria-pressed`: the *name* already changes with the state, and a
-        // toggle that announces both "Remove ... from Payments Demo" and
-        // "pressed" says the same thing twice in opposite words.
-        onClick={(event) => {
-          event.stopPropagation();
-          if (inside) {
-            this.product.setFocus({ kind: "gear", id });
-            void this.commands.executeCommand(SHOW_PRODUCT.id, "composition");
-            return;
-          }
-          void this.commands.executeCommand(ADD_GEAR.id, { gearId: id });
-        }}
-      >
-        {inside ? "In product · Show in product" : "Add to product"}
-      </button>
+      <span className="gbx-row-action">
+        {inside && (
+          <span className="gbx-badge gbx-badge-in-product" data-in-product-badge={id}>
+            in product
+          </span>
+        )}
+        <button
+          type="button"
+          aria-label={label}
+          className="gbx-in-product"
+          data-in-product={inside ? "true" : "false"}
+          // `data-toggle-gear` rather than `data-gear`: the graph widget's nodes
+          // carry `data-gear`, and the co-location tests reach them with an
+          // unscoped `querySelector`. Reusing the name here made a click meant
+          // for a graph node land on a catalogue button instead -- and that
+          // button opens a write confirmation, so the collision was worse than a
+          // wrong selection. One attribute, one meaning per document.
+          data-toggle-gear={id}
+          title={label}
+          // No `aria-pressed`: the *name* already changes with the state, and a
+          // toggle that announces both "Show ... in Payments Demo" and "pressed"
+          // says the same thing twice in opposite words.
+          onClick={(event) => {
+            event.stopPropagation();
+            if (inside) {
+              this.product.setFocus({ kind: "gear", id });
+              void this.commands.executeCommand(SHOW_PRODUCT.id, "composition");
+              return;
+            }
+            void this.commands.executeCommand(ADD_GEAR.id, { gearId: id });
+          }}
+        >
+          {inside ? "Show" : "Add"}
+        </button>
+      </span>
     );
   }
 
@@ -322,22 +336,36 @@ export class CatalogueWidget extends ReactWidget {
         onDoubleClick={() => void this.reveals.reveal(row.gear.source, row.gear.gdl_path)}
         title={row.gear.gdl_path}
       >
+        {/* **The facts in one box, so the action can be beside them rather than
+            after them.** The row is a grid of two columns: everything that
+            describes the gear wraps freely inside this one, and the control
+            keeps the second to itself. As flat flex items with `flex-wrap`, a
+            row whose badges filled the line pushed its own action onto the next
+            one -- where it sat directly above the *following* gear's name and
+            read as belonging to it. */}
+        <span className="gbx-row-main">
+          <span className="gbx-row-name">{label}</span>
+          {row.kind === "projected" ? (
+            <>
+              <span className="gbx-id">{row.gear.id}</span>
+              {(row.gear.runtime_caps ?? []).map((cap) => (
+                <span className="gbx-badge" key={cap}>
+                  {cap}
+                </span>
+              ))}
+            </>
+          ) : (
+            // No id and no badges, because neither exists yet. Saying so beats an
+            // empty space that reads as "this gear has none".
+            <span className="gbx-waiting">{stalled ? "did not project" : "parsing…"}</span>
+          )}
+        </span>
+        {/* **Last, and in its own column.** It was first, ahead of the name,
+            which put a control where a reader expects the subject and pushed
+            every row's text right by a different amount depending on whether
+            the control was there at all. A row reads as "what this gear is",
+            then "what I can do about it". */}
         {this.renderInProduct(row)}
-        <span className="gbx-row-name">{label}</span>
-        {row.kind === "projected" ? (
-          <>
-            <span className="gbx-id">{row.gear.id}</span>
-            {(row.gear.runtime_caps ?? []).map((cap) => (
-              <span className="gbx-badge" key={cap}>
-                {cap}
-              </span>
-            ))}
-          </>
-        ) : (
-          // No id and no badges, because neither exists yet. Saying so beats an
-          // empty space that reads as "this gear has none".
-          <span className="gbx-waiting">{stalled ? "did not project" : "parsing…"}</span>
-        )}
       </div>
     );
   }

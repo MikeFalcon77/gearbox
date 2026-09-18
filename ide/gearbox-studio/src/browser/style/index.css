@@ -588,26 +588,74 @@
    with its name. */
 .gbx-leaf-why { opacity: 0.65; font-size: 0.9em; }
 
-/* --- The "in this product" toggle ---------------------------------------- */
+/* --- The catalogue row's status and action -------------------------------- */
 
-/* Sits inside the row, so it must not look like part of the row's own text and
-   must not steal the row's click -- the handler stops propagation for the second
-   half of that. */
-.gbx-in-product {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 16px; height: 16px; padding: 0;
-  border: none; border-radius: 3px;
-  cursor: pointer;
-  color: var(--theia-icon-foreground);
-  background: transparent;
-  opacity: 0.45;
+/* **A slot at the end of the row, and it is always there.** The control used to
+   sit ahead of the name, so a list where only some rows carry one stepped in and
+   out at the left margin -- and the row reads better as "what this gear is",
+   then "what I can do about it".
+
+   `margin-left: auto` inside the row's flex, so the slot goes to the far end of
+   whichever line it lands on. `.gbx-row` wraps on purpose (see its own comment),
+   and a slot pinned by `position` rather than by the flow would leave the badges
+   underneath it. */
+/* **A grid, not a wrapping flex row, and the difference is the whole point.**
+   `.gbx-row` wraps on purpose -- a nowrap row clipped the last badge mid-word in
+   a narrow panel -- but with the action as one more flex item, a row whose
+   badges filled the line wrapped the action onto the next one, where it sat
+   directly above the following gear's name. Which gear it acted on then became
+   a guess. Two columns instead: the facts wrap inside their own, the control
+   keeps the other whatever the facts do.
+
+   Scoped to the catalogue. `.gbx-row` is shared with the Generate file plan and
+   with Topology's application and binding rows, and neither has an action
+   column. */
+.gbx-widget-catalogue .gbx-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 6px;
 }
-.gbx-row:hover .gbx-in-product { opacity: 0.8; }
-.gbx-in-product:hover { background: var(--theia-toolbar-hoverBackground, var(--theia-list-hoverBackground)); opacity: 1; }
-.gbx-in-product:focus-visible { outline: 1px solid var(--theia-focusBorder); opacity: 1; }
-/* A gear already in the product stays lit whether or not the row is hovered:
-   "what is in my product" should be answerable by looking, not by pointing. */
-.gbx-in-product-on { opacity: 1; color: var(--theia-successBackground); }
+.gbx-row-main { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.gbx-row-action {
+  display: inline-flex; align-items: center; gap: 6px;
+  /* Top-aligned rather than centred: the facts may be two lines tall and the
+     control is one, and an action drifting to the vertical middle of a tall row
+     points at nothing in particular. */
+  align-self: start;
+}
+
+/* A gear already in the product says so without being pointed at: "what is in my
+   product" should be answerable by looking. The badge is the *status*; the
+   button beside it is the one thing a click does. They were one control reading
+   `In product · Show in product`, which is a sentence rather than a label. */
+.gbx-badge-in-product {
+  border-color: var(--theia-successBackground);
+  background: transparent;
+  color: var(--theia-successBackground);
+}
+
+/* **A text button, sized for its text.** This was `width: 16px; height: 16px`
+   from when it was an icon. The width never applied -- as a flex item its
+   `min-width: auto` resolves to min-content, so the box silently became the
+   longest word -- but the height did, with no `overflow` set, so the label bled
+   out of a 16px box onto the rows above and below. The overflow was not counted
+   in the row height either, which is why rows collided rather than grew.
+
+   Sized from `.gbx-choice`'s vocabulary rather than a second one, and not
+   hidden until hover: an action a person has to find by pointing is an action
+   they do not know exists. */
+.gbx-in-product {
+  font: inherit; font-size: 0.85em;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 1px 8px;
+  border: 1px solid var(--theia-editorGroup-border); border-radius: 3px;
+  cursor: pointer;
+  color: var(--theia-button-secondaryForeground);
+  background: var(--theia-button-secondaryBackground);
+}
+.gbx-in-product:hover { background: var(--theia-button-secondaryHoverBackground); }
+.gbx-in-product:focus-visible { outline: 1px solid var(--theia-focusBorder); outline-offset: 1px; }
 
 /* What each edit in the batch targets, between the count and the diff. The diff
    is a diff of one file and cannot say which profile or gear a line belongs to;
