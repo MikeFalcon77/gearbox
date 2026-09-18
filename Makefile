@@ -101,13 +101,21 @@ dev-test: test
 
 # Bindings are generated from the Rust model so the client cannot drift from it
 # (cpt-gearbox-nfr-no-type-drift).
+TS_OUT := ide/gearbox-studio/src/common/generated
+
 ts:
 	$(CARGO) test -p gearbox-rpc --test export_bindings
 
 # The anti-drift guard: regenerating must change nothing.
 ts-check: ts
-	@git diff --exit-code -- ide/gearbox-studio/src/common/generated \
+	@git diff --exit-code -- $(TS_OUT) \
 		|| { echo "ERROR: TypeScript bindings are stale. Run 'make ts' and commit the result."; exit 1; }
+	@# `git diff` only sees tracked files, so a first-ever generated binding would
+	@# pass this check while being absent from the commit -- which is how
+	@# PluginTarget.ts came to be referenced by ProductEdit.ts and index.ts while
+	@# untracked. Same guard as `grammar-check` and `diagnostics-check`.
+	@[ -z "$$(git ls-files --others --exclude-standard -- $(TS_OUT))" ] \
+		|| { echo "ERROR: 'make ts' produced an untracked binding. Run 'make ts' and 'git add' the result."; exit 1; }
 
 # The editor's .gdl grammar colours a vocabulary generated from the same globals
 # the interpreter evaluates against, so it cannot drift into colouring a

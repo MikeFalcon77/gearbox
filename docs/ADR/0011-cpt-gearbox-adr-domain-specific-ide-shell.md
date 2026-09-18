@@ -958,3 +958,45 @@ rather than reinstating the package or rebuilding its view.
   now configurable by the person using it.
 * Uses this ADR's own mechanisms — `rebind(TheiaX).to(MyX)`, and the
   `src/browser/theia/**` mirror for every override.
+
+## Amendment 2026-09-18: Add Gear is a dialog, so it is not a screen to withdraw
+
+Amendment 2026-09-08 named Add Gear as the *hard* half of "a screen belongs to a subject": the
+configurator holds a proposal composed against one product, and `commitAddGear` resolves its target
+at commit time, so a proposal that outlived its product could be written to the next one. The
+scoping machinery in `shell/screens.ts` exists largely because of that.
+
+Adding a gear is now a **modal dialog** (`AddGearDialog`), not a panel in the main area. The reason
+is not shell hygiene but the scenario: choosing a gear is a question with an answer, asked in the
+middle of composing a product and finished in one act. A panel made it a place a person could leave
+half-done and come back to, which is what let a stale proposal exist at all.
+
+### What this changes about the 2026-09-08 rule
+
+The rule stands; Add Gear stops being one of its subjects. A dialog is not registered as a widget,
+is not restored from a saved layout, and cannot be reached from `View > Views` or `Open View...` —
+so three of the four surfaces that amendment had to gate do not exist for it.
+
+The dangerous half is closed more directly than by withdrawal. The dialog captures the product path
+at construction and subscribes to `ProductStore`; when the open product changes it invalidates its
+in-flight preview token and closes itself. There is no state that can outlive the subject, because
+the surface holding the state goes with it.
+
+### What it costs
+
+A modal blocks the shell beneath it, and that is a real loss. Three conformance claims were written
+against the panel and asserted shell behaviour *while the add flow was open* — closing the product
+from the toolbar, opening a second room-wanting screen. Those interactions are not expressible
+against a modal, and the claims are re-pointed at screens that are still panels (Graph, Conflicts,
+Generate), with the subject-lifetime half claimed directly: the dialog closes when its product does.
+
+This is the narrower kind of claim, and worth saying plainly: the panel version could assert that a
+screen was *withdrawn*, and the dialog version asserts that it was *never separable*. The second is
+a weaker statement about the shell and a stronger one about the flow.
+
+### Traceability
+
+* Amends Amendment 2026-09-08 for one surface; the `ContextIdentity` scoping it introduced is
+  unchanged for every screen that is still a screen.
+* Recorded in full by `cpt-gearbox-adr-product-composition`, which owns the composition scenario
+  this dialog serves.

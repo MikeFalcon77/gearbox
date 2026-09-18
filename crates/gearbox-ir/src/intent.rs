@@ -375,6 +375,21 @@ pub struct PluginSelection {
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub profiles: BTreeSet<ProfileId>,
 
+    /// This entry's position in the host's written `plugins = [...]` list.
+    ///
+    /// **The written position, not this vector's.** Evaluation drops entries --
+    /// a plugin id that does not parse, a duplicate selection for one profile --
+    /// so the nth `PluginSelection` is not in general the nth `plugin(...)` in
+    /// the file. An editor that addressed entries by their position here would
+    /// aim at the wrong one the moment a malformed sibling existed, which is
+    /// exactly when a person needs to edit the others.
+    ///
+    /// Carried rather than recomputed because only evaluation still knows both
+    /// orders at once; by the time the client has an intent, the dropped entries
+    /// are gone without trace.
+    #[serde(default)]
+    pub entry_index: usize,
+
     /// Where `plugin(...)` was written in the product description.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub declared_at: Option<Location>,

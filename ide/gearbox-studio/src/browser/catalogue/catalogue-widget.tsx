@@ -25,7 +25,7 @@ import { DiagnosticsList } from "../diagnostics/diagnostics-list";
 import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
 import { RevealService } from "../reveal-service";
-import { ADD_GEAR } from "../shell/session-command-ids";
+import { ADD_GEAR, SHOW_PRODUCT } from "../shell/session-command-ids";
 import { GEARBOX_DRAG_MIME } from "../ai/gearbox-context";
 
 @injectable()
@@ -200,13 +200,14 @@ export class CatalogueWidget extends ReactWidget {
         onClick={(event) => {
           event.stopPropagation();
           if (inside) {
-            void this.edits.toggle(id, row.gear.source);
+            this.product.setFocus({ kind: "gear", id });
+            void this.commands.executeCommand(SHOW_PRODUCT.id, "composition");
             return;
           }
           void this.commands.executeCommand(ADD_GEAR.id, { gearId: id });
         }}
       >
-        <span className={`codicon codicon-${inside ? "check" : "add"}`} aria-hidden="true" />
+        {inside ? "In product · Show in product" : "Add to product"}
       </button>
     );
   }

@@ -31,9 +31,9 @@
 mod edit_call;
 
 pub use edit_call::{
-    CreateProductParams, PROFILE_KINDS, add_gear_plugin, add_profile, add_source,
-    clone_product_text, is_secret_config_key, quote_string, remove_profile,
-    render_product_template, set_gear_config, set_gear_features, set_gear_plugins,
+    CreateProductParams, PROFILE_KINDS, add_gear_plugin, add_plugin_selection, add_profile,
+    add_source, clone_product_text, edit_plugin_entry, is_secret_config_key, quote_string,
+    remove_profile, render_product_template, set_gear_config, set_gear_features, set_gear_plugins,
     set_profile_field,
 };
 

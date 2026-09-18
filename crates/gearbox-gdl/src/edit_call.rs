@@ -234,6 +234,214 @@ pub fn add_gear_plugin(
     })
 }
 
+/// Edit one `plugin(...)` entry in place, by where it is written.
+///
+/// **Addressed by position, because GDL gives the entry nothing else.** A
+/// `plugin("x")` call carries no id, and the same implementation may legitimately
+/// appear twice under one host for disjoint profiles -- that is what
+/// `profiles = [...]` is for -- so the pair `(host, index)` is the only thing
+/// that distinguishes them. `plugin` is checked against what is found there and
+/// the edit is refused on a mismatch, which turns a stale address into a refusal
+/// rather than into an edit of the wrong connection.
+///
+/// **`index` counts written entries, not evaluated ones.** Evaluation drops an
+/// entry whose id does not parse and an entry that duplicates a selection, so a
+/// caller counting the `PluginSelection`s it received would address the wrong
+/// `plugin(...)` as soon as one malformed sibling existed -- exactly when the
+/// others most need editing. `gearbox_ir::PluginSelection::entry_index` carries
+/// the written position for this reason; pass that.
+///
+/// The document the index refers to is the caller's to pin: the RPC layer
+/// compares the whole text against the snapshot the client previewed before this
+/// is ever reached.
+///
+/// `config` sets or (with `None`) removes one key; `profiles` replaces the whole
+/// scope, where an empty slice means every profile and so removes the argument.
+/// `remove` drops the entry and outranks both.
+///
+/// # Errors
+/// When the host is no longer named by a `use_gear`, when `plugins` is absent or
+/// not a literal list, when no entry at `index` names `plugin`, or when the
+/// value would write a literal secret.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one entry, and every way to edit it"
+)]
+pub fn edit_plugin_entry(
+    uri: &str,
+    source: &str,
+    host: &str,
+    index: usize,
+    plugin: &str,
+    config: Option<(&str, Option<&ConfigValue>)>,
+    profiles: Option<&[String]>,
+    remove: bool,
+) -> Result<Edit, Diagnostics> {
+    let list = named_list_literal(uri, source, "gears")?;
+    let host_span = find_gear_entry(source, &list, host).ok_or_else(|| {
+        refuse(
+            uri,
+            &format!("no `use_gear` naming `{host}` in `gears`"),
+            "reload the product: the host of this connection is no longer selected",
+        )
+    })?;
+    // Spans inside the host's `plugins` are relative to the host's own text, so
+    // the entry is edited within that slice and the whole slice is spliced back.
+    let host_text = slice(source, host_span);
+    let plugins = list_arg_on_call(uri, host_text, "plugins")?.ok_or_else(|| {
+        refuse(
+            uri,
+            &format!("`{host}` no longer has a `plugins` list"),
+            "reload the product before editing this connection",
+        )
+    })?;
+    let entry = plugins
+        .entries()
+        .get(index)
+        .copied()
+        .filter(|entry| names_entry(host_text, *entry, plugin))
+        .ok_or_else(|| {
+            refuse(
+                uri,
+                &format!("no `plugin(\"{plugin}\")` at position {index} of `{host}`"),
+                "reload the product: this connection has moved or is already gone",
+            )
+        })?;
+
+    let updated_host = if remove {
+        remove_entry(host_text, entry)
+    } else {
+        let mut text = slice(host_text, entry).to_owned();
+        if let Some((key, value)) = config {
+            if refuses_as_literal_secret(key, value) {
+                return Err(refuse(
+                    uri,
+                    &format!(
+                        "`{key}` reads as a secret, so it is not written into the description"
+                    ),
+                    "point the value at a secret store and let the profile supply it",
+                ));
+            }
+            let rendered = value.map(render_config_value);
+            text = set_dict_key_on_call(uri, &text, "config", key, rendered.as_deref())?;
+        }
+        if let Some(profiles) = profiles {
+            // An empty scope is not an empty list: `profiles = []` would read as
+            // "no profile", while the absence of the argument means every one.
+            let rendered = render_profiles(profiles);
+            text = set_named_arg_on_call(
+                uri,
+                &text,
+                "profiles",
+                if profiles.is_empty() {
+                    None
+                } else {
+                    Some(&rendered)
+                },
+            )?;
+        }
+        replace_span(host_text, entry, &text)
+    };
+
+    if updated_host == host_text {
+        return Ok(Edit::Unchanged);
+    }
+    Ok(Edit::Changed {
+        source: replace_span(source, host_span, &updated_host),
+    })
+}
+
+/// Append one profile-scoped `plugin(...)` to a host, leaving the rest alone.
+///
+/// Beside [`add_gear_plugin`] rather than replacing it because the scope is part
+/// of the identity here: the same implementation twice for disjoint profiles is
+/// a pair of legitimate entries, not a duplicate.
+///
+/// Idempotent on that reading -- an entry naming this plugin *with the same
+/// scope* yields [`Edit::Unchanged`], while the same plugin under a different
+/// scope appends. A same-scope duplicate is what the evaluator reports as a
+/// collision, so writing one would only produce a diagnostic.
+///
+/// # Errors
+/// When the host is not named by a `use_gear` in `gears`, when `plugins` is
+/// present but not a literal list, or when the description does not parse.
+pub fn add_plugin_selection(
+    uri: &str,
+    source: &str,
+    host: &str,
+    plugin: &str,
+    profiles: &[String],
+) -> Result<Edit, Diagnostics> {
+    let list = named_list_literal(uri, source, "gears")?;
+    let entry = find_gear_entry(source, &list, host).ok_or_else(|| {
+        refuse(
+            uri,
+            &format!("no `use_gear` naming `{host}` in `gears`"),
+            "add the host gear first, then attach the plugin to it",
+        )
+    })?;
+    let text = slice(source, entry);
+    let scope = if profiles.is_empty() {
+        String::new()
+    } else {
+        format!(", profiles = {}", render_profiles(profiles))
+    };
+    let rendered = format!("plugin({}{scope})", quote_string(plugin));
+
+    let updated = match list_arg_on_call(uri, text, "plugins")? {
+        // No `plugins` yet: the argument arrives with this one entry in it.
+        None => set_named_arg_on_call(uri, text, "plugins", Some(&format!("[{rendered}]")))?,
+        Some(plugins) => {
+            let wanted: Vec<String> = profiles.to_vec();
+            if plugins.entries().iter().any(|entry| {
+                names_entry(text, *entry, plugin)
+                    && entry_profiles(text, *entry).unwrap_or_default() == wanted
+            }) {
+                return Ok(Edit::Unchanged);
+            }
+            insert_entry(text, &plugins, &rendered)
+        }
+    };
+
+    if updated == text {
+        return Ok(Edit::Unchanged);
+    }
+    Ok(Edit::Changed {
+        source: replace_span(source, entry, &updated),
+    })
+}
+
+/// `["a", "b"]`, the one place the scope list is spelled.
+fn render_profiles(profiles: &[String]) -> String {
+    format!(
+        "[{}]",
+        profiles
+            .iter()
+            .map(|profile| quote_string(profile))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+/// The `profiles = [...]` of a list entry, as written. Absent reads as empty.
+///
+/// Mirrors [`entry_id`]: the entry fragment is parsed as its own module, because
+/// a span is all that is held of it.
+fn entry_profiles(source: &str, entry: Span) -> Option<Vec<String>> {
+    let text = slice(source, entry);
+    let ast = AstModule::parse("file:///entry.gdl", text.to_owned(), &dialect()).ok()?;
+    let args = call_args(ast.statement())?;
+    for arg in args {
+        if let ArgumentP::Named(name, value) = &arg.node
+            && name.node == "profiles"
+            && let ExprP::List(items) = &value.node
+        {
+            return items.iter().map(string_literal).collect();
+        }
+    }
+    Some(Vec::new())
+}
+
 /// Replace a gear's `plugins = [plugin("..."), ...]` list.
 ///
 /// Each entry is a bare `plugin("id")` — profiles and per-plugin config stay

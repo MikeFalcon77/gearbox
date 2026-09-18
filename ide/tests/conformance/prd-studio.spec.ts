@@ -58,7 +58,11 @@ function diffOfProduct(): string {
  * *writes to a description*.
  */
 async function acceptEdit(page: import("@playwright/test").Page): Promise<void> {
-  const dialog = page.locator(".dialogBlock", { has: page.locator(".gbx-edit-preview") });
+  // **By the confirmation's own class, not by "has a preview".** The add-gear
+  // configurator is a modal showing what it would write, so the preview pane no
+  // longer identifies *this* dialog -- and accepting the wrong one is exactly
+  // what the note above says must not happen.
+  const dialog = page.locator(".gbx-edit-confirm");
   await expect(dialog, "the edit dialog is not open, so there is nothing to accept").toBeVisible();
   await dialog.locator(".theia-button.main").click();
 }

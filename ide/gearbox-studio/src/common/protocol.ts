@@ -287,10 +287,10 @@ export interface GearboxService {
    * refuses unless this client declared write capability at initialize and the
    * path is inside the declared workspace.
    */
-  addGear(path: string, gear: string, source: string, dryRun: boolean): Promise<EditGearResult>;
+  addGear(path: string, gear: string, source: string, dryRun: boolean, expectedBefore?: string): Promise<EditGearResult>;
 
   /** Remove a gear from a product description, or preview the removal. */
-  removeGear(path: string, gear: string, dryRun: boolean): Promise<EditGearResult>;
+  removeGear(path: string, gear: string, dryRun: boolean, expectedBefore?: string): Promise<EditGearResult>;
 
   setConfig(
     path: string,
@@ -315,7 +315,7 @@ export interface GearboxService {
     dryRun: boolean,
   ): Promise<EditGearResult>;
 
-  removeProfile(path: string, id: string, dryRun: boolean): Promise<EditGearResult>;
+  removeProfile(path: string, id: string, dryRun: boolean, expectedBefore?: string): Promise<EditGearResult>;
 
   setProfileField(
     path: string,
@@ -331,7 +331,7 @@ export interface GearboxService {
    * One dry-run and one write for a draft of config, features and profile
    * scalars — the Studio's Apply path, not N per-field RPCs.
    */
-  applyEdits(path: string, edits: readonly ProductEdit[], dryRun: boolean): Promise<EditGearResult>;
+  applyEdits(path: string, edits: readonly ProductEdit[], dryRun: boolean, expectedBefore?: string): Promise<EditGearResult>;
 
   createProduct(params: {
     path: string;

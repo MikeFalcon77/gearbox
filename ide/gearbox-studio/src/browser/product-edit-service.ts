@@ -42,6 +42,7 @@ import { inject, injectable } from "@theia/core/shared/inversify";
 
 import type { ConfigValue } from "../common/generated/ConfigValue";
 import type { EditGearResult } from "../common/generated/EditGearResult";
+import type { PluginTarget } from "../common/generated/PluginTarget";
 import type { ProductEdit } from "../common/generated/ProductEdit";
 import type { ResolveResult } from "../common/generated/ResolveResult";
 import { GearboxService } from "../common/protocol";
@@ -101,10 +102,7 @@ export class ProductEditService {
 
   /** Whether the open product names this gear directly. */
   inProduct(gear: string): boolean {
-    const product = this.product.current.resolution?.product;
-    return (
-      product?.gears[gear]?.selected_by.some((reason) => reason.reason === "selected") ?? false
-    );
+    return this.product.current.intent?.selected_gears.some((entry) => entry.gear === gear) ?? false;
   }
 
   /** Whether an edit is possible at all right now. */
@@ -144,7 +142,7 @@ export class ProductEditService {
     // checkbox is no longer refused for a reason that never applied to it. The
     // two must agree -- this one is UX, the engine's is the rule.
     if (
-      edit.kind === "set_config" &&
+      (edit.kind === "set_config" || edit.kind === "set_plugin_config") &&
       typeof edit.value === "string" &&
       isSecretConfigKey(edit.key)
     ) {
@@ -180,6 +178,75 @@ export class ProductEditService {
   /**
    * Dry-run the draft once, confirm once, write once via `applyEdits`.
    */
+  /**
+   * Remove a gear, or one connection under it, after a preview and a confirmation.
+   *
+   * Structural, so it is written on its own rather than queued: a draft holds
+   * config and profile edits, which describe entries that still exist. Mixing a
+   * removal into that batch is refused by the engine anyway, because removing an
+   * entry moves the ones the other edits address.
+   *
+   * Draft edits aimed at what is being removed go with it, and the confirmation
+   * says how many, because agreeing to a removal is not agreeing to silently
+   * lose unrelated typing.
+   */
+  async removeComposition(gear: string, entryIndex?: number): Promise<boolean> {
+    const state = this.product.current;
+    const open = state.open;
+    if (!open) return false;
+    const plugin =
+      entryIndex === undefined
+        ? undefined
+        : state.intent?.selected_gears
+            .find(g => g.gear === gear)
+            ?.plugins?.find(p => p.entry_index === entryIndex);
+    if (entryIndex !== undefined && !plugin) return false;
+    const operation: ProductEdit =
+      plugin && entryIndex !== undefined
+        ? { kind: "remove_plugin", target: { gear, plugin: plugin.gear, entry_index: entryIndex } }
+        : { kind: "remove_gear", gear };
+    const affected = (edit: ProductEdit): boolean =>
+      "target" in edit
+        ? edit.target.gear === gear &&
+          (entryIndex === undefined || edit.target.entry_index === entryIndex)
+        : "gear" in edit && edit.gear === gear && entryIndex === undefined;
+    const count = this.draftEdits().filter(affected).length;
+    let before: string | undefined;
+    const ok = await this.applyDescriptionEdit({
+      title: "Remove from product",
+      ok: "Remove",
+      path: open.path,
+      label: open.label,
+      summary:
+        `Remove ${plugin?.gear ?? gear}${plugin ? ` from ${gear}` : ""}.` +
+        (count > 0 ? ` ${count} pending change(s) to it will be discarded.` : ""),
+      targets: [operation],
+      dryRun: async () => {
+        const preview = await this.service.applyEdits(open.path, [operation], true);
+        before = preview.before;
+        return preview;
+      },
+      commit: () => this.service.applyEdits(open.path, [operation], false, before),
+      log: "remove composition entry",
+    });
+    if (ok) {
+      // What is left addresses entries after the removed one, which have all
+      // moved up by one. Rebased here rather than dropped, so configuring two
+      // connections and then removing a third does not lose the other two.
+      const remaining = (this.drafts.get(open.path) ?? []).filter(edit => !affected(edit));
+      this.drafts.set(
+        open.path,
+        remaining.map(edit => {
+          if (!("target" in edit) || entryIndex === undefined) return edit;
+          if (edit.target.gear !== gear || edit.target.entry_index < entryIndex) return edit;
+          return { ...edit, target: { ...edit.target, entry_index: edit.target.entry_index - 1 } };
+        }),
+      );
+      this.onDraftChangedEmitter.fire();
+    }
+    return ok;
+  }
+
   async applyDraft(): Promise<boolean> {
     const open = this.product.current.open;
     if (open === undefined) return false;
@@ -188,15 +255,26 @@ export class ProductEditService {
       this.messages.info("Nothing to change.");
       return false;
     }
+    let approvedBefore: string | undefined;
+    const touched = profilesTouchedBy(edits);
     const applied = await this.applyDescriptionEdit({
       title: "Apply changes",
       ok: "Apply",
-      summary: `${edits.length} edit${edits.length === 1 ? "" : "s"} on ${this.productName(open.label)}`,
+      // **The profiles are named, and only when there are any.** A draft mixes
+      // edits that are profile-scoped (a profile field, a connection's scope)
+      // with ones that are not (a gear's config and features are facts about the
+      // product under every profile). Naming the profile being *viewed* would
+      // read as "this applies to dev", which for most of a draft is false; so
+      // what is named is what the batch actually touches, and nothing when it
+      // touches none.
+      summary:
+        `${edits.length} edit${edits.length === 1 ? "" : "s"} on ${this.productName(open.label)}` +
+        (touched.length > 0 ? ` · profiles: ${touched.join(", ")}` : ""),
       path: open.path,
       label: open.label,
       targets: edits,
-      dryRun: () => this.service.applyEdits(open.path, edits, true),
-      commit: () => this.service.applyEdits(open.path, edits, false),
+      dryRun: async () => { const preview = await this.service.applyEdits(open.path, edits, true); approvedBefore = preview.before; return preview; },
+      commit: () => this.service.applyEdits(open.path, edits, false, approvedBefore),
       log: `apply ${edits.length} draft edit(s)`,
     });
     if (applied) {
@@ -472,6 +550,7 @@ export class ProductEditService {
     gear: string,
     edits: readonly ProductEdit[],
     owner?: ContextIdentity,
+    expectedBefore?: string,
   ): Promise<boolean> {
     if (!this.ownsSubject(owner)) return false;
     const open = this.product.current.open;
@@ -506,7 +585,7 @@ export class ProductEditService {
     // eslint-disable-next-line no-console
     console.info(`Gearbox: writing add ${gear} to ${open.path}`, new Error("write path").stack);
     try {
-      await this.service.applyEdits(open.path, [...edits], false);
+      await this.service.applyEdits(open.path, [...edits], false, expectedBefore ?? preview.before);
     } catch (error) {
       this.messages.error(messageOf(error));
       await this.product.reload();
@@ -514,6 +593,9 @@ export class ProductEditService {
     }
 
     await this.product.reload();
+    // Adding appends, so nothing a draft already addresses moves: every
+    // `entry_index` in it still names the entry it named. The document snapshot
+    // the batch is checked against is taken fresh at Apply, not held here.
     return true;
   }
 
@@ -991,6 +1073,12 @@ export class ProductEditService {
 class EditPreviewDialog extends ConfirmDialog {
   constructor(props: ConfirmDialogProps) {
     super(props);
+    // **Named, so that "this is the confirmation" is answerable.** Adding a gear
+    // is a modal dialog now and it shows what would be written, so `a
+    // .dialogBlock containing a preview` no longer tells the two apart -- and
+    // the claim that a catalogue `+` opens the configurator rather than writing
+    // immediately depends on telling them apart.
+    this.node.classList.add("gbx-edit-confirm");
   }
 
   protected override handleEnter(): boolean {
@@ -1039,6 +1127,23 @@ function describeEdit(edit: ProductEdit): string {
       return `gear \`${edit.gear}\`: features = [${edit.features.join(", ")}]`;
     case "add_plugin":
       return `gear \`${edit.gear}\`: add plugin \`${edit.plugin}\``;
+    case "add_plugin_selection":
+      return (
+        `gear \`${edit.gear}\`: add plugin \`${edit.plugin}\` for ` +
+        `${edit.profiles.join(", ") || "all profiles"}`
+      );
+    case "remove_plugin":
+      return `gear \`${edit.target.gear}\`: remove ${describeConnection(edit.target)}`;
+    case "set_plugin_config":
+      return (
+        `gear \`${edit.target.gear}\`, ${describeConnection(edit.target)}: ` +
+        `${edit.key} = ${JSON.stringify(edit.value)}`
+      );
+    case "set_plugin_profiles":
+      return (
+        `gear \`${edit.target.gear}\`, ${describeConnection(edit.target)}: ` +
+        `profiles = ${edit.profiles.join(", ") || "all profiles"}`
+      );
     case "set_plugins":
       return `gear \`${edit.gear}\`: plugins = [${edit.plugins.join(", ")}]`;
     case "set_profile_field":
@@ -1062,9 +1167,47 @@ export function isSecretConfigKey(key: string): boolean {
   );
 }
 
+/**
+ * Every profile a batch names, in order, without repeats.
+ *
+ * `set_profile_field` names one directly. A connection's scope names each
+ * profile it is narrowed to -- and an empty scope names none, because "every
+ * profile" is the absence of a restriction rather than a list of them.
+ */
+function profilesTouchedBy(edits: readonly ProductEdit[]): string[] {
+  const seen = new Set<string>();
+  for (const edit of edits) {
+    if (edit.kind === "set_profile_field") seen.add(edit.profile);
+    if (edit.kind === "set_plugin_profiles" || edit.kind === "add_plugin_selection") {
+      for (const profile of edit.profiles) seen.add(profile);
+    }
+  }
+  return [...seen];
+}
+
+/**
+ * How one connection is named in a confirmation.
+ *
+ * Both the implementation and which entry of it: a host may hold the same plugin
+ * twice for different profiles, and "remove `static-authn-plugin`" would not say
+ * which of them a person is agreeing to.
+ */
+function describeConnection(target: PluginTarget): string {
+  return `plugin \`${target.plugin}\` (connection ${target.entry_index + 1})`;
+}
+
 /** Replace an earlier draft that targets the same slot; append otherwise. */
 function mergeDraft(existing: ProductEdit[], edit: ProductEdit): ProductEdit[] {
   const sameSlot = (other: ProductEdit): boolean => {
+    // One connection's one key, or one connection's scope: the same slot a
+    // second time replaces the first, exactly as it does for a gear's config.
+    if ("target" in edit && "target" in other && edit.kind === other.kind) {
+      return (
+        edit.target.gear === other.target.gear &&
+        edit.target.entry_index === other.target.entry_index &&
+        (!("key" in edit) || ("key" in other && edit.key === other.key))
+      );
+    }
     if (edit.kind === "set_config" && other.kind === "set_config") {
       return other.gear === edit.gear && other.key === edit.key;
     }

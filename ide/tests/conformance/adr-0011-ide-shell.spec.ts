@@ -545,7 +545,7 @@ test.describe("the editor Studio came for", () => {
     // shipped dead.
     await openProduct(studio.page, "dev");
     // The Gears stage: the panel is `Overview · Gears · Topology · Validation`.
-    await productSection(studio.page, "gears");
+    await productSection(studio.page, "composition");
     const link = studio.page.locator('[data-asked-for="api-gateway"] a').first();
     await expect(link).toBeVisible();
     await link.click();

@@ -338,6 +338,8 @@ pub struct ProductLoadParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ProductLoadResult {
+    /// Exact document snapshot used to evaluate intent.
+    pub source: String,
     pub intent: ProductIntent,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<Diagnostic>,
@@ -620,6 +622,23 @@ pub enum ProductEdit {
         gear: String,
         plugin: String,
     },
+    AddPluginSelection {
+        gear: String,
+        plugin: String,
+        profiles: Vec<String>,
+    },
+    RemovePlugin {
+        target: PluginTarget,
+    },
+    SetPluginConfig {
+        target: PluginTarget,
+        key: String,
+        value: Option<ConfigValue>,
+    },
+    SetPluginProfiles {
+        target: PluginTarget,
+        profiles: Vec<String>,
+    },
     SetPlugins {
         gear: String,
         plugins: Vec<String>,
@@ -632,9 +651,40 @@ pub enum ProductEdit {
     },
 }
 
+/// One `plugin(...)` entry, addressed inside its host.
+///
+/// **A position, deliberately, and not a key.** GDL gives a `plugin(...)` call
+/// no identity of its own, so two entries naming the same implementation for
+/// disjoint profiles are distinguishable only by where they are written. The
+/// pair `(gear, entry_index)` is that address, and `plugin` is carried beside it
+/// as a cheap assertion about what is expected to be found there.
+///
+/// **`entry_index` counts written entries, not evaluated ones.** It is
+/// [`PluginSelection::entry_index`](gearbox_ir::PluginSelection), which records
+/// the position in the host's `plugins = [...]` list including the entries
+/// evaluation dropped. Counting the survivors instead would address the wrong
+/// entry whenever a malformed sibling existed.
+///
+/// The document this position refers to is pinned once for the whole batch by
+/// [`ApplyEditsParams::expected_before`], not per target: one snapshot cannot
+/// disagree with itself.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct PluginTarget {
+    pub gear: String,
+    pub plugin: String,
+    pub entry_index: usize,
+}
+
 /// `gearbox/product/applyEdits` -- several description edits in one pass.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ApplyEditsParams {
+    /// The document the client previewed against, refused if it no longer matches.
+    ///
+    /// The one staleness guard for the batch. Every `PluginTarget` in `edits`
+    /// addresses an entry by position, and a position only means something
+    /// against a known text.
+    #[serde(default)]
+    pub expected_before: Option<String>,
     pub path: String,
     #[serde(default)]
     pub dry_run: bool,

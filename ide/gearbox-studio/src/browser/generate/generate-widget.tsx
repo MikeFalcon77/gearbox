@@ -17,7 +17,8 @@ import type { FileKind } from "../../common/generated/FileKind";
 import type { FilePlan } from "../../common/generated/FilePlan";
 import type { GenerateFileResult } from "../../common/generated/GenerateFileResult";
 import { CatalogueStore } from "../catalogue-store";
-import { DiagnosticsList } from "../diagnostics/diagnostics-list";
+import { DiagnosticsList, selectionOf } from "../diagnostics/diagnostics-list";
+import { SelectionService } from "../shell/selection-service";
 import { ProductStore } from "../product-store";
 import { SHOW_PRODUCT } from "../shell/session-command-ids";
 import { GenerateService } from "./generate-service";
@@ -94,6 +95,8 @@ export class GenerateWidget extends ReactWidget {
   @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
   // For the one way out of a failed plan. See the error branch in `render`.
   @inject(CommandService) protected readonly commands!: CommandService;
+  // For the trip from a blocked generation to the object that blocked it.
+  @inject(SelectionService) protected readonly selection!: SelectionService;
 
   protected selected: string | undefined;
   protected preview: GenerateFileResult | undefined;
@@ -195,13 +198,26 @@ export class GenerateWidget extends ReactWidget {
             </>
           )}
           <div className="gbx-generate-actions">
+            {/* **To the object, not just to the view.** Landing on the Product
+                view left a person to find, among the gears, the one the error is
+                about. The first error names its subject, and `selectionOf` is
+                the same reader the diagnostics rows use, so the trip ends on the
+                thing that has to change with its settings already open.
+                The profile is untouched on purpose: it lives in the store, and
+                the errors being read are that profile's. */}
             <button
               type="button"
               className="gbx-start-primary"
               data-generate-to-product="true"
-              onClick={() => void this.commands.executeCommand(SHOW_PRODUCT.id)}
+              onClick={() => {
+                const subject = selectionOf(errors[0]?.subject);
+                if (subject !== undefined) this.selection.select(subject);
+                void this.commands.executeCommand(SHOW_PRODUCT.id, "composition");
+              }}
             >
-              Open the Product view
+              {selectionOf(errors[0]?.subject) !== undefined
+                ? "Fix it in the product"
+                : "Open the Product view"}
             </button>
             <span className="gbx-waiting">
               Generation resumes on its own once the resolution has no errors.

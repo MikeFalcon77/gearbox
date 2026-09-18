@@ -20,6 +20,8 @@ import { CatalogueWidget } from "./catalogue/catalogue-widget";
 import { ConflictsWidget } from "./conflicts/conflicts-widget";
 import { CreateProductWidget, type CreateProductState } from "./create/create-product-widget";
 import { CreateGearWidget, type CreateGearState } from "./create/create-gear-widget";
+import { AddGearDialog, type AddGearChoice } from "./add-gear/add-gear-dialog";
+import { ProductEditService } from "./product-edit-service";
 import { AddGearWidget, type AddGearState } from "./add-gear/add-gear-widget";
 import { GraphWidget } from "./graph/graph-widget";
 import { InspectorWidget } from "./inspector/inspector-widget";
@@ -504,6 +506,11 @@ export class GearAuthorViewContribution extends ScopedViewContribution<GearAutho
 
 @injectable()
 export class AddGearViewContribution extends ScopedViewContribution<AddGearWidget> {
+  @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
+  @inject(ProductEditService) protected readonly edits!: ProductEditService;
+  @inject(SelectionService) protected readonly selection!: SelectionService;
+  @inject(CommandRegistry) protected readonly compositionCommands!: CommandRegistry;
+  private dialog?: AddGearDialog;
   @inject(ProductStore) protected readonly products!: ProductStore;
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
 
@@ -520,13 +527,7 @@ export class AddGearViewContribution extends ScopedViewContribution<AddGearWidge
     return this.engine.isConnected;
   }
 
-  /** Reveals rather than re-seeds -- see `CreateProductViewContribution`. */
-  protected override async revealView(): Promise<unknown> {
-    if (this.tryGetWidget() !== undefined) {
-      return this.openFocused();
-    }
-    return this.openAdd();
-  }
+  protected override async revealView(): Promise<unknown> { return this.openAdd(); }
 
   override registerCommands(commands: CommandRegistry): void {
     super.registerCommands(commands);
@@ -546,14 +547,13 @@ export class AddGearViewContribution extends ScopedViewContribution<AddGearWidge
     });
   }
 
-  async openAdd(state?: AddGearState): Promise<void> {
-    // Seeded first -- see `CreateProductViewContribution.openCreate`. It matters
-    // most here: the panel opened on whichever gear the previous visit had
-    // configured, for as long as it took the new state to arrive.
-    const widget = await this.widgetManager.getOrCreateWidget<AddGearWidget>(AddGearWidget.ID);
-    this.stampOwner(widget);
-    widget.openWith(state);
-    await this.openFocused();
+  async openAdd(state?: AddGearChoice): Promise<void> {
+    if (!this.products.current.open || !this.engine.isConnected) return;
+    if (this.dialog && !this.dialog.isDisposed) { this.dialog.activate(); return; }
+    this.tryGetWidget()?.close();
+    const dialog = new AddGearDialog(this.catalogue, this.products, this.edits, this.selection, this.compositionCommands, state);
+    this.dialog = dialog;
+    try { await dialog.open(); } finally { dialog.dispose(); if (this.dialog === dialog) this.dialog = undefined; }
   }
 }
 
@@ -771,7 +771,7 @@ export class ProductViewContribution
     // this contribution -- and `mayTakeTheFront` deliberately refuses to steal
     // the front from a Gearbox surface, so a wizard has to *ask*.
     commands.registerCommand(SHOW_PRODUCT, {
-      execute: () => this.openView({ activate: true, reveal: true }),
+      execute: async (section?: import("./product/product-widget").ProductSection) => { const widget = await this.openView({ activate: true, reveal: true }); if (section) widget.showSection(section); },
       isEnabled: () => this.store.current.open !== undefined,
     });
     commands.registerCommand(RESOLVE_PRODUCT, {

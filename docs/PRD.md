@@ -769,8 +769,14 @@ resolves a product across profiles, renders the dependency, contract, applicatio
 answers "why" for a selected decision, and previews and applies generation — containing no
 resolution logic of its own.
 
+An opened product **MUST** show its composition — the gears it names and the plugin connections
+under them — as its first stage, built from the product's own description rather than from a
+resolution, so that a product whose resolution fails is still shown and still editable. A gear and a
+connection **MUST** be configurable where they are shown, without navigating to another surface.
+
 - **Rationale**: The engine must be usable by a human without a terminal, and the UI must not become
-  a second implementation of product semantics.
+  a second implementation of product semantics. Building the first screen from the resolution made a
+  readable description invisible whenever it did not resolve, which is when it most needs reading.
 - **Actors**: `cpt-gearbox-actor-integrator`, `cpt-gearbox-actor-platform-engineer`
 
 #### The configurator answers in words, from the resolver's own output

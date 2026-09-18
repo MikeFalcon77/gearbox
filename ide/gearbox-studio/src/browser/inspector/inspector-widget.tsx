@@ -25,25 +25,19 @@ import { codicon, ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
+import { GearSettings } from "../product/gear-settings";
+import { PluginSettings } from "../product/plugin-settings";
 import type { ExplanationGraph } from "../../common/generated/ExplanationGraph";
 import type { ExplanationNode } from "../../common/generated/ExplanationNode";
-import type { ConfigValue } from "../../common/generated/ConfigValue";
 import type { GearDescriptor } from "../../common/generated/GearDescriptor";
 import type { Location } from "../../common/generated/Location";
 import type { ProvenanceEdge } from "../../common/generated/ProvenanceEdge";
 import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
 import type { Row } from "../../common/protocol";
-import { configKeyProblem, unknownConfigKeyNote } from "../../common/config-keys";
 import { CatalogueStore } from "../catalogue-store";
 import { Focus, ProductStore } from "../product-store";
 import { ProductEditService } from "../product-edit-service";
-import { ConfigFields } from "../add-gear/config-fields";
-import {
-  describeFocus,
-  nodeIdOf,
-  provenanceOf,
-  type ConfigSources,
-} from "./effective-config";
+import { describeFocus, nodeIdOf, type ConfigSources } from "./effective-config";
 import { RevealLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
 import { Selection, SelectionService } from "../shell/selection-service";
@@ -122,10 +116,6 @@ export class InspectorWidget extends ReactWidget {
   @inject(RevealService) protected readonly reveals!: RevealService;
   @inject(ProductEditService) protected readonly edits!: ProductEditService;
 
-  protected newConfigKey = "";
-  protected newConfigValue = "";
-  protected newFeature = "";
-
   @postConstruct()
   protected init(): void {
     this.id = InspectorWidget.ID;
@@ -141,17 +131,11 @@ export class InspectorWidget extends ReactWidget {
     this.toDispose.push(this.selection.onDidChange(() => this.update()));
     this.toDispose.push(this.catalogue.onChanged(() => this.update()));
     this.toDispose.push(this.products.onChanged(() => this.update()));
-    this.toDispose.push(
-      this.edits.onDraftChanged(() => {
-        // A draft dropped from the header leaves this panel's half-typed new-key
-        // boxes behind, and they are not part of the draft, so nothing else can
-        // clear them.
-        if (!this.edits.hasDraft()) {
-          this.clearScratch();
-        }
-        this.update();
-      }),
-    );
+    // The half-typed new-key boxes used to live here and had to be cleared by
+    // hand when a Discard happened elsewhere. They belong to `GearSettings` now
+    // and are reset by remounting it on the draft epoch, so this is a plain
+    // re-render like the others.
+    this.toDispose.push(this.edits.onDraftChanged(() => this.update()));
     this.update();
   }
 
@@ -177,12 +161,21 @@ export class InspectorWidget extends ReactWidget {
   protected rowFor(selection: Selection): Row | undefined {
     if (selection.kind === "catalogue-row") return this.catalogue.row(selection.key);
     if (selection.kind !== "gear") return undefined;
-    return this.catalogue.selectedRow;
+    return this.catalogue.current.rows.find(row => row.kind === "projected" && row.gear.id === selection.id);
   }
 
   // ---- what it is --------------------------------------------------------
 
   protected renderWhat(selection: Selection): React.ReactNode {
+    if (selection.kind === "plugin") {
+      const state = this.products.current;
+      const descriptor = this.catalogue.current.rows.find(row => row.kind === "projected" && row.gear.id === selection.id);
+      return <><PluginSettings key={`${selection.path}:${selection.host}:${selection.entryIndex}`} selection={selection} state={state}
+        descriptor={descriptor?.kind === "projected" ? descriptor.gear : undefined} edits={this.edits}
+        openGdl={() => { if (state.open) void this.reveals.revealPath(state.open.path); }}
+        remove={() => void this.edits.removeComposition(selection.host, selection.entryIndex).then(ok => { if (ok) this.selection.select({ kind: "gear", id: selection.host }); })} />
+        {descriptor?.kind === "projected" && this.renderProjected(descriptor.gear)}</>;
+    }
     const row = this.rowFor(selection);
     if (row === undefined) {
       // An application and a binding are not catalogue entries -- they are things the
@@ -194,7 +187,7 @@ export class InspectorWidget extends ReactWidget {
         <div className="gbx-detail gbx-empty" data-no-descriptor={noun}>
           {selection.kind === "catalogue-row"
             ? "This row is no longer in the catalogue."
-            : `A ${selection.kind} is not a catalogue entry: the resolver derives it from gears. ` +
+            : `A ${selection.kind} has no available catalogue descriptor: the resolver derives it from gears. ` +
               `What it is made of is in the Product view; why it exists is below.`}
         </div>
       );
@@ -238,238 +231,28 @@ export class InspectorWidget extends ReactWidget {
   /**
    * Config and features for a gear the product asks for directly.
    *
-   * Only when the gear is `selected` in the intent — pulled-in gears are not
-   * edited here; their facts live in another `use_gear` entry or in the closure.
+   * The controls themselves live in `GearSettings`, which the Composition pane
+   * renders too. Keyed on the draft epoch so a Discard or an Apply remounts it
+   * and clears the half-typed boxes it owns -- this panel no longer holds them.
    */
   protected renderProductGearEdit(
     selection: Selection,
     descriptor: GearDescriptor,
   ): React.ReactNode {
-    const gearId = descriptor.id;
     if (selection.kind !== "gear") return undefined;
     const intent = this.products.current.intent;
     if (intent === undefined) return undefined;
-    const picked = intent.selected_gears.find((entry) => entry.gear === gearId);
+    const picked = intent.selected_gears.find((entry) => entry.gear === descriptor.id);
     if (picked === undefined) return undefined;
-
-    const config = this.edits.draftConfig(gearId, picked.config ?? {});
-    // Fields the schema covers get typed controls; the text rows keep everything
-    // else, so a key outside a curated `exposes` is still editable.
-    const fields = descriptor.config_schema?.fields ?? [];
-    const typedKeys = new Set(fields.map((f) => f.name));
-    const untyped = Object.fromEntries(
-      Object.entries(config).filter(([key]) => !typedKeys.has(key)),
-    );
-    const features = this.edits.draftFeatures(gearId, picked.features ?? []);
-    // The curated list when the gear has one, the projected table otherwise --
-    // the same fallback the Add Gear panel makes, and for the same reason: a
-    // gear nobody has curated still has features worth offering.
-    const curatedFeatures = descriptor.cargo_features;
-    const available =
-      curatedFeatures === undefined || curatedFeatures === null
-        ? (descriptor.available_features ?? [])
-        : curatedFeatures.map((feature) => feature.name);
-    const chosenFeatures = new Set(features);
-    const extraFeatures = features.filter((feature) => !available.includes(feature));
-    const keyProblem = configKeyProblem(this.newConfigKey);
-    const keyNote =
-      this.newConfigKey === ""
-        ? undefined
-        : unknownConfigKeyNote(this.newConfigKey.trim(), descriptor.config_schema);
-
     return (
-      <div className="gbx-product-edit" data-gear-config={gearId}>
-        <div className="gbx-detail-title">in this product</div>
-        {fields.length > 0 && (
-          <ConfigFields
-            fields={fields}
-            values={this.edits.draftConfigValues(gearId, picked.config ?? {})}
-            onChange={(key, value) => this.queueConfig(gearId, key, value)}
-            provenanceOf={(key) =>
-              provenanceOf(this.configSources(), gearId, key, picked.config ?? {})
-            }
-            isDrafted={(key) => this.edits.isDraftedConfig(gearId, key)}
-            // A reset is a `set_config` with no value, which is how the wire
-            // spells "remove this key" -- so it queues into the same draft and
-            // waits for the same Apply as typing does.
-            onReset={(key) => this.queueConfig(gearId, key, undefined)}
-          />
-        )}
-        {/* **The free keys, under Advanced.** The typed controls above are what
-            this gear exposes; this is the escape hatch for a curated `exposes`
-            that is narrower than the struct it came from. Open when it already
-            holds something, because a key somebody set is not advanced any more
-            -- it is part of this product's description. */}
-        <details
-          className="gbx-advanced"
-          open={Object.keys(untyped).length > 0}
-          data-inspector-advanced
-        >
-          <summary>Other keys</summary>
-          <span className="gbx-config-list" key={`cfg-${gearId}-${this.edits.epoch}`}>
-            {Object.keys(untyped).length === 0 && (
-              <span className="gbx-add-gear-note">
-                Nothing outside the schema. A key the gear does not read is written and reported
-                (GBX0115) rather than refused.
-              </span>
-            )}
-            {Object.entries(untyped).map(([key, value]) => (
-              <label key={key} className="gbx-config-row" data-config-key={key}>
-                <code>{key}</code>
-                <input
-                  value={value}
-                  aria-label={key}
-                  data-config-edit={key}
-                  data-field-modified={
-                    this.edits.isDraftedConfig(gearId, key) ? "true" : undefined
-                  }
-                  onChange={(e) => this.queueConfig(gearId, key, e.target.value)}
-                />
-                <button
-                  type="button"
-                  className="gbx-choice"
-                  data-config-remove={key}
-                  onClick={() => this.queueConfig(gearId, key, undefined)}
-                >
-                  Remove
-                </button>
-              </label>
-            ))}
-            <button
-              type="button"
-              className="gbx-choice"
-              data-add-config={gearId}
-              disabled={this.newConfigKey === "" || keyProblem !== undefined}
-              onClick={() => this.queueNewConfig(gearId)}
-            >
-              Add key
-            </button>
-            {keyProblem !== undefined && this.newConfigKey !== "" && (
-              <div className="gbx-inline-error" role="alert" data-config-key-error>
-                {keyProblem}
-              </div>
-            )}
-            {keyNote !== undefined && (
-              <div className="gbx-inline-note" data-config-key-note>
-                {keyNote}
-              </div>
-            )}
-            <label className="gbx-config-row">
-              <span className="gbx-sr-only">new config key</span>
-              <input
-                data-config-new-key
-                placeholder="key"
-                aria-label="new config key"
-                aria-invalid={
-                  keyProblem !== undefined && this.newConfigKey !== "" ? true : undefined
-                }
-                value={this.newConfigKey}
-                onChange={(e) => {
-                  this.newConfigKey = e.target.value;
-                  this.update();
-                }}
-              />
-              <span className="gbx-sr-only">new config value</span>
-              <input
-                data-config-new-value
-                placeholder="value"
-                aria-label="new config value"
-                value={this.newConfigValue}
-                onChange={(e) => {
-                  this.newConfigValue = e.target.value;
-                  this.update();
-                }}
-              />
-            </label>
-          </span>
-        </details>
-        <div className="gbx-kv">
-          <span>features</span>
-          {/* The crate's own `[features]` table, as checkboxes. One renderer's
-              worth of duplication with the Add Gear panel is deliberate for now:
-              the two carry different state (a draft here, a staged proposal
-              there), and a control that disagreed with itself between them would
-              be worse than two that agree by construction. */}
-          <span className="gbx-features-list" key={`features-${gearId}-${this.edits.epoch}`}>
-            {available.length === 0 && (
-              <span className="gbx-empty" data-features-none>
-                this crate declares no Cargo features
-              </span>
-            )}
-            {available.length > 0 && (
-              <span className="gbx-feature-choices">
-                {available.map((feature) => (
-                  <label
-                    className="gbx-feature-choice"
-                    key={feature}
-                    data-feature-option={feature}
-                    data-field-modified={
-                      this.edits.isDraftedFeatures(gearId) ? "true" : undefined
-                    }
-                  >
-                    <input
-                      type="checkbox"
-                      checked={chosenFeatures.has(feature)}
-                      aria-label={feature}
-                      onChange={(e) =>
-                        this.queueFeatures(
-                          gearId,
-                          e.target.checked
-                            ? [...features, feature]
-                            : features.filter((f) => f !== feature),
-                        )
-                      }
-                    />
-                    <code>{feature}</code>
-                  </label>
-                ))}
-              </span>
-            )}
-            {extraFeatures.map((feature) => (
-              <span className="gbx-badge gbx-downgraded" key={feature} data-feature={feature}>
-                {feature}
-                <button
-                  type="button"
-                  className="gbx-feature-remove"
-                  aria-label={`Remove ${feature}`}
-                  onClick={() =>
-                    this.queueFeatures(
-                      gearId,
-                      features.filter((f) => f !== feature),
-                    )
-                  }
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-            <details className="gbx-advanced">
-              <summary>Advanced: a feature name not in the table</summary>
-              <label className="gbx-config-row" data-feature-new>
-                <span className="gbx-sr-only">new feature</span>
-                <input
-                  placeholder="feature"
-                  aria-label="new feature"
-                  value={this.newFeature}
-                  onChange={(e) => {
-                    this.newFeature = e.target.value;
-                    this.update();
-                  }}
-                />
-                <button
-                  type="button"
-                  className="gbx-choice"
-                  data-add-feature={gearId}
-                  disabled={this.newFeature.trim() === ""}
-                  onClick={() => this.queueNewFeature(gearId, features)}
-                >
-                  Add feature
-                </button>
-              </label>
-            </details>
-          </span>
-        </div>
-      </div>
+      <GearSettings
+        key={`gear-${descriptor.id}-${this.edits.epoch}`}
+        descriptor={descriptor}
+        picked={picked}
+        edits={this.edits}
+        sources={this.configSources()}
+        profileKind={this.products.current.resolution?.product?.product.profile_kind}
+      />
     );
   }
 
@@ -482,56 +265,6 @@ export class InspectorWidget extends ReactWidget {
    */
   protected configSources(): ConfigSources {
     return { edits: this.edits, products: this.products };
-  }
-
-  protected queueNewConfig(gear: string): void {
-    const key = this.newConfigKey.trim();
-    // The same rule the button is disabled by, restated at the act: a keyboard
-    // Enter, a test, or a future caller does not go through the button.
-    if (key === "" || configKeyProblem(key) !== undefined) return;
-    const value = this.newConfigValue;
-    if (!this.queueConfig(gear, key, value === "" ? undefined : value)) return;
-    this.newConfigKey = "";
-    this.newConfigValue = "";
-    this.update();
-  }
-
-  protected queueConfig(gear: string, key: string, value: ConfigValue | undefined): boolean {
-    return this.edits.queueDraft({
-      kind: "set_config",
-      gear,
-      key,
-      value: value ?? null,
-    });
-  }
-
-  protected queueFeatures(gear: string, features: readonly string[]): void {
-    this.edits.queueDraft({
-      kind: "set_features",
-      gear,
-      features: [...features],
-    });
-  }
-
-  protected queueNewFeature(gear: string, current: readonly string[]): void {
-    const feature = this.newFeature.trim();
-    if (feature === "" || current.includes(feature)) return;
-    this.newFeature = "";
-    this.queueFeatures(gear, [...current, feature]);
-  }
-
-  /**
-   * The scratch boxes this panel owns, cleared when the draft goes.
-   *
-   * The draft itself is dropped from the header now, so this reacts to
-   * `onDraftChanged` rather than being the thing that discards: a half-typed new
-   * key is this widget's state and nobody else can clear it, but it should not
-   * survive a Discard the person asked for somewhere else.
-   */
-  protected clearScratch(): void {
-    this.newConfigKey = "";
-    this.newConfigValue = "";
-    this.newFeature = "";
   }
 
   protected renderProjected(gear: GearDescriptor): React.ReactNode {
@@ -708,8 +441,24 @@ export class InspectorWidget extends ReactWidget {
 
   // ---- why it is here ---------------------------------------------------
 
+  /**
+   * What "why" is asked about, which is not always what is selected.
+   *
+   * A plugin *connection* is a position in the description, and the explanation
+   * graph is keyed by gear id -- so `ProductStore.focus` excludes it and would
+   * leave this whole half blank whenever a connection is selected. It is asked
+   * about the implementation the connection names, which is the thing the graph
+   * has a node for, and whose node already says which host selected it and for
+   * which profile. That is the question a person is asking anyway.
+   */
+  protected explainFocus(): Focus | undefined {
+    const selection = this.selection.current;
+    if (selection?.kind === "plugin") return { kind: "gear", id: selection.id };
+    return this.products.focus;
+  }
+
   protected renderWhy(): React.ReactNode {
-    const focus = this.products.focus;
+    const focus = this.explainFocus();
     const graph = this.products.current.resolution?.explanation ?? undefined;
 
     if (graph === undefined) {
@@ -835,6 +584,8 @@ function keyOf(selection: Selection): string {
     case "gear":
     case "application":
       return `${selection.kind}:${selection.id}`;
+    case "plugin":
+      return `plugin:${selection.path}:${selection.host}:${selection.entryIndex}`;
     case "binding":
       return `binding:${selection.consumer}|${selection.contract}`;
     case "catalogue-row":

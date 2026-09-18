@@ -86,6 +86,7 @@ export * from "./PendingGear";
 export * from "./PluginFill";
 export * from "./PluginScaffold";
 export * from "./PluginSelection";
+export * from "./PluginTarget";
 export * from "./Position";
 export * from "./Preference";
 export * from "./PreviewAddGear";

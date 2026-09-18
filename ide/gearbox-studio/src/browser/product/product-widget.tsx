@@ -21,7 +21,6 @@ import type { DeploymentProfileDecl } from "../../common/generated/DeploymentPro
 import type { ClusterResolution } from "../../common/generated/ClusterResolution";
 import type { Diagnostic } from "../../common/generated/Diagnostic";
 import type { Discovery } from "../../common/generated/Discovery";
-import type { InclusionReason } from "../../common/generated/InclusionReason";
 import type { ResolvedBinding } from "../../common/generated/ResolvedBinding";
 import type { ResolvedApplication } from "../../common/generated/ResolvedApplication";
 import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
@@ -33,6 +32,10 @@ import {
   worstFirst,
   worstOf,
 } from "../diagnostics/diagnostics-list";
+import { CatalogueStore } from "../catalogue-store";
+import { Composition } from "./composition";
+import { GearSettings } from "./gear-settings";
+import { PluginSettings } from "./plugin-settings";
 import { ProductStore } from "../product-store";
 import { GenerateService } from "../generate/generate-service";
 import { ProductEditService } from "../product-edit-service";
@@ -44,9 +47,10 @@ import {
   type OpeningState,
 } from "../shell/product-session-service";
 import { ADD_GEAR, NEW_GEAR, SHOW_CONFLICTS, SHOW_GENERATE } from "../shell/session-command-ids";
-import { RevealLink, RevealPathLink } from "../reveal-link";
+import { RevealPathLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
-import { SelectionService } from "../shell/selection-service";
+import { SelectionService, type Selection } from "../shell/selection-service";
+import type { GearDescriptor } from "../../common/generated/GearDescriptor";
 
 /**
  * The stages of a product, in the order they are worked through.
@@ -55,11 +59,11 @@ import { SelectionService } from "../shell/selection-service";
  * file plan and its Apply button would be a second place to answer the same
  * question. The strip links to it.
  */
-export type ProductSection = "overview" | "gears" | "topology" | "validation";
+export type ProductSection = "overview" | "composition" | "topology" | "validation";
 
 const SECTIONS: readonly { readonly id: ProductSection; readonly label: string }[] = [
   { id: "overview", label: "Overview" },
-  { id: "gears", label: "Gears" },
+  { id: "composition", label: "Composition" },
   { id: "topology", label: "Topology" },
   { id: "validation", label: "Validation" },
 ];
@@ -83,6 +87,7 @@ export class ProductWidget extends ReactWidget {
   // about a selection.
   @inject(SelectionService) protected readonly selection!: SelectionService;
   @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
+  @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
   @inject(PendingCreateGear) protected readonly pendingGear!: PendingCreateGear;
 
   /** Which branches are folded away. Widget state; nobody else's business. */
@@ -103,7 +108,7 @@ export class ProductWidget extends ReactWidget {
    * still wants them, and the two mechanisms answer different questions --
    * "which stage" and "how much of this stage".
    */
-  protected section: ProductSection = "overview";
+  protected section: ProductSection = "composition";
 
   /**
    * The product whose errors have already chosen a stage.
@@ -122,10 +127,14 @@ export class ProductWidget extends ReactWidget {
   protected stagedFor: string | undefined;
   protected addingProfile = false;
   protected newProfileId = "";
+  protected newProfileHost = "localhost";
+  protected newProfileDiscovery = "static";
   protected newProfileKind: "embedded" | "self_hosted" | "kubernetes" = "embedded";
 
   @postConstruct()
   protected init(): void {
+    this.toDispose.push(this.selection.onDidChange(() => this.update()));
+    this.toDispose.push(this.catalogue.onChanged(() => this.update()));
     this.id = ProductWidget.ID;
     this.title.label = ProductWidget.LABEL;
     this.title.iconClass = codicon("project");
@@ -134,7 +143,7 @@ export class ProductWidget extends ReactWidget {
     this.addClass("gbx-widget-product");
     this.toDispose.push(
       this.store.onChanged(() => {
-        this.landOnErrors();
+        this.stageForOpenProduct();
         this.update();
       }),
     );
@@ -161,52 +170,35 @@ export class ProductWidget extends ReactWidget {
     // because no store event follows, and the widget would sit on Overview with
     // the errors one tab away. Idempotent by the guards inside: `stagedFor`
     // fires once per open product.
-    this.landOnErrors();
+    this.stageForOpenProduct();
     this.update();
   }
 
   /**
-   * A resolution that carries errors opens on the stage that shows them.
+   * A newly opened product starts on Composition.
    *
-   * **Only for errors, and only once.** Warnings and hints are the ordinary
-   * state of a healthy product -- the demo resolves with four of them under two
-   * profiles -- so moving for those would move for everything and stop meaning
-   * anything. An error is different: it is what stops the lock being written.
+   * **This used to move to Validation when the resolution carried errors, and
+   * deliberately no longer does.** Sending someone to a list of problems is the
+   * right answer when the screen they came from cannot show them anything; it is
+   * the wrong one now that the screen they came from *is* the product. An error
+   * does not stop a product having a composition, and a person who opened a
+   * product asked to see the product. The count on the Validation tab and the
+   * summary line are the way there, and they name the object, so the trip is
+   * chosen rather than imposed.
    *
-   * Moves *to* Validation and never away from it: the stage a person chose is
-   * theirs, and a later store event must not take it back. Guarded by the open
-   * product rather than by the store revision -- see `stagedFor` for why the
-   * narrower key is the correct one and what the wider one broke.
+   * **Once per product, not once per store event.** Keyed on the open path, so a
+   * re-resolve, a profile switch or an Apply cannot pull the stage out from
+   * under someone mid-edit. Reopening the panel over a product that is already
+   * resolved runs this too -- no store event follows that, and the widget would
+   * otherwise come back on whatever stage the field initialiser named.
    *
-   * The second panel is deliberately not opened. `ConflictsViewContribution`
-   * argues that a panel appearing at startup to say "no conflicts" says
-   * nothing, and it is withdrawn on every product change besides. Showing the
-   * stage that is already there is the cheaper answer to the same need.
-   *
-   * **Both halves are observed, and the positive one costs a temporary edit.**
-   * No product in the corpus resolves with an error -- the demo carries two
-   * warnings and an info under `embedded` and four and an info under the other
-   * two -- so `regression.spec.ts` writes one in for the length of two tests
-   * and restores the bytes in a `finally`. GBX0115, a config key the gear does
-   * not declare: an error, and one resolution does not stop on, so the lock
-   * still arrives with its applications and bindings. GBX0120 looks like the
-   * obvious candidate and is not -- it is a warning on purpose, because the
-   * value may still come from a profile.
+   * Idempotent by the `stagedFor` guard, so both call sites can be unconditional.
    */
-  protected landOnErrors(): void {
-    const state = this.store.current;
-    const path = state.open?.path;
-    if (path === undefined) return;
-    // Mid-flight: the diagnostics on screen still describe the previous answer.
-    if (state.status === "loading" || state.status === "resolving") return;
-    // Never while an edit is pending. A draft is a person mid-sentence, and its
-    // resolution is a question about what they have typed so far -- not an
-    // answer to move the screen for.
-    if (this.edits.hasDraft()) return;
-    if (this.stagedFor === path) return;
-    this.stagedFor = path;
-    if (errorsIn(state.diagnostics) > 0) {
-      this.section = "validation";
+  protected stageForOpenProduct(): void {
+    const path = this.store.current.open?.path;
+    if (path !== this.stagedFor) {
+      this.stagedFor = path;
+      this.section = "composition";
     }
   }
 
@@ -334,12 +326,12 @@ export class ProductWidget extends ReactWidget {
       );
     }
 
-    if (state.status === "error") {
+    // Nothing could be read, so there is no composition to fall back to: the
+    // panel is the recovery state until a reload or an edit produces an intent.
+    if (state.status === "error" && !state.intent) {
       return (
         <div className="gbx-product">
-          <div className="gbx-error" role="alert">
-            {state.error}
-          </div>
+          {this.renderRecovery(state.error)}
           {renderDiagnosticsSummary(state.diagnostics, () => this.showConflicts())}
         </div>
       );
@@ -499,7 +491,18 @@ export class ProductWidget extends ReactWidget {
 
         {state.status === "resolving" && <div className="gbx-progress">resolving…</div>}
 
-        {product && this.renderSection(product)}
+        {/* The product was read but something after it was not -- a failed
+            resolve, most often. The composition below is still this product's,
+            so the failure is reported beside it rather than replacing it. */}
+        {state.error !== undefined && this.renderRecovery(state.error)}
+        {/* Composition and Validation render from the intent and the
+            diagnostics, so they survive a resolution that did not arrive.
+            Overview and Topology are views *of* a resolution and wait for one. */}
+        {this.section === "composition"
+          ? this.renderComposition()
+          : this.section === "validation"
+            ? this.renderValidation()
+            : product && this.renderSection(product)}
 
         {/* The summary line stays on every section **except Validation**. It is
             one line, it is the only thing on this panel that says something is
@@ -514,10 +517,133 @@ export class ProductWidget extends ReactWidget {
     );
   }
 
+  /**
+   * What went wrong, and the two things that can be done about it.
+   *
+   * One renderer for both places it appears -- the panel-wide recovery state
+   * when nothing could be read, and the line above a composition that survived
+   * whatever failed after it. Reload and Open GDL are the whole repertoire:
+   * everything else a person might do about a broken description happens in the
+   * description.
+   */
+  protected renderRecovery(error: string | undefined): React.ReactNode {
+    const path = this.store.current.open?.path;
+    return (
+      <div className="gbx-error" role="alert" data-product-error>
+        <span>{error}</span>
+        <button type="button" onClick={() => void this.store.reload()}>
+          Retry
+        </button>
+        {path !== undefined && (
+          <button type="button" onClick={() => void this.reveals.revealPath(path)}>
+            Open GDL
+          </button>
+        )}
+      </div>
+    );
+  }
+
   /** Move to a stage, from somewhere other than the strip. */
-  protected showSection(section: ProductSection): void {
+  public showSection(section: ProductSection): void {
     this.section = section;
     this.update();
+  }
+
+  protected renderComposition(): React.ReactNode {
+    const state = this.store.current;
+    const selection = this.selection.current;
+    return <>
+      <div className="gbx-composition-draft" aria-live="polite">
+        {this.edits.hasDraft() ? <><span>{this.edits.draftEdits().length} pending changes</span>
+          <button onClick={() => void this.edits.applyDraft()}>Apply changes</button>
+          <button onClick={() => this.edits.discardDraft()}>Discard</button></> : <span>Saved</span>}
+      </div>
+      <Composition state={state} descriptors={this.catalogue.current.rows.flatMap(row => row.kind === "projected" ? [row.gear] : [])}
+        selection={selection} select={selected => { this.selection.select(selected); this.update(); }}
+        add={(host, point) => void this.commands.executeCommand(ADD_GEAR.id, { host, point })}
+        remove={(host, index) => void this.edits.removeComposition(host, index).then(ok => { if (ok) this.selection.select(undefined); })}
+        settings={this.renderSettings(selection)} reveals={this.reveals} />
+    </>;
+  }
+
+  /**
+   * The settings half of Composition, for whatever is selected.
+   *
+   * **Rendered here, not borrowed from the Inspector.** This used to call
+   * `InspectorWidget.renderContent()` on an injected instance, which made the
+   * right-hand panel and this pane one widget with one set of half-typed boxes.
+   * They are components now, so each surface holds its own.
+   *
+   * Keyed on the draft epoch for the same reason the Inspector keys them: a
+   * Discard or an Apply must take the scratch boxes with it.
+   */
+  protected renderSettings(selection: Selection | undefined): React.ReactNode {
+    const state = this.store.current;
+    const descriptorFor = (id: string): GearDescriptor | undefined => {
+      const row = this.catalogue.current.rows.find(
+        (row) => row.kind === "projected" && row.gear.id === id,
+      );
+      return row?.kind === "projected" ? row.gear : undefined;
+    };
+
+    if (selection?.kind === "plugin") {
+      return (
+        <PluginSettings
+          key={`plugin-${selection.host}-${selection.entryIndex}-${this.edits.epoch}`}
+          selection={selection}
+          state={state}
+          descriptor={descriptorFor(selection.id)}
+          edits={this.edits}
+          openGdl={() => {
+            if (state.open) void this.reveals.revealPath(state.open.path);
+          }}
+          remove={() =>
+            void this.edits
+              .removeComposition(selection.host, selection.entryIndex)
+              .then((ok) => {
+                if (ok) this.selection.select({ kind: "gear", id: selection.host });
+              })
+          }
+        />
+      );
+    }
+
+    if (selection?.kind === "gear") {
+      const descriptor = descriptorFor(selection.id);
+      const picked = state.intent?.selected_gears.find((entry) => entry.gear === selection.id);
+      if (descriptor === undefined) {
+        return (
+          <div className="gbx-empty">
+            No catalogue descriptor for <code>{selection.id}</code> yet. It stays in your
+            product; its settings appear once the catalogue has read it.
+          </div>
+        );
+      }
+      // A gear the closure pulled in is not edited here: there is no `use_gear`
+      // entry of its own to write into.
+      if (picked === undefined) {
+        return (
+          <div className="gbx-empty">
+            <code>{selection.id}</code> is included by another gear, so it has no settings of
+            its own. Configure the gear that requires it.
+          </div>
+        );
+      }
+      return (
+        <GearSettings
+          key={`gear-${selection.id}-${this.edits.epoch}`}
+          descriptor={descriptor}
+          picked={picked}
+          edits={this.edits}
+          sources={{ edits: this.edits, products: this.store }}
+          profileKind={state.resolution?.product?.product.profile_kind}
+        />
+      );
+    }
+
+    return (
+      <div className="gbx-empty">Select a gear or a plugin connection to configure it.</div>
+    );
   }
 
   /** Whichever stage is selected, rendered from the same resolution. */
@@ -525,12 +651,13 @@ export class ProductWidget extends ReactWidget {
     switch (this.section) {
       case "overview":
         return this.renderOverview(product);
-      case "gears":
-        return this.renderGears(product);
       case "topology":
         return this.renderTopology(product);
+      // Both are rendered by `render` before it reaches here, because both work
+      // without a resolution and this method is only called once there is one.
+      case "composition":
       case "validation":
-        return this.renderValidation();
+        return undefined;
     }
   }
 
@@ -563,10 +690,19 @@ export class ProductWidget extends ReactWidget {
             <option value="kubernetes">kubernetes</option>
           </select>
         </label>
+        {this.newProfileKind === "self_hosted" && <label>Host (required)
+          <input value={this.newProfileHost} onChange={e => { this.newProfileHost = e.target.value; this.update(); }} />
+        </label>}
+        {this.newProfileKind !== "embedded" && <label>Discovery (required)
+          <select value={this.newProfileDiscovery} onChange={e => { this.newProfileDiscovery = e.target.value; this.update(); }}>
+            <option value="static">static</option><option value="directory">directory</option>
+          </select>
+        </label>}
         <button
           type="button"
           className="gbx-choice"
           data-profile-add-confirm
+          disabled={!this.newProfileId.trim() || (this.newProfileKind === "self_hosted" && !this.newProfileHost.trim())}
           onClick={() => void this.confirmAddProfile()}
         >
           Add
@@ -709,7 +845,10 @@ export class ProductWidget extends ReactWidget {
   protected async confirmAddProfile(): Promise<void> {
     const id = this.newProfileId.trim();
     if (id === "") return;
-    const ok = await this.edits.addProfile(this.newProfileKind, id, []);
+    const fields = this.newProfileKind === "embedded" ? [] : this.newProfileKind === "self_hosted"
+      ? [{ name: "host", value: this.newProfileHost.trim() }, { name: "worker_discovery", value: this.newProfileDiscovery }]
+      : [{ name: "discovery", value: this.newProfileDiscovery }];
+    const ok = await this.edits.addProfile(this.newProfileKind, id, fields);
     if (ok) {
       this.addingProfile = false;
       this.newProfileId = "";
@@ -798,7 +937,7 @@ export class ProductWidget extends ReactWidget {
           type="button"
           className="gbx-figure"
           data-figure="gears"
-          onClick={() => this.showSection("gears")}
+          onClick={() => this.showSection("composition")}
         >
           <span className="gbx-figure-value" data-overview-gears={entries.length}>
             {entries.length}
@@ -897,66 +1036,6 @@ export class ProductWidget extends ReactWidget {
           ))}
         </span>
       </div>
-    );
-  }
-
-  /**
-   * What the product is made of, in two lists that mean different things.
-   *
-   * `asked for` is the description's own `use_gear` entries; everything else is
-   * here because the closure pulled it in, and each of those carries the reason.
-   * Keeping them apart is the panel's most-praised property and predates the
-   * sections.
-   */
-  /*
-   * Vision §60 sketches the product as a tree -- Deployment, Gears, Contracts,
-   * Cluster, Edge, Security, Artifacts -- and the sections are that, with four
-   * departures worth naming rather than leaving to be noticed.
-   *
-   * There is no Deployment section: the profile switch above the strip *is* the
-   * deployment control, and it has to stay reachable while a resolution is in
-   * flight, which anything rendered from the resolved product cannot be.
-   * Security is not modelled in the IR at all. Artifacts live in the Generate
-   * view, which the strip links to. And Contracts and Cluster are inside
-   * Topology rather than beside it, because a binding's `mode` is a consequence
-   * of which applications its ends landed in, and a reader checking that needs both
-   * at once.
-   */
-  protected renderGears(product: ResolvedProduct): React.ReactNode {
-    const entries = Object.entries(product.gears);
-    const selected = entries
-      .filter(([, gear]) => gear.selected_by.some((reason) => reason.reason === "selected"))
-      .map(([id]) => id);
-    const pulled = entries
-      .filter(([, gear]) => !gear.selected_by.some((reason) => reason.reason === "selected"))
-      .map(([id, gear]) => ({ id, why: gear.selected_by.map(describeInclusion).join("; ") }));
-
-    return (
-      <>
-        {this.renderBranch("gears", "package", "Gears", entries.length, (
-          <>
-            {this.renderTwig("asked for", selected.length, (
-              <>
-                {selected.length === 0
-                  ? <div className="gbx-empty">—</div>
-                  : selected.map((id) =>
-                      this.renderGearNode(product, id, { "data-asked-for": id }),
-                    )}
-              </>
-            ))}
-            {this.renderTwig("pulled in by the closure", pulled.length, (
-              <>
-                {pulled.length === 0
-                  ? <div className="gbx-empty">—</div>
-                  : pulled.map(({ id, why }) =>
-                      this.renderGearNode(product, id, { "data-pulled-in": id }, why),
-                    )}
-              </>
-            ))}
-          </>
-        ))}
-
-      </>
     );
   }
 
@@ -1155,90 +1234,12 @@ export class ProductWidget extends ReactWidget {
     );
   }
 
-  /** A second level, without a fold of its own: two twigs do not need chrome. */
-  protected renderTwig(title: string, count: number, children: React.ReactNode): React.ReactNode {
-    return (
-      <div className="gbx-twig" key={title}>
-        <div className="gbx-twig-label">
-          {title}
-          <span className="gbx-group-count">{count}</span>
-        </div>
-        {children}
-      </div>
-    );
-  }
-
+  /** Fold or unfold one branch of the topology tree. */
   protected toggle(id: string): void {
     if (!this.collapsed.delete(id)) {
       this.collapsed.add(id);
     }
     this.update();
-  }
-
-  /**
-   * One gear as a tree leaf: an icon saying what kind it is, a link to its
-   * description, and the reason it is here when that is not "you asked".
-   *
-   * The icon is chosen from `selected_by`, not from the name: a gear is a plugin
-   * because something selected it as one, and `*-plugin` in an id is a convention
-   * rather than a fact.
-   */
-  protected renderGearNode(
-    product: ResolvedProduct,
-    id: string,
-    attributes: Record<string, string>,
-    why?: string,
-  ): React.ReactNode {
-    const gear = product.gears[id];
-    const isPlugin = gear?.selected_by.some((reason) => reason.reason === "plugin_of") ?? false;
-    return (
-      <div className="gbx-leaf" key={id} {...attributes}>
-        <span className={`gbx-leaf-icon codicon codicon-${isPlugin ? "plug" : "package"}`} />
-        {this.renderGear(product, id)}
-        {why !== undefined && <span className="gbx-leaf-why">{why}</span>}
-      </div>
-    );
-  }
-
-  /**
-   * A gear id, as a link to its own description.
-   *
-   * The id used to be a `<code>` that only moved the Explain focus, while the
-   * stylesheet gave it a pointer cursor and an underline on hover -- so it
-   * promised navigation and delivered nothing visible unless Explain happened to
-   * be open. It now opens the gear's `gear.gdl` *and* points Explain at it: both
-   * answers to one click, and neither is a surprise.
-   *
-   * `source` and `gdl_path` come from the resolution itself
-   * (`ResolvedGear`), so this needs nothing from the catalogue -- and they agree
-   * with the catalogue's, which is what lets one `RevealService` serve both.
-   */
-  protected renderGear(
-    product: ResolvedProduct,
-    id: string,
-    attributes: Record<string, string> = {},
-  ): React.ReactNode {
-    const gear = product.gears[id];
-    if (gear === undefined) {
-      // In the closure and absent from the gear table would be a resolver fault.
-      // Rendered plainly rather than as a dead link.
-      return (
-        <code key={id} {...attributes}>
-          {id}
-        </code>
-      );
-    }
-    return (
-      <span key={id} className="gbx-gear-link" {...attributes}>
-        <RevealLink
-          reveals={this.reveals}
-          source={gear.source}
-          target={gear.gdl_path}
-          label={id}
-          onActivate={() => this.store.setFocus({ kind: "gear", id })}
-        />
-      </span>
-    );
   }
 
   protected renderApplication(application: ResolvedApplication): React.ReactNode {
@@ -1424,24 +1425,6 @@ function describeClusterResolution(resolution: ClusterResolution): string {
 /** `auto` means "you decide", so it has no value to print. */
 function describeChoice(choice: Choice<unknown>): string {
   return choice.choice === "explicit" ? String(choice.value) : "auto";
-}
-
-/**
- * Why a gear is in the product, in words.
- *
- * `plugin_of` names the profile as well as the host, because it is the only
- * inclusion reason that differs between profiles -- dev links the static plugin
- * and prod the OIDC one, from the same description.
- */
-function describeInclusion(reason: InclusionReason): string {
-  switch (reason.reason) {
-    case "selected":
-      return "asked for by the product";
-    case "colocated_by":
-      return `co-located with ${reason.gear}`;
-    case "plugin_of":
-      return `plugin of ${reason.host} for ${reason.profile}`;
-  }
 }
 
 /**

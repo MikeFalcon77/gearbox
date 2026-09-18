@@ -46,6 +46,7 @@ export function cap<T>(all: readonly T[], limit = LIST_CAP): Capped<T> {
  * inventing one would be inventing the answer.
  */
 export type SelectionSnapshot =
+  | Extract<Selection, { kind: "plugin" }>
   | { readonly kind: "gear"; readonly id: string; readonly label?: string }
   | { readonly kind: "application"; readonly id: string }
   | { readonly kind: "binding"; readonly consumer: string; readonly contract: string }
@@ -58,6 +59,7 @@ export function selectionSnapshot(
 ): SelectionSnapshot {
   if (selection === undefined) return { kind: "none" };
   switch (selection.kind) {
+    case "plugin": return selection;
     case "gear":
       return { kind: "gear", id: selection.id };
     case "application":
@@ -82,6 +84,8 @@ export function selectionLabel(
 ): string {
   if (selection === undefined) return "nothing selected";
   switch (selection.kind) {
+    case "plugin":
+      return `${selection.host} / ${selection.id} (connection ${selection.entryIndex + 1})`;
     case "gear":
       return selection.id;
     case "application":

@@ -22,6 +22,21 @@ config?: Record<string, unknown>,
  */
 profiles?: Array<ProfileId>, 
 /**
+ * This entry's position in the host's written `plugins = [...]` list.
+ *
+ * **The written position, not this vector's.** Evaluation drops entries --
+ * a plugin id that does not parse, a duplicate selection for one profile --
+ * so the nth `PluginSelection` is not in general the nth `plugin(...)` in
+ * the file. An editor that addressed entries by their position here would
+ * aim at the wrong one the moment a malformed sibling existed, which is
+ * exactly when a person needs to edit the others.
+ *
+ * Carried rather than recomputed because only evaluation still knows both
+ * orders at once; by the time the client has an intent, the dropped entries
+ * are gone without trace.
+ */
+entry_index: number, 
+/**
  * Where `plugin(...)` was written in the product description.
  */
 declared_at?: Location | null, };

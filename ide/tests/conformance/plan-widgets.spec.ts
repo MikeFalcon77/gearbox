@@ -142,7 +142,7 @@ test.describe("where the views live", () => {
     // a gear in the catalogue". One `SelectionService` later, both are about the
     // same gear.
     await openProduct(studio.page, "dev");
-    await productSection(studio.page, "gears");
+    await productSection(studio.page, "composition");
     await studio.page.locator('[data-asked-for="api-gateway"] a').click();
     await revealDetail(studio.page);
 
@@ -186,42 +186,57 @@ test.describe("where the views live", () => {
     // co-location legible; Security and Artifacts are absent because neither
     // exists to show; Deployment stays in the header because the profile switch
     // must work while a resolution is in flight.
-    // **The branches are behind the stages now**, and that is the one change to
-    // this claim: the panel is `Overview · Gears · Topology · Validation`, so
-    // `Gears` holds the gears branch and `Topology` holds the three that describe
-    // how it deploys. The set is the same and the order is the same; what the
-    // claim adds is that each is reachable.
+    // **The branches are behind the stages now**, and the gears half changed
+    // shape again with Composition: `Topology` still holds the three branches
+    // that describe how a product deploys, and the gears are no longer one of
+    // them. A branch was a read-only fold over the resolution's two buckets;
+    // Composition is the product's own structure, so it folds per *gear* -- each
+    // host with its connections under it -- rather than as one bucket of them.
     await openProduct(studio.page, "dev");
-    await productSection(studio.page, "gears");
-    const gearBranches = await studio.page
-      .locator("[data-branch]")
-      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-branch")));
-    expect(gearBranches).toEqual(["gears"]);
-
     await productSection(studio.page, "topology");
     const topologyBranches = await studio.page
       .locator("[data-branch]")
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-branch")));
     expect(topologyBranches).toEqual(["applications", "contracts", "cluster"]);
 
-    // A branch folds, and says so rather than only looking folded.
-    await productSection(studio.page, "gears");
-    const gears = studio.page.locator('[data-branch="gears"] .gbx-group-label').first();
-    await expect(gears).toHaveAttribute("data-collapsed", "false");
+    await productSection(studio.page, "composition");
+    expect(
+      await studio.page
+        .locator("[data-branch]")
+        .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-branch"))),
+      "Composition is not a bucket of gears; the branches belong to Topology",
+    ).toEqual([]);
+
+    // Both halves of the old buckets are still named and still distinguished:
+    // what the product asked for, and what came with it.
     await expect(studio.page.locator('[data-asked-for="api-gateway"]')).toBeVisible();
-    await gears.click();
-    await expect(gears).toHaveAttribute("data-collapsed", "true");
-    await expect(studio.page.locator('[data-asked-for="api-gateway"]')).toHaveCount(0);
-    await gears.click();
+    await expect(studio.page.locator("[data-pulled-in]").first()).toBeVisible();
+
+    // A gear folds, and says so rather than only looking folded -- natively now,
+    // because each host is a `<details>` and `open` is the state itself rather
+    // than an attribute mirroring it.
+    const host = studio.page.locator('[data-asked-for="api-gateway"]');
+    await expect(host).toHaveAttribute("open", "");
+    await host.locator("summary").click();
+    await expect(host).not.toHaveAttribute("open", "");
+    await host.locator("summary").click();
+    await expect(host).toHaveAttribute("open", "");
 
     // The icon says what a leaf is, and it is chosen from `selected_by` rather
     // than from the id -- a gear is a plugin because something selected it as
-    // one, and `*-plugin` in a name is a convention.
+    // one, and `*-plugin` in a name is a convention. Read on a co-located gear,
+    // because a *selected* plugin is no longer listed here as an independent
+    // entry: it belongs to the host that named it, under that host's point.
     await expect(
-      studio.page.locator('[data-pulled-in="static-authn-plugin"] .codicon-plug'),
+      studio.page.locator('[data-pulled-in="types-registry"] .codicon-package'),
     ).toBeVisible();
     await expect(
       studio.page.locator('[data-asked-for="api-gateway"] .codicon-package'),
+    ).toBeVisible();
+    // And the plugin is where it now belongs: under its host, as a connection.
+    await expect(
+      studio.page.locator('[data-plugin-host="authn-resolver"]').first(),
+      "a selected plugin is a connection under its host, not a loose gear",
     ).toBeVisible();
   });
 
@@ -242,7 +257,7 @@ test.describe("where the views live", () => {
     await expect(studio.page.locator("[data-profile]").first()).toBeVisible();
     await expect(studio.page.locator(".gbx-diagnostics")).toBeVisible();
 
-    await productSection(studio.page, "gears");
+    await productSection(studio.page, "composition");
     await expect(studio.page.locator("[data-asked-for]").first()).toBeVisible();
     await expect(studio.page.locator("[data-pulled-in]").first()).toBeVisible();
     // Still on screen from here: one line, on every stage.
@@ -328,7 +343,7 @@ test.describe("where the views live", () => {
     // is on screen rather than instead of it. A side panel satisfies that; the
     // main area would not.
     await openProduct(studio.page, "dev");
-    await productSection(studio.page, "gears");
+    await productSection(studio.page, "composition");
     await studio.page.locator('[data-asked-for="api-gateway"] a').click();
     await openExplain(studio.page);
     const area = await studio.page.evaluate(() => {

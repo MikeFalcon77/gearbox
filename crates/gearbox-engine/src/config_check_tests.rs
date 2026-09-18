@@ -386,6 +386,7 @@ fn a_credential_on_a_plugin_is_refused_as_well() {
                 .into_iter()
                 .collect(),
             profiles: BTreeSet::new(),
+            entry_index: 0,
             declared_at: None,
         });
 

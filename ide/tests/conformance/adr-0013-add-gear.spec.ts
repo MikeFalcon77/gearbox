@@ -33,9 +33,13 @@ test.describe("product session and Add Gear", () => {
     await toggle.click();
 
     await expect(studio.page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
-    await expect(
-      studio.page.locator(".dialogBlock", { has: studio.page.locator(".gbx-edit-preview") }),
-    ).toHaveCount(0);
+    // **The confirmation by name, not by shape.** This read "a `.dialogBlock`
+    // containing a preview", which distinguished the configurator from the write
+    // confirmation only while the configurator was a panel. Both are dialogs
+    // showing what would be written now, so the claim -- a catalogue `+` opens
+    // the configurator and writes nothing -- is asserted against the
+    // confirmation's own class.
+    await expect(studio.page.locator(".gbx-edit-confirm")).toHaveCount(0);
     await expect(studio.page.locator("[data-add-gear-flow] .gbx-edit-preview")).toContainText(
       "tenant-resolver",
       { timeout: 30_000 },
@@ -55,7 +59,7 @@ test.describe("Add Gear shows consequences before the write", () => {
     await expect(add).toBeVisible({ timeout: 60_000 });
     await add.click();
     await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
-    await page.locator("[data-add-gear-select]").selectOption(gear);
+    await page.locator(`[data-add-gear-select="${gear}"]`).click();
   }
 
   test("the closure a gear joins is visible before anything is written", async ({ studio }) => {
@@ -288,7 +292,7 @@ test.describe("Add Gear shows consequences before the write", () => {
       // next plugin was reported as "already attached to authn-resolver" while
       // the section above correctly said that host declares no point it fills.
       await page.locator("[data-add-gear-change]").click();
-      await page.locator("[data-add-gear-select]").selectOption("rg-tr-plugin");
+      await page.locator('[data-add-gear-select="rg-tr-plugin"]').click();
       const blocked = "Nothing in this product declares";
       await expect(page.locator("[data-add-gear-host-none]")).toContainText(blocked, {
         timeout: 30_000,
@@ -417,7 +421,7 @@ test.describe("Add Gear shows consequences before the write", () => {
     // a gear is chosen -- the overview replaces it, which is also what makes the
     // staged features, config and plugins safe to clear on a change of subject.
     await page.locator("[data-add-gear-change]").click();
-    await page.locator("[data-add-gear-select]").selectOption("types-registry");
+    await page.locator('[data-add-gear-select="types-registry"]').click();
     await expect(page.locator("[data-add-gear-features-none]")).toContainText(
       "offers no Cargo features",
       { timeout: 60_000 },
@@ -431,7 +435,7 @@ test.describe("Add Gear shows consequences before the write", () => {
     // why it is not on offer here -- a list that silently omitted it would read
     // as a missing feature.
     await page.locator("[data-add-gear-change]").click();
-    await page.locator("[data-add-gear-select]").selectOption("grpc-hub");
+    await page.locator('[data-add-gear-select="grpc-hub"]').click();
     await expect(
       page.locator('[data-add-gear-feature-elsewhere="k8s-auth"]'),
     ).toContainText("kubernetes", { timeout: 60_000 });

@@ -983,7 +983,7 @@ export async function expectContext(
  */
 export async function productSection(
   page: Page,
-  section: "overview" | "gears" | "topology" | "validation",
+  section: "overview" | "composition" | "topology" | "validation",
 ): Promise<void> {
   const tab = page.locator(`[data-product-section="${section}"]`);
   await tab.waitFor({ state: "visible", timeout: 30_000 });

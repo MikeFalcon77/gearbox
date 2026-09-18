@@ -17,6 +17,7 @@ import {
   openGenerate,
   openPalette,
   openProduct,
+  productSection,
   resetCatalogueView,
   revealCatalogue,
   revealInspector,
@@ -45,7 +46,11 @@ function diffOfProduct(): string {
  * preview pane is what makes it ours.
  */
 async function acceptEdit(page: import("@playwright/test").Page): Promise<void> {
-  const dialog = page.locator(".dialogBlock", { has: page.locator(".gbx-edit-preview") });
+  // **By the confirmation's own class, not by "has a preview".** The add-gear
+  // configurator is a modal showing what it would write, so the preview pane no
+  // longer identifies *this* dialog -- and accepting the wrong one is exactly
+  // what the note above says must not happen.
+  const dialog = page.locator(".gbx-edit-confirm");
   await expect(dialog, "the edit dialog is not open, so there is nothing to accept").toBeVisible();
   await dialog.locator(".theia-button.main").click();
 }
@@ -344,7 +349,16 @@ test.describe("tier 3: a description edited surgically", () => {
       await expect(toggle).toHaveAttribute("data-in-product", "true", { timeout: 60_000 });
       expect(diffOfProduct()).not.toBe("");
 
-      await toggle.click();
+      // **Removed from the composition, not from the catalogue.** The catalogue's
+      // control for a gear that is already in the product is "show it there"
+      // now: removing is an act on the product's own structure, and the surface
+      // that owns that structure is the one that offers it. So the round trip
+      // goes out through the product and the catalogue is only asked to agree.
+      await studio.page.locator('[data-toggle-gear="tenant-resolver"]').click();
+      await productSection(studio.page, "composition");
+      await studio.page
+        .locator('[data-asked-for="tenant-resolver"] button[aria-label="Remove tenant-resolver from product"]')
+        .click();
       await acceptEdit(studio.page);
       await expect(toggle).toHaveAttribute("data-in-product", "false", { timeout: 60_000 });
       expect(diffOfProduct()).toBe("");
@@ -450,7 +464,7 @@ test.describe("typed config from schema (Phase 7)", () => {
     await expect(add).toBeVisible({ timeout: 60_000 });
     await add.click();
     await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
-    await page.locator("[data-add-gear-select]").selectOption("tenant-resolver");
+    await page.locator('[data-add-gear-select="tenant-resolver"]').click();
 
     const field = page.locator('[data-config-field="vendor"]');
     await expect(field).toBeVisible({ timeout: 60_000 });

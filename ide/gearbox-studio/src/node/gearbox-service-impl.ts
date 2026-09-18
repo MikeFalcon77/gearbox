@@ -401,10 +401,12 @@ export class GearboxServiceImpl implements GearboxService {
     path: string,
     edits: readonly ProductEdit[],
     dryRun: boolean,
+    expectedBefore?: string,
   ): Promise<EditGearResult> {
     return this.request(method.PRODUCT_APPLY_EDITS, {
       path,
       edits: [...edits],
+      expected_before: expectedBefore,
       dry_run: dryRun,
     });
   }

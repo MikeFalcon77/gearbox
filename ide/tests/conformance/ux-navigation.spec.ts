@@ -75,16 +75,20 @@ test.describe("a screen belongs to a subject", () => {
     // allowed. A menu is re-read each time it opens; a widget already on screen
     // is never asked again.
     //
-    // Add Gear is opened first because it is the harder half: the Product view
-    // at least renders a picker with no product, whereas the configurator holds a
-    // proposal composed against one, and `ProductEditService` resolves its target
-    // when it commits rather than when it was staged.
+    // **Read with Generate rather than Add Gear.** Add Gear was the example here
+    // because it was the harder half -- the Product view at least renders a
+    // picker with no product, whereas the configurator held a proposal composed
+    // against one, and `ProductEditService` resolves its target when it commits
+    // rather than when it was staged. Adding is a modal dialog now, so it is not
+    // a screen that could outlive anything: it captures the product path, and
+    // closes itself when the open product changes. The dangerous half is closed
+    // at the source rather than by withdrawal, and the claim here is carried by
+    // Generate, which is still a product-scoped screen in the main area.
+    // See `cpt-gearbox-adr-domain-specific-ide-shell` Amendment 2026-09-18.
     const { page } = studio;
     await openProduct(page, "dev");
-    await revealCatalogue(page);
-    await resetCatalogueView(page);
-    await page.locator('[data-toggle-gear="tenant-resolver"]').click();
-    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+    await runCommand(page, "Gearbox: Show Generate");
+    await expect(page.locator(".gbx-widget-generate")).toBeVisible({ timeout: 60_000 });
 
     await page.locator('[data-command="gearbox.product.close"]').click();
     await expectContext(page, "home");
@@ -95,7 +99,7 @@ test.describe("a screen belongs to a subject", () => {
       ),
     );
     expect(main, "a product's screens outlived the product").not.toContain("Gearbox Product");
-    expect(main, "a product's screens outlived the product").not.toContain("Add Gear");
+    expect(main, "a product's screens outlived the product").not.toContain("Gearbox Generate");
     // And the context's own screen is in front, rather than whichever sibling
     // Lumino picked when the active tab closed -- the rule that took ten Add Gear
     // claims down the last time anything here was closed.
@@ -111,6 +115,13 @@ test.describe("a screen that wants the room", () => {
     // panels back while the Graph -- which had asked for the room in the same
     // episode -- was still the screen in front of them. The service tracked one
     // screen per episode, so the first close looked like the last.
+    //
+    // **Read with New Gear rather than Add Gear**, because adding a gear is a
+    // modal dialog now and a dialog does not ask for the room -- it takes the
+    // whole screen for as long as it is open and gives it back on its own. The
+    // claim is about *focus screens*, of which there are still three; any two of
+    // them exercise it, and the episode logic does not know which. See
+    // `cpt-gearbox-adr-domain-specific-ide-shell` Amendment 2026-09-18.
     //
     // **Read by comparing the panel to its own tab bar**, which is what makes
     // this independent of how wide a person has dragged it: a collapsed side
@@ -136,17 +147,17 @@ test.describe("a screen that wants the room", () => {
     await resetCatalogueView(page);
     expect(await leftOpen(), "the catalogue must start open for this to mean anything").toBe(true);
 
-    await page.locator('[data-toggle-gear="tenant-resolver"]').click();
-    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
-    expect(await leftOpen(), "opening the configurator did not fold the catalogue").toBe(false);
+    await runCommand(page, "Gearbox: New Gear");
+    await expect(page.locator(".gbx-widget-create-gear")).toBeVisible({ timeout: 30_000 });
+    expect(await leftOpen(), "opening a focus screen did not fold the catalogue").toBe(false);
 
     await openGraph(page);
     // Still one episode: opening a second such screen must not re-snapshot, or
     // the episode records "already folded" as the state it owes.
     expect(await leftOpen()).toBe(false);
 
-    await page.locator('[id="shell-tab-gearbox.add-gear"] .lm-TabBar-tabCloseIcon').click();
-    await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0);
+    await page.locator('[id="shell-tab-gearbox.gear.create"] .lm-TabBar-tabCloseIcon').click();
+    await expect(page.locator(".gbx-widget-create-gear")).toHaveCount(0);
     expect(
       await leftOpen(),
       "the panels came back while a screen that wanted the room was still open",
@@ -168,6 +179,11 @@ test.describe("the product has stages", () => {
     // where one is. The four names are the stages of composing a product: what
     // it *is*, what it is *made of*, how that *deploys*, and what is *wrong*.
     //
+    // "Made of" is **Composition**, and it is where the view opens. It replaced
+    // a Gears stage that listed the resolution's two buckets read-only: the same
+    // question, but answered from the intent and answerable *into* -- a gear is
+    // configured where it is seen, rather than in a panel somewhere else.
+    //
     // Generate is the fifth stage and is a view of its own, so the strip links
     // out to it rather than reproducing a file plan and an Apply button in two
     // places. That is the difference this claim fixes in place: a tab would
@@ -178,7 +194,11 @@ test.describe("the product has stages", () => {
     const tabs = await strip
       .locator("[data-product-section]")
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-product-section")));
-    expect(tabs).toEqual(["overview", "gears", "topology", "validation"]);
+    expect(tabs).toEqual(["overview", "composition", "topology", "validation"]);
+    // Which stage a product *opens* on is not asserted here: `openProduct`
+    // establishes Overview on purpose, because the resolved header lives there.
+    // The arriving stage is claimed in `regression.spec.ts`, which opens without
+    // establishing one.
 
     // The profile switch and the diagnostics summary are above the strip, so they
     // survive a change of stage: the switch has to work while a resolution is in
@@ -280,7 +300,7 @@ test.describe("validation is a stage, not a doorway", () => {
     // diagnostic the current resolution does not have, which is exactly the
     // subtraction section 6 performs.
     const widget = readFileSync(
-      join(IDE, "gearbox-studio/src/browser/add-gear/add-gear-widget.tsx"),
+      join(IDE, "gearbox-studio/src/browser/add-gear/add-gear-dialog.tsx"),
       "utf8",
     );
     expect(widget, "Add Gear should render diagnostics with the shared row").toMatch(
@@ -291,7 +311,10 @@ test.describe("validation is a stage, not a doorway", () => {
     await openProduct(page, "dev");
     await page.locator("[data-add-gear]").click();
     await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
-    await page.locator("[data-add-gear-select]").selectOption("event-broker");
+    // A list of buttons rather than a `<select>`: the dialog shows each candidate
+    // with its source and whether it is already in the product, which an option
+    // element cannot carry.
+    await page.locator('[data-add-gear-select="event-broker"]').click();
 
     const introduced = page.locator("[data-add-gear-impact-diagnostics]");
     await expect(introduced).toBeVisible({ timeout: 60_000 });
@@ -489,6 +512,11 @@ test.describe("opening a product is one act", () => {
     // written at the *end*, deliberately, because it is a list of products that
     // opened rather than of ones once attempted. Reloading before then aborts the
     // open and there is nothing to continue.
+    // Overview first: `data-resolved-profile` is the resolved header, and the
+    // panel opens on Composition now. The stage is not the claim here -- "the
+    // open finished resolving" is -- so this goes where that fact is rendered,
+    // exactly as `openProduct` does and for the same reason.
+    await productSection(page, "overview");
     await expect(page.locator("[data-resolved-profile]")).toBeVisible({ timeout: 90_000 });
 
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -519,6 +547,11 @@ test.describe("opening a product is one act", () => {
     await expect(page.locator(".gbx-toolbar")).toHaveAttribute("data-context", "product", {
       timeout: 90_000,
     });
+    // Overview first: `data-resolved-profile` is the resolved header, and the
+    // panel opens on Composition now. The stage is not the claim here -- "the
+    // open finished resolving" is -- so this goes where that fact is rendered,
+    // exactly as `openProduct` does and for the same reason.
+    await productSection(page, "overview");
     await expect(page.locator("[data-resolved-profile]")).toBeVisible({ timeout: 90_000 });
     await page.reload({ waitUntil: "domcontentloaded" });
     await settled(page);
@@ -530,6 +563,11 @@ test.describe("opening a product is one act", () => {
     // for, and it is the Product panel saying it rather than Home still sitting
     // there.
     await expect(page.locator(".gbx-product")).toBeVisible({ timeout: 90_000 });
+    // Overview first: `data-resolved-profile` is the resolved header, and the
+    // panel opens on Composition now. The stage is not the claim here -- "the
+    // open finished resolving" is -- so this goes where that fact is rendered,
+    // exactly as `openProduct` does and for the same reason.
+    await productSection(page, "overview");
     await expect(page.locator("[data-resolved-profile]")).toBeVisible({ timeout: 90_000 });
     // Home is not in front of it: the header would say `payments-demo` while the
     // centre offered to open one. Not *absent* -- the Start screen stays a tab

@@ -1219,3 +1219,446 @@ fn a_product_with_no_sources_list_is_still_editable() {
         "a product with no sources list must still accept an edit"
     );
 }
+
+/// One host, one implementation, twice, for scopes that do not overlap.
+///
+/// The shape `add_gear_plugin` cannot express and `set_gear_plugins` destroys,
+/// and the reason a connection is addressed by position: both entries name
+/// `static-authn-plugin`, so nothing else tells them apart.
+const REPEATED_PLUGIN: &str = r#"product(
+    gears = [
+        use_gear("api-gateway", source = "gears-rust"),
+        use_gear("authn-resolver", source = "gears-rust",
+            plugins = [
+                # Permissive locally, strict in production: one plugin, two scopes.
+                plugin("static-authn-plugin", profiles = ["dev", "local"],
+                       config = {"mode": "accept_all"}),
+                plugin("static-authn-plugin", profiles = ["prod"],
+                       config = {"mode": "strict"}),
+            ],
+        ),
+    ],
+)
+"#;
+
+#[test]
+fn editing_one_connection_leaves_every_neighbour_alone() {
+    // The claim the whole per-entry editor exists to make. `set_gear_plugins`
+    // rewrites the list and would flatten all of this.
+    let edited = edit_plugin_entry(
+        URI,
+        HOST_WITH_PLUGINS,
+        "authn-resolver",
+        0,
+        "static-authn-plugin",
+        Some(("mode", Some(&str_value("strict")))),
+        None,
+        false,
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    assert!(
+        edited.contains(r#""mode": "strict""#),
+        "the edited key did not change: {edited}"
+    );
+    assert!(
+        edited.contains(r#"profiles = ["dev", "local"]"#),
+        "the edited entry lost its own scope: {edited}"
+    );
+    assert!(
+        edited.contains(r#"plugin("oidc-authn-plugin", profiles = ["prod"]"#),
+        "the sibling connection was reshaped: {edited}"
+    );
+    assert!(
+        edited.contains(r#"config = {"issuer": "https://id.example.com"}"#),
+        "the sibling connection lost its config: {edited}"
+    );
+    assert!(
+        edited.contains("# `local` takes the static plugin"),
+        "a comment inside the list was lost: {edited}"
+    );
+    assert!(
+        edited.contains("# authn-resolver routes to whichever plugin"),
+        "a comment above the host was lost: {edited}"
+    );
+    assert!(
+        edited.contains(r#"use_gear("api-gateway", source = "gears-rust"),"#),
+        "another gear was reshaped: {edited}"
+    );
+}
+
+#[test]
+fn two_entries_of_one_plugin_are_edited_separately() {
+    // Both entries name the same implementation, so only the position tells the
+    // editor which one was meant.
+    let edited = edit_plugin_entry(
+        URI,
+        REPEATED_PLUGIN,
+        "authn-resolver",
+        1,
+        "static-authn-plugin",
+        Some(("mode", Some(&str_value("paranoid")))),
+        None,
+        false,
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    assert!(
+        edited.contains(r#""mode": "paranoid""#),
+        "the addressed entry did not change: {edited}"
+    );
+    assert!(
+        edited.contains(r#""mode": "accept_all""#),
+        "the entry at the other position changed too: {edited}"
+    );
+}
+
+#[test]
+fn a_position_naming_the_wrong_plugin_is_refused() {
+    // A stale address is a refusal, never an edit of whatever moved into place.
+    let refusal = edit_plugin_entry(
+        URI,
+        HOST_WITH_PLUGINS,
+        "authn-resolver",
+        0,
+        "oidc-authn-plugin",
+        None,
+        Some(&["prod".to_owned()]),
+        false,
+    )
+    .expect_err("a mismatched name must refuse");
+    assert_eq!(refusal.as_slice()[0].code, DiagnosticCode::GdlCardinality);
+}
+
+#[test]
+fn a_position_past_the_end_is_refused() {
+    edit_plugin_entry(
+        URI,
+        HOST_WITH_PLUGINS,
+        "authn-resolver",
+        7,
+        "static-authn-plugin",
+        None,
+        None,
+        true,
+    )
+    .expect_err("a position past the end must refuse");
+}
+
+#[test]
+fn a_malformed_sibling_does_not_block_editing_the_others() {
+    // The regression `entry_index` exists for. Evaluation drops the unparseable
+    // entry, so a caller counting evaluated selections would address `oidc` as 0
+    // and edit the wrong line. Counting written entries, `oidc` is 1 and this
+    // works -- which is what keeps a product with one bad entry repairable.
+    let source = r#"product(
+    gears = [
+        use_gear("authn-resolver", source = "gears-rust",
+            plugins = [
+                plugin("Not A Gear Id"),
+                plugin("oidc-authn-plugin", config = {"issuer": "https://old.example.com"}),
+            ],
+        ),
+    ],
+)
+"#;
+    let edited = edit_plugin_entry(
+        URI,
+        source,
+        "authn-resolver",
+        1,
+        "oidc-authn-plugin",
+        Some(("issuer", Some(&str_value("https://id.example.com")))),
+        None,
+        false,
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    assert!(
+        edited.contains("https://id.example.com"),
+        "the good entry was not edited: {edited}"
+    );
+    assert!(
+        edited.contains(r#"plugin("Not A Gear Id")"#),
+        "the malformed entry was not left for the person to fix: {edited}"
+    );
+}
+
+#[test]
+fn a_connection_scope_is_replaced_whole() {
+    let edited = edit_plugin_entry(
+        URI,
+        HOST_WITH_PLUGINS,
+        "authn-resolver",
+        0,
+        "static-authn-plugin",
+        None,
+        Some(&["staging".to_owned()]),
+        false,
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    assert!(
+        edited.contains(r#"profiles = ["staging"]"#),
+        "the scope was not replaced: {edited}"
+    );
+    assert!(
+        !edited.contains(r#"profiles = ["dev", "local"]"#),
+        "the old scope survived beside the new one: {edited}"
+    );
+    assert!(
+        edited.contains(r#"config = {"mode": "accept_all"}"#),
+        "replacing the scope disturbed the config: {edited}"
+    );
+}
+
+#[test]
+fn an_empty_scope_removes_the_argument_rather_than_writing_no_profile() {
+    // `profiles = []` would read as "under no profile at all". Every profile is
+    // the absence of the argument -- see `ProductIntent::applies`.
+    let edited = edit_plugin_entry(
+        URI,
+        HOST_WITH_PLUGINS,
+        "authn-resolver",
+        0,
+        "static-authn-plugin",
+        None,
+        Some(&[]),
+        false,
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    assert!(
+        !edited.contains("profiles = []"),
+        "an empty scope was written literally: {edited}"
+    );
+    assert!(
+        !edited.contains(r#"profiles = ["dev", "local"]"#),
+        "the scope was not removed: {edited}"
+    );
+    assert!(
+        edited.contains(r#"profiles = ["prod"]"#),
+        "the sibling's scope was removed too: {edited}"
+    );
+}
+
+#[test]
+fn removing_a_connection_leaves_the_host_and_its_other_connections() {
+    let edited = edit_plugin_entry(
+        URI,
+        HOST_WITH_PLUGINS,
+        "authn-resolver",
+        0,
+        "static-authn-plugin",
+        None,
+        None,
+        true,
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    assert!(
+        !edited.contains("static-authn-plugin"),
+        "the connection was not removed: {edited}"
+    );
+    assert!(
+        edited.contains(r#"plugin("oidc-authn-plugin""#),
+        "the sibling connection went with it: {edited}"
+    );
+    assert!(
+        edited.contains(r#"use_gear("authn-resolver""#),
+        "the host went with its plugin: {edited}"
+    );
+}
+
+#[test]
+fn a_config_key_is_removed_from_one_connection_only() {
+    let edited = edit_plugin_entry(
+        URI,
+        HOST_WITH_PLUGINS,
+        "authn-resolver",
+        0,
+        "static-authn-plugin",
+        Some(("mode", None)),
+        None,
+        false,
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    assert!(
+        !edited.contains(r#""mode": "accept_all""#),
+        "the key was not removed: {edited}"
+    );
+    assert!(
+        edited.contains(r#"config = {"issuer": "https://id.example.com"}"#),
+        "the sibling's config was disturbed: {edited}"
+    );
+}
+
+#[test]
+fn a_literal_secret_is_refused_on_a_connection_too() {
+    // The same rule the gear-level editor applies; a connection is not a way
+    // around it.
+    let refusal = edit_plugin_entry(
+        URI,
+        HOST_WITH_PLUGINS,
+        "authn-resolver",
+        0,
+        "static-authn-plugin",
+        Some(("password", Some(&str_value("hunter2")))),
+        None,
+        false,
+    )
+    .expect_err("a literal secret must refuse");
+    assert_eq!(refusal.as_slice()[0].code, DiagnosticCode::GdlCardinality);
+}
+
+#[test]
+fn add_plugin_selection_appends_with_its_scope() {
+    let edited = add_plugin_selection(
+        URI,
+        HOST_WITH_PLUGINS,
+        "authn-resolver",
+        "ldap-authn-plugin",
+        &["staging".to_owned()],
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    assert!(
+        edited.contains(r#"plugin("ldap-authn-plugin", profiles = ["staging"])"#),
+        "the scoped entry was not written: {edited}"
+    );
+    assert!(
+        edited.contains(r#"config = {"mode": "accept_all"}"#),
+        "an existing entry was flattened: {edited}"
+    );
+    assert!(
+        edited.contains("# `local` takes the static plugin"),
+        "a comment inside the list was lost: {edited}"
+    );
+}
+
+#[test]
+fn add_plugin_selection_is_idempotent_within_one_scope() {
+    // The same implementation under the same scope is the duplicate the
+    // evaluator reports; writing it again would only produce a diagnostic.
+    assert_eq!(
+        add_plugin_selection(
+            URI,
+            REPEATED_PLUGIN,
+            "authn-resolver",
+            "static-authn-plugin",
+            &["prod".to_owned()],
+        )
+        .expect("editable"),
+        Edit::Unchanged
+    );
+}
+
+#[test]
+fn add_plugin_selection_appends_the_same_plugin_under_a_different_scope() {
+    // The case that makes the scope part of the identity: not a duplicate.
+    let edited = add_plugin_selection(
+        URI,
+        REPEATED_PLUGIN,
+        "authn-resolver",
+        "static-authn-plugin",
+        &["staging".to_owned()],
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    assert!(
+        edited.contains(r#"plugin("static-authn-plugin", profiles = ["staging"])"#),
+        "the differently scoped entry was refused as a duplicate: {edited}"
+    );
+}
+
+#[test]
+fn add_plugin_selection_creates_the_argument_when_absent() {
+    let source = r#"product(
+    gears = [
+        use_gear("authn-resolver", source = "gears-rust"),
+    ],
+)
+"#;
+    let edited = add_plugin_selection(URI, source, "authn-resolver", "oidc-authn-plugin", &[])
+        .expect("editable")
+        .changed()
+        .expect("changed")
+        .to_owned();
+    assert!(
+        edited.contains(r#"plugins = [plugin("oidc-authn-plugin")]"#),
+        "the argument was not created: {edited}"
+    );
+}
+
+#[test]
+fn add_plugin_selection_refuses_a_host_that_is_not_selected() {
+    add_plugin_selection(
+        URI,
+        HOST_WITH_PLUGINS,
+        "not-a-gear",
+        "oidc-authn-plugin",
+        &[],
+    )
+    .expect_err("an absent host must refuse");
+}
+
+#[test]
+fn add_then_remove_is_an_inverse_for_a_connection() {
+    // The same round-trip claim the gear-level edits make, one level down.
+    let added = add_plugin_selection(
+        URI,
+        HOST_WITH_PLUGINS,
+        "authn-resolver",
+        "ldap-authn-plugin",
+        &["staging".to_owned()],
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    let back = edit_plugin_entry(
+        URI,
+        &added,
+        "authn-resolver",
+        2,
+        "ldap-authn-plugin",
+        None,
+        None,
+        true,
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    assert_eq!(back, HOST_WITH_PLUGINS);
+}

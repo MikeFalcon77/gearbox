@@ -26,7 +26,7 @@ import { expect, openProduct, productSection, test } from "../fixtures/studio";
 async function shown(page: import("@playwright/test").Page) {
   await productSection(page, "overview");
   const header = await snapshot(page);
-  await productSection(page, "gears");
+  await productSection(page, "composition");
   const gears = await snapshot(page);
   await productSection(page, "topology");
   const topology = await snapshot(page);
@@ -42,6 +42,7 @@ async function shown(page: import("@playwright/test").Page) {
     mechanisms: topology.mechanisms,
     askedFor: gears.askedFor,
     pulledIn: gears.pulledIn,
+    connections: gears.connections,
   };
 }
 
@@ -73,6 +74,17 @@ async function snapshot(page: import("@playwright/test").Page) {
       askedFor: attrs("[data-asked-for]", "data-asked-for"),
       pulledIn: Array.from(root.querySelectorAll("[data-pulled-in]")).map((e) => ({
         id: e.getAttribute("data-pulled-in") ?? "",
+        why: (e.textContent ?? "").replace(/\s+/g, " ").trim(),
+      })),
+      // **A third bucket, because there are three kinds of membership now.** A
+      // plugin the product selected is not "asked for" (it has no `use_gear`)
+      // and not "pulled in" (nothing dragged it along) -- it is a connection
+      // written under the host that named it, and Composition shows it there
+      // rather than repeating it as a loose gear.
+      connections: Array.from(root.querySelectorAll("[data-plugin-id]")).map((e) => ({
+        id: e.getAttribute("data-plugin-id") ?? "",
+        host: e.getAttribute("data-plugin-host") ?? "",
+        active: e.getAttribute("data-plugin-active") === "true",
         why: (e.textContent ?? "").replace(/\s+/g, " ").trim(),
       })),
     };
@@ -135,19 +147,27 @@ test.describe("a product resolved across profiles", () => {
     // browser-observable half of a resolver bug found in M4 -- plugins chosen
     // through `plugins { ... }` never reached the closure, so the host built with
     // none linked and the contract route answered 401.
+    // **Read off the connections, and both of them are always listed.** The old
+    // Gears stage showed the resolution's closure, so the plugin the profile did
+    // *not* select was simply absent and "which one is linked" was answered by
+    // what was there. Composition shows what the description says, which is both
+    // connections under `authn-resolver` whichever profile is on screen -- so the
+    // answer is which one is *active here*, and the other stays visible and
+    // editable instead of vanishing when the profile changes.
     await openProduct(studio.page, "dev");
     const dev = await shown(studio.page);
-    const devPlugin = dev.pulledIn.find((g) => g.id.endsWith("authn-plugin"));
-    expect(devPlugin?.id).toBe("static-authn-plugin");
-    // And it says which host selected it, and for which profile -- the only
-    // inclusion reason that differs between profiles.
-    expect(devPlugin?.why).toContain("plugin of authn-resolver for dev");
+    const devLinked = dev.connections.filter((c) => c.active && c.id.endsWith("authn-plugin"));
+    expect(devLinked.map((c) => c.id)).toEqual(["static-authn-plugin"]);
+    expect(devLinked[0]?.host).toBe("authn-resolver");
+    // And the one this profile did not select is present and marked, not gone.
+    const devIdle = dev.connections.filter((c) => !c.active && c.id.endsWith("authn-plugin"));
+    expect(devIdle.map((c) => c.id)).toEqual(["oidc-authn-plugin"]);
 
     await openProduct(studio.page, "prod");
     const prod = await shown(studio.page);
-    const prodPlugin = prod.pulledIn.find((g) => g.id.endsWith("authn-plugin"));
-    expect(prodPlugin?.id).toBe("oidc-authn-plugin");
-    expect(prodPlugin?.why).toContain("plugin of authn-resolver for prod");
+    const prodLinked = prod.connections.filter((c) => c.active && c.id.endsWith("authn-plugin"));
+    expect(prodLinked.map((c) => c.id)).toEqual(["oidc-authn-plugin"]);
+    expect(prodLinked[0]?.host).toBe("authn-resolver");
   });
 
   test("a gear pulled in by co-location names the gear that pulled it [PRD cpt-gearbox-fr-never-cut-colocation]", async ({
@@ -174,7 +194,13 @@ test.describe("a product resolved across profiles", () => {
     // and in no application is a gear nothing will build.
     await openProduct(studio.page, "prod");
     const state = await shown(studio.page);
-    const closure = new Set([...state.askedFor, ...state.pulledIn.map((g) => g.id)]);
+    // All three buckets: a connection is in the closure too, and leaving it out
+    // would make every selected plugin read as an orphan.
+    const closure = new Set([
+      ...state.askedFor,
+      ...state.pulledIn.map((g) => g.id),
+      ...state.connections.filter((c) => c.active).map((c) => c.id),
+    ]);
     const placed = new Set(state.applicationGears.flatMap((application) => application.gears));
     expect(closure.size).toBeGreaterThan(0);
     expect([...closure].filter((gear) => !placed.has(gear))).toEqual([]);

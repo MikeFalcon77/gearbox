@@ -610,7 +610,7 @@ test.describe("a required config field says so", () => {
     await expect(add).toBeVisible({ timeout: 60_000 });
     await add.click();
     await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
-    await page.locator("[data-add-gear-select]").selectOption(gear);
+    await page.locator(`[data-add-gear-select="${gear}"]`).click();
   }
 
   test("a field the gear requires and does not default is marked", async ({ studio }) => {
@@ -743,10 +743,16 @@ test.describe("the Generate screen names the profile it plans for", () => {
 
 test.describe("the diagnostics count is a signpost, not a hijack", () => {
   // The Validation stage already rendered the whole list with its counts; what
-  // was missing was any reason to go there. Both halves are asserted here
-  // because the second one broke something on its first attempt: keyed per
-  // store revision, the stage moved out from under a person typing into a
-  // config field, since editing a description is a stream of revisions.
+  // was missing was any reason to go there.
+  //
+  // **These used to assert the opposite of what they assert now.** An
+  // error-carrying resolution took the stage to Validation, which was the right
+  // answer while the arriving stage was Overview -- a summary that says nothing
+  // about a product that did not resolve. The product screen opens on its
+  // composition now, and a composition is built from the intent: it is there,
+  // and it is what a person opened the product to see, error or not. So the
+  // count and the summary line are the way to the problems, and the trip is
+  // chosen rather than imposed.
 
   test("the count is on the tab, and warnings do not move the stage", async ({ studio }) => {
     await openProduct(studio.page, "dev");
@@ -765,6 +771,9 @@ test.describe("the diagnostics count is a signpost, not a hijack", () => {
     // case that must *not* move anything: a product whose ordinary state moved
     // the screen would move it always and so mean nothing.
     await expect(badge).toHaveAttribute("data-validation-worst", "warning");
+    // Overview, not Composition: `openProduct` establishes a stage on purpose,
+    // and the claim is that warnings leave *whatever* stage that is alone. The
+    // arriving stage is claimed further down, where nothing establishes one.
     await expect(
       studio.page.locator('[data-product-section="overview"]'),
       "warnings must leave the arriving stage alone",
@@ -839,7 +848,7 @@ test.describe("the diagnostics count is a signpost, not a hijack", () => {
     }
   }
 
-  test("a resolution carrying an error arrives on Validation", async ({ freshStudio }) => {
+  test("a resolution carrying an error still arrives on Composition", async ({ freshStudio }) => {
     const { page } = freshStudio;
     await withAnErrorInTheDescription(async () => {
       await settled(page);
@@ -848,21 +857,34 @@ test.describe("the diagnostics count is a signpost, not a hijack", () => {
       const badge = page.locator("[data-validation-count]");
       await expect(badge, "the error has to reach the badge before the stage can mean anything")
         .toHaveAttribute("data-validation-worst", "error", { timeout: 90_000 });
+
+      // The claim: an error is reported without taking the screen.
       await expect(
-        page.locator('[data-product-section="validation"]'),
-        "an error is what stops the lock being written, so it gets the stage",
+        page.locator('[data-product-section="composition"]'),
+        "a product with an error still has a composition, and that is what was asked for",
       ).toHaveAttribute("aria-selected", "true");
       await expect(
+        page.locator("[data-composition]"),
+        "and the composition is rendered, not an empty panel",
+      ).toBeVisible();
+      await expect(
+        page.locator('[data-asked-for="api-gateway"]'),
+        "including the gear whose config carries the error",
+      ).toBeVisible();
+
+      // And the count is a way to the problem rather than an ornament.
+      await page.locator('[data-product-section="validation"]').click();
+      await expect(
         page.locator('[data-product-validation] [data-conflict-code="GBX0115"]'),
-        "and the stage it opened shows the diagnostic that moved it",
+        "the stage the count points at shows the diagnostic",
       ).toBeVisible();
     });
   });
 
-  test("rebuilding the panel comes back to Validation", async ({ freshStudio }) => {
+  test("rebuilding the panel comes back to Composition", async ({ freshStudio }) => {
     // The subscription covers a product arriving at a panel that already
     // exists. This is the other order: the panel is built while the product is
-    // already resolved, so no store event follows and nothing would move the
+    // already resolved, so no store event follows and nothing would set the
     // stage. Closing the view and reopening it is that order, and it is a thing
     // a person does.
     const { page } = freshStudio;
@@ -875,7 +897,7 @@ test.describe("the diagnostics count is a signpost, not a hijack", () => {
         { timeout: 90_000 },
       );
 
-      // A stage a person chose, so that landing on Validation again cannot be
+      // A stage a person chose, so that coming back to Composition cannot be
       // mistaken for the stage simply never having moved.
       await productSection(page, "overview");
 
@@ -887,8 +909,8 @@ test.describe("the diagnostics count is a signpost, not a hijack", () => {
       await page.locator(".gbx-product").waitFor({ state: "visible", timeout: 60_000 });
 
       await expect(
-        page.locator('[data-product-section="validation"]'),
-        "a fresh panel over an error-carrying resolution opens on the errors",
+        page.locator('[data-product-section="composition"]'),
+        "a fresh panel over an error-carrying resolution still opens on the product",
       ).toHaveAttribute("aria-selected", "true");
     });
   });

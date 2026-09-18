@@ -29,6 +29,22 @@ import { injectable } from "@theia/core/shared/inversify";
  * part of the wire contract rather than a local invention.
  */
 export type Selection =
+  /**
+   * One `plugin(...)` connection, addressed the way the editor addresses it.
+   *
+   * `entryIndex` is `PluginSelection.entry_index` -- the position the entry is
+   * *written* at in the host's `plugins = [...]`, not its position in the list
+   * that survived evaluation. `path` is here because this is the only selection
+   * an edit can invalidate rather than a re-resolve, so it has to say which
+   * document it counted in.
+   */
+  | {
+      readonly kind: "plugin";
+      readonly host: string;
+      readonly id: string;
+      readonly entryIndex: number;
+      readonly path: string;
+    }
   | { readonly kind: "gear"; readonly id: string }
   | { readonly kind: "application"; readonly id: string }
   | { readonly kind: "binding"; readonly consumer: string; readonly contract: string }
@@ -36,12 +52,12 @@ export type Selection =
   | { readonly kind: "catalogue-row"; readonly key: string };
 
 /** The three the resolution knows about. Named because `ProductStore` speaks it. */
-export type ProductSelection = Exclude<Selection, { kind: "catalogue-row" }>;
+export type ProductSelection = Exclude<Selection, { kind: "catalogue-row" | "plugin" }>;
 
 export function isProductSelection(
   selection: Selection | undefined,
 ): selection is ProductSelection {
-  return selection !== undefined && selection.kind !== "catalogue-row";
+  return selection !== undefined && selection.kind !== "catalogue-row" && selection.kind !== "plugin";
 }
 
 @injectable()
@@ -74,6 +90,15 @@ export function sameSelection(a: Selection | undefined, b: Selection | undefined
   if (a === undefined || b === undefined) return a === b;
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
+    case "plugin": {
+      const other = b as Extract<Selection, { kind: "plugin" }>;
+      return (
+        a.path === other.path &&
+        a.host === other.host &&
+        a.entryIndex === other.entryIndex &&
+        a.id === other.id
+      );
+    }
     case "gear":
     case "application":
       return a.id === (b as { id: string }).id;

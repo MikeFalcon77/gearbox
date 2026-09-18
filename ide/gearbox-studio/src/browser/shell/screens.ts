@@ -134,6 +134,20 @@ export function identityOf(context: StudioContext): ContextIdentity {
   }
 }
 
+/**
+ * The identity of one product, for a caller holding a path rather than a context.
+ *
+ * **Exists because spelling it by hand was wrong.** `identityOf` canonicalises,
+ * so `product:${path}` written out is a *different string* from the identity the
+ * same product answers to -- `file:///a/product.gdl` against `/a/product.gdl` --
+ * and every owner check against it silently refused. The Add Gear dialog did
+ * exactly that, so its own preview was rejected as composed for another product
+ * and it could not write at all.
+ */
+export function productIdentity(path: string): ContextIdentity {
+  return `product:${canonical(path)}`;
+}
+
 /** The kind an identity belongs to, without re-deriving it from the context. */
 export function kindOf(identity: ContextIdentity): ContextKind {
   if (identity === "home") return "home";

@@ -43,6 +43,7 @@ export interface ProductState {
   readonly products: readonly ProductRef[];
   readonly open: ProductRef | undefined;
   readonly intent: ProductIntent | undefined;
+  readonly source?: string;
   /** Which profile is being shown. From the intent's default until switched. */
   readonly profile: string | undefined;
   readonly resolution: ResolveResult | undefined;
@@ -250,12 +251,14 @@ export class ProductStore {
     if (this.state.open?.path !== ref.path) {
       this.selection.select(undefined);
     }
-    this.update({ status: "loading", open: ref, intent: undefined, resolution: undefined });
+    this.update({ status: "loading", open: ref, intent: undefined, source: undefined, resolution: undefined, diagnostics: [], error: undefined });
     try {
       const loaded = await this.service.loadProduct(ref.path);
       if (epoch !== this.epoch) return;
       this.update({
         intent: loaded.intent,
+        source: loaded.source,
+        open: { ...ref, label: loaded.intent.display_name || loaded.intent.id },
         // The product's own default, so the first thing shown comes from the
         // description rather than from a guess made here.
         profile: loaded.intent.default_profile,
@@ -425,6 +428,8 @@ export class ProductStore {
     if (epoch !== this.epoch) return;
     this.update({
       status: "error",
+      resolution: undefined,
+      lock: undefined,
       error: messageOf(error),
       diagnostics: diagnosticsOf(error) ?? [],
     });

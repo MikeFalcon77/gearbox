@@ -241,6 +241,7 @@ function Where(props: {
 
 function label(selection: Selection): string {
   switch (selection.kind) {
+    case "plugin": return `${selection.host} / ${selection.id}`;
     case "gear":
     case "application":
       return selection.id;

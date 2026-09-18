@@ -383,7 +383,7 @@ fn build_plugins(
     let mut out = Vec::new();
     let mut claimed = Claims::new();
 
-    for entry in &record.plugins {
+    for (entry_index, entry) in record.plugins.iter().enumerate() {
         let Some(gear) = gear_id(
             record.declared_at.as_ref(),
             uri,
@@ -416,6 +416,9 @@ fn build_plugins(
             gear,
             config: entry.config.iter().cloned().collect(),
             profiles: scoped,
+            // The position in `record.plugins`, which is the written list: the
+            // `continue`s above are why this is not `out.len()`.
+            entry_index,
             declared_at: entry.declared_at.clone(),
         });
     }

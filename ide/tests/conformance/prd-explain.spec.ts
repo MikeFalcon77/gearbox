@@ -27,7 +27,7 @@ async function explain(
   click: string,
 ): Promise<{ explaining: string; steps: { kind: string; because: string; origin: string | null }[] }> {
   await openExplain(page);
-  for (const section of ["gears", "topology"] as const) {
+  for (const section of ["composition", "topology"] as const) {
     await productSection(page, section);
     if ((await page.locator(click).count()) > 0) break;
   }
@@ -89,10 +89,14 @@ test.describe("why the resolution is the way it is", () => {
   test("a plugin's inclusion names the host and the profile [PRD cpt-gearbox-fr-plugin-selection]", async ({
     studio,
   }) => {
+    // Asked from the *connection*, which is where a selected plugin lives now:
+    // it is written under the host that named it rather than listed as a gear
+    // the closure dragged in. The explanation is still the implementation's --
+    // the graph is keyed by gear id -- and the connection is how one reaches it.
     await openProduct(studio.page, "prod");
     const { steps } = await explain(
       studio.page,
-      '[data-pulled-in="oidc-authn-plugin"] a',
+      '[data-plugin-id="oidc-authn-plugin"] button',
     );
     expect(
       steps.some((s) => /selected as a plugin of `authn-resolver` for profile `prod`/.test(s.because)),
@@ -109,7 +113,7 @@ test.describe("why the resolution is the way it is", () => {
     // missing from its graph" is a defect. Sharing one alarming message for both
     // trains people to ignore the one that matters.
     await openProduct(studio.page, "prod");
-    await explain(studio.page, '[data-pulled-in="oidc-authn-plugin"] a');
+    await explain(studio.page, '[data-plugin-id="oidc-authn-plugin"] button');
 
     await openProduct(studio.page, "dev");
     await expect(
@@ -144,7 +148,7 @@ test.describe("why the resolution is the way it is", () => {
     // Overview, so scrolling to a gear leaf before switching to Gears waits on
     // an element that is not in the DOM -- and with no `actionTimeout` in the
     // config, "waits" means until the test times out.
-    await productSection(studio.page, "gears");
+    await productSection(studio.page, "composition");
     const pulled = studio.page.locator('[data-pulled-in="types-registry"] a');
     await pulled.scrollIntoViewIfNeeded();
     const colocated = await explain(studio.page, '[data-pulled-in="types-registry"] a');

@@ -669,3 +669,104 @@ product(
     );
     assert!(at.uri.contains("product.gdl"), "{}", at.uri);
 }
+
+/// `entry_index` is the position the entry is *written* at.
+///
+/// The editor addresses a connection by its place in the host's written
+/// `plugins = [...]`, so this field is that address travelling to the client.
+/// Pinned on its own because every other test here would pass just as well if it
+/// were the position in the surviving vector -- the two only diverge when an
+/// entry is dropped, which is the case below.
+#[test]
+fn entry_index_is_the_written_position_of_each_connection() {
+    let src = r#"
+product(
+    id = "demo", version = "0.1.0",
+    sources = [source(id = "s", at = path("."))],
+    profiles = [embedded(id = "dev"), embedded(id = "prod")],
+    default_profile = "dev",
+    gears = [
+        use_gear("host", source = "s", plugins = [
+            plugin("first"),
+            plugin("second", profiles = ["prod"]),
+            plugin("third"),
+        ]),
+    ],
+)
+"#;
+    let (intent, codes, messages) = eval(src);
+    assert!(codes.is_empty(), "{codes:?} {messages}");
+    let intent = intent.expect("the description evaluates");
+    let plugins = &intent.selected_gears[0].plugins;
+    let written: Vec<(&str, usize)> = plugins
+        .iter()
+        .map(|plugin| (plugin.gear.as_str(), plugin.entry_index))
+        .collect();
+    assert_eq!(
+        written,
+        vec![("first", 0), ("second", 1), ("third", 2)],
+        "each connection must carry where it is written"
+    );
+}
+
+/// An entry that evaluation cannot use takes the whole intent down with it.
+///
+/// **This is what makes a positional address safe**, and it is worth pinning
+/// precisely because nothing else states it. `build_plugins` skips an entry
+/// whose id does not parse and an entry that duplicates a selection, which would
+/// leave the surviving vector shorter than the written list -- but both skips
+/// also push an *error*, and `eval_product` yields no intent when any error is
+/// present. So a client never holds an intent whose plugins are missing one.
+///
+/// If that rule ever loosens -- either diagnostic downgraded to a warning, or a
+/// partial intent handed out for a broken product -- positions and survivors
+/// part company, and `PluginSelection::entry_index` is what keeps the editor
+/// aiming at the right entry. This test is the tripwire for that change.
+#[test]
+fn an_unusable_plugin_entry_yields_no_intent_at_all() {
+    let malformed = r#"
+product(
+    id = "demo", version = "0.1.0",
+    sources = [source(id = "s", at = path("."))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [
+        use_gear("host", source = "s", plugins = [
+            plugin("Not A Gear Id"),
+            plugin("good-plugin"),
+        ]),
+    ],
+)
+"#;
+    let (intent, codes, _messages) = eval(malformed);
+    assert!(
+        intent.is_none(),
+        "a plugin id that does not parse must not produce a partial intent"
+    );
+    assert!(codes.contains(&DiagnosticCode::GdlEval), "{codes:?}");
+
+    let collided = r#"
+product(
+    id = "demo", version = "0.1.0",
+    sources = [source(id = "s", at = path("."))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [
+        use_gear("host", source = "s", plugins = [
+            plugin("twice"),
+            plugin("twice"),
+            plugin("after"),
+        ]),
+    ],
+)
+"#;
+    let (intent, codes, _messages) = eval(collided);
+    assert!(
+        intent.is_none(),
+        "a duplicate selection must not produce a partial intent either"
+    );
+    assert!(
+        codes.contains(&DiagnosticCode::GdlDuplicateProfileScoped),
+        "{codes:?}"
+    );
+}

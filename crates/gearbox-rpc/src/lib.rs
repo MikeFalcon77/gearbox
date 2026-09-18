@@ -17,6 +17,10 @@ pub mod lsp;
 pub mod protocol;
 
 #[cfg(test)]
+#[path = "apply_edits_tests.rs"]
+mod apply_edits_tests;
+
+#[cfg(test)]
 #[path = "document_tests.rs"]
 mod document_tests;
 
@@ -55,7 +59,7 @@ use crate::protocol::{
     CatalogueLoadResult, CreateProductParams, EditGearParams, EditGearResult, FailedRoot,
     GenerateApplyResult, GenerateFileParams, GenerateFileResult, GenerateParams,
     GeneratePlanResult, InitializeParams, InitializeResult, LockOnDisk, LockParams, LockResult,
-    LogParams, ProductEdit, ProductLoadParams, ProductLoadResult, ProgressParams,
+    LogParams, PluginTarget, ProductEdit, ProductLoadParams, ProductLoadResult, ProgressParams,
     RemoveProfileParams, ResolveParams, ResolvePreviewParams, ResolveResult, ResolvedRoot,
     ScaffoldGearParams, ScaffoldGearResult, ServerInfo, SetConfigParams, SetFeaturesParams,
     SetProfileFieldParams, ValidateParams, ValidateResult, error_code, method,
@@ -987,11 +991,16 @@ fn require_writes(state: &State, id: &RequestId) -> Option<Response> {
 /// Evaluate a `product.gdl`.
 fn product_load(id: RequestId, params: &ProductLoadParams) -> Response {
     let path = PathBuf::from(&params.path);
-    let scan = gearbox_engine::product::load_product(&path, None);
+    let source = match std::fs::read_to_string(&path) {
+        Ok(source) => source,
+        Err(e) => return error(id, error_code::PRODUCT_LOAD_FAILED, &e.to_string()),
+    };
+    let scan = gearbox_engine::product::eval_product_text(&path, None, &source);
     match scan.intent {
         Some(intent) => ok(
             id,
             &ProductLoadResult {
+                source,
                 intent,
                 diagnostics: scan.diagnostics.as_slice().to_vec(),
             },
@@ -1412,8 +1421,88 @@ fn edit_set_profile_field(
 
 fn edit_apply_edits(state: &mut State, id: RequestId, params: &ApplyEditsParams) -> Response {
     edit_with(state, id, &params.path, params.dry_run, |uri, before| {
-        apply_product_edits(uri, before, &params.edits)
+        if params
+            .expected_before
+            .as_deref()
+            .is_some_and(|expected| expected != before)
+        {
+            let mut diagnostics = gearbox_ir::Diagnostics::new();
+            diagnostics.push(gearbox_ir::Diagnostic::error(
+                gearbox_ir::DiagnosticCode::GdlEval,
+                "the document changed after preview",
+                "reload the preview and confirm again",
+            ));
+            return Err(diagnostics);
+        }
+        let edited = apply_product_edits(uri, before, &params.edits)?;
+        if let Some(after) = edited.changed() {
+            let scan =
+                gearbox_engine::product::eval_product_text(Path::new(&params.path), None, after);
+            if scan.intent.is_none() {
+                return Err(scan.diagnostics);
+            }
+        }
+        Ok(edited)
     })
+}
+
+/// Refuse a batch whose own removals would move an entry a later edit addresses.
+///
+/// Every [`PluginTarget`] is a position in the text the *client* previewed, but
+/// the fold below rewrites that text as it goes. Removing one entry shifts every
+/// later entry under the same host down by one, so a batch that removes an entry
+/// and then edits a second one under the same host would aim the second edit at
+/// the wrong `plugin(...)` — and `names_entry` would only catch it when the two
+/// happen to name different implementations.
+///
+/// Refused rather than rebased. Rebasing is a silent reinterpretation of what
+/// was confirmed, and the preview a person agreed to was computed without it.
+/// The client has no reason to build such a batch — removals are applied on
+/// their own, drafts hold only config and profile edits — so this is a guard
+/// against a future caller, not a case to be clever about.
+fn refuse_shifted_targets(edits: &[ProductEdit]) -> Result<(), gearbox_ir::Diagnostics> {
+    let target_of = |edit: &ProductEdit| match edit {
+        ProductEdit::RemovePlugin { target }
+        | ProductEdit::SetPluginConfig { target, .. }
+        | ProductEdit::SetPluginProfiles { target, .. } => Some(target.clone()),
+        _ => None,
+    };
+    let removed: Vec<PluginTarget> = edits
+        .iter()
+        .filter_map(|edit| match edit {
+            ProductEdit::RemovePlugin { target } => Some(target.clone()),
+            _ => None,
+        })
+        .collect();
+    if removed.is_empty() {
+        return Ok(());
+    }
+    for edit in edits {
+        let Some(target) = target_of(edit) else {
+            continue;
+        };
+        let shifted = removed.iter().any(|gone| {
+            gone.gear == target.gear
+                && (gone.entry_index < target.entry_index
+                    // The same entry named twice in one batch is the same trap:
+                    // the second edit would land on whatever slid into its place.
+                    || (gone.entry_index == target.entry_index
+                        && !matches!(edit, ProductEdit::RemovePlugin { .. })))
+        });
+        if shifted {
+            let mut diagnostics = gearbox_ir::Diagnostics::new();
+            diagnostics.push(gearbox_ir::Diagnostic::error(
+                gearbox_ir::DiagnosticCode::GdlEval,
+                format!(
+                    "removing a plugin from `{}` moves the other connections this batch edits",
+                    target.gear
+                ),
+                "apply the pending changes first, then remove the connection",
+            ));
+            return Err(diagnostics);
+        }
+    }
+    Ok(())
 }
 
 /// Fold every edit onto the same text, in order. Fail the whole batch if any
@@ -1423,6 +1512,7 @@ fn apply_product_edits(
     before: &str,
     edits: &[ProductEdit],
 ) -> Result<gearbox_gdl::edit::Edit, gearbox_ir::Diagnostics> {
+    refuse_shifted_targets(edits)?;
     let mut current = before.to_owned();
     let mut changed = false;
     for edit in edits {
@@ -1444,6 +1534,45 @@ fn apply_product_edits(
             }
             ProductEdit::AddPlugin { gear, plugin } => {
                 gearbox_gdl::edit::add_gear_plugin(uri, &current, gear, plugin)?
+            }
+            ProductEdit::AddPluginSelection {
+                gear,
+                plugin,
+                profiles,
+            } => gearbox_gdl::edit::add_plugin_selection(uri, &current, gear, plugin, profiles)?,
+            ProductEdit::RemovePlugin { target } => gearbox_gdl::edit::edit_plugin_entry(
+                uri,
+                &current,
+                &target.gear,
+                target.entry_index,
+                &target.plugin,
+                None,
+                None,
+                true,
+            )?,
+            ProductEdit::SetPluginConfig { target, key, value } => {
+                gearbox_gdl::edit::edit_plugin_entry(
+                    uri,
+                    &current,
+                    &target.gear,
+                    target.entry_index,
+                    &target.plugin,
+                    Some((key, value.as_ref())),
+                    None,
+                    false,
+                )?
+            }
+            ProductEdit::SetPluginProfiles { target, profiles } => {
+                gearbox_gdl::edit::edit_plugin_entry(
+                    uri,
+                    &current,
+                    &target.gear,
+                    target.entry_index,
+                    &target.plugin,
+                    None,
+                    Some(profiles),
+                    false,
+                )?
             }
             ProductEdit::SetPlugins { gear, plugins } => {
                 gearbox_gdl::edit::set_gear_plugins(uri, &current, gear, plugins)?

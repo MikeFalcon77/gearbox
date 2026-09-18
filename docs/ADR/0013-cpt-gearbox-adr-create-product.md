@@ -51,6 +51,11 @@ Start-screen create runs against the repository workspace the engine already kno
 Values in `config = {...}` are scalars in this pass (string / number / bool). Nested dicts and
 `plugins = [...]` are out of scope.
 
+> **Superseded for `plugins` by `cpt-gearbox-adr-product-composition` (2026-09-18).** Per-entry
+> plugin editing — add with a scope, remove one entry, set one key, change one scope — is in scope
+> there, addressed by written position rather than by name. Nested dicts remain out of scope and are
+> still opened in the GDL rather than edited in a form.
+
 **Heuristic only:** `set_gear_config` refuses a key whose name equals, case-insensitively,
 `password`, `secret`, `token`, `key`, or `credential`, or ends with `_password`, `_secret`,
 `_token`, `_key`, or `_credential` (so `api_key` is refused; `namespace` is not). The diagnostic

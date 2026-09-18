@@ -4,4 +4,12 @@ import type { ProductEdit } from "./ProductEdit";
 /**
  * `gearbox/product/applyEdits` -- several description edits in one pass.
  */
-export type ApplyEditsParams = { path: string, dry_run: boolean, edits: Array<ProductEdit>, };
+export type ApplyEditsParams = { 
+/**
+ * The document the client previewed against, refused if it no longer matches.
+ *
+ * The one staleness guard for the batch. Every `PluginTarget` in `edits`
+ * addresses an entry by position, and a position only means something
+ * against a known text.
+ */
+expected_before: string | null, path: string, dry_run: boolean, edits: Array<ProductEdit>, };

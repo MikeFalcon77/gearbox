@@ -1,0 +1,80 @@
+# A product that exists to be *configured*, not to be a realistic deployment.
+#
+# `payments-demo` is the corpus's real product, and its `gears` list is chosen to
+# exercise resolution: co-location, per-profile plugin selection, cluster
+# providers, remote bindings. What it is not chosen for is authoring, and that
+# turned out to matter. Every gear whose settings are worth a claim --
+# `event-broker`'s enum, `tenant-resolver`'s exposed `vendor`, the three
+# different answers a features list can give -- arrives there through the
+# closure, and a gear the closure pulled in has no `use_gear` entry of its own.
+# No entry, no form: the Studio edits what the description names.
+#
+# So a claim about editing had to add its gear first and `git checkout` the
+# corpus afterwards. That is worse than it sounds: `global-setup` refuses to
+# start when `products/` differs from HEAD and `global-teardown` restores it with
+# `git clean`, so a fixture written at run time is deleted by the run that needs
+# it. This product names the gears instead, and nothing here mutates.
+#
+# **Every gear is named explicitly, including the ones co-location would bring.**
+# `tenant-resolver` co-locates `types-registry` and `event-broker` co-locates
+# `cluster`, so both would arrive anyway -- but arriving is not being named, and
+# being named is the whole point of this file.
+
+product(
+    id = "configurable-gears",
+    name = "Configurable Gears",
+    version = "0.1.0",
+
+    sources = [source(id = "gears-rust", at = path("../../../gears-rust"))],
+
+    # Embedded first and by default, because that is what makes `grpc-hub`'s
+    # `k8s-auth` read as "not for this deployment" -- the third of the three
+    # answers a features list gives. The kubernetes profile is here so the same
+    # feature can be seen being *offered*, which is that claim from the other
+    # side rather than a second claim.
+    profiles = [
+        embedded(id = "dev"),
+        kubernetes(
+            id = "prod",
+            discovery = "static",
+            namespace = "configurable",
+            image_registry = "registry.example.com/configurable",
+        ),
+    ],
+    default_profile = "dev",
+
+    gears = [
+        # Exposes `mode` -- a `DeploymentMode`, so a closed set a value can be
+        # refused against -- and `default_storage_backend`, with no default for
+        # either. The gear that makes both "refused at the field" and "a required
+        # field nothing supplies" observable without inventing a gear.
+        use_gear("event-broker", source = "gears-rust"),
+
+        # Declares `TenantResolverPluginClient` and exposes `vendor`, whose
+        # default is projected from `impl Default` rather than written here --
+        # which is what makes a placeholder a claim about projection.
+        use_gear("tenant-resolver", source = "gears-rust"),
+
+        # `cargo_features = []`: a curation that offers nothing. Not the same
+        # statement as declaring nothing, and the two used to read alike.
+        use_gear("types-registry", source = "gears-rust"),
+
+        # `cargo_features = [k8s-auth for kubernetes]`, and `available_features`
+        # holds `default` beside it -- the curated half replacing the projected
+        # one rather than filtering it.
+        use_gear("grpc-hub", source = "gears-rust"),
+
+        # Named for the reason `payments-demo` names it: the cluster providers
+        # are projected from `ClusterGear::provider_registry()`, so the gear has
+        # to be in the closure for them to exist at all.
+        use_gear("cluster", source = "gears-rust"),
+    ],
+
+    cluster_profiles = [
+        cluster_profile(
+            name = "event-broker",
+            cache = provider("standalone"),
+            profiles = ["dev"],
+        ),
+    ],
+)

@@ -2,4 +2,8 @@
 import type { Diagnostic } from "./Diagnostic";
 import type { ProductIntent } from "./ProductIntent";
 
-export type ProductLoadResult = { intent: ProductIntent, diagnostics?: Array<Diagnostic>, };
+export type ProductLoadResult = { 
+/**
+ * Exact document snapshot used to evaluate intent.
+ */
+source: string, intent: ProductIntent, diagnostics?: Array<Diagnostic>, };
