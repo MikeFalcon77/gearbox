@@ -77,7 +77,7 @@ Namespaces of values. Both file kinds see all five:
 cap.db | cap.rest | cap.rest_host | cap.stateful | cap.system | cap.grpc_hub | cap.grpc
 transport.local | transport.rest | transport.grpc
 contract_kind.api | contract_kind.embedded | contract_kind.backend | contract_kind.extension
-cluster_cap.linearizable | cluster_cap.prefix_watch
+cluster_cap.linearizable | cluster_cap.watch | cluster_cap.prefix_watch
 binding_mode.auto | binding_mode.local | binding_mode.remote
 ```
 
@@ -88,7 +88,7 @@ cluster.cache(...) | cluster.leader_election(...) | cluster.lock(...)
 prefer.existing_infrastructure() | prefer.fewer_applications() | prefer.isolate(...)
 ```
 
-`cluster_cap.prefix_watch` applies only to `cluster.cache`; a lock and an election take `linearizable` and nothing else. Asking for it on either is an error.
+`cluster_cap.watch` and `cluster_cap.prefix_watch` apply only to `cluster.cache`; a lock and an election take `linearizable` and nothing else. Asking for either on either is an error, and the message names what does apply.
 
 `cap.*` and `contract_kind.*` have no legal use site. The three arguments that would take them, `gear(runtime_caps = ...)`, `provide(kind = ...)` and `consume(kind = ...)`, are accepted only to be refused by name (**GBX0210**), because those facts are projected from Rust. The members resolve so that the refusal is about the argument rather than about the attribute.
 
@@ -195,10 +195,12 @@ cluster.lock(profile, capabilities = [])
 ### `role(...)` → role
 
 ```
-role(name, directory_name?, sharded = False, instance_addressable = False)
+role(name, directory_name?, labels = [])
 ```
 
-Parsed and stored. The runtime has no role concept; resolution excludes it (**GBX0601** / **GBX0602**).
+`name` is the value the gear's own mode selector accepts, the only spelling checkable against a projected enum. `directory_name` is what an instance of this role registers under; omit it and lowering defaults to `<gear-id>-<name>`, where the id is known. `labels` are the label *keys* an instance registers under, not values: a value is per-instance and belongs to the deployment, which the runtime sources from configuration or the environment.
+
+Parsed and stored. The runtime takes whatever directory name it is given; what cannot express a second role is the model here, one application per anchor gear, so a role nothing anchors has nowhere to go. That is **GBX0318** at resolution. Sharding and per-instance addressing are a separate gap, **GBX0602**. Both are warnings: the description is not wrong, it describes a shape this tool does not build yet.
 
 ### `fail(message)`
 
@@ -308,13 +310,13 @@ cluster_profile(name, cache, leader_election?, lock?, profiles = [])
 ### Topology and preferences
 
 ```
-application("name", anchor, replicas = 1, profiles = [])
+application("name", anchor, role?, replicas = 1, profiles = [])
 prefer.existing_infrastructure()
 prefer.fewer_applications()
 prefer.isolate(gear = "api-gateway")
 ```
 
-Only the application name is positional: `application("audit", anchor = "api-contracts-consumer")`. `anchor` is a kebab gear id. `replicas` must be ≥ 1.
+Only the application name is positional: `application("audit", anchor = "api-contracts-consumer")`. `anchor` is a kebab gear id. `role` names one of the anchor gear's `role(...)` declarations; omit it for the gear's default shape. `replicas` must be ≥ 1.
 
 ### `product(...)`
 
@@ -409,7 +411,8 @@ This table is the authoring subset, curated and hand-written, because the stage 
 | GBX0316 | a selected feature belongs to another deployment kind | resolve |
 | GBX0506 | a provider needs a credential and the scope names no source | resolve |
 | GBX0508 | a `cluster_profile` name no selected gear implements | resolve |
-| GBX0601, GBX0602 | `role(...)` and sharding are recorded, not supported (warnings) | resolve |
+| GBX0318 | a gear's roles cannot all be deployed (warning) | resolve |
+| GBX0602 | sharding and per-instance addressing are not generated (warning) | resolve |
 | GBX0706 | a generated crate directory the product no longer builds (warning) | generate |
 
 ---
