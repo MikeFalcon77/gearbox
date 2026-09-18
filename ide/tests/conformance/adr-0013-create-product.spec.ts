@@ -9,6 +9,7 @@ import {
   expectContext,
   openAdvancedKeys,
   openProduct,
+  productSection,
   revealCatalogue,
   revealInspector,
   resetCatalogueView,
@@ -121,6 +122,10 @@ test.describe("create and clone a product", () => {
     await page.locator("[data-create-submit]").click();
     await acceptPreview(page);
 
+    // Overview, because the resolved header lives there and a product opens on
+    // its Composition now. The claim is that the new product opened *and
+    // resolved*, not that any particular stage is showing.
+    await productSection(page, "overview");
     await expect(page.locator("[data-resolved-profile]")).toBeVisible({ timeout: 60_000 });
     expect(existsSync(join(REPO, "products", id, "product.gdl"))).toBe(true);
   });
@@ -173,6 +178,7 @@ test.describe("create and clone a product", () => {
 
         await page.locator("[data-create-submit]").click();
         await acceptPreview(page);
+        await productSection(page, "overview");
         await expect(page.locator("[data-resolved-profile]")).toBeVisible({ timeout: 60_000 });
         expect(existsSync(join(REPO, "products", productId, "product.gdl"))).toBe(true);
 
@@ -278,6 +284,7 @@ test.describe("create and clone a product", () => {
         });
         await create.click();
         await acceptPreview(page);
+        await productSection(page, "overview");
         await expect(page.locator("[data-resolved-profile]")).toBeVisible({ timeout: 90_000 });
         expect(existsSync(join(REPO, "products", cloned, "product.gdl"))).toBe(true);
 
@@ -596,18 +603,26 @@ test.describe("edit config and profiles in the open product", () => {
       await resetCatalogueView(studio.page);
       await studio.page.locator(".gbx-widget-catalogue .gbx-row", { hasText: "api-gateway" }).click();
       await revealInspector(studio.page);
-      await studio.page.locator('[data-gear-config="api-gateway"]').waitFor({ state: "visible" });
+      // **Scoped to the Inspector, because two surfaces render this form.**
+      // `GearSettings` is one component shown by the Inspector and by the
+      // Composition pane, so an unscoped `[data-config-new-key]` depends on
+      // which stage the Product panel happens to be on -- and on what the
+      // previous test in this worker left it on. This claim is about the
+      // Inspector; it says so.
+      const form = studio.page.locator('.gbx-inspector [data-gear-config="api-gateway"]');
+      await form.waitFor({ state: "visible" });
 
       // Free keys live under "Other keys" now -- see `openAdvancedKeys`.
+      const queue = async (key: string, value: string): Promise<void> => {
+        await form.locator("[data-config-new-key]").fill(key);
+        await form.locator("[data-config-new-value]").fill(value);
+        await form.locator('[data-add-config="api-gateway"]').click();
+      };
       await openAdvancedKeys(studio.page, ".gbx-inspector");
-      await studio.page.locator("[data-config-new-key]").fill("draft_a");
-      await studio.page.locator("[data-config-new-value]").fill("one");
-      await studio.page.locator('[data-add-config="api-gateway"]').click();
-      await studio.page.locator("[data-config-new-key]").fill("draft_b");
-      await studio.page.locator("[data-config-new-value]").fill("two");
-      await studio.page.locator('[data-add-config="api-gateway"]').click();
-      await expect(studio.page.locator('[data-config-key="draft_a"]')).toBeVisible();
-      await expect(studio.page.locator('[data-config-key="draft_b"]')).toBeVisible();
+      await queue("draft_a", "one");
+      await queue("draft_b", "two");
+      await expect(form.locator('[data-config-key="draft_a"]')).toBeVisible();
+      await expect(form.locator('[data-config-key="draft_b"]')).toBeVisible();
       expect(diffOf(DEMO_REL)).toBe("");
 
       // **The pair is in the header, and there is exactly one.** It used to be
@@ -618,8 +633,8 @@ test.describe("edit config and profiles in the open product", () => {
       const draft = studio.page.locator(".gbx-toolbar");
       await expect(draft.locator("[data-draft-apply]")).toHaveCount(1);
       await draft.locator("[data-draft-discard]").click();
-      await expect(studio.page.locator('[data-config-key="draft_a"]')).toHaveCount(0);
-      await expect(studio.page.locator('[data-config-key="draft_b"]')).toHaveCount(0);
+      await expect(form.locator('[data-config-key="draft_a"]')).toHaveCount(0);
+      await expect(form.locator('[data-config-key="draft_b"]')).toHaveCount(0);
       await expect(draft.locator("[data-draft-apply]")).toHaveCount(0);
       expect(diffOf(DEMO_REL)).toBe("");
 
@@ -627,26 +642,20 @@ test.describe("edit config and profiles in the open product", () => {
       // when it holds something, because a key somebody set is not advanced any
       // more. Reopening is what a person does to add the pair a second time.
       await openAdvancedKeys(studio.page, ".gbx-inspector");
-      await studio.page.locator("[data-config-new-key]").fill("draft_a");
-      await studio.page.locator("[data-config-new-value]").fill("one");
-      await studio.page.locator('[data-add-config="api-gateway"]').click();
-      await studio.page.locator("[data-config-new-key]").fill("draft_b");
-      await studio.page.locator("[data-config-new-value]").fill("two");
-      await studio.page.locator('[data-add-config="api-gateway"]').click();
+      await queue("draft_a", "one");
+      await queue("draft_b", "two");
       await draft.locator("[data-draft-apply]").click();
-      const previews = studio.page.locator(".dialogBlock", {
-        has: studio.page.locator(".gbx-edit-preview"),
-      });
-      await expect(previews).toHaveCount(1);
+      // **One confirmation, by its own class.** This read "a `.dialogBlock`
+      // containing a preview", which stopped identifying the write dialog when
+      // adding a gear became a modal that also shows what it would write.
+      await expect(studio.page.locator(".gbx-edit-confirm")).toHaveCount(1);
       await acceptPreview(studio.page);
-      await expect(studio.page.locator('[data-config-key="draft_a"]')).toBeVisible({
-        timeout: 30_000,
-      });
-      await expect(studio.page.locator('[data-config-key="draft_b"]')).toBeVisible();
+      await expect(form.locator('[data-config-key="draft_a"]')).toBeVisible({ timeout: 30_000 });
+      await expect(form.locator('[data-config-key="draft_b"]')).toBeVisible();
       expect(diffOf(DEMO_REL)).not.toBe("");
 
-      await studio.page.locator('[data-config-remove="draft_a"]').click();
-      await studio.page.locator('[data-config-remove="draft_b"]').click();
+      await form.locator('[data-config-remove="draft_a"]').click();
+      await form.locator('[data-config-remove="draft_b"]').click();
       await draft.locator("[data-draft-apply]").click();
       await acceptPreview(studio.page);
       // Polled, not sampled: accepting the preview starts the write, and reading

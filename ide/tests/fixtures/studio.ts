@@ -994,98 +994,77 @@ export async function productSection(
 /**
  * Open a *named* product, whichever one is open now.
  *
- * **Why this is not `openProduct` with an argument.** That helper short-circuits
- * entirely when the context is already `product`, which is right for it -- the
- * shared worker session usually has `payments-demo` open and re-opening it every
- * time cost minutes -- and fatal here: it would silently leave the wrong product
- * open and every assertion below would read the wrong description.
+ * **Which product, not just whether one is open.** This used to be `openProduct`
+ * with `payments-demo` written into it and a short-circuit on
+ * `data-context === "product"` -- which was fine while the corpus had one
+ * product and silently wrong the moment it had two: a claim that opened
+ * `configurable-gears` left it open, and the next test's `openProduct` saw a
+ * product context, returned, and read the wrong description. Three claims failed
+ * somewhere else entirely, which is the expensive kind of wrong.
  *
- * So this one closes first when something else is open. That routes through Home,
- * which is *not* what a claim about a product-to-product transition may do; such
- * a claim has to drive the picker itself. This helper is for reading a second
- * product, not for observing the switch.
+ * So the check is `[data-product-name]`, the id the description names itself by.
+ * Closing first is unavoidable when it disagrees: the picker is reachable from
+ * Home. That makes this helper the wrong instrument for a claim *about* the
+ * product-to-product transition, which must not pass through Home -- such a
+ * claim drives the picker itself.
  *
  * `fragment` matches the picker's path column (`products/<name>/product.gdl`)
- * rather than the display label, because the label is prose -- `Configurable
- * Gears` for `configurable-gears` -- and the id is what a test knows.
+ * as well as the id, because the display label is prose: `Configurable Gears`
+ * for `configurable-gears`.
  */
 export async function openProductById(
   page: Page,
   fragment: string,
   profile: string,
 ): Promise<void> {
-  const open = await page.locator(".gbx-toolbar").getAttribute("data-context");
-  if (open === "product") {
-    const already = await page
+  const context = (): Promise<string | null> =>
+    page.locator(".gbx-toolbar").getAttribute("data-context");
+
+  if ((await context()) === "product") {
+    await revealView(page, "Gearbox Product", ".gbx-product");
+    const openNow = await page
       .locator("[data-product-name]")
       .getAttribute("data-product-name")
       .catch(() => null);
-    if (already !== fragment) {
+    if (openNow !== fragment) {
       await runCommand(page, "Close Product");
       await expectContext(page, "home");
     }
   }
-  if ((await page.locator(".gbx-toolbar").getAttribute("data-context")) !== "product") {
-    await runCommand(page, "Open Product…");
-    const options = page.locator(`.quick-input-list [role="option"]`);
-    await options.first().waitFor({ state: "visible", timeout: 30_000 });
-    // Never `.first()` blindly: the list opens with a `Choose product.gdl…`
-    // entry, so an unfiltered first click picks the file dialog.
-    await options.filter({ hasText: fragment }).first().click();
-    await expect(page.locator(".gbx-toolbar")).toHaveAttribute("data-context", "product", {
-      timeout: 90_000,
-    });
-  }
-  await revealView(page, "Gearbox Product", ".gbx-product");
-  await productSection(page, "overview");
-  await page.locator("[data-resolved-profile]").waitFor({ state: "visible", timeout: 60_000 });
-  await page.locator(`[data-profile="${profile}"]`).click();
-  await page
-    .locator(`[data-resolved-profile="${profile}"]`)
-    .waitFor({ state: "visible", timeout: 60_000 });
-}
 
-/**
- * Select a gear in the Composition tree and wait for its settings form.
- *
- * The click is `Configure <gear>`, which is what sets the selection the settings
- * half renders from -- not the `<summary>`, which only folds the branch.
- */
-export async function configureGear(page: Page, gear: string): Promise<void> {
-  await productSection(page, "composition");
-  await page.locator(`[data-composition-gear="${gear}"]`).click();
-  await page
-    .locator(`[data-gear-config="${gear}"]`)
-    .waitFor({ state: "visible", timeout: 60_000 });
-}
-
-export async function openProduct(page: Page, profile: string): Promise<void> {
-  // **A product is opened here, not inherited from boot.** Studio used to open
-  // the only product it could find whenever the Product widget was constructed,
-  // so every test started with one open and this helper only had to reveal the
-  // view. Home is a deliberate starting point now, so the helper does what a
-  // person does: the Continue card when it is offered, the picker otherwise.
-  //
-  // The `revealView` call stays. It is not the claim about automatic placement --
-  // `conformance/ux-navigation.spec.ts` asserts that with no reveal at all -- it
-  // is protection against the tab a *previous* test left on top in the shared
-  // worker session, and the measurement in `revealView` (19.6 minutes against
-  // 3.3) is why it is a tab click rather than a command.
-  if ((await page.locator(".gbx-toolbar").getAttribute("data-context")) !== "product") {
+  if ((await context()) !== "product") {
+    // The Continue card only when it names the product wanted -- it opens the
+    // most recent one, which after a switch is the other one.
     const card = page.locator('[data-start-action="continue"]');
-    if (await card.isVisible().catch(() => false)) {
+    const recent = (await card.isVisible().catch(() => false))
+      ? ((await card.textContent()) ?? "")
+      : "";
+    if (recent.includes(fragment)) {
       await card.click();
     } else {
       await runCommand(page, "Open Product…");
       const options = page.locator(`.quick-input-list [role="option"]`);
       await options.first().waitFor({ state: "visible", timeout: 30_000 });
-      await options.filter({ hasText: "payments-demo" }).first().click();
+      // Never `.first()` blindly: the list opens with a `Choose product.gdl…`
+      // entry, so an unfiltered first click picks the file dialog.
+      await options.filter({ hasText: fragment }).first().click();
     }
     await expect(page.locator(".gbx-toolbar")).toHaveAttribute("data-context", "product", {
       timeout: 90_000,
     });
   }
+
+  // **The reveal stays.** It is not the claim about automatic placement --
+  // `conformance/ux-navigation.spec.ts` asserts that with no reveal at all --
+  // it is protection against the tab a *previous* test left on top in the shared
+  // worker session, and the measurement in `revealView` (19.6 minutes against
+  // 3.3) is why it is a tab click rather than a command.
   await revealView(page, "Gearbox Product", ".gbx-product");
+  await expect(page.locator("[data-product-name]")).toHaveAttribute(
+    "data-product-name",
+    fragment,
+    { timeout: 90_000 },
+  );
   // **Overview, because the resolved header lives there.** The panel keeps
   // whichever stage was last chosen -- correct behaviour, and it means a helper
   // that waits for `[data-resolved-profile]` would be waiting for a section a
@@ -1098,6 +1077,40 @@ export async function openProduct(page: Page, profile: string): Promise<void> {
   await page
     .locator(`[data-resolved-profile="${profile}"]`)
     .waitFor({ state: "visible", timeout: 60_000 });
+}
+
+/**
+ * Select a gear in the Composition tree and return *its* settings form.
+ *
+ * The click is `Configure <gear>`, which sets the selection the settings half
+ * renders from -- not the `<summary>`, which only folds the branch.
+ *
+ * **Returns a scoped locator, and that is not a convenience.** `GearSettings` is
+ * one component rendered by two surfaces: the Composition pane and the
+ * Inspector, which opens itself on every selection. So `[data-gear-config=…]`
+ * and every marker inside it match twice, and an unscoped locator is a strict
+ * mode violation rather than a wrong answer -- which is the good failure, but a
+ * failure. Callers assert through the returned form.
+ */
+export async function configureGear(page: Page, gear: string): Promise<Locator> {
+  await productSection(page, "composition");
+  await page.locator(`[data-composition-gear="${gear}"]`).click();
+  const form = page.locator(`.gbx-composition-settings [data-gear-config="${gear}"]`);
+  await form.waitFor({ state: "visible", timeout: 60_000 });
+  return form;
+}
+
+/**
+ * Open the corpus's real product, `payments-demo`.
+ *
+ * A product is opened here, not inherited from boot: Studio used to open the
+ * only product it could find whenever the Product widget was constructed, so
+ * every test started with one open and this helper only had to reveal the view.
+ * Home is a deliberate starting point now, so the helper does what a person
+ * does.
+ */
+export async function openProduct(page: Page, profile: string): Promise<void> {
+  await openProductById(page, "payments-demo", profile);
 }
 
 export const test = base.extend<{ freshStudio: Studio }, { studio: Studio }>({

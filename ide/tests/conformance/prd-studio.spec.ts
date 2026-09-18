@@ -260,9 +260,20 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
       await revealCatalogue(page);
       await resetCatalogueView(page);
 
+      // **Removed from the composition, not from the catalogue.** The
+      // catalogue's control for a gear already in the product is "show it
+      // there" now: removing is an act on the product's own structure, so the
+      // surface that owns the structure is the one that offers it. The
+      // catalogue is only asked to agree afterwards.
       const toggle = page.locator('[data-toggle-gear="api-contracts-consumer"]');
       await expect(toggle).toHaveAttribute("data-in-product", "true", { timeout: 60_000 });
-      await toggle.click();
+      await productSection(page, "composition");
+      await page
+        .locator(
+          '[data-asked-for="api-contracts-consumer"] ' +
+            'button[aria-label="Remove api-contracts-consumer from product"]',
+        )
+        .click();
       await acceptEdit(page);
       await expect(toggle).toHaveAttribute("data-in-product", "false", { timeout: 60_000 });
 

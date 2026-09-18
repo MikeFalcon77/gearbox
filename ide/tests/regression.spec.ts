@@ -9,11 +9,13 @@ import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  configureGear,
   expect,
   openGenerate,
   openGraph,
   openPalette,
   openProduct,
+  openProductById,
   productSection,
   revealCatalogue,
   revealInspector,
@@ -604,14 +606,15 @@ test.describe("a required config field says so", () => {
   // marker, the inline note and the placeholder had no DOM coverage at all --
   // the three of them could have been deleted and every suite stayed green.
 
-  /** Open the configurator on a gear and wait for its fields. */
-  async function configure(page: import("@playwright/test").Page, gear: string): Promise<void> {
-    const add = page.locator("[data-add-gear]");
-    await expect(add).toBeVisible({ timeout: 60_000 });
-    await add.click();
-    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
-    await page.locator(`[data-add-gear-select="${gear}"]`).click();
-  }
+  // **Read in the product, not in the add dialog.** These three markers belong
+  // to `ConfigFields`, which is one component shared by the Composition pane and
+  // the Inspector; the dialog stopped rendering it when configuration moved to
+  // the gear it configures. `configurable-gears` names both subjects, which
+  // `payments-demo` cannot: `event-broker` and `grpc-hub` reach it through the
+  // closure, and a gear nothing named has no `use_gear` entry and so no form.
+  //
+  // `configureGear` returns the form scoped to the Composition pane, because the
+  // Inspector renders the same component and an unscoped marker matches twice.
 
   test("a field the gear requires and does not default is marked", async ({ studio }) => {
     // `event-broker` is the corpus's one gear that exercises this:
@@ -619,22 +622,20 @@ test.describe("a required config field says so", () => {
     // and `default_storage_backend` are required, and neither default is a
     // literal the projector can read. Engine-side the same pair is what
     // `GBX0120` reports.
-    await openProduct(studio.page, "dev");
-    await configure(studio.page, "event-broker");
+    await openProductById(studio.page, "configurable-gears", "dev");
+    const form = await configureGear(studio.page, "event-broker");
 
     for (const field of ["mode", "default_storage_backend"]) {
       await expect(
-        studio.page.locator(`[data-config-field-required="${field}"]`),
+        form.locator(`[data-config-field-required="${field}"]`),
         `${field} is required with no default, so it must be marked`,
       ).toHaveCount(1, { timeout: 30_000 });
     }
     // Said in words as well as by the glyph: a `title` on an empty span reaches
     // nobody using a screen reader.
-    await expect(
-      studio.page.locator('[data-config-field-required="mode"] .gbx-sr-only'),
-    ).toHaveText("required");
-
-    await studio.page.locator("[data-add-gear-cancel]").click();
+    await expect(form.locator('[data-config-field-required="mode"] .gbx-sr-only')).toHaveText(
+      "required",
+    );
   });
 
   test("a gear whose config all defaults is marked nowhere", async ({ studio }) => {
@@ -644,19 +645,14 @@ test.describe("a required config field says so", () => {
     // every field has a default; `listen_addr` is an endpoint's `config_key`
     // besides, which generation writes from the port the resolver assigned.
     // An empty panel here is the right answer, not a missing feature.
-    await openProduct(studio.page, "dev");
-    await configure(studio.page, "grpc-hub");
+    await openProductById(studio.page, "configurable-gears", "dev");
+    const form = await configureGear(studio.page, "grpc-hub");
 
-    const fields = studio.page.locator("[data-add-gear-flow] [data-config-field]");
     expect(
-      await fields.count(),
+      await form.locator("[data-config-field]").count(),
       "grpc-hub exposes three config fields, so this is not passing on an empty form",
     ).toBeGreaterThan(0);
-    await expect(
-      studio.page.locator("[data-add-gear-flow] [data-config-field-required]"),
-    ).toHaveCount(0);
-
-    await studio.page.locator("[data-add-gear-cancel]").click();
+    await expect(form.locator("[data-config-field-required]")).toHaveCount(0);
   });
 
   test("the note and the placeholder say it in words too", async ({ studio }) => {
@@ -665,12 +661,12 @@ test.describe("a required config field says so", () => {
     // either could have been deleted silently -- which is the whole reason this
     // describe exists.
     const { page } = studio;
-    await openProduct(page, "dev");
-    await configure(page, "event-broker");
+    await openProductById(page, "configurable-gears", "dev");
+    const form = await configureGear(page, "event-broker");
 
     for (const field of ["mode", "default_storage_backend"]) {
       await expect(
-        page.locator(`[data-config-field-missing="${field}"]`),
+        form.locator(`[data-config-field-missing="${field}"]`),
         `${field} is required with no default, so it must say so in words`,
       ).toHaveText("required, and the gear declares no default");
     }
@@ -679,15 +675,13 @@ test.describe("a required config field says so", () => {
     // asserted: an enum has no `placeholder` attribute to carry it, and shows
     // it as the text of the empty option that means "left alone".
     await expect(
-      page.locator('[data-config-field="mode"] select option[value=""]'),
+      form.locator('[data-config-field="mode"] select option[value=""]'),
       "an enum carries the placeholder as its empty option",
     ).toHaveText("required");
     await expect(
-      page.locator('[data-config-field="default_storage_backend"] input'),
+      form.locator('[data-config-field="default_storage_backend"] input'),
       "a string field carries it as the attribute",
     ).toHaveAttribute("placeholder", "required");
-
-    await page.locator("[data-add-gear-cancel]").click();
   });
 });
 

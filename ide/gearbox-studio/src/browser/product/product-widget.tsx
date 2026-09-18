@@ -560,8 +560,8 @@ export class ProductWidget extends ReactWidget {
     return <>
       <div className="gbx-composition-draft" aria-live="polite">
         {this.edits.hasDraft() ? <><span>{this.edits.draftEdits().length} pending changes</span>
-          <button onClick={() => void this.edits.applyDraft()}>Apply changes</button>
-          <button onClick={() => this.edits.discardDraft()}>Discard</button></> : <span>Saved</span>}
+          <button type="button" onClick={() => void this.edits.applyDraft()}>Apply changes</button>
+          <button type="button" onClick={() => this.edits.discardDraft()}>Discard</button></> : <span>Saved</span>}
       </div>
       <Composition state={state} descriptors={this.catalogue.current.rows.flatMap(row => row.kind === "projected" ? [row.gear] : [])}
         selection={selection} select={selected => { this.selection.select(selected); this.update(); }}

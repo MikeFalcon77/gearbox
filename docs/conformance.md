@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **178** — 136 built, 0 not built, 42 broken, 0 not observed.
+Claims: **179** — 178 built, 0 not built, 0 broken, 1 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -35,11 +35,11 @@ Rust, and the ADRs' own Confirmation sections say which.
 | a scaffold has three shapes, and each offers what its kind needs | `ADR-0010 tier 0` | ✅ built |  |
 | choosing a host writes the plugin's locator instead of commenting it | `ADR-0010 tier 0` | ✅ built |  |
 | a generated composition crate carries a header naming its generator | `ADR-0010 tier 2` | ✅ built |  |
-| a description edit shows the line before writing it | `ADR-0010 §Consequences: a preview is not optional` | ❌ broken | Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoContainText[2m([22m[32mexpected[39m[2m)[22m failed |
-| adding a gear inserts one line, and removing it restores the file exactly | `ADR-0010 tier 3` | ❌ broken | Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeEnabled[2m([22m[2m)[22m failed |
+| a description edit shows the line before writing it | `ADR-0010 §Consequences: a preview is not optional` | ✅ built |  |
+| adding a gear inserts one line, and removing it restores the file exactly | `ADR-0010 tier 3` | ✅ built |  |
 | Inspector projects config struct fields as typed controls | `Phase 7` | ✅ built |  |
 | a field says where its value came from, and an explicit one can be reset | `Phase 7` | ✅ built |  |
-| a projected string field renders as a typed control | `Phase 7` | ❌ broken | [31mTest timeout of 120000ms exceeded.[39m |
+| a projected string field renders as a typed control | `Phase 7` | ✅ built |  |
 
 ## `conformance/adr-0011-ide-shell.spec.ts`
 
@@ -65,11 +65,12 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the header names what is being worked on | `ADR-0011 §The two contexts` | ✅ built |  |
 | a product context exists, and only with a product | `ADR-0011 §The two contexts` | ✅ built |  |
 | a clicked link opens the file | `ADR-0011 §Confirmation: a clicked link must open a tab` | ✅ built |  |
-| a gear in the Product view opens its description | `ADR-0011 §Confirmation: a clicked link must open a tab` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
+| a gear in the Product view opens its description | `ADR-0011 §Confirmation: a clicked link must open a tab` | ✅ built |  |
 | the Product view opens its own description | `ADR-0011 §Confirmation: a clicked link must open a tab` | ✅ built |  |
 | the .gdl editor is tokenized, not plaintext | `ADR-0011 §Confirmation` | ✅ built |  |
 | no grammar failed to load | `ADR-0011 §the .gdl grammar is native` | ✅ built |  |
 | a screen composed for one product does not survive another | `ADR-0011 §Amendment: a screen belongs to a subject` | ✅ built |  |
+| opening a second product withdraws the first one's screens | `ADR-0011 §Amendment: a screen belongs to a subject` | ✅ built |  |
 | exactly one @theia/core is installed | `ADR-0011 §Confirmation` | ✅ built |  |
 | a contribution base class binds five contribution interfaces at once | `ADR-0011 §Consequences` | ✅ built |  |
 
@@ -77,7 +78,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 
 | Claim | Source | Status | Note |
 |---|---|---|---|
-| Open Product from Start shows the Product view without View menu | `ADR-0011 §Amendment: Product openView` | ❌ broken | Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed |
+| Open Product from Start shows the Product view without View menu | `ADR-0011 §Amendment: Product openView` | ✅ built |  |
 | a dead engine disables the actions that need it, and Retry brings them back | `ADR-0011 §Amendment: disconnected state` | ✅ built |  |
 | toolbar Generate is labelled Generate, not Toggle | `ADR-0011 §Amendment: Generate shortTitle` | ✅ built |  |
 | Discard on a profile field restores the saved value | `ADR-0013 §Amendment: Discard restores` | ✅ built |  |
@@ -108,27 +109,27 @@ Rust, and the ADRs' own Confirmation sections say which.
 
 | Claim | Source | Status | Note |
 |---|---|---|---|
-| Product has an Add Gear button that opens the configurator | `—` | ❌ broken | [31mTest timeout of 120000ms exceeded.[39m |
-| catalogue + opens the Add Gear configurator, not an immediate write dialog | `—` | ❌ broken | Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoContainText[2m([22m[32mexpected[39m[2m)[22m failed |
-| the closure a gear joins is visible before anything is written | `—` | ❌ broken | [31mTest timeout of 120000ms exceeded.[39m |
-| choosing a plugin changes what the closure would pull in | `—` | ❌ broken | [31mTest timeout of 120000ms exceeded.[39m |
-| a gear that declares no extension point is offered no plugin | `plan §9.1: the surface offers only what is applicable` | ❌ broken | [31mTest timeout of 120000ms exceeded.[39m |
-| a host is offered only the plugins that fill its own points | `plan §9.1: the surface offers only what is applicable` | ❌ broken | [31mTest timeout of 120000ms exceeded.[39m |
-| What will be written names every staged edit, not just the gear | `plan §9.1: the review is the exact serialization` | ❌ broken | [31mTest timeout of 120000ms exceeded.[39m |
-| free keys are behind Advanced, and a bad value is refused at the field | `plan §9.1: checked where the caret is` | ❌ broken | Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoHaveCount[2m([22m[32mexpected[39m[2m)[22m failed |
-| a plugin is attached to a host, and the impact is of that | `ADR-0013 §Amendment: a plugin is not a selected gear` | ❌ broken | Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed |
-| an invalid value disables Add before the next debounce | `plan §9.1: checked where the caret is` | ❌ broken | Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeEnabled[2m([22m[2m)[22m failed |
-| a config key that no field could be is refused at the row | `plan §9.1: checked where the caret is` | ❌ broken | [31mTest timeout of 120000ms exceeded.[39m |
-| features are curated, and one that is not for this deployment says so | `plan §9.1: features are projected` | ❌ broken | [31mTest timeout of 120000ms exceeded.[39m |
-| errors warn beside the button and never disable it | `—` | ❌ broken | [31mTest timeout of 120000ms exceeded.[39m |
+| Product has an Add Gear button that opens the configurator | `—` | ✅ built |  |
+| catalogue + opens the Add Gear configurator, not an immediate write dialog | `—` | ✅ built |  |
+| the closure a gear joins is visible before anything is written | `—` | ✅ built |  |
+| choosing a plugin changes what the closure would pull in | `—` | ✅ built |  |
+| a gear that declares no extension point is offered no plugin | `plan §9.1: the surface offers only what is applicable` | ✅ built |  |
+| a host is offered only the plugins that fill its own points | `plan §9.1: the surface offers only what is applicable` | ✅ built |  |
+| What will be written names every staged edit, not just the gear | `plan §9.1: the review is the exact serialization` | ✅ built |  |
+| free keys are behind Advanced, and a bad value is refused at the field | `plan §9.1: checked where the caret is` | ✅ built |  |
+| a plugin is attached to a host, and the impact is of that | `ADR-0013 §Amendment: a plugin is not a selected gear` | ✅ built |  |
+| an invalid value is refused at the field on the keystroke | `plan §9.1: checked where the caret is` | ✅ built |  |
+| a config key that no field could be is refused at the row | `plan §9.1: checked where the caret is` | ✅ built |  |
+| features are curated, and one that is not for this deployment says so | `plan §9.1: features are projected` | ✅ built |  |
+| errors warn beside the button and never disable it | `—` | ✅ built |  |
 
 ## `conformance/adr-0013-create-product.spec.ts`
 
 | Claim | Source | Status | Note |
 |---|---|---|---|
-| Create shows preview text, Cancel writes nothing, Create opens the product | `ADR-0013 §Confirmation` | ❌ broken | Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed |
-| a second product can be created after the first is closed | `ADR-0013 §Where the file is created` | ❌ broken | Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed |
-| Clone Git reviews the checkout before it creates anything | `ADR-0013 §Amendment: clone review` | ❌ broken | Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed |
+| Create shows preview text, Cancel writes nothing, Create opens the product | `ADR-0013 §Confirmation` | ✅ built |  |
+| a second product can be created after the first is closed | `ADR-0013 §Where the file is created` | ✅ built |  |
+| Clone Git reviews the checkout before it creates anything | `ADR-0013 §Amendment: clone review` | ✅ built |  |
 | mode selector is visible on New Product from Start | `ADR-0013 amendment` | ✅ built |  |
 | the destination is choosable, and sources are relative to it | `ADR-0013 §Amendment: destination picker` | ✅ built |  |
 | a root containing the destination is not offered as a source | `ADR-0013 §Where the file is created` | ✅ built |  |
@@ -167,13 +168,13 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the Catalogue folds by category and filters | `plan §9: Catalogue, foldable and filtered` | ✅ built |  |
 | the Catalogue is in the left area | `plan §9: Catalogue, left` | ✅ built |  |
 | the Inspector is beside the tree, not under it | `plan §9: Inspector, right panel` | ✅ built |  |
-| one selection answers both questions at once | `plan §9: Inspector, one selection` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
+| one selection answers both questions at once | `plan §9: Inspector, one selection` | ✅ built |  |
 | the co-location Graph opens in the main area | `plan §9: Graph, main` | ✅ built |  |
-| the Product view is a tree of branches | `vision §60; plan §9: Product` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
-| the Product view shows what §9 asks it to | `plan §9: Product` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
+| the Product view is a tree of branches | `vision §60; plan §9: Product` | ✅ built |  |
+| the Product view shows what §9 asks it to | `plan §9: Product` | ✅ built |  |
 | the Conflicts screen lists what the resolution reported | `plan §9: Conflicts` | ✅ built |  |
 | a conflict points the Inspector at its subject | `PRD cpt-gearbox-fr-explain: subject` | ✅ built |  |
-| the explanation travels with the Inspector | `plan §9: Explain` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
+| the explanation travels with the Inspector | `plan §9: Explain` | ✅ built |  |
 | the Lock view is in the main area | `plan §9: Lock` | ✅ built |  |
 | a Generate view exists | `plan §9: Generate` | ✅ built |  |
 | Apply is refused when the plan writes nothing | `plan §9: Generate, Apply disabled` | ✅ built |  |
@@ -195,18 +196,18 @@ Rust, and the ADRs' own Confirmation sections say which.
 | the Problems view is present to receive markers | `PRD cpt-gearbox-fr-editor-diagnostics` | ✅ built |  |
 | the catalogue panel renders the diagnostics a load produced | `PRD cpt-gearbox-fr-editor-diagnostics` | ✅ built |  |
 | resolution diagnostics appear as problem markers | `PRD cpt-gearbox-fr-editor-diagnostics` | ✅ built |  |
-| markers are replaced atomically on each resolution | `PRD cpt-gearbox-fr-editor-diagnostics` | ❌ broken | TimeoutError: locator.waitFor: Timeout 60000ms exceeded. |
+| markers are replaced atomically on each resolution | `PRD cpt-gearbox-fr-editor-diagnostics` | ✅ built |  |
 | description diagnostics arrive over a language-server interface with source ranges | `PRD cpt-gearbox-fr-editor-diagnostics` | ✅ built |  |
 
 ## `conformance/prd-explain.spec.ts`
 
 | Claim | Source | Status | Note |
 |---|---|---|---|
-| a binding's mode is explained by where its two gears ended up | `PRD cpt-gearbox-fr-explain` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
-| a gear pulled in by co-location is explained back to a named gear | `PRD cpt-gearbox-fr-explain` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
-| a plugin's inclusion names the host and the profile | `PRD cpt-gearbox-fr-plugin-selection` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
-| a selection that this profile does not contain reads as ordinary | `PRD cpt-gearbox-fr-explain` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
-| each step links to the source location of its fact | `PRD cpt-gearbox-fr-explain: the source location of each contributing fact` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
+| a binding's mode is explained by where its two gears ended up | `PRD cpt-gearbox-fr-explain` | ✅ built |  |
+| a gear pulled in by co-location is explained back to a named gear | `PRD cpt-gearbox-fr-explain` | ✅ built |  |
+| a plugin's inclusion names the host and the profile | `PRD cpt-gearbox-fr-plugin-selection` | ✅ built |  |
+| a selection that this profile does not contain reads as ordinary | `PRD cpt-gearbox-fr-explain` | ✅ built |  |
+| each step links to the source location of its fact | `PRD cpt-gearbox-fr-explain: the source location of each contributing fact` | ✅ built |  |
 
 ## `conformance/prd-lock.spec.ts`
 
@@ -225,12 +226,12 @@ Rust, and the ADRs' own Confirmation sections say which.
 
 | Claim | Source | Status | Note |
 |---|---|---|---|
-| one description gives three profiles three distinct locks | `PRD cpt-gearbox-fr-lock-single-source` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
-| a binding's mode is derived from placement, never declared | `PRD cpt-gearbox-fr-derive-binding-from-placement` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
-| the plugin linked for a profile is the one that profile selected | `PRD cpt-gearbox-fr-plugin-selection` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
-| a gear pulled in by co-location names the gear that pulled it | `PRD cpt-gearbox-fr-never-cut-colocation` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
-| every gear in the closure ends up in some application | `plan §9: no orphans` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
-| applications overlap rather than partition the gears | `plan §9: closure not partition` | ❌ broken | TimeoutError: locator.waitFor: Timeout 30000ms exceeded. |
+| one description gives three profiles three distinct locks | `PRD cpt-gearbox-fr-lock-single-source` | ✅ built |  |
+| a binding's mode is derived from placement, never declared | `PRD cpt-gearbox-fr-derive-binding-from-placement` | ✅ built |  |
+| the plugin linked for a profile is the one that profile selected | `PRD cpt-gearbox-fr-plugin-selection` | ✅ built |  |
+| a gear pulled in by co-location names the gear that pulled it | `PRD cpt-gearbox-fr-never-cut-colocation` | ✅ built |  |
+| every gear in the closure ends up in some application | `plan §9: no orphans` | ✅ built |  |
+| applications overlap rather than partition the gears | `plan §9: closure not partition` | ⚪ not observed | no anchor in this product shares a co-location closure with another, so no overlap exists to see |
 
 ## `conformance/prd-projection.spec.ts`
 
@@ -255,7 +256,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | it renders the contract graph | `PRD cpt-gearbox-fr-studio: renders the contract graph` | ✅ built |  |
 | it renders the application graph | `PRD cpt-gearbox-fr-studio: renders the application graph` | ✅ built |  |
 | it renders the cluster graph | `PRD cpt-gearbox-fr-studio: renders the cluster graph` | ✅ built |  |
-| the cluster view explains an empty resolution | `PRD cpt-gearbox-fr-studio: renders the cluster graph` | ❌ broken | Error: the edit dialog is not open, so there is nothing to accept |
+| the cluster view explains an empty resolution | `PRD cpt-gearbox-fr-studio: renders the cluster graph` | ✅ built |  |
 | it answers why for a selected decision | `PRD cpt-gearbox-fr-studio: answers why` | ✅ built |  |
 | it previews and applies generation | `PRD cpt-gearbox-fr-generate-preview` | ✅ built |  |
 | the resolver notice is gone, and gone because the engine says so | `PRD cpt-gearbox-fr-rpc-api` | ✅ built |  |
@@ -265,7 +266,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 
 | Claim | Source | Status | Note |
 |---|---|---|---|
-| no button in the Studio is written without a type | `ADR-0011 §Confirmation` | ❌ broken | Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoEqual[2m([22m[32mexpected[39m[2m) // deep equality[22m |
+| no button in the Studio is written without a type | `ADR-0011 §Confirmation` | ✅ built |  |
 | an icon-only button carries an accessible name | `ADR-0011 §Confirmation` | ✅ built |  |
 | the catalogue's add control says which gear and which product | `ADR-0011 §Confirmation` | ✅ built |  |
 
@@ -274,11 +275,11 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Claim | Source | Status | Note |
 |---|---|---|---|
 | nothing opens itself into the bottom panel on Home | `plan §9.1: an empty domain panel is worse than an absent one` | ✅ built |  |
-| closing a product takes its screens with it | `ADR-0011 §Amendment: a screen belongs to a subject` | ❌ broken | [31mTest timeout of 120000ms exceeded.[39m |
-| the panels come back when the last such screen closes, not the first | `ADR-0011 §Amendment: the room is arranged before the screen appears` | ❌ broken | Error: opening the configurator did not fold the catalogue |
+| closing a product takes its screens with it | `ADR-0011 §Amendment: a screen belongs to a subject` | ✅ built |  |
+| the panels come back when the last such screen closes, not the first | `ADR-0011 §Amendment: the room is arranged before the screen appears` | ✅ built |  |
 | the Product view is four stages and a way out to Generate | `plan §9.1: Product navigation` | ✅ built |  |
 | Validation shows the diagnostics rather than a way to reach them | `plan §9.1: Validation is a screen` | ✅ built |  |
-| what a proposal would introduce is the same row, at a smaller weight | `plan §9.1: Validation is a screen` | ❌ broken | [31mTest timeout of 120000ms exceeded.[39m |
+| what a proposal would introduce is the same row, at a smaller weight | `plan §9.1: Validation is a screen` | ✅ built |  |
 | the wait is four named steps that advance | `plan §9.1: opening is staged` | ✅ built |  |
 | Overview reports the shape, the tree and the sources without asking for any of it | `plan §9.1: Overview is the product at a glance` | ✅ built |  |
 | a reload with a product open comes back to Home | `plan §9.1: Home is a screen, not an empty area` | ✅ built |  |

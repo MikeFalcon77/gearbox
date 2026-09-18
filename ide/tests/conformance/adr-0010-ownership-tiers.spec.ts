@@ -466,9 +466,11 @@ test.describe("typed config from schema (Phase 7)", () => {
     // gear once it is in the product.
     const page = studio.page;
     await openProductById(page, "configurable-gears", "dev");
-    await configureGear(page, "tenant-resolver");
+    const form = await configureGear(page, "tenant-resolver");
 
-    const field = page.locator('[data-config-field="vendor"]');
+    // Through the form: the Inspector renders the same component, so an
+    // unscoped `[data-config-field]` matches twice.
+    const field = form.locator('[data-config-field="vendor"]');
     await expect(field).toBeVisible({ timeout: 60_000 });
     await expect(field).toHaveAttribute("data-config-field-kind", "str");
     // The default is projected from `impl Default`, not typed into the gdl --

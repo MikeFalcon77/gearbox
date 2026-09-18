@@ -74,7 +74,7 @@ export function Composition({ state, descriptors, selection, select, add, remove
     <nav className="gbx-composition-tree" aria-label="Product composition">
       <h3>Selected gears ({explicit.length})</h3>
       {explicit.length === 0 && <div className="gbx-empty">Your product has no gears yet. Choose a gear, then configure it here.
-        <button className="gbx-start-primary" onClick={() => add()}>Add gear</button>
+        <button type="button" className="gbx-start-primary" onClick={() => add()}>Add gear</button>
       </div>}
       {explicit.map(host => {
         const d = descriptor(host.gear);
@@ -97,7 +97,7 @@ export function Composition({ state, descriptors, selection, select, add, remove
             selection.host === host.gear &&
             selection.entryIndex === entryIndex;
           return <div className="gbx-composition-connection" key={entryIndex} data-plugin-host={host.gear} data-plugin-index={entryIndex} data-plugin-id={p.gear} data-plugin-active={active}>
-            <button aria-pressed={selected} className={`gbx-choice ${selected ? "gbx-choice-on" : ""}`} onClick={() => select({ kind: "plugin", host: host.gear, id: p.gear, entryIndex, path: openPath })}>{p.gear}</button>
+            <button type="button" aria-pressed={selected} className={`gbx-choice ${selected ? "gbx-choice-on" : ""}`} onClick={() => select({ kind: "plugin", host: host.gear, id: p.gear, entryIndex, path: openPath })}>{p.gear}</button>
             <small>Profiles: {p.profiles?.join(", ") || "All profiles"}{!active ? " · inactive here" : ""}</small>
           </div>;
         });
@@ -111,14 +111,14 @@ export function Composition({ state, descriptors, selection, select, add, remove
             <GearLink state={state} id={host.gear} reveals={reveals} select={select} />
           </summary>
           <div className="gbx-composition-host-actions">
-            <button data-composition-gear={host.gear} className={`gbx-choice ${selection?.kind === "gear" && selection.id === host.gear ? "gbx-choice-on" : ""}`} onClick={() => select({ kind: "gear", id: host.gear })}>Configure {host.gear}</button>
-            <button aria-label={`Remove ${host.gear} from product`} onClick={() => remove(host.gear)}>Remove</button>
+            <button type="button" data-composition-gear={host.gear} className={`gbx-choice ${selection?.kind === "gear" && selection.id === host.gear ? "gbx-choice-on" : ""}`} onClick={() => select({ kind: "gear", id: host.gear })}>Configure {host.gear}</button>
+            <button type="button" aria-label={`Remove ${host.gear} from product`} onClick={() => remove(host.gear)}>Remove</button>
           </div>
           {!d && <small>Descriptor unavailable or still loading. This gear remains in your product.</small>}
           {points.map(point => <section className="gbx-composition-slot" key={point.key}>
             <h4>{point.label}</h4>
             {renderConnections(connections.filter(c => c.point && pointKey(c.point) === point.key))}
-            <button onClick={() => add(host.gear, point.key)}>Add compatible plugin</button>
+            <button type="button" onClick={() => add(host.gear, point.key)}>Add compatible plugin</button>
           </section>)}
           {unassigned.length > 0 && <section className="gbx-composition-slot"><h4>Connections needing review</h4>{renderConnections(unassigned)}</section>}
         </details>;
@@ -138,10 +138,10 @@ export function Composition({ state, descriptors, selection, select, add, remove
               answered by the sentence rather than by the button being there. */}
           {gear.selected_by.map((reason, i) => <div key={i} className="gbx-leaf-why">
             {reason.reason === "colocated_by"
-              ? <button className="gbx-choice" onClick={() => select({ kind: "gear", id: reason.gear })}>{describeInclusion(reason)}</button>
+              ? <button type="button" className="gbx-choice" onClick={() => select({ kind: "gear", id: reason.gear })}>{describeInclusion(reason)}</button>
               : describeInclusion(reason)}
           </div>)}
-          {descriptor(id)?.extension_points?.length ? <button onClick={() => add(id)}>Add plugin (select host explicitly)</button> : null}
+          {descriptor(id)?.extension_points?.length ? <button type="button" onClick={() => add(id)}>Add plugin (select host explicitly)</button> : null}
         </div>)}
       </details>}
     </nav>

@@ -50,6 +50,10 @@ test.describe("session trust [ADR-0011 amendment 2026-09-02]", () => {
     const listed = page.locator("[data-start-product]").first();
     await expect(listed).toBeVisible({ timeout: 60_000 });
     await listed.click();
+    // Overview holds the resolved header, and a product opens on Composition.
+    // What is claimed is that the list button opened *and resolved* a product.
+    await expect(page.locator(".gbx-product")).toBeVisible({ timeout: 60_000 });
+    await productSection(page, "overview");
     await expect(page.locator(".gbx-product [data-resolved-profile]")).toBeVisible({
       timeout: 60_000,
     });

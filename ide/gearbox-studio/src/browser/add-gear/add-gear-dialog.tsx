@@ -83,6 +83,31 @@ export class AddGearDialog extends ReactDialog<boolean> {
     return this.descriptors().filter(host => fillsPointOf(plugin, host) &&
       (state.intent?.selected_gears.some(g => g.gear === host.id) || !!state.resolution?.product?.gears[host.id]));
   }
+  /**
+   * Whether this host already has this plugin for a profile the proposal claims.
+   *
+   * **Overlap, not equality, and the rule is the engine's.** An empty scope
+   * means *every* profile (`ProductIntent::applies`), so proposing an unscoped
+   * `plugin("oidc-authn-plugin")` beside an existing `profiles = ["prod"]` entry
+   * is the same implementation twice under one host in one profile -- which the
+   * evaluator reports as a collision, so the write is refused and no intent
+   * comes back. Asking here turns that into a sentence instead of a refusal
+   * whose reason is two layers away.
+   *
+   * Disjoint scopes are the case this must *not* catch: `["dev"]` beside
+   * `["prod"]` is a pair of legitimate entries, and offering them is the whole
+   * reason connections carry a scope.
+   */
+  private alreadyAttached(host: string, plugin: string, profiles: string[]): boolean {
+    const entries = this.products.current.intent?.selected_gears.find(g => g.gear === host)?.plugins ?? [];
+    return entries.some(entry => {
+      if (entry.gear !== plugin) return false;
+      const mine = entry.profiles ?? [];
+      // Either side empty is "every profile", which overlaps anything.
+      return mine.length === 0 || profiles.length === 0 || mine.some(p => profiles.includes(p));
+    });
+  }
+
   /** The catalogue's plugins that fill one of this host's own points. */
   private compatible(host: GearDescriptor): GearDescriptor[] {
     return this.descriptors().filter(plugin => fillsPointOf(plugin, host));
@@ -107,6 +132,10 @@ export class AddGearDialog extends ReactDialog<boolean> {
           "so there is no gear for this plugin to fill a point on.";
       }
       if (!this.host) return "Choose the gear that will host this plugin.";
+      if (this.alreadyAttached(this.host, gear.id, this.profiles)) {
+        return `\`${gear.id}\` is already attached to ${this.host} for these profiles, ` +
+          "so nothing would be written. Narrow the scope to add it for another profile.";
+      }
     }
     if (this.resolving) return "Calculating changes…";
     if (this.preview && !this.preview.changed) {
@@ -131,6 +160,7 @@ export class AddGearDialog extends ReactDialog<boolean> {
     }
     const host = this.hosts(gear).find(h => h.id === this.host);
     if (!host) return [];
+    if (this.alreadyAttached(host.id, gear.id, this.profiles)) return [];
     return [
       ...(this.products.current.intent?.selected_gears.some(g => g.gear === host.id) ? [] : [{ kind: "add_gear" as const, gear: host.id, source: host.source }]),
       { kind: "add_plugin_selection", gear: host.id, plugin: gear.id, profiles: this.profiles },
@@ -183,12 +213,35 @@ export class AddGearDialog extends ReactDialog<boolean> {
     await this.commands.executeCommand(SHOW_PRODUCT.id, "composition");
     requestAnimationFrame(() => document.querySelector<HTMLElement>(".gbx-composition-settings")?.focus());
   }
+  /**
+   * Whether **Add to product** may be pressed.
+   *
+   * **Theia's hook, because assigning `acceptButton.disabled` does not hold.**
+   * `AbstractDialog.onUpdateRequest` renders *then* calls `validate()`, which
+   * calls `setErrorMessage` and sets `disabled` from the result -- so a render
+   * that disabled the button had it re-enabled a moment later, every time. The
+   * button was therefore always live, including while the dialog said in two
+   * places that nothing would be written.
+   *
+   * `false` rather than a message: the reason is already on screen, in the
+   * `changes` and `closure` sections, and Theia would print a second copy of it
+   * into its own error node.
+   *
+   * An error the *proposal introduces* is not a reason to refuse -- building a
+   * product is add-a-gear-then-configure-it, so a resolution that complains in
+   * between is a waypoint. That is what the warning beside the button is for.
+   */
+  protected override isValid(): boolean | string {
+    if (this.writing || this.resolving) return false;
+    return this.preview?.changed === true;
+  }
+
   protected render(): React.ReactNode {
     const chosen = this.chosen(), all = this.descriptors();
     const filtered = all.filter(d => (!this.initial.point || (d.fills && pointKey(d.fills.point) === this.initial.point)) &&
       (!this.initial.host || !!d.fills) && (!this.category || d.category === this.category) &&
       `${d.id} ${d.display_name} ${d.description}`.toLowerCase().includes(this.search.toLowerCase()));
-    if (this.acceptButton) this.acceptButton.disabled = this.resolving || this.writing || !this.preview?.changed;
+    const introduced = this.impact?.newDiagnostics.length ?? 0;
     // `data-add-gear-flow` is the marker the old Add Gear *panel* carried, kept
     // because this dialog is that flow now: the specs ask "is the add-gear flow
     // on screen", and the answer is still yes -- only the surface changed.
@@ -196,7 +249,7 @@ export class AddGearDialog extends ReactDialog<boolean> {
       <div className="gbx-add-dialog-search"><label>Find a gear<input autoFocus aria-label="Search gear catalogue" value={this.search} onChange={e => { this.search = e.target.value; this.update(); }} /></label>
         <label>Category<select value={this.category} onChange={e => { this.category = e.target.value; this.update(); }}><option value="">All categories</option>{[...new Set(all.map(d => d.category).filter((c): c is string => !!c))].sort().map(c => <option key={c} value={c}>{c}</option>)}</select></label></div>
       <div className="gbx-add-dialog-columns"><nav aria-label="Available gears" data-add-gear-picker>
-        {filtered.map(d => <button key={`${d.source}:${d.id}`} data-add-gear-select={d.id} aria-pressed={chosen === d} className="gbx-catalogue-choice" onClick={() => { this.candidate = `${d.source}:${d.id}`; this.host = this.initial.host; this.profiles = []; this.staged = []; this.pluginPick = ""; void this.refreshPreview(); }}>
+        {filtered.map(d => <button type="button" key={`${d.source}:${d.id}`} data-add-gear-select={d.id} aria-pressed={chosen === d} className="gbx-catalogue-choice" onClick={() => { this.candidate = `${d.source}:${d.id}`; this.host = this.initial.host; this.profiles = []; this.staged = []; this.pluginPick = ""; void this.refreshPreview(); }}>
           <strong>{d.display_name || d.id}</strong><small>{d.id} · {d.source}{this.edits.inProduct(d.id) ? " · In product" : ""}</small>
         </button>)}
         {!filtered.length && <p>No matching gears. Entries still being projected become available when ready.</p>}
@@ -221,14 +274,14 @@ export class AddGearDialog extends ReactDialog<boolean> {
               {!points.length ? <p data-add-gear-plugins-none>Extension points: none declared. This gear takes no plugins.</p> : <>
                 <p>Extension points: {points.map(point => point.trait_ident).join(", ")}</p>
                 {this.staged.map(id => <p key={id} data-add-gear-plugin={id}>{id}
-                  <button onClick={() => { this.staged = this.staged.filter(v => v !== id); void this.refreshPreview(); }}>Remove</button></p>)}
+                  <button type="button" onClick={() => { this.staged = this.staged.filter(v => v !== id); void this.refreshPreview(); }}>Remove</button></p>)}
                 {offer.length ? <>
                   <select data-add-gear-plugin-pick aria-label="Plugin to attach" value={this.pluginPick}
                     onChange={e => { this.pluginPick = e.target.value; this.update(); }}>
                     <option value="">Choose a plugin</option>
                     {offer.map(p => <option key={p.id} value={p.id}>{p.id}</option>)}
                   </select>
-                  <button data-add-gear-plugin-add disabled={!this.pluginPick}
+                  <button type="button" data-add-gear-plugin-add disabled={!this.pluginPick}
                     onClick={() => { if (this.pluginPick) { this.staged = [...this.staged, this.pluginPick]; this.pluginPick = ""; void this.refreshPreview(); } }}>Attach plugin</button>
                 </> : <p data-add-gear-plugins-unfilled>Every plugin that fills these points is already staged.</p>}
               </>}
@@ -236,7 +289,21 @@ export class AddGearDialog extends ReactDialog<boolean> {
           })()}
           {this.edits.hasDraft() && <p role="note">Impact uses the saved product. Pending configuration changes stay in your draft and are not applied by Add.</p>}
           {this.resolving && <p role="status">Calculating changes…</p>}
-          {this.error && <p role="alert" data-add-gear-impact-error data-add-gear-error-warning>{this.error}<button onClick={() => void this.refreshPreview()}>Refresh preview</button></p>}
+          {this.error && <p role="alert" data-add-gear-impact-error>{this.error}<button type="button" onClick={() => void this.refreshPreview()}>Refresh preview</button></p>}
+          {/* **Said beside the button, and the button stays live.** Building a
+              product is add-a-gear-then-configure-it, so a resolution that
+              complains in between is a waypoint: refusing the write would make
+              the ordinary order impossible. What must not happen is writing it
+              silently, so the count of what this addition *introduces* -- the
+              subtraction `impactOf` performs, not the diagnostics the product
+              already had -- is stated here. */}
+          {introduced > 0 && (
+            <p role="alert" className="gbx-add-gear-note" data-add-gear-error-warning={introduced}>
+              This addition introduces {introduced} new{" "}
+              {introduced === 1 ? "diagnostic" : "diagnostics"}. You can still add it and fix
+              them in the product.
+            </p>
+          )}
           <section data-add-gear-impact data-add-gear-section="changes"><h4>What changes</h4>
             {!this.impact && <p>{this.pending()}</p>}
             {this.impact?.arriving.map(g => <p key={g.id} data-add-gear-impact-closure={g.id} data-impact-gear={g.id}>+ {g.id} · {g.why}</p>)}

@@ -54,12 +54,12 @@ export function PluginSettings({ selection, state, descriptor, edits, openGdl, r
     <h4>Configuration</h4>
     <ConfigFields fields={fields} values={values} onChange={queue} onReset={k => queue(k, undefined)} provenanceOf={k => k in config ? "explicit" : "default"} isDrafted={k => draft.some(e => e.kind === "set_plugin_config" && e.key === k)} />
     {Object.entries(config).filter(([k]) => !fields.some(f => f.name === k)).map(([k, v]) => <div key={k}>
-      <label>{k}{typeof v === "object" ? <><pre>{JSON.stringify(v, null, 2)}</pre><button onClick={openGdl}>Edit structured value in GDL</button></> :
+      <label>{k}{typeof v === "object" ? <><pre>{JSON.stringify(v, null, 2)}</pre><button type="button" onClick={openGdl}>Edit structured value in GDL</button></> :
         typeof v === "boolean" ? <input type="checkbox" checked={v} onChange={e => queue(k, e.target.checked)} /> :
         <input value={String(v)} type={typeof v === "number" ? "number" : "text"} onChange={e => { if (typeof v !== "number" || e.target.value !== "") queue(k, typeof v === "number" ? Number(e.target.value) : e.target.value); }} />}</label>
-      <button onClick={() => queue(k, undefined)}>Remove {k}</button>
+      <button type="button" onClick={() => queue(k, undefined)}>Remove {k}</button>
     </div>)}
-    <div><input aria-label="Plugin config key" placeholder="Config key" value={key} onChange={e => setKey(e.target.value)} /><input aria-label="Plugin config value" placeholder="String value" value={value} onChange={e => setValue(e.target.value)} /><button disabled={!key.trim()} onClick={() => { queue(key.trim(), value); setKey(""); setValue(""); }}>Add key</button></div>
-    <button onClick={openGdl}>Open GDL</button><button onClick={remove}>Remove this connection</button>
+    <div><input aria-label="Plugin config key" placeholder="Config key" value={key} onChange={e => setKey(e.target.value)} /><input aria-label="Plugin config value" placeholder="String value" value={value} onChange={e => setValue(e.target.value)} /><button type="button" disabled={!key.trim()} onClick={() => { queue(key.trim(), value); setKey(""); setValue(""); }}>Add key</button></div>
+    <button type="button" onClick={openGdl}>Open GDL</button><button type="button" onClick={remove}>Remove this connection</button>
   </div>;
 }

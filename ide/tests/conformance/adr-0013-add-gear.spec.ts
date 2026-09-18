@@ -197,8 +197,8 @@ test.describe("Add Gear shows consequences before the write", () => {
       // add dialog stopped rendering them when configuration moved to the gear.
       const { page } = studio;
       await openProductById(page, "configurable-gears", "dev");
-      await configureGear(page, "event-broker");
-      const config = '[data-gear-config="event-broker"]';
+      const form = await configureGear(page, "event-broker");
+      const config = '.gbx-composition-settings [data-gear-config="event-broker"]';
 
       // Folded, and the free-key input is not reachable until it is opened.
       //
@@ -207,21 +207,21 @@ test.describe("Add Gear shows consequences before the write", () => {
       // so the count is 2 here where the panel had 1. `openAdvancedKeys` takes
       // the first, which is the config one -- the order is the claim's, and
       // asserting the count keeps a third from appearing unnoticed.
-      const advanced = page.locator(`${config} details.gbx-advanced`);
+      const advanced = form.locator("details.gbx-advanced");
       await expect(advanced).toHaveCount(2);
       expect(
         await advanced.first().evaluate((e) => (e as HTMLDetailsElement).open),
         "free-form keys should start folded",
       ).toBe(false);
-      await expect(page.locator("[data-config-new-key]")).toBeHidden();
+      await expect(form.locator("[data-config-new-key]")).toBeHidden();
 
       await openAdvancedKeys(page, config);
-      await expect(page.locator("[data-config-new-key]")).toBeVisible();
+      await expect(form.locator("[data-config-new-key]")).toBeVisible();
 
       // An enum whose value is not one of its variants is refused where it was
       // typed, and the variants come from the engine's own list rather than from
       // a rule written here.
-      const enums = page.locator('[data-config-field-kind="enum"]');
+      const enums = form.locator('[data-config-field-kind="enum"]');
       const count = await enums.count();
       test.skip(count === 0, "this gear exposes no enum field, so there is no closed set to leave");
       const field = enums.first();
@@ -233,7 +233,7 @@ test.describe("Add Gear shows consequences before the write", () => {
       // Selecting a real variant must *not* complain -- the check has to be about
       // the value, not about the field having been touched.
       await field.locator("select").selectOption(String(options[0]));
-      await expect(page.locator(`[data-config-field-error="${String(name)}"]`)).toHaveCount(0);
+      await expect(form.locator(`[data-config-field-error="${String(name)}"]`)).toHaveCount(0);
 
       // Selecting a variant queues a draft, so it has to be dropped: the suite
       // refuses to start when `products/` differs from HEAD, and teardown
@@ -330,67 +330,66 @@ test.describe("Add Gear shows consequences before the write", () => {
   );
 
   test(
-    "an invalid value disables Add before the next debounce [plan §9.1: checked where the caret is]",
+    "an invalid value is refused at the field on the keystroke [plan §9.1: checked where the caret is]",
     async ({ studio }) => {
-      // The window this closes: the field said `internal_auth_cache_ttl_secs is
-      // an integer` while `Add to Product` stayed live until the next 400 ms
-      // debounce turned it off. Asserted immediately after the keystroke, which
-      // is the only moment that distinguishes the fix from what it replaced.
+      // **Half of this claim moved and half of it went away, and the half that
+      // went away is worth naming.** It read "an invalid value disables Add
+      // before the next debounce": the field said the value was not an integer
+      // while the panel's own `Add to Product` stayed live until the 400 ms
+      // impact debounce turned it off. Configuration left the add dialog, so
+      // there is no Add button beside the field any more -- the field is in the
+      // product, and the primary action is Apply, a toolbar control over a whole
+      // draft. Apply is *not* disabled by one invalid field today; the engine
+      // refuses the value at Apply instead. That is later than the panel managed
+      // and is recorded here rather than quietly dropped.
+      //
+      // What survives is the part the tag is about: the check happens where the
+      // caret is, on the keystroke, with no debounce between.
+      //
+      // `grpc-hub` exposes `internal_auth_cache_ttl_secs`, an integer, and
+      // `configurable-gears` names it -- so there is a real closed type to
+      // violate rather than a skip dressed as a pass.
       const { page } = studio;
-      await openProduct(page, "dev");
-      await revealCatalogue(page);
-      await resetCatalogueView(page);
-      await page.locator('[data-toggle-gear="grpc-hub"]').click();
-      await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+      await openProductById(page, "configurable-gears", "dev");
+      const form = await configureGear(page, "grpc-hub");
 
-      const add = page.locator("[data-add-gear-apply]");
-      await expect(add).toBeEnabled({ timeout: 60_000 });
-
-      const ints = page.locator('[data-config-field-kind="int"]');
-      const count = await ints.count();
-      test.skip(count === 0, "this gear exposes no integer field to make invalid");
+      const ints = form.locator('[data-config-field-kind="int"]');
+      expect(await ints.count(), "grpc-hub exposes an integer field").toBeGreaterThan(0);
       const field = ints.first();
       const name = await field.getAttribute("data-config-field");
       await field.locator("input").fill("1.5");
 
       // **Read once, not with a retrying matcher, and that is the whole claim.**
-      // `expect(...).toBeDisabled()` polls for seconds, so it passes whether the
-      // button goes dead on the keystroke or 400 ms later when the debounce
-      // fires -- which is exactly the window this closes. One snapshot of both
-      // facts, taken immediately, is the only formulation that can tell the two
-      // apart.
-      //
-      // `IMPACT_DEBOUNCE_MS` is 400; the budget here is a fifth of that, and it
-      // exists at all because React flushes its render in a microtask rather
-      // than synchronously with `fill`.
-      const snapshot = async (): Promise<{ error: number; disabled: boolean }> =>
-        page.evaluate((field) => {
-          const button = document.querySelector("[data-add-gear-apply]");
-          return {
-            error: document.querySelectorAll(`[data-config-field-error="${field}"]`).length,
-            disabled: button instanceof HTMLButtonElement ? button.disabled : false,
-          };
-        }, String(name));
+      // `expect(...).toBeVisible()` polls for seconds, so it would pass whether
+      // the field complains on the keystroke or a render or two later. One
+      // snapshot, taken immediately, is the only formulation that can tell those
+      // apart. The budget exists at all because React flushes in a microtask
+      // rather than synchronously with `fill`.
+      const errors = async (): Promise<number> =>
+        page.evaluate(
+          (f) =>
+            document.querySelectorAll(
+              `.gbx-composition-settings [data-config-field-error="${f}"]`,
+            ).length,
+          String(name),
+        );
 
       const started = Date.now();
-      let seen = await snapshot();
-      while ((seen.error === 0 || !seen.disabled) && Date.now() - started < 80) {
-        seen = await snapshot();
+      let seen = await errors();
+      while (seen === 0 && Date.now() - started < 80) {
+        seen = await errors();
       }
       const elapsed = Date.now() - started;
-      expect(seen.error, "the field did not say what is wrong with the value").toBeGreaterThan(0);
-      expect(seen.disabled, `Add was still live ${String(elapsed)}ms after the keystroke`).toBe(
-        true,
-      );
-      expect(elapsed, "this must be decided well inside the 400ms debounce").toBeLessThan(200);
+      expect(seen, `the field did not say what is wrong ${String(elapsed)}ms after the keystroke`)
+        .toBeGreaterThan(0);
+      expect(elapsed, "this must be decided without waiting for a debounce").toBeLessThan(200);
 
-      // And still disabled once the debounce has been and gone -- the guard is
-      // not something the next preview undoes.
+      // And it stays said: nothing re-renders the complaint away.
       await page.waitForTimeout(1_200);
-      expect((await snapshot()).disabled).toBe(true);
+      expect(await errors()).toBeGreaterThan(0);
 
-      await page.locator("[data-add-gear-cancel]").click();
-      await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0);
+      await page.locator(".gbx-toolbar [data-draft-discard]").click();
+      await expect(page.locator(".gbx-toolbar [data-draft-apply]")).toHaveCount(0);
     },
   );
 
@@ -407,15 +406,16 @@ test.describe("Add Gear shows consequences before the write", () => {
     // the claim -- a key checked where the caret is -- is unchanged.
     const page = studio.page;
     await openProductById(page, "configurable-gears", "dev");
-    await configureGear(page, "tenant-resolver");
-    const config = '[data-gear-config="tenant-resolver"]';
-    await openAdvancedKeys(page, config);
-    await page.locator("[data-config-new-key]").fill("bad key");
-    await expect(page.locator("[data-config-key-error]")).toContainText("spaces");
-    await expect(page.locator('[data-add-config="tenant-resolver"]')).toBeDisabled();
-    await page.locator("[data-config-new-key]").fill("namespace");
-    await expect(page.locator("[data-config-key-error]")).toHaveCount(0);
-    await expect(page.locator('[data-add-config="tenant-resolver"]')).toBeEnabled();
+    const form = await configureGear(page, "tenant-resolver");
+    await openAdvancedKeys(page, '.gbx-composition-settings [data-gear-config="tenant-resolver"]');
+    const key = form.locator("[data-config-new-key]");
+    const add = form.locator('[data-add-config="tenant-resolver"]');
+    await key.fill("bad key");
+    await expect(form.locator("[data-config-key-error]")).toContainText("spaces");
+    await expect(add).toBeDisabled();
+    await key.fill("namespace");
+    await expect(form.locator("[data-config-key-error]")).toHaveCount(0);
+    await expect(add).toBeEnabled();
     // Nothing was queued -- the key was never added -- so there is no draft to
     // discard, and `global-teardown` finds `products/` as it left it.
     await expect(page.locator(".gbx-toolbar [data-draft-apply]")).toHaveCount(0);
@@ -442,22 +442,23 @@ test.describe("Add Gear shows consequences before the write", () => {
 
     // (1) The crate declares no features at all: `cargo_features` absent *and*
     // `available_features` absent, so there is nothing to fall back to either.
-    await configureGear(page, "tenant-resolver");
-    await expect(page.locator("[data-features-none]")).toContainText("no Cargo features", {
+    const noneAtAll = await configureGear(page, "tenant-resolver");
+    await expect(noneAtAll.locator("[data-features-none]")).toContainText("no Cargo features", {
       timeout: 60_000,
     });
-    await expect(page.locator("[data-feature-option]")).toHaveCount(0);
+    await expect(noneAtAll.locator("[data-feature-option]")).toHaveCount(0);
 
     // (2) The crate declares one and the gear offers none of them.
     // `types-registry`'s only feature is `integration`; `cargo_features = []`
     // says so deliberately, which is not the same as saying nothing -- and the
     // wording separates it from (1).
     //
-    await configureGear(page, "types-registry");
-    await expect(page.locator("[data-features-none]")).toContainText("offers no Cargo features", {
-      timeout: 60_000,
-    });
-    await expect(page.locator("[data-feature-option]")).toHaveCount(0);
+    const curatedEmpty = await configureGear(page, "types-registry");
+    await expect(curatedEmpty.locator("[data-features-none]")).toContainText(
+      "offers no Cargo features",
+      { timeout: 60_000 },
+    );
+    await expect(curatedEmpty.locator("[data-feature-option]")).toHaveCount(0);
 
     // (3) The feature exists, is offered, and belongs to another deployment.
     // `grpc-hub` declares `k8s-auth` for `kubernetes`; this product is being
@@ -465,22 +466,25 @@ test.describe("Add Gear shows consequences before the write", () => {
     // than hidden, because someone looking for it needs to be told it exists and
     // why it is not on offer here -- a list that silently omitted it would read
     // as a missing feature.
-    await configureGear(page, "grpc-hub");
-    await expect(page.locator('[data-feature-elsewhere="k8s-auth"]')).toContainText("kubernetes", {
-      timeout: 60_000,
-    });
-    await expect(page.locator('[data-feature-option="k8s-auth"]')).toHaveCount(0);
+    const embedded = await configureGear(page, "grpc-hub");
+    await expect(embedded.locator('[data-feature-elsewhere="k8s-auth"]')).toContainText(
+      "kubernetes",
+      { timeout: 60_000 },
+    );
+    await expect(embedded.locator('[data-feature-option="k8s-auth"]')).toHaveCount(0);
 
     // And the mirror: on the kubernetes profile the same feature is *offered*,
     // which is what makes "not for this deployment" a statement about the view
     // rather than about the gear.
-    await page.locator('[data-profile="prod"]').click();
-    await page
-      .locator('[data-resolved-profile="prod"]')
-      .waitFor({ state: "visible", timeout: 60_000 });
-    await configureGear(page, "grpc-hub");
-    await expect(page.locator('[data-feature-option="k8s-auth"]')).toHaveCount(1);
-    await expect(page.locator('[data-feature-elsewhere="k8s-auth"]')).toHaveCount(0);
+    // Through the helper, because the resolved header it waits on is Overview's
+    // and `configureGear` leaves the panel on Composition. The profile switch
+    // itself works from any stage -- it sits above the strip -- but knowing the
+    // resolution for the new profile has *arrived* is what this needs, and that
+    // is what the header says.
+    await openProductById(page, "configurable-gears", "prod");
+    const onKubernetes = await configureGear(page, "grpc-hub");
+    await expect(onKubernetes.locator('[data-feature-option="k8s-auth"]')).toHaveCount(1);
+    await expect(onKubernetes.locator('[data-feature-elsewhere="k8s-auth"]')).toHaveCount(0);
     await expect(page.locator(".gbx-toolbar [data-draft-apply]")).toHaveCount(0);
   });
 
