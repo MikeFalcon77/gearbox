@@ -80,7 +80,7 @@ export const STARLARK_BUILTINS: readonly string[] = [
 export const VALUE_NAMESPACES: Readonly<Record<string, readonly string[]>> = {
   binding_mode: ["auto", "local", "remote"],
   cap: ["db", "grpc", "grpc_hub", "rest", "rest_host", "stateful", "system"],
-  cluster_cap: ["linearizable", "prefix_watch"],
+  cluster_cap: ["linearizable", "prefix_watch", "watch"],
   contract_kind: ["api", "backend", "embedded", "extension"],
   transport: ["grpc", "local", "rest"],
 };

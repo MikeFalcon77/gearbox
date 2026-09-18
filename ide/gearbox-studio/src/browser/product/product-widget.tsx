@@ -554,6 +554,17 @@ export class ProductWidget extends ReactWidget {
     this.update();
   }
 
+  /**
+   * Which stage is showing.
+   *
+   * Exposed for one reader: the Inspector opens itself on every selection, and
+   * over the Composition pane that means a second copy of the settings form the
+   * person is already looking at. It has to be able to ask.
+   */
+  public get currentSection(): ProductSection {
+    return this.section;
+  }
+
   protected renderComposition(): React.ReactNode {
     const state = this.store.current;
     const selection = this.selection.current;

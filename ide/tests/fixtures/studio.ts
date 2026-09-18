@@ -1101,6 +1101,37 @@ export async function configureGear(page: Page, gear: string): Promise<Locator> 
 }
 
 /**
+ * Select one plugin connection under a host and return *its* settings form.
+ *
+ * Addressed the way the editor addresses it: `(host, entryIndex)`, where the
+ * index is the position the `plugin(...)` entry is *written* at. The plugin id
+ * alone will not do -- a host may hold the same implementation twice for
+ * disjoint profiles, which is what per-connection scopes are for.
+ *
+ * Scoped for the reason `configureGear` gives: `PluginSettings` is one component
+ * rendered by the Composition pane and by the Inspector, so an unscoped
+ * `[data-plugin-settings=…]` is a strict mode violation rather than a wrong
+ * answer.
+ */
+export async function configureConnection(
+  page: Page,
+  host: string,
+  entryIndex: number,
+): Promise<Locator> {
+  await productSection(page, "composition");
+  const row = page.locator(
+    `[data-plugin-host="${host}"][data-plugin-index="${String(entryIndex)}"]`,
+  );
+  const plugin = await row.getAttribute("data-plugin-id");
+  await row.locator("button").first().click();
+  const form = page.locator(
+    `.gbx-composition-settings [data-plugin-settings="${String(plugin)}"]`,
+  );
+  await form.waitFor({ state: "visible", timeout: 60_000 });
+  return form;
+}
+
+/**
  * Open the corpus's real product, `payments-demo`.
  *
  * A product is opened here, not inherited from boot: Studio used to open the

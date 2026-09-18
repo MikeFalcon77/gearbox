@@ -646,12 +646,38 @@ export class InspectorViewContribution
     return this.selection.current !== undefined;
   }
 
+  /**
+   * Whether the Composition pane is the thing on screen.
+   *
+   * **The one case where opening itself is unhelpful.** `GearSettings` and
+   * `PluginSettings` are one pair of components rendered by two surfaces --
+   * that is the decided design, so the catalogue and the other views keep a
+   * panel that can configure what they select. But the Composition stage puts
+   * those same forms beside its tree, so following a selection made *there*
+   * expands a second editable copy of the form the person is already using, over
+   * one draft, and takes the focus doing it.
+   *
+   * Asked of the *current main widget* rather than of the stage alone: with
+   * another tab in front the Composition pane is not visible, and then the
+   * Inspector should follow a selection as it always has.
+   *
+   * Only the automatic open is suppressed. A panel opened deliberately stays and
+   * still earns its place -- it carries the descriptor facts and the `why`
+   * explanation, neither of which Composition shows -- and closing one somebody
+   * asked for would be ruder than the duplication.
+   */
+  protected composedOnScreen(): boolean {
+    const main = this.shell.getCurrentWidget("main");
+    return main instanceof ProductWidget && main.currentSection === "composition";
+  }
+
   onStart(): void {
     // Open when there is something to explain. Catalogue rows without a gear id
     // are skipped: they have no descriptor join yet, and stealing focus for an
     // empty "still parsing" panel is worse than waiting for the projected gear.
     this.selection.onDidChange((current) => {
       if (current === undefined || current.kind === "catalogue-row") return;
+      if (this.composedOnScreen()) return;
       void this.openView({ activate: true, reveal: true });
     });
     // After a reload the layout restorer may leave the panel empty while

@@ -823,6 +823,15 @@ fn tenant_resolver_projects_its_single_vendor_field() {
 /// bool` upstream and the test failed for a change that was none of its
 /// business. A corpus test may assert what the projector reads; it may not
 /// assert what someone else's struct is allowed to contain.
+///
+/// **Learned twice.** `gear_orchestrator_reads_no_config_at_all` was the same
+/// mistake in the other direction -- it pinned `gear-orchestrator` to reading
+/// *no* config -- and it went red when that gear grew `OrchestratorConfig` to
+/// authorize registration RPCs against peer identity. The projector was correct
+/// throughout, so the test was deleted rather than re-pointed: aiming it at
+/// whichever gear has no config today only re-arms it. The `Ok(None)` path is
+/// held by `a_gear_that_reads_no_config_has_no_root`, whose fixture is inline
+/// and so cannot be invalidated from another repository.
 #[test]
 fn a_configuration_that_is_all_collections_offers_no_controls() {
     let cluster = require!(tree("gears/system/cluster/cluster"));
@@ -847,12 +856,6 @@ fn a_vec_field_in_the_real_corpus_is_complex() {
             "`{name}` is a list and carries no control"
         );
     }
-}
-
-#[test]
-fn gear_orchestrator_reads_no_config_at_all() {
-    let files = require!(tree("gears/system/gear-orchestrator"));
-    assert_eq!(project_config_root(&files), Ok(None));
 }
 
 /// The deep search finds the call wherever it sits, so the binding's type is

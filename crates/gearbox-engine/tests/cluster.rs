@@ -92,16 +92,21 @@ fn the_capability_matrix_comes_out_of_rust() {
 
     assert_eq!(
         caps("standalone", ClusterPrimitive::Cache),
-        vec!["cluster.cache.linearizable", "cluster.cache.prefix-watch"],
-        "an in-process store watches a prefix natively"
+        vec![
+            "cluster.cache.linearizable",
+            "cluster.cache.prefix-watch",
+            "cluster.cache.watch"
+        ],
+        "an in-process store watches a prefix natively, and a key as well"
     );
     assert_eq!(
         caps("postgres", ClusterPrimitive::Cache),
-        vec!["cluster.cache.linearizable"],
+        vec!["cluster.cache.linearizable", "cluster.cache.watch"],
         "the NOTIFY channel carries one key per payload, so prefix routing is \
          infeasible -- and that absence is what later makes \
          cache(linearizable + prefix_watch) unsatisfiable in a multi-application \
-         profile"
+         profile. One key it does watch, which is what `cluster.cache.watch` is \
+         for: the two are separate questions and postgres answers them differently"
     );
     assert_eq!(
         caps("postgres", ClusterPrimitive::Lock),

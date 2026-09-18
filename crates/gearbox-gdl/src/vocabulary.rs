@@ -35,7 +35,7 @@ pub const CONTRACT_KIND: GdlNamespace = GdlNamespace::new(
 
 /// `cluster_cap.*` -- the cache capabilities the cluster SDK declares.
 pub const CLUSTER_CAP: GdlNamespace =
-    GdlNamespace::new("cluster_cap", &["linearizable", "prefix_watch"]);
+    GdlNamespace::new("cluster_cap", &["linearizable", "watch", "prefix_watch"]);
 
 /// The gear categories the platform actually uses.
 ///
@@ -146,6 +146,7 @@ pub fn cluster_capability(
 
     let id = match (primitive, variant) {
         (ClusterPrimitive::Cache, "linearizable") => caps::CACHE_LINEARIZABLE,
+        (ClusterPrimitive::Cache, "watch") => caps::CACHE_WATCH,
         (ClusterPrimitive::Cache, "prefix_watch") => caps::CACHE_PREFIX_WATCH,
         (ClusterPrimitive::LeaderElection, "linearizable") => caps::LEADER_ELECTION_LINEARIZABLE,
         (ClusterPrimitive::Lock, "linearizable") => caps::LOCK_LINEARIZABLE,

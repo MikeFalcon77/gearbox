@@ -5,6 +5,7 @@ import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "no
 import { join } from "node:path";
 
 import {
+  configureConnection,
   expect,
   expectContext,
   openAdvancedKeys,
@@ -562,9 +563,13 @@ test.describe("edit config and profiles in the open product", () => {
       await revealInspector(studio.page);
       await studio.page.locator('[data-gear-config="api-gateway"]').waitFor({ state: "visible" });
 
-      // Free keys live under "Other keys" now -- see `openAdvancedKeys`.
-      await openAdvancedKeys(studio.page, ".gbx-inspector");
-      await studio.page.locator("[data-config-new-key]").fill("demo_mode");
+      // Free keys live under "Other keys" now -- see `openAdvancedKeys`. Opened
+      // and typed into as one retried step: the section folds on any remount, so
+      // the two must not be separated by an await that a reload can land in.
+      await expect(async () => {
+        await openAdvancedKeys(studio.page, ".gbx-inspector");
+        await studio.page.locator("[data-config-new-key]").fill("demo_mode", { timeout: 5_000 });
+      }).toPass({ timeout: 30_000 });
       await studio.page.locator("[data-config-new-value]").fill("demo_value");
       await studio.page.locator('[data-add-config="api-gateway"]').click();
       await studio.page.locator(".gbx-toolbar [data-draft-apply]").click();
@@ -572,7 +577,14 @@ test.describe("edit config and profiles in the open product", () => {
       await expect(studio.page.locator('[data-config-key="demo_mode"]')).toBeVisible({
         timeout: 30_000,
       });
-      expect(diffOf(DEMO_REL)).toContain("1 insertion(+)");
+      // **Polled, because the row above does not say the write landed.** The row
+      // renders from the draft overlay the moment the key is added, so it is
+      // already on screen before Apply is clicked -- which made this a read of
+      // `git diff` racing the file write, and it lost. The file is the only thing
+      // here that answers "was it written", so it is what this waits on.
+      await expect.poll(() => diffOf(DEMO_REL), { timeout: 30_000 }).toContain(
+        "1 insertion(+)",
+      );
 
       // Undo through the interface, not with `git checkout` + reload: restoring
       // the file behind the app leaves the store holding the edited description
@@ -584,7 +596,9 @@ test.describe("edit config and profiles in the open product", () => {
       await expect(studio.page.locator('[data-config-key="demo_mode"]')).toHaveCount(0, {
         timeout: 30_000,
       });
-      expect(diffOf(DEMO_REL)).toBe("");
+      // The same race in the other direction: the draft's removal takes the row
+      // off screen before the second write reaches disk.
+      await expect.poll(() => diffOf(DEMO_REL), { timeout: 30_000 }).toBe("");
     } finally {
       if (diffOf(DEMO_REL) !== "") {
         execFileSync("git", ["checkout", "--", DEMO_REL], { cwd: REPO });
@@ -613,12 +627,22 @@ test.describe("edit config and profiles in the open product", () => {
       await form.waitFor({ state: "visible" });
 
       // Free keys live under "Other keys" now -- see `openAdvancedKeys`.
+      //
+      // **The section is reopened on every attempt, and that is not belt and
+      // braces.** It is open exactly when it holds something, so any remount
+      // between opening it and typing into it folds it again -- and `fill` then
+      // waits on an invisible input until the whole test times out. The remount
+      // that did it came from the *previous* test's trailing reload, which is to
+      // say from outside this test entirely; a fold is recoverable, so this
+      // recovers from it rather than reading it as a failure.
       const queue = async (key: string, value: string): Promise<void> => {
-        await form.locator("[data-config-new-key]").fill(key);
+        await expect(async () => {
+          await openAdvancedKeys(studio.page, ".gbx-inspector");
+          await form.locator("[data-config-new-key]").fill(key, { timeout: 5_000 });
+        }).toPass({ timeout: 30_000 });
         await form.locator("[data-config-new-value]").fill(value);
         await form.locator('[data-add-config="api-gateway"]').click();
       };
-      await openAdvancedKeys(studio.page, ".gbx-inspector");
       await queue("draft_a", "one");
       await queue("draft_b", "two");
       await expect(form.locator('[data-config-key="draft_a"]')).toBeVisible();
@@ -640,8 +664,8 @@ test.describe("edit config and profiles in the open product", () => {
 
       // Discard emptied the section, so it folded again -- it is open exactly
       // when it holds something, because a key somebody set is not advanced any
-      // more. Reopening is what a person does to add the pair a second time.
-      await openAdvancedKeys(studio.page, ".gbx-inspector");
+      // more. Reopening is what a person does to add the pair a second time, and
+      // `queue` is where that now happens.
       await queue("draft_a", "one");
       await queue("draft_b", "two");
       await draft.locator("[data-draft-apply]").click();
@@ -652,7 +676,10 @@ test.describe("edit config and profiles in the open product", () => {
       await acceptPreview(studio.page);
       await expect(form.locator('[data-config-key="draft_a"]')).toBeVisible({ timeout: 30_000 });
       await expect(form.locator('[data-config-key="draft_b"]')).toBeVisible();
-      expect(diffOf(DEMO_REL)).not.toBe("");
+      // Polled for the reason stated below, and in this direction too: the rows
+      // above are on screen from the draft overlay before Apply is clicked, so
+      // they cannot be what says the write happened.
+      await expect.poll(() => diffOf(DEMO_REL), { timeout: 30_000 }).not.toBe("");
 
       await form.locator('[data-config-remove="draft_a"]').click();
       await form.locator('[data-config-remove="draft_b"]').click();
@@ -681,9 +708,12 @@ test.describe("edit config and profiles in the open product", () => {
     await revealInspector(studio.page);
     await studio.page.locator('[data-gear-config="api-gateway"]').waitFor({ state: "visible" });
 
-    // Free keys live under "Other keys" now -- see `openAdvancedKeys`.
-    await openAdvancedKeys(studio.page, ".gbx-inspector");
-    await studio.page.locator("[data-config-new-key]").fill("password");
+    // Free keys live under "Other keys" now -- see `openAdvancedKeys`, and
+    // retried together with the fill for the reason given there.
+    await expect(async () => {
+      await openAdvancedKeys(studio.page, ".gbx-inspector");
+      await studio.page.locator("[data-config-new-key]").fill("password", { timeout: 5_000 });
+    }).toPass({ timeout: 30_000 });
     await studio.page.locator("[data-config-new-value]").fill("literal");
     await studio.page.locator('[data-add-config="api-gateway"]').click();
     // Matched among the notifications rather than at the top of the stack. The
@@ -698,6 +728,107 @@ test.describe("edit config and profiles in the open product", () => {
         .first(),
     ).toBeVisible({ timeout: 10_000 });
     expect(diffOf(DEMO_REL)).toBe("");
+  });
+
+  test("one connection is edited without touching the one beside it [ADR-0013 §Amendment: a plugin is not a selected gear]", async ({
+    studio,
+  }) => {
+    // **The claim the per-entry editor exists for.** `set_plugins` rewrites a
+    // host's whole list as bare `plugin("id")` entries, which drops the profiles
+    // and config of every entry it did not mean to touch. That is why
+    // `PluginTarget` addresses one written position and why this asserts on the
+    // *diff* rather than on the form: the proof is what would reach the file.
+    //
+    // Nothing is written. The draft is discarded and both confirmations are
+    // cancelled, so the `finally` below is a net under a failed assertion rather
+    // than a cleanup.
+    const { page } = studio;
+    expect(diffOf(DEMO_REL), "the description must start clean").toBe("");
+
+    try {
+      await openProduct(page, "dev");
+
+      // `authn-resolver` holds two connections, and the precondition is that
+      // both are on screen: the one this profile does not select is marked, not
+      // hidden. Which of them is *active* is `prd-product.spec.ts`'s claim.
+      await productSection(page, "composition");
+      const connections = page.locator('[data-plugin-host="authn-resolver"]');
+      await expect(connections).toHaveCount(2);
+      await expect(
+        page.locator('[data-plugin-id="oidc-authn-plugin"]'),
+        "a connection inactive in this profile stays visible and editable",
+      ).toHaveAttribute("data-plugin-active", "false");
+
+      // Entry 0 is `static-authn-plugin`, written `profiles = ["dev", "local"]`.
+      const form = await configureConnection(page, "authn-resolver", 0);
+      // Read as a map rather than as a list: the boxes are the product's
+      // profiles, and asserting their *order* would be asserting how the intent
+      // serialises its profile map, which is not this claim's business.
+      expect(
+        Object.fromEntries(
+          await form.locator("fieldset label").evaluateAll((labels) =>
+            labels.map((label) => [
+              label.textContent?.trim() ?? "",
+              label.querySelector("input")?.checked === true,
+            ]),
+          ),
+        ),
+        "the boxes say what the description writes, and nothing more",
+      ).toEqual({ "All profiles": false, dev: true, local: true, prod: false });
+
+      // One scope change and one typed config value, into one draft. `priority`
+      // is an `i16` on `StaticAuthNPluginConfig`, so the projected control is a
+      // number box -- a field is typed here because Rust said so, which is the
+      // half of this that a Rust test cannot reach.
+      await form.locator("fieldset label", { hasText: /^prod$/ }).locator("input").click();
+      await form.locator('[data-config-field="priority"] input').fill("50");
+      const toolbar = page.locator(".gbx-toolbar");
+      await expect(toolbar.locator("[data-draft-apply]")).toHaveCount(1);
+
+      await toolbar.locator("[data-draft-apply]").click();
+      const confirm = page.locator(".gbx-edit-confirm");
+      await expect(confirm).toBeVisible({ timeout: 60_000 });
+
+      // Named by ordinal, because a host may hold one plugin twice and "remove
+      // `static-authn-plugin`" would not say which.
+      const targets = confirm.locator("[data-edit-target]");
+      await expect(targets).toHaveCount(2);
+      await expect(targets.first()).toContainText("connection 1");
+
+      // **The diff is the claim.** The edited entry changes and the sibling is
+      // absent from it entirely -- not reformatted, not re-emitted.
+      const diff = await confirm.locator(".gbx-edit-preview").innerText();
+      expect(diff).toContain('"dev", "local", "prod"');
+      expect(diff).toContain('"priority": 50');
+      expect(diff, "the sibling connection is not in the diff").not.toContain(
+        "oidc-authn-plugin",
+      );
+
+      await confirm.locator(".theia-button.secondary").click();
+      await expect(confirm).toHaveCount(0);
+      expect(diffOf(DEMO_REL), "cancelling writes nothing").toBe("");
+
+      await toolbar.locator("[data-draft-discard]").click();
+      await expect(toolbar.locator("[data-draft-apply]")).toHaveCount(0);
+
+      // Removing addresses the same entry, and takes only it.
+      const again = await configureConnection(page, "authn-resolver", 0);
+      await again.getByText("Remove this connection").click();
+      const removal = page.locator(".gbx-edit-confirm");
+      await expect(removal).toBeVisible({ timeout: 60_000 });
+      const removed = await removal.locator(".gbx-edit-preview").innerText();
+      expect(removed).toContain("static-authn-plugin");
+      expect(removed, "the sibling survives a removal too").not.toContain(
+        "oidc-authn-plugin",
+      );
+      await removal.locator(".theia-button.secondary").click();
+      await expect(removal).toHaveCount(0);
+      expect(diffOf(DEMO_REL)).toBe("");
+    } finally {
+      if (diffOf(DEMO_REL) !== "") {
+        execFileSync("git", ["checkout", "--", DEMO_REL], { cwd: REPO });
+      }
+    }
   });
 
   /**

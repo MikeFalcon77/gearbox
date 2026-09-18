@@ -75,6 +75,18 @@ pub mod capabilities {
     /// which refuse to construct over an eventually-consistent cache.
     pub const CACHE_LINEARIZABLE: &str = "cluster.cache.linearizable";
 
+    /// A cache that can watch one key for changes.
+    ///
+    /// Weaker than [`CACHE_PREFIX_WATCH`] and not implied by it being absent: a
+    /// backend may serve an exact-key watch and no prefix watch -- postgres does,
+    /// over a NOTIFY channel that carries one key per payload. What this refuses
+    /// is the backend that serves neither, which the SDK spells
+    /// `CacheFeatures::without_watch()` and redis reaches under
+    /// `watch_mode: disabled`. Without this word a gear that needs to watch a
+    /// single key could not say so, and the mismatch arrived at run time as
+    /// `ClusterError::Unsupported` rather than as a refusal to resolve.
+    pub const CACHE_WATCH: &str = "cluster.cache.watch";
+
     /// A cache that can watch a key prefix for changes.
     pub const CACHE_PREFIX_WATCH: &str = "cluster.cache.prefix-watch";
 
@@ -85,7 +97,7 @@ pub mod capabilities {
     pub const LOCK_LINEARIZABLE: &str = "cluster.lock.linearizable";
 
     /// Every capability a `cluster.cache(...)` requirement may name.
-    pub const CACHE_ALL: &[&str] = &[CACHE_LINEARIZABLE, CACHE_PREFIX_WATCH];
+    pub const CACHE_ALL: &[&str] = &[CACHE_LINEARIZABLE, CACHE_WATCH, CACHE_PREFIX_WATCH];
 
     /// Every capability a `cluster.leader_election(...)` requirement may name.
     pub const LEADER_ELECTION_ALL: &[&str] = &[LEADER_ELECTION_LINEARIZABLE];

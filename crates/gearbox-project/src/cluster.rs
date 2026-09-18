@@ -370,7 +370,26 @@ pub fn project_provider_name(
     }
 }
 
-/// Read the flag a backend's `features()` states, when it states one.
+/// What a backend's `features()` states, as two independent answers.
+///
+/// **Two, because the cache's constructors settle two different things.**
+/// `CacheFeatures::new(x)` sets `prefix_watch` from its argument and `watch` to
+/// `true` unconditionally, so a backend whose prefix flag is computed still
+/// states plainly that it serves an exact-key watch -- postgres is exactly that
+/// shape, and the catalogue understated it for as long as this returned one bool.
+/// `without_watch()` settles both at once, in the other direction.
+///
+/// For a lock or a leader election there is one flag and `watch` is meaningless;
+/// the caller reads it only for a cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Features {
+    /// The positional flag: `prefix_watch` for a cache, `linearizable` otherwise.
+    flag: Option<bool>,
+    /// Whether an exact-key watch is served. Cache only.
+    watch: Option<bool>,
+}
+
+/// Read the flags a backend's `features()` states, when it states them.
 ///
 /// Three answers, and they are not interchangeable. `Some(flag)` is a fact the
 /// description can be resolved against. `None` is "the backend decides at run
@@ -390,7 +409,7 @@ pub fn project_provider_name(
 /// * an `if`/`else` whose branches are any of the above -- the backend picks a
 ///   shape from its own configuration, so the answer is whatever the branches
 ///   agree on and `None` when they do not.
-fn features_flag(expr: &syn::Expr, ty: &str) -> Result<Option<bool>, ClusterProjectionError> {
+fn features_flag(expr: &syn::Expr, ty: &str) -> Result<Features, ClusterProjectionError> {
     let fail = |reason: String| ClusterProjectionError::Capability {
         method: "features",
         ty: ty.to_owned(),
@@ -415,9 +434,17 @@ fn features_flag(expr: &syn::Expr, ty: &str) -> Result<Option<bool>, ClusterProj
                         .to_owned(),
                 ));
             };
+            // Each answer is combined on its own, because the branches may
+            // agree about one and not the other: redis states `watch` both ways
+            // (`new(...)` serves it, `without_watch()` does not) while its
+            // prefix flag is computed in the branch that has one.
             let taken = features_flag(then, ty)?;
             let untaken = features_flag(otherwise, ty)?;
-            Ok(if taken == untaken { taken } else { None })
+            let agree = |a: Option<bool>, b: Option<bool>| if a == b { a } else { None };
+            Ok(Features {
+                flag: agree(taken.flag, untaken.flag),
+                watch: agree(taken.watch, untaken.watch),
+            })
         }
         // An `else` arm, or a braced body inside one. `else if` arrives as
         // `Expr::If` above and recurses without help.
@@ -440,7 +467,7 @@ fn features_flag(expr: &syn::Expr, ty: &str) -> Result<Option<bool>, ClusterProj
 fn features_call_flag(
     call: &syn::ExprCall,
     fail: &impl Fn(String) -> ClusterProjectionError,
-) -> Result<Option<bool>, ClusterProjectionError> {
+) -> Result<Features, ClusterProjectionError> {
     let syn::Expr::Path(path) = &*call.func else {
         return Err(fail(
             "body is not a `*Features::` constructor call".to_owned(),
@@ -451,12 +478,21 @@ fn features_call_flag(
     match (constructor.as_str(), call.args.len()) {
         // The name is the statement. Checked before the arity rule, which
         // exists for `new` and would otherwise refuse this for taking none.
-        ("without_watch", 0) => Ok(Some(false)),
+        ("without_watch", 0) => Ok(Features {
+            flag: Some(false),
+            watch: Some(false),
+        }),
+        // `new` serves an exact watch whatever its argument says -- that is the
+        // meaning the SDK records on it, and it is why `watch` can be known here
+        // while the prefix flag is not.
         ("new", 1) => match call.args.first() {
             Some(syn::Expr::Lit(syn::ExprLit {
                 lit: syn::Lit::Bool(b),
                 ..
-            })) => Ok(Some(b.value)),
+            })) => Ok(Features {
+                flag: Some(b.value),
+                watch: Some(true),
+            }),
             // The SDK-default derivation, pointed at by the wrong projector.
             // Still an error: this shape *has* a readable meaning, and reading
             // it here would attribute the default's capability to a plugin
@@ -468,7 +504,10 @@ fn features_call_flag(
             )),
             // Anything else computed: the backend decides the flag at run time,
             // from what it connected to.
-            _ => Ok(None),
+            _ => Ok(Features {
+                flag: None,
+                watch: Some(true),
+            }),
         },
         (name, arity) => Err(fail(format!(
             "`*Features::{name}` takes {arity} arguments here; this parser models \
@@ -610,7 +649,8 @@ pub fn project_backend_capabilities(
         ty: ty.clone(),
         reason: "no trailing expression".to_owned(),
     })?;
-    match features_flag(expr, &ty)? {
+    let features = features_flag(expr, &ty)?;
+    match features.flag {
         Some(true) => {
             caps.insert(CapabilityId::new(match primitive {
                 ClusterPrimitive::Cache => capabilities::CACHE_PREFIX_WATCH,
@@ -620,6 +660,27 @@ pub fn project_backend_capabilities(
         }
         Some(false) => {}
         None => runtime_determined.push("features"),
+    }
+    // **The exact-key watch, and only for a cache.** A lock and a leader
+    // election have one flag each; `watch` is a cache word. Read separately
+    // because the two answers come apart: postgres states `watch` outright while
+    // declining the prefix flag, and redis states neither because its branches
+    // disagree about both.
+    //
+    // `runtime_determined` is not pushed twice -- it names the *method*, and
+    // `features` is already in it whenever any of its answers is undecided.
+    if primitive == ClusterPrimitive::Cache {
+        match features.watch {
+            Some(true) => {
+                caps.insert(CapabilityId::new(capabilities::CACHE_WATCH)?);
+            }
+            Some(false) => {}
+            None => {
+                if !runtime_determined.contains(&"features") {
+                    runtime_determined.push("features");
+                }
+            }
+        }
     }
 
     Ok(BackendCapabilities {

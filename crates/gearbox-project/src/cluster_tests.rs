@@ -263,7 +263,11 @@ fn cache_capabilities_read_both_axes() {
     ";
     assert_eq!(
         caps(&[file(src)], ClusterPrimitive::Cache),
-        vec!["cluster.cache.linearizable", "cluster.cache.prefix-watch"]
+        vec![
+            "cluster.cache.linearizable",
+            "cluster.cache.prefix-watch",
+            "cluster.cache.watch"
+        ]
     );
 }
 
@@ -277,9 +281,11 @@ fn prefix_watch_false_drops_the_capability() {
     ";
     assert_eq!(
         caps(&[file(src)], ClusterPrimitive::Cache),
-        vec!["cluster.cache.linearizable"],
+        vec!["cluster.cache.linearizable", "cluster.cache.watch"],
         "postgres cannot route a prefix watch; that absence is what later makes \
-         cache(linearizable + prefix_watch) unsatisfiable"
+         cache(linearizable + prefix_watch) unsatisfiable -- but `new` states an \
+         exact-key watch whatever its argument says, and postgres serves one over \
+         NOTIFY, so only the prefix half drops"
     );
 }
 
@@ -359,11 +365,20 @@ fn capabilities_come_from_the_real_plugins() {
 
     assert_eq!(
         caps(&standalone, ClusterPrimitive::Cache),
-        vec!["cluster.cache.linearizable", "cluster.cache.prefix-watch"]
+        vec![
+            "cluster.cache.linearizable",
+            "cluster.cache.prefix-watch",
+            "cluster.cache.watch"
+        ]
     );
+    // **Postgres watches one key and not a family, and both halves are read.**
+    // It was described by `linearizable` alone until `cluster.cache.watch`
+    // existed, which understated it: its NOTIFY channel carries a single key per
+    // payload, so an exact watch is served and only prefix routing is not
+    // (DESIGN.md §4.3, quoted in the plugin's own `features`).
     assert_eq!(
         caps(&postgres, ClusterPrimitive::Cache),
-        vec!["cluster.cache.linearizable"]
+        vec!["cluster.cache.linearizable", "cluster.cache.watch"]
     );
     assert_eq!(
         caps(&postgres, ClusterPrimitive::Lock),
@@ -404,7 +419,14 @@ fn a_non_path_consistency_body_is_recorded_as_runtime_determined() {
     let got = project_backend_capabilities(&[file(src)], ClusterPrimitive::Cache, "fixture", None)
         .expect("a computed consistency is not an error");
     assert_eq!(got.runtime_determined, vec!["consistency"]);
-    assert!(got.declared.is_empty(), "got {:?}", got.declared);
+    // `features` is not undecided here: `new(false)` says prefix watch no, exact
+    // watch yes. Only `consistency` is left to run time.
+    assert_eq!(
+        caps(&[file(src)], ClusterPrimitive::Cache),
+        vec!["cluster.cache.watch"],
+        "got {:?}",
+        got.declared
+    );
 }
 
 /// A declared capability is *not* runtime-determined, which is the other half of
@@ -558,7 +580,11 @@ fn backend_narrowing_resolves_an_ambiguity() {
     got.sort();
     assert_eq!(
         got,
-        vec!["cluster.cache.linearizable", "cluster.cache.prefix-watch"],
+        vec![
+            "cluster.cache.linearizable",
+            "cluster.cache.prefix-watch",
+            "cluster.cache.watch"
+        ],
         "the narrowed file's flag must win; picking the decoy's `false` would be \
          a silently wrong answer"
     );
@@ -629,7 +655,11 @@ fn a_conditional_features_body_whose_branches_agree_is_read() {
     ";
     assert_eq!(
         caps(&[file(src)], ClusterPrimitive::Cache),
-        vec!["cluster.cache.linearizable", "cluster.cache.prefix-watch"]
+        vec![
+            "cluster.cache.linearizable",
+            "cluster.cache.prefix-watch",
+            "cluster.cache.watch"
+        ]
     );
 }
 
@@ -704,4 +734,68 @@ fn an_if_with_no_else_is_refused() {
     ";
     project_backend_capabilities(&[file(src)], ClusterPrimitive::Cache, "fixture", None)
         .expect_err("an `if` with no `else` has no single value");
+}
+
+/// The two watch answers come apart, and that is the whole point of the pair.
+///
+/// `new(x)` sets `prefix_watch` from its argument and `watch` to `true`
+/// regardless -- so a backend can serve an exact-key watch while declining a
+/// prefix one, which is what postgres does and what a single flag could not say.
+#[test]
+fn an_exact_watch_is_declared_even_when_the_prefix_flag_is_off() {
+    let src = r"
+        impl ClusterCacheBackend for ExactOnly {
+            fn consistency(&self) -> CacheConsistency { CacheConsistency::Linearizable }
+            fn features(&self) -> CacheFeatures { CacheFeatures::new(false) }
+        }
+    ";
+    assert_eq!(
+        caps(&[file(src)], ClusterPrimitive::Cache),
+        vec!["cluster.cache.linearizable", "cluster.cache.watch"]
+    );
+}
+
+/// A computed prefix flag still states the exact watch.
+///
+/// The argument is what `new` cannot answer; the constructor's own meaning is
+/// what it always answers. Reading only the argument left redis-shaped backends
+/// describing nothing at all.
+#[test]
+fn a_computed_prefix_flag_leaves_the_exact_watch_declared() {
+    let src = r"
+        impl ClusterCacheBackend for Configurable {
+            fn consistency(&self) -> CacheConsistency { CacheConsistency::Linearizable }
+            fn features(&self) -> CacheFeatures { CacheFeatures::new(self.offers_prefix_watch()) }
+        }
+    ";
+    let got = project_backend_capabilities(&[file(src)], ClusterPrimitive::Cache, "fixture", None)
+        .expect("a computed flag is not an error");
+    assert_eq!(
+        got.runtime_determined,
+        vec!["features"],
+        "the prefix half is decided at run time"
+    );
+    assert_eq!(
+        caps(&[file(src)], ClusterPrimitive::Cache),
+        vec!["cluster.cache.linearizable", "cluster.cache.watch"],
+        "the exact half is not"
+    );
+}
+
+/// A lock has one flag, and `watch` is not a word about it.
+///
+/// The cache-only branch is guarded by the primitive rather than by the
+/// constructor, so a lock whose flag reads `true` must not pick up a cache
+/// capability on the way past.
+#[test]
+fn a_lock_never_declares_a_cache_watch() {
+    let src = r"
+        impl DistributedLockBackend for Strict {
+            fn features(&self) -> LockFeatures { LockFeatures::new(true) }
+        }
+    ";
+    assert_eq!(
+        caps(&[file(src)], ClusterPrimitive::Lock),
+        vec!["cluster.lock.linearizable"]
+    );
 }
