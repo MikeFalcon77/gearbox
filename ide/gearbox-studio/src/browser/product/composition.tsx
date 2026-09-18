@@ -107,7 +107,7 @@ export function Composition({ state, descriptors, selection, select, add, remove
               plugin is a fact about what selected it. */}
           <summary>
             <span className="gbx-leaf-icon codicon codicon-package" />
-            <span>{d?.display_name || host.gear}</span>
+            <span>{d?.display_name || host.gear}</span>{" "}
             <GearLink state={state} id={host.gear} reveals={reveals} select={select} />
           </summary>
           <div className="gbx-composition-host-actions">

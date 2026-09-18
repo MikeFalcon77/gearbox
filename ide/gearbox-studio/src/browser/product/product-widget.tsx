@@ -558,10 +558,22 @@ export class ProductWidget extends ReactWidget {
     const state = this.store.current;
     const selection = this.selection.current;
     return <>
+      {/* **The count, not a second pair of buttons.** Apply and Discard live in
+          the toolbar, once, because the draft is product-wide: two pairs gated
+          on the same `hasDraft()` is the defect
+          `adr-0013-create-product.spec.ts` already pins -- discarding through
+          one of them remounted that panel's inputs and left the other showing
+          text the file did not contain. What this line adds is *how much* is
+          pending, beside the composition the pending edits are about. */}
       <div className="gbx-composition-draft" aria-live="polite">
-        {this.edits.hasDraft() ? <><span>{this.edits.draftEdits().length} pending changes</span>
-          <button type="button" onClick={() => void this.edits.applyDraft()}>Apply changes</button>
-          <button type="button" onClick={() => this.edits.discardDraft()}>Discard</button></> : <span>Saved</span>}
+        {this.edits.hasDraft() ? (
+          <span>
+            {this.edits.draftEdits().length} pending change
+            {this.edits.draftEdits().length === 1 ? "" : "s"} — Apply or Discard above
+          </span>
+        ) : (
+          <span>Saved</span>
+        )}
       </div>
       <Composition state={state} descriptors={this.catalogue.current.rows.flatMap(row => row.kind === "projected" ? [row.gear] : [])}
         selection={selection} select={selected => { this.selection.select(selected); this.update(); }}
