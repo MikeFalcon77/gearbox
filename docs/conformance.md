@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **187** — 186 built, 0 not built, 0 broken, 1 not observed.
+Claims: **188** — 187 built, 0 not built, 0 broken, 1 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -294,3 +294,4 @@ Rust, and the ADRs' own Confirmation sections say which.
 | saving a gear description re-reads the catalogue without a reload | `plan §9.1: the panel shows what the file says` | ✅ built |  |
 | Composition stacks when its pane is narrow, whatever the window is | `ADR-0023 §Amendment: one surface configures` | ✅ built |  |
 | a diagnostic leads to the control that would fix it | `plan §9.1: Validation is a screen` | ✅ built |  |
+| scrolling one half of Composition leaves the other and the head alone | `ADR-0023 §Amendment: one surface configures` | ✅ built |  |
