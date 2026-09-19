@@ -34,6 +34,7 @@ import {
 } from "../diagnostics/diagnostics-list";
 import { CatalogueStore } from "../catalogue-store";
 import { Composition } from "./composition";
+import { GearBlurb, GearDocs, GearHeading, InclusionReasons } from "../gear/gear-facts";
 import { GearSettings } from "./gear-settings";
 import { PluginSettings } from "./plugin-settings";
 import { ProductStore } from "../product-store";
@@ -637,40 +638,133 @@ export class ProductWidget extends ReactWidget {
     }
 
     if (selection?.kind === "gear") {
-      const descriptor = descriptorFor(selection.id);
-      const picked = state.intent?.selected_gears.find((entry) => entry.gear === selection.id);
-      if (descriptor === undefined) {
-        return (
-          <div className="gbx-empty">
-            No catalogue descriptor for <code>{selection.id}</code> yet. It stays in your
-            product; its settings appear once the catalogue has read it.
-          </div>
-        );
-      }
-      // A gear the closure pulled in is not edited here: there is no `use_gear`
-      // entry of its own to write into.
-      if (picked === undefined) {
-        return (
-          <div className="gbx-empty">
-            <code>{selection.id}</code> is included by another gear, so it has no settings of
-            its own. Configure the gear that requires it.
-          </div>
-        );
-      }
+      return this.renderGearSettings(selection.id, descriptorFor(selection.id));
+    }
+
+    return (
+      <div className="gbx-empty">
+        Select a gear or a plugin connection in the tree to configure it.
+      </div>
+    );
+  }
+
+  /**
+   * One named gear, and the truth about why it is on this screen.
+   *
+   * **Four answers, because there were four questions and one sentence.** This
+   * decided everything from `picked === undefined` -- no `use_gear` entry in the
+   * intent -- and then said "`X` is included by another gear, so it has no
+   * settings of its own." That is true of a gear the closure pulled in. It is
+   * false of a gear that exists only in the catalogue, where no such other gear
+   * is named because there is none, and false again when no product is open at
+   * all, which reaches the same branch through the optional chain.
+   *
+   * The resolution can tell them apart and was not being asked: a gear in the
+   * closure has an entry in `resolution.product.gears` carrying `selected_by`;
+   * a gear that is merely in the catalogue does not.
+   *
+   * Every branch names the object first. The form used to open with the words
+   * "in this product" and never said which gear they were about.
+   */
+  protected renderGearSettings(id: string, descriptor?: GearDescriptor): React.ReactNode {
+    const state = this.store.current;
+    const picked = state.intent?.selected_gears.find((entry) => entry.gear === id);
+    const resolved = state.resolution?.product?.gears?.[id];
+    const selectGear = (gear: string): void => {
+      this.selection.select({ kind: "gear", id: gear });
+      this.update();
+    };
+    const heading = (
+      <>
+        <GearHeading id={id} descriptor={descriptor} />
+        <GearBlurb descriptor={descriptor} />
+        <GearDocs descriptor={descriptor} reveals={this.reveals} />
+      </>
+    );
+
+    // Asked for by name: the one case with a `use_gear` entry to write into.
+    if (picked !== undefined) {
       return (
-        <GearSettings
-          key={`gear-${selection.id}-${this.edits.epoch}`}
-          descriptor={descriptor}
-          picked={picked}
-          edits={this.edits}
-          sources={{ edits: this.edits, products: this.store }}
-          profileKind={state.resolution?.product?.product.profile_kind}
-        />
+        <div className="gbx-detail" data-settings-for={id}>
+          {heading}
+          <InclusionReasons reasons={resolved?.selected_by ?? []} onSelectGear={selectGear} />
+          {descriptor === undefined ? (
+            <div className="gbx-empty">
+              No catalogue descriptor for <code>{id}</code> yet. It stays in your product;
+              its fields appear once the catalogue has read it.
+            </div>
+          ) : (
+            <GearSettings
+              key={`gear-${id}-${this.edits.epoch}`}
+              descriptor={descriptor}
+              picked={picked}
+              edits={this.edits}
+              sources={{ edits: this.edits, products: this.store }}
+              profileKind={state.resolution?.product?.product.profile_kind}
+            />
+          )}
+        </div>
+      );
+    }
+
+    // In the closure, and genuinely not editable here -- now said with the gear
+    // that requires it named, and reachable.
+    if (resolved !== undefined) {
+      const host = resolved.selected_by.flatMap((reason) =>
+        reason.reason === "colocated_by"
+          ? [reason.gear]
+          : reason.reason === "plugin_of"
+            ? [reason.host]
+            : [],
+      )[0];
+      return (
+        <div className="gbx-detail" data-pulled-in-settings={id}>
+          {heading}
+          <InclusionReasons reasons={resolved.selected_by} onSelectGear={selectGear} />
+          <div className="gbx-empty">
+            It has no <code>use_gear</code> entry of its own, so what it is set to is the
+            business of whatever requires it.
+          </div>
+          {host !== undefined && (
+            <button
+              type="button"
+              className="gbx-choice"
+              data-configure-host={host}
+              onClick={() => selectGear(host)}
+            >
+              Configure {host}
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    // Known to the catalogue and in no product -- reachable after a removal
+    // while selected, or under a profile that does not take it.
+    if (state.open !== undefined) {
+      return (
+        <div className="gbx-detail" data-not-in-product={id}>
+          {heading}
+          <div className="gbx-empty">
+            <code>{id}</code> is in the catalogue and not in {state.open.label}.
+          </div>
+          <button
+            type="button"
+            className="gbx-choice"
+            data-add-to-product={id}
+            onClick={() => void this.commands.executeCommand(ADD_GEAR.id, { gearId: id })}
+          >
+            Add to product
+          </button>
+        </div>
       );
     }
 
     return (
-      <div className="gbx-empty">Select a gear or a plugin connection to configure it.</div>
+      <div className="gbx-detail" data-not-in-product={id}>
+        {heading}
+        <div className="gbx-empty">Open a product to configure this gear in one.</div>
+      </div>
     );
   }
 

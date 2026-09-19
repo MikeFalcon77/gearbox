@@ -141,8 +141,11 @@ export function GearSettings({
   };
 
   return (
+    // **No heading of its own.** It carried `in this product`, which is the
+    // only three words the settings half showed above the fields -- a headline
+    // that never named the object it was about. The surrounding pane names the
+    // gear now, so a second heading here would be a subtitle to it.
     <div className="gbx-product-edit" data-gear-config={gearId}>
-      <div className="gbx-detail-title">in this product</div>
       {fields.length > 0 && (
         <ConfigFields
           fields={fields}

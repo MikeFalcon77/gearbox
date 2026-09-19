@@ -9,7 +9,7 @@
 // `cpt-gearbox-fr-studio: no resolution logic` exists to prevent.
 
 import type { Diagnostic } from "../../common/generated/Diagnostic";
-import type { InclusionReason } from "../../common/generated/InclusionReason";
+import { whyPresent } from "../product/inclusion";
 import type { ResolvedBindingMode } from "../../common/generated/ResolvedBindingMode";
 import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
 import type { Transport } from "../../common/generated/Transport";
@@ -59,34 +59,6 @@ function bindingKey(binding: { consumer: string; contract: string }): string {
   // The same `{consumer}|{contract}` the explanation graph keys bindings by, so a
   // step in the Inspector and a row here name the same thing.
   return `${binding.consumer}|${binding.contract}`;
-}
-
-/**
- * Why a gear is in the resolution, in the product's own words.
- *
- * Naming the *specific* gear or profile that dragged this one in is the whole
- * value of the section. "transitive dependency" tells a person nothing they can
- * act on; "co-located with api-gateway" tells them where to look and what to
- * remove if they did not want it.
- *
- * `selected` wins over the rest when both are recorded: a gear the description
- * names is asked for, whatever else also happens to pull it in.
- */
-function whyPresent(gear: { selected_by: readonly InclusionReason[] }): string {
-  const reasons = gear.selected_by;
-  if (reasons.some((reason) => reason.reason === "selected")) return "asked for";
-  const first = reasons[0];
-  if (first === undefined) return "pulled into the closure";
-  switch (first.reason) {
-    case "selected":
-      return "asked for";
-    case "colocated_by":
-      return `co-located with ${String(first.gear)}`;
-    case "plugin_of":
-      return `plugin of ${String(first.host)}`;
-    default:
-      return "pulled into the closure";
-  }
 }
 
 /** Which application each gear ends up in. A gear can appear in several; first wins. */

@@ -25,6 +25,7 @@ import { codicon, ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 
+import { GearBlurb, GearDocs, GearHeading } from "../gear/gear-facts";
 import { GearSettings } from "../product/gear-settings";
 import { PluginSettings } from "../product/plugin-settings";
 import type { ExplanationGraph } from "../../common/generated/ExplanationGraph";
@@ -271,14 +272,12 @@ export class InspectorWidget extends ReactWidget {
     const capabilities = this.catalogue.engineCapabilities;
     return (
       <div className="gbx-detail">
-        <div className="gbx-detail-title">
-          {gear.display_name} <span className="gbx-id">{gear.id}</span>
-        </div>
-
-        <div className="gbx-kv">
-          <span>description</span>
-          <span>{gear.description ?? "—"}</span>
-        </div>
+        {/* The heading and the blurb are the two things every surface showing a
+            gear needs, so they are components rather than markup repeated here
+            and in the settings pane. The rows below them are catalogue facts and
+            stay. */}
+        <GearHeading id={gear.id} descriptor={gear} />
+        <GearBlurb descriptor={gear} />
         <div className="gbx-kv">
           <span>capabilities</span>
           <span>
@@ -370,17 +369,7 @@ export class InspectorWidget extends ReactWidget {
           </div>
         )}
 
-        {gear.docs && (
-          <div className="gbx-kv">
-            <span>docs</span>
-            <span className="gbx-links">
-              {this.renderDocLink(gear.source, "PRD", gear.docs.prd)}
-              {this.renderDocLink(gear.source, "DESIGN", gear.docs.design)}
-              {(gear.docs.adr ?? []).map((adr) => this.renderDocLink(gear.source, adrLabel(adr), adr))}
-              {!gear.docs.prd && !gear.docs.design && (gear.docs.adr ?? []).length === 0 && "—"}
-            </span>
-          </div>
-        )}
+        <GearDocs descriptor={gear} reveals={this.reveals} />
 
         {this.renderPath(gear.source, gear.gdl_path)}
 
@@ -414,17 +403,6 @@ export class InspectorWidget extends ReactWidget {
         <span className="gbx-links">{this.renderLink(source, gdlPath, gdlPath)}</span>
       </div>
     );
-  }
-
-  protected renderDocLink(
-    source: string,
-    label: string,
-    target: string | null | undefined,
-  ): React.ReactNode {
-    if (target === null || target === undefined) {
-      return undefined;
-    }
-    return this.renderLink(source, target, label);
   }
 
   /**
@@ -593,21 +571,3 @@ function keyOf(selection: Selection): string {
   }
 }
 
-/**
- * `ADR 001` rather than `001-provider-compatibility-and-performance.md`.
- *
- * `cluster` has nine ADRs and `types-registry` fifteen, with names long enough
- * that the full filenames wrapped to three lines and read as a paragraph rather
- * than as a list. The number is the part anyone actually cites; the filename stays
- * in the link's tooltip.
- */
-function adrLabel(target: string): string {
-  const file = basename(target);
-  const numbered = /^(\d+)/.exec(file);
-  return numbered ? `ADR ${numbered[1]}` : file.replace(/\.md$/, "");
-}
-
-function basename(target: string): string {
-  const parts = target.split("/");
-  return parts[parts.length - 1] ?? target;
-}

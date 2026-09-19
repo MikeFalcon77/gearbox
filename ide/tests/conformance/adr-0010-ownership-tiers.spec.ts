@@ -22,7 +22,6 @@ import {
   productSection,
   resetCatalogueView,
   revealCatalogue,
-  revealInspector,
   settled,
   test,
 } from "../fixtures/studio";
@@ -380,34 +379,32 @@ test.describe("typed config from schema (Phase 7)", () => {
    * declared by nobody meant there was nothing to project, so the feature would
    * have been a guess. `tenant-resolver` declares one exposed field now.
    */
-  test("Inspector projects config struct fields as typed controls [Phase 7]", async ({
+  test("the Composition pane projects config struct fields as typed controls [Phase 7]", async ({
     studio,
   }) => {
+    // **Retitled, because the surface moved and the claim did not.** The fields
+    // are projected from the Rust struct wherever they are shown; what changed
+    // is that a product is configured in one place. Reached through the
+    // Composition tree, which is how a person reaches it.
     const page = studio.page;
     await openProduct(page, "dev");
-    await revealCatalogue(page);
-    await resetCatalogueView(page);
-    await page.locator(".gbx-widget-catalogue .gbx-row", { hasText: "api-gateway" }).click();
-    await revealInspector(page);
-
-    await expect(page.locator('[data-gear-config="api-gateway"]')).toBeVisible({
-      timeout: 60_000,
-    });
+    const form = await configureGear(page, "api-gateway");
+    await expect(form).toBeVisible({ timeout: 60_000 });
 
     // The five settings its description exposes, out of the fourteen the struct
     // declares -- curation is the half a description contributes.
-    const bind = page.locator('[data-config-field="bind_addr"]');
+    const bind = form.locator('[data-config-field="bind_addr"]');
     await expect(bind).toBeVisible();
     await expect(bind).toHaveAttribute("data-config-field-kind", "str");
 
     // A bool is a checkbox because Rust says it is a bool, not because anything
     // here knows what `enable_docs` means.
-    const docs = page.locator('[data-config-field="enable_docs"]');
+    const docs = form.locator('[data-config-field="enable_docs"]');
     await expect(docs).toHaveAttribute("data-config-field-kind", "bool");
     await expect(docs.locator('input[type="checkbox"]')).toBeVisible();
 
     // Nested fields carry no control and are not offered as one.
-    await expect(page.locator('[data-config-field="openapi"]')).toHaveCount(0);
+    await expect(form.locator('[data-config-field="openapi"]')).toHaveCount(0);
   });
 
   /**
@@ -427,12 +424,7 @@ test.describe("typed config from schema (Phase 7)", () => {
     // All three are read from what is on screen: the intent, the resolution, and
     // the difference between them. No new wire field.
     await openProduct(studio.page, "dev");
-    await revealCatalogue(studio.page);
-    await resetCatalogueView(studio.page);
-    await studio.page.locator(".gbx-widget-catalogue .gbx-row", { hasText: "api-gateway" }).click();
-    await revealInspector(studio.page);
-    const config = studio.page.locator('[data-gear-config="api-gateway"]');
-    await config.waitFor({ state: "visible", timeout: 60_000 });
+    const config = await configureGear(studio.page, "api-gateway");
 
     // `bind_addr` is the derived case in this corpus: the resolver assigns the
     // port from the process topology, and the demo description sets nothing.

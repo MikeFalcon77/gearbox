@@ -2,31 +2,10 @@ import React from "@theia/core/shared/react";
 import type { ProductState } from "../product-store";
 import type { GearDescriptor } from "../../common/generated/GearDescriptor";
 import { pointKey, pointsOf } from "../../common/extension-points";
-import type { InclusionReason } from "../../common/generated/InclusionReason";
+import { describeInclusion } from "./inclusion";
 import type { Selection } from "../shell/selection-service";
 import { RevealLink } from "../reveal-link";
 import type { RevealService } from "../reveal-service";
-
-/**
- * Why a gear is in the product, in words.
- *
- * `plugin_of` names the profile as well as the host, because it is the only
- * inclusion reason that differs between profiles -- dev links the static plugin
- * and prod the OIDC one, from the same description.
- *
- * Moved here from the Product widget's old Gears stage, which is what this tree
- * replaced: the reasons are the same ones, and the words for them should be too.
- */
-function describeInclusion(reason: InclusionReason): string {
-  switch (reason.reason) {
-    case "selected":
-      return "asked for by the product";
-    case "colocated_by":
-      return `co-located with ${reason.gear}`;
-    case "plugin_of":
-      return `plugin of ${reason.host} for ${reason.profile}`;
-  }
-}
 
 export interface CompositionProps {
   state: ProductState;

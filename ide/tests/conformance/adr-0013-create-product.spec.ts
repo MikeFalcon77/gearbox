@@ -6,14 +6,12 @@ import { join } from "node:path";
 
 import {
   configureConnection,
+  configureGear,
   expect,
   expectContext,
   openAdvancedKeys,
   openProduct,
   productSection,
-  revealCatalogue,
-  revealInspector,
-  resetCatalogueView,
   runCommand,
   settled,
   test,
@@ -555,26 +553,26 @@ test.describe("edit config and profiles in the open product", () => {
 
     try {
       await openProduct(studio.page, "dev");
-      await revealCatalogue(studio.page);
-      await resetCatalogueView(studio.page);
-      await studio.page
-        .locator(".gbx-widget-catalogue .gbx-row", { hasText: "api-gateway" })
-        .click();
-      await revealInspector(studio.page);
-      await studio.page.locator('[data-gear-config="api-gateway"]').waitFor({ state: "visible" });
+      // **Configured where a product is configured.** This reached the form
+      // through the catalogue and the Inspector, which worked only because the
+      // Product panel was on Overview and therefore rendering no form of its
+      // own -- an unscoped `[data-gear-config]` that matched once by accident of
+      // stage. Configuring is the Composition pane's act now, and `configureGear`
+      // is how a person performs it.
+      const form = await configureGear(studio.page, "api-gateway");
 
       // Free keys live under "Other keys" now -- see `openAdvancedKeys`. Opened
       // and typed into as one retried step: the section folds on any remount, so
       // the two must not be separated by an await that a reload can land in.
       await expect(async () => {
-        await openAdvancedKeys(studio.page, ".gbx-inspector");
-        await studio.page.locator("[data-config-new-key]").fill("demo_mode", { timeout: 5_000 });
+        await openAdvancedKeys(studio.page, ".gbx-composition-settings");
+        await form.locator("[data-config-new-key]").fill("demo_mode", { timeout: 5_000 });
       }).toPass({ timeout: 30_000 });
-      await studio.page.locator("[data-config-new-value]").fill("demo_value");
-      await studio.page.locator('[data-add-config="api-gateway"]').click();
+      await form.locator("[data-config-new-value]").fill("demo_value");
+      await form.locator('[data-add-config="api-gateway"]').click();
       await studio.page.locator(".gbx-toolbar [data-draft-apply]").click();
       await acceptPreview(studio.page);
-      await expect(studio.page.locator('[data-config-key="demo_mode"]')).toBeVisible({
+      await expect(form.locator('[data-config-key="demo_mode"]')).toBeVisible({
         timeout: 30_000,
       });
       // **Polled, because the row above does not say the write landed.** The row
@@ -590,10 +588,10 @@ test.describe("edit config and profiles in the open product", () => {
       // the file behind the app leaves the store holding the edited description
       // (§9.1), and a reload of the shared worker page races the next test against
       // an empty catalogue `rootPaths()`.
-      await studio.page.locator('[data-config-remove="demo_mode"]').click();
+      await form.locator('[data-config-remove="demo_mode"]').click();
       await studio.page.locator(".gbx-toolbar [data-draft-apply]").click();
       await acceptPreview(studio.page);
-      await expect(studio.page.locator('[data-config-key="demo_mode"]')).toHaveCount(0, {
+      await expect(form.locator('[data-config-key="demo_mode"]')).toHaveCount(0, {
         timeout: 30_000,
       });
       // The same race in the other direction: the draft's removal takes the row
@@ -613,18 +611,13 @@ test.describe("edit config and profiles in the open product", () => {
 
     try {
       await openProduct(studio.page, "dev");
-      await revealCatalogue(studio.page);
-      await resetCatalogueView(studio.page);
-      await studio.page.locator(".gbx-widget-catalogue .gbx-row", { hasText: "api-gateway" }).click();
-      await revealInspector(studio.page);
-      // **Scoped to the Inspector, because two surfaces render this form.**
-      // `GearSettings` is one component shown by the Inspector and by the
-      // Composition pane, so an unscoped `[data-config-new-key]` depends on
-      // which stage the Product panel happens to be on -- and on what the
-      // previous test in this worker left it on. This claim is about the
-      // Inspector; it says so.
-      const form = studio.page.locator('.gbx-inspector [data-gear-config="api-gateway"]');
-      await form.waitFor({ state: "visible" });
+      // **Scoped to the form, and the reason for scoping has changed.** It read
+      // `.gbx-inspector`, because `GearSettings` was rendered by two surfaces
+      // and an unscoped locator depended on which stage the Product panel
+      // happened to be on. One surface renders it now; the scope stays because a
+      // locator that names the object it is about survives the next rearrangement
+      // too.
+      const form = await configureGear(studio.page, "api-gateway");
 
       // Free keys live under "Other keys" now -- see `openAdvancedKeys`.
       //
@@ -637,7 +630,7 @@ test.describe("edit config and profiles in the open product", () => {
       // recovers from it rather than reading it as a failure.
       const queue = async (key: string, value: string): Promise<void> => {
         await expect(async () => {
-          await openAdvancedKeys(studio.page, ".gbx-inspector");
+          await openAdvancedKeys(studio.page, ".gbx-composition-settings");
           await form.locator("[data-config-new-key]").fill(key, { timeout: 5_000 });
         }).toPass({ timeout: 30_000 });
         await form.locator("[data-config-new-value]").fill(value);
@@ -702,20 +695,16 @@ test.describe("edit config and profiles in the open product", () => {
     studio,
   }) => {
     await openProduct(studio.page, "dev");
-    await revealCatalogue(studio.page);
-    await resetCatalogueView(studio.page);
-    await studio.page.locator(".gbx-widget-catalogue .gbx-row", { hasText: "api-gateway" }).click();
-    await revealInspector(studio.page);
-    await studio.page.locator('[data-gear-config="api-gateway"]').waitFor({ state: "visible" });
+    const form = await configureGear(studio.page, "api-gateway");
 
     // Free keys live under "Other keys" now -- see `openAdvancedKeys`, and
     // retried together with the fill for the reason given there.
     await expect(async () => {
-      await openAdvancedKeys(studio.page, ".gbx-inspector");
-      await studio.page.locator("[data-config-new-key]").fill("password", { timeout: 5_000 });
+      await openAdvancedKeys(studio.page, ".gbx-composition-settings");
+      await form.locator("[data-config-new-key]").fill("password", { timeout: 5_000 });
     }).toPass({ timeout: 30_000 });
-    await studio.page.locator("[data-config-new-value]").fill("literal");
-    await studio.page.locator('[data-add-config="api-gateway"]').click();
+    await form.locator("[data-config-new-value]").fill("literal");
+    await form.locator('[data-add-config="api-gateway"]').click();
     // Matched among the notifications rather than at the top of the stack. The
     // claim is that the refusal is *said*, and notifications accumulate in the
     // shared session -- reading `.first()` made this assert which message was
