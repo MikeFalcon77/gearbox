@@ -669,6 +669,17 @@ test.describe("a required config field says so", () => {
         form.locator(`[data-config-field-missing="${field}"]`),
         `${field} is required with no default, so it must say so in words`,
       ).toHaveText("required, and the gear declares no default");
+      // **And the provenance beside it must not contradict it.** These carried
+      // `the gear's default` over that same note, because "nobody sets this
+      // key" and "the gear supplies one" were one word. A person reading both
+      // could not tell whether a value was needed.
+      await expect(
+        form.locator(`[data-config-field="${field}"]`),
+        `${field} has no default, so nothing here may say it has one`,
+      ).toHaveAttribute("data-config-provenance", "unset");
+      await expect(
+        form.locator(`[data-config-field="${field}"] [data-config-provenance-label]`),
+      ).toHaveText("not configured · required");
     }
 
     // The placeholder reaches the two kinds by different routes, so both are

@@ -415,14 +415,21 @@ test.describe("typed config from schema (Phase 7)", () => {
   test("a field says where its value came from, and an explicit one can be reset [Phase 7]", async ({
     studio,
   }) => {
-    // Three states a person acts on differently, and a form that renders them
+    // Four states a person acts on differently, and a form that renders them
     // identically invites someone to override the resolver by accident: what the
     // *description* sets can be reset, what the *resolver* derived should
-    // usually be left alone (GBX0114 is the engine saying so), and what nothing
-    // sets is the gear's own default -- already the control's placeholder.
+    // usually be left alone (GBX0114 is the engine saying so), what nothing sets
+    // but the gear defaults is the gear's own value -- already the control's
+    // placeholder -- and what nothing sets and the gear does not default is
+    // simply **not configured**.
     //
-    // All three are read from what is on screen: the intent, the resolution, and
-    // the difference between them. No new wire field.
+    // The fourth was `default` until it was noticed that the same field also
+    // carried "required, and the gear declares no default" two lines below, and
+    // the two sentences contradicted each other.
+    //
+    // All of them are read from what is on screen: the intent, the resolution,
+    // the difference between them, and the field's own declaration. No new wire
+    // field.
     await openProduct(studio.page, "dev");
     const config = await configureGear(studio.page, "api-gateway");
 
@@ -431,7 +438,7 @@ test.describe("typed config from schema (Phase 7)", () => {
     const bindAddr = config.locator('[data-config-field="bind_addr"]');
     await expect(bindAddr).toBeVisible();
     const provenance = await bindAddr.getAttribute("data-config-provenance");
-    expect(["derived", "default", "explicit"]).toContain(provenance);
+    expect(["derived", "default", "explicit", "unset"]).toContain(provenance);
     // Whatever it is, it is *said*: the label is the claim, not the attribute.
     await expect(bindAddr.locator("[data-config-provenance-label]")).toBeVisible();
 

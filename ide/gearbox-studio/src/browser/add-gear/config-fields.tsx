@@ -41,7 +41,7 @@ import { isSecretConfigKey } from "../product-edit-service";
  * the description does not name yet, so every field there is a value being
  * chosen rather than one with a history.
  */
-export type ConfigProvenance = "explicit" | "derived" | "default";
+export type ConfigProvenance = "explicit" | "derived" | "default" | "unset";
 
 export interface ConfigFieldsProps {
   readonly fields: readonly ConfigFieldDecl[];
@@ -74,7 +74,36 @@ const PROVENANCE_LABEL: Record<ConfigProvenance, string> = {
   explicit: "set by this product",
   derived: "derived by the resolver",
   default: "the gear's default",
+  unset: "not configured · required",
 };
+
+/**
+ * What the field can honestly say about where its value comes from.
+ *
+ * **`default` was answering two questions with one word.** `provenanceOf` says
+ * "nobody sets this key", which it derives from the intent and the resolution --
+ * and that is *also* what it answers for a field the gear gives no default at
+ * all. So a required field with no default carried `the gear's default` and, two
+ * lines below it, `required, and the gear declares no default`. The two
+ * sentences contradict each other, and a person reading them cannot tell whether
+ * a value is needed.
+ *
+ * In the connection editor it was not even a corner case: its values and its
+ * provenance are read from the same object, so *every* unset required field
+ * showed both.
+ *
+ * The fourth state is decided here rather than in `provenanceOf`, because this
+ * is the only place that knows both halves -- what is set, from the caller, and
+ * what the gear declares, from the field.
+ */
+function provenanceShown(
+  field: ConfigFieldDecl,
+  value: ConfigValue | undefined,
+  provenance: ConfigProvenance | undefined,
+): ConfigProvenance | undefined {
+  if (provenance !== "default") return provenance;
+  return valueMissing(field, value) ? "unset" : "default";
+}
 
 /** The placeholder a control shows when the operator has set nothing. */
 function placeholder(field: ConfigFieldDecl): string {
@@ -115,7 +144,7 @@ function ConfigField(
   const { field, values, onChange, provenanceOf, isDrafted, onReset } = props;
   const value = values.get(field.name);
   const blocked = refusal(field);
-  const provenance = provenanceOf?.(field.name);
+  const provenance = provenanceShown(field, values.get(field.name), provenanceOf?.(field.name));
   const drafted = isDrafted?.(field.name) === true;
   const problem = blocked === undefined ? valueProblem(field, value) : undefined;
   const missing = blocked === undefined && problem === undefined && valueMissing(field, value);
