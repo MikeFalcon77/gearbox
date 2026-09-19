@@ -33,12 +33,30 @@ import {
   productSection,
   resetCatalogueView,
   revealCatalogue,
+  revealInspector,
   runCommand,
   settled,
   test,
 } from "../fixtures/studio";
 
 const IDE = join(__dirname, "../..");
+
+/** The Composition grid as it actually lays out, with the room it was given. */
+async function measurePane(
+  page: import("@playwright/test").Page,
+): Promise<{ window: number; pane: number; columns: number }> {
+  return page.evaluate(() => {
+    const pane = document.querySelector(".gbx-product");
+    const grid = document.querySelector(".gbx-composition");
+    return {
+      window: window.innerWidth,
+      pane: Math.round(pane?.getBoundingClientRect().width ?? 0),
+      // The computed value is the resolved track list, so its length is the
+      // number of columns the browser actually used.
+      columns: grid ? getComputedStyle(grid).gridTemplateColumns.split(" ").length : 0,
+    };
+  });
+}
 
 test.describe("Home is the start screen and nothing else", () => {
   test("nothing opens itself into the bottom panel on Home [plan §9.1: an empty domain panel is worse than an absent one]", async ({
@@ -659,6 +677,45 @@ test.describe("opening a product is one act", () => {
       // `git` for the reason given on the claim above -- this file is one of
       // `GUARDED_CORPUS_FILES`, so the helper already knows about it.
       restoreCorpus(REPO);
+    }
+  });
+
+  test("Composition stacks when its pane is narrow, whatever the window is [ADR-0023 §Amendment: one surface configures]", async ({
+    studio,
+  }) => {
+    // **The pane, not the window, and the difference was the defect.** The only
+    // rule that could stack this grid was a `@media (max-width: 800px)`, keyed
+    // on the viewport -- and the Product panel is the main area, which is the
+    // window minus whatever the left and right panels take. With both open on a
+    // 1708px window the pane had 606px and was still forced into two columns
+    // with a 230px floor. The converse was equally wrong: collapsing both side
+    // panels on a small laptop gave a wide pane still pinned to one column.
+    //
+    // So the assertion is deliberately a *disagreement* between the two numbers:
+    // a window comfortably over the threshold, a pane comfortably under it, and
+    // one column. A rule keyed on the window cannot produce that.
+    const { page } = studio;
+    try {
+      await openProduct(page, "dev");
+      await productSection(page, "composition");
+      await revealCatalogue(page);
+      await revealInspector(page);
+
+      await page.setViewportSize({ width: 1400, height: 900 });
+      const narrow = await measurePane(page);
+      expect(narrow.window, "the window is wide enough that a viewport rule would not fire").toBeGreaterThan(
+        900,
+      );
+      expect(narrow.pane, "and the pane it leaves is not").toBeLessThan(900);
+      expect(narrow.columns, "so the columns stack").toBe(1);
+
+      // And widening genuinely brings the second column back -- otherwise "one
+      // column" would be satisfied by a grid that simply never has two.
+      await page.setViewportSize({ width: 1800, height: 900 });
+      await expect.poll(async () => (await measurePane(page)).columns, { timeout: 15_000 }).toBe(2);
+    } finally {
+      // The studio is worker-scoped, so the viewport outlives this test.
+      await page.setViewportSize({ width: 1600, height: 1000 });
     }
   });
 });

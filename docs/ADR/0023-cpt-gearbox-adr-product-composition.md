@@ -186,6 +186,18 @@ supply the half the summary could not. The host is a plain element with a disclo
 own now, the row carries the name and the selection, and opening the description and removing the
 gear are secondary: things done *to* a gear that has been chosen, not ways of choosing it.
 
+### The pane measures itself
+
+The Composition grid could only be stacked by a `@media (max-width: 800px)`, and the Product panel
+is the main area — the window minus whatever the left and right panels take. With both open on a
+1708px window the pane had 606px and was still forced into two columns with a 230px floor; the
+converse was equally wrong, a wide pane on a small laptop still pinned to one column.
+
+The panel declares `container-type: inline-size` and the screens inside it use `@container`. A
+container query cannot ask about the element that declares the containment, which is why the
+declaration is on `.gbx-product` and the query on its descendants; the Add Gear dialog declares its
+own, because it is not inside the panel.
+
 ### Confirmation
 
 * `ide/tests/conformance/adr-0013-add-gear.spec.ts` — the Inspector renders no `[data-gear-config]`

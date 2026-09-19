@@ -371,7 +371,19 @@
 
 /* --- Product ------------------------------------------------------------- */
 
-.gbx-product { padding: 6px 10px; overflow: auto; height: 100%; }
+/* **The Product panel measures itself, and the screens inside it ask.**
+   `container-type: inline-size` here is what makes `@container` below possible:
+   a container query cannot ask about the element that declares the containment,
+   so the query has to live on a descendant and the declaration on an ancestor.
+
+   Why it is needed at all: this panel is the main area, which is the window
+   minus whatever the left and right panels take. With both open on a 1708px
+   window the Composition pane had 606px to work with, and the only rule that
+   could stack it was a `@media` keyed on the *window* -- so it never fired, and
+   two columns with a 230px floor were forced into a pane that could not hold
+   them. The converse was just as wrong: collapsing both side panels on a small
+   laptop gave a wide pane still pinned to one column. */
+.gbx-product { padding: 6px 10px; overflow: auto; height: 100%; container-type: inline-size; }
 .gbx-product-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
 .gbx-gear { padding: 12px 16px; overflow: auto; height: 100%; }
 .gbx-gear-validate {
@@ -1215,7 +1227,10 @@
 
 /* Product composition keeps authoring and its context together. */
 .gbx-composition { display: grid; grid-template-columns: minmax(230px, 34%) minmax(0, 1fr); gap: 20px; align-items: start; }
-.gbx-composition-tree { border-right: 1px solid var(--theia-panel-border); padding-right: 16px; }
+/* `min-width: 0`, so the column may shrink below its content's min-content
+   width instead of forcing the grid wider than the pane. The settings column has
+   carried it since it was written; this one had not. */
+.gbx-composition-tree { border-right: 1px solid var(--theia-panel-border); padding-right: 16px; min-width: 0; }
 .gbx-composition-tree h3, .gbx-composition-settings h3 { margin-top: 8px; }
 .gbx-composition-host { border-bottom: 1px solid var(--theia-panel-border); padding: 10px 0; }
 /* The host's own line: disclosure, the name that selects, then the two things
@@ -1237,7 +1252,8 @@
 .gbx-composition fieldset label, .gbx-add-dialog fieldset label { display: block; margin: 6px 0; }
 .gbx-composition pre, .gbx-add-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .gbx-add-dialog .dialogBlock { width: min(1120px, 94vw); }
-.gbx-add-dialog-content { max-height: 74vh; overflow: auto; }
+/* Its own containment context: the dialog is not inside `.gbx-product`. */
+.gbx-add-dialog-content { max-height: 74vh; overflow: auto; container-type: inline-size; }
 .gbx-add-dialog-search { display: flex; gap: 20px; margin-bottom: 16px; }
 .gbx-add-dialog-search label { display: flex; flex: 1; flex-direction: column; gap: 6px; }
 .gbx-add-dialog-columns { display: grid; grid-template-columns: minmax(230px, 36%) minmax(0, 1fr); gap: 24px; }
@@ -1248,4 +1264,13 @@
 .gbx-composition button, .gbx-add-dialog button { cursor: pointer; }
 .gbx-composition button:focus-visible, .gbx-add-dialog button:focus-visible { outline: 1px solid var(--theia-focusBorder); outline-offset: 2px; }
 .gbx-destination-full { display: block; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-@media (max-width: 800px) { .gbx-composition, .gbx-add-dialog-columns { grid-template-columns: 1fr; } }
+/* **Asked of the pane, not of the window.** Both of these live inside a
+   containment context declared above, so the threshold is about the space the
+   columns actually have. 800px is where a 230px tree plus a 20px gap stops
+   leaving a settings column worth reading. */
+@container (max-width: 800px) {
+  .gbx-composition, .gbx-add-dialog-columns { grid-template-columns: 1fr; }
+  /* Stacked, the divider between the columns becomes a line down the left of a
+     full-width block, which reads as a quote rather than as a division. */
+  .gbx-composition-tree { border-right: none; padding-right: 0; border-bottom: 1px solid var(--theia-panel-border); padding-bottom: 12px; }
+}
