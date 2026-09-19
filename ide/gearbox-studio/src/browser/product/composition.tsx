@@ -107,6 +107,11 @@ export function Composition({ state, descriptors, selection, select, add, remove
                 The icon says what kind of gear this is, read from the resolution
                 rather than from the id: `*-plugin` is a naming convention, being
                 a plugin is a fact about what selected it. */}
+            {/* Name and id share a column so they may wrap together; `Remove`
+                keeps its own. As flat flex items, a long display name pushed the
+                button onto the next line for some gears and not others -- the
+                catalogue row's lesson, one panel over. */}
+            <span className="gbx-composition-host-main">
             <button type="button" data-composition-gear={host.gear} aria-pressed={chosen}
               className={`gbx-composition-host-name gbx-choice ${chosen ? "gbx-choice-on" : ""}`}
               onClick={() => select({ kind: "gear", id: host.gear })}>
@@ -118,6 +123,7 @@ export function Composition({ state, descriptors, selection, select, add, remove
                 of choosing it. `GearLink` still selects as well as opens --
                 dropping that would make the id a worse control than the row. */}
             <GearLink state={state} id={host.gear} reveals={reveals} select={select} />
+            </span>
             <button type="button" aria-label={`Remove ${host.gear} from product`} onClick={() => remove(host.gear)}>Remove</button>
           </div>
           {!shut && <>

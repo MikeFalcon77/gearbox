@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **180** — 179 built, 0 not built, 0 broken, 1 not observed.
+Claims: **185** — 184 built, 0 not built, 0 broken, 1 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -37,7 +37,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | a generated composition crate carries a header naming its generator | `ADR-0010 tier 2` | ✅ built |  |
 | a description edit shows the line before writing it | `ADR-0010 §Consequences: a preview is not optional` | ✅ built |  |
 | adding a gear inserts one line, and removing it restores the file exactly | `ADR-0010 tier 3` | ✅ built |  |
-| Inspector projects config struct fields as typed controls | `Phase 7` | ✅ built |  |
+| the Composition pane projects config struct fields as typed controls | `Phase 7` | ✅ built |  |
 | a field says where its value came from, and an explicit one can be reset | `Phase 7` | ✅ built |  |
 | a projected string field renders as a typed control | `Phase 7` | ✅ built |  |
 
@@ -122,6 +122,8 @@ Rust, and the ADRs' own Confirmation sections say which.
 | a config key that no field could be is refused at the row | `plan §9.1: checked where the caret is` | ✅ built |  |
 | features are curated, and one that is not for this deployment says so | `plan §9.1: features are projected` | ✅ built |  |
 | errors warn beside the button and never disable it | `—` | ✅ built |  |
+| the Inspector explains a gear and does not offer a second copy of its form | `ADR-0023 §Amendment: one surface configures` | ✅ built |  |
+| Configure in product carries the gear from the Inspector to its form | `ADR-0023 §Amendment: one surface configures` | ✅ built |  |
 
 ## `conformance/adr-0013-create-product.spec.ts`
 
@@ -141,6 +143,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | draft edits two config keys with one Apply preview; Discard restores | `ADR-0013 §Confirmation` | ✅ built |  |
 | a config key named password is refused with an explanation | `ADR-0013 §Confirmation` | ✅ built |  |
 | one connection is edited without touching the one beside it | `ADR-0013 §Amendment: a plugin is not a selected gear` | ✅ built |  |
+| narrowing a connection's scope cannot silently widen it | `ADR-0013 §Amendment: a plugin is not a selected gear` | ✅ built |  |
 | an added embedded profile appears in the switcher and resolves | `ADR-0013 §Confirmation` | ✅ built |  |
 | an added self_hosted profile appears in the switcher and resolves | `ADR-0013 §Confirmation` | ✅ built |  |
 | an added kubernetes profile appears in the switcher and resolves | `ADR-0013 §Confirmation` | ✅ built |  |
@@ -269,7 +272,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 |---|---|---|---|
 | no button in the Studio is written without a type | `ADR-0011 §Confirmation` | ✅ built |  |
 | an icon-only button carries an accessible name | `ADR-0011 §Confirmation` | ✅ built |  |
-| the catalogue's add control says which gear and which product | `ADR-0011 §Confirmation` | ✅ built |  |
+| the catalogue's action names the act it performs, in both states | `ADR-0011 §Confirmation` | ✅ built |  |
 
 ## `conformance/ux-navigation.spec.ts`
 
@@ -287,3 +290,5 @@ Rust, and the ADRs' own Confirmation sections say which.
 | opening a product leaves the Product workspace on screen | `plan §9.1: Open Product is atomic` | ✅ built |  |
 | saving the description on disk re-resolves it without a click | `plan §9.1: the panel shows what the file says` | ✅ built |  |
 | saving a gear description re-reads the catalogue without a reload | `plan §9.1: the panel shows what the file says` | ✅ built |  |
+| Composition stacks when its pane is narrow, whatever the window is | `ADR-0023 §Amendment: one surface configures` | ✅ built |  |
+| a diagnostic leads to the control that would fix it | `plan §9.1: Validation is a screen` | ✅ built |  |

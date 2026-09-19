@@ -1236,7 +1236,12 @@
 /* The host's own line: disclosure, the name that selects, then the two things
    done *to* a gear once it is chosen. It was a `<summary>` plus a separate row
    of actions, which made the name the one part of the line that did the least. */
-.gbx-composition-host-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gbx-composition-host-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start; column-gap: 6px;
+}
+.gbx-composition-host-main { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .gbx-composition-host-name {
   display: inline-flex; align-items: center; gap: 6px;
   font-weight: 600; min-width: 0;
