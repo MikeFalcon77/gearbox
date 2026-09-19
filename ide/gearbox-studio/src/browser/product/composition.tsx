@@ -15,6 +15,9 @@ export interface CompositionProps {
   add: (host?: string, point?: string) => void;
   remove: (host: string, entryIndex?: number) => void;
   settings: React.ReactNode;
+  /** Which hosts are folded shut, and how to change that. Widget state. */
+  folded: ReadonlySet<string>;
+  toggleFold: (host: string) => void;
   /** For the links from a gear to its own `gear.gdl`. */
   reveals: RevealService;
 }
@@ -39,7 +42,7 @@ function GearLink({ state, id, reveals, select }: {
 }
 
 /** The saved intent is the tree; resolution only annotates it. */
-export function Composition({ state, descriptors, selection, select, add, remove, settings, reveals }: CompositionProps): React.ReactElement {
+export function Composition({ state, descriptors, selection, select, add, remove, settings, reveals, folded, toggleFold }: CompositionProps): React.ReactElement {
   // A composition is a view of one open document; without one there is nothing
   // to address a connection in. `explicit` is empty in that case anyway, so the
   // tree renders its empty state rather than a non-null assertion.
@@ -80,27 +83,53 @@ export function Composition({ state, descriptors, selection, select, add, remove
             <small>Profiles: {p.profiles?.join(", ") || "All profiles"}{!active ? " · inactive here" : ""}</small>
           </div>;
         });
-        return <details open key={host.gear} className="gbx-composition-host" data-asked-for={host.gear}>
-          {/* The icon says what kind of gear this is, read from the resolution
-              rather than from the id: `*-plugin` is a naming convention, being a
-              plugin is a fact about what selected it. */}
-          <summary>
-            <span className="gbx-leaf-icon codicon codicon-package" />
-            <span>{d?.display_name || host.gear}</span>{" "}
+        const chosen = selection?.kind === "gear" && selection.id === host.gear;
+        const shut = folded.has(host.gear);
+        // **Not a `<details>` any more, and the reason is not stylistic.**
+        // Toggling is what activating a `<summary>` *does*: a click on anything
+        // inside it bubbles there and folds the branch unless something cancels
+        // the default. So a summary cannot both name the gear and select it, and
+        // the tree grew a separate `Configure <gear>` button to do the selecting
+        // -- three different actions where a person expects one, and the name of
+        // the thing was the one that did the least.
+        //
+        // The disclosure is its own control now, which is the pattern the
+        // catalogue's groups and the topology tree already use.
+        return <div key={host.gear} className="gbx-composition-host" data-asked-for={host.gear} data-collapsed={shut ? "true" : "false"}>
+          <div className="gbx-composition-host-row">
+            <button type="button" className={`gbx-twistie codicon codicon-chevron-${shut ? "right" : "down"}`}
+              aria-expanded={!shut} aria-label={`${shut ? "Expand" : "Collapse"} ${host.gear}`}
+              data-composition-expand={host.gear} onClick={() => toggleFold(host.gear)} />
+            {/* The row is the selector. `data-composition-gear` stays on it, so
+                the act it names -- configure this gear -- is addressed the same
+                way it always was.
+
+                The icon says what kind of gear this is, read from the resolution
+                rather than from the id: `*-plugin` is a naming convention, being
+                a plugin is a fact about what selected it. */}
+            <button type="button" data-composition-gear={host.gear} aria-pressed={chosen}
+              className={`gbx-composition-host-name gbx-choice ${chosen ? "gbx-choice-on" : ""}`}
+              onClick={() => select({ kind: "gear", id: host.gear })}>
+              <span className="gbx-leaf-icon codicon codicon-package" />
+              <span>{d?.display_name || host.gear}</span>
+            </button>
+            {/* Secondary, both of them: opening the description and removing the
+                gear are things done *to* a gear that has been chosen, not ways
+                of choosing it. `GearLink` still selects as well as opens --
+                dropping that would make the id a worse control than the row. */}
             <GearLink state={state} id={host.gear} reveals={reveals} select={select} />
-          </summary>
-          <div className="gbx-composition-host-actions">
-            <button type="button" data-composition-gear={host.gear} className={`gbx-choice ${selection?.kind === "gear" && selection.id === host.gear ? "gbx-choice-on" : ""}`} onClick={() => select({ kind: "gear", id: host.gear })}>Configure {host.gear}</button>
             <button type="button" aria-label={`Remove ${host.gear} from product`} onClick={() => remove(host.gear)}>Remove</button>
           </div>
-          {!d && <small>Descriptor unavailable or still loading. This gear remains in your product.</small>}
-          {points.map(point => <section className="gbx-composition-slot" key={point.key}>
-            <h4>{point.label}</h4>
-            {renderConnections(connections.filter(c => c.point && pointKey(c.point) === point.key))}
-            <button type="button" onClick={() => add(host.gear, point.key)}>Add compatible plugin</button>
-          </section>)}
-          {unassigned.length > 0 && <section className="gbx-composition-slot"><h4>Connections needing review</h4>{renderConnections(unassigned)}</section>}
-        </details>;
+          {!shut && <>
+            {!d && <small>Descriptor unavailable or still loading. This gear remains in your product.</small>}
+            {points.map(point => <section className="gbx-composition-slot" key={point.key}>
+              <h4>{point.label}</h4>
+              {renderConnections(connections.filter(c => c.point && pointKey(c.point) === point.key))}
+              <button type="button" onClick={() => add(host.gear, point.key)}>Add compatible plugin</button>
+            </section>)}
+            {unassigned.length > 0 && <section className="gbx-composition-slot"><h4>Connections needing review</h4>{renderConnections(unassigned)}</section>}
+          </>}
+        </div>;
       })}
       {/* Open by default. The group is *collapsible* because a long closure is
           noise once it is understood -- not because what the product pulled in

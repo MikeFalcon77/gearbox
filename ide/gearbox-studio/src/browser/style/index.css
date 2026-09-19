@@ -563,6 +563,7 @@
   outline-offset: -1px;
 }
 .gbx-twistie { font-size: 14px; opacity: 0.7; }
+
 /* Pushed right and dimmed: the count answers "how many are in here" for a folded
    group, and must not compete with the name when it is open. */
 .gbx-group-count { margin-left: auto; opacity: 0.5; font-variant-numeric: tabular-nums; }
@@ -1217,8 +1218,16 @@
 .gbx-composition-tree { border-right: 1px solid var(--theia-panel-border); padding-right: 16px; }
 .gbx-composition-tree h3, .gbx-composition-settings h3 { margin-top: 8px; }
 .gbx-composition-host { border-bottom: 1px solid var(--theia-panel-border); padding: 10px 0; }
-.gbx-composition-host > summary { cursor: pointer; font-weight: 600; }
-.gbx-composition-host-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+/* The host's own line: disclosure, the name that selects, then the two things
+   done *to* a gear once it is chosen. It was a `<summary>` plus a separate row
+   of actions, which made the name the one part of the line that did the least. */
+.gbx-composition-host-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gbx-composition-host-name {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-weight: 600; min-width: 0;
+}
+.gbx-twistie { background: transparent; border: none; padding: 0 2px; cursor: pointer; color: inherit; }
+.gbx-twistie:focus-visible { outline: 1px solid var(--theia-focusBorder); }
 .gbx-composition-slot { margin: 12px 0 12px 12px; border-left: 2px solid var(--theia-panel-border); padding-left: 12px; }
 .gbx-composition-slot h4 { margin: 6px 0; overflow-wrap: anywhere; }
 .gbx-composition-connection { display: flex; flex-direction: column; align-items: flex-start; margin: 8px 0; }

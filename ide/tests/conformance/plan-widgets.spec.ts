@@ -212,15 +212,35 @@ test.describe("where the views live", () => {
     await expect(studio.page.locator('[data-asked-for="api-gateway"]')).toBeVisible();
     await expect(studio.page.locator("[data-pulled-in]").first()).toBeVisible();
 
-    // A gear folds, and says so rather than only looking folded -- natively now,
-    // because each host is a `<details>` and `open` is the state itself rather
-    // than an attribute mirroring it.
+    // A gear folds, and says so rather than only looking folded. **Not a
+    // `<details>` any more**, and the reason is in `composition.tsx`: toggling
+    // is what activating a `<summary>` does, so a summary cannot both name the
+    // gear and select it -- which is why the tree used to carry a separate
+    // `Configure <gear>` button and left the name doing the least of the three
+    // controls on the line. The disclosure is its own control now, and the state
+    // is on the host for a reader to check.
     const host = studio.page.locator('[data-asked-for="api-gateway"]');
-    await expect(host).toHaveAttribute("open", "");
-    await host.locator("summary").click();
-    await expect(host).not.toHaveAttribute("open", "");
-    await host.locator("summary").click();
-    await expect(host).toHaveAttribute("open", "");
+    const twistie = host.locator('[data-composition-expand="api-gateway"]');
+    await expect(host).toHaveAttribute("data-collapsed", "false");
+    await expect(twistie).toHaveAttribute("aria-expanded", "true");
+    await twistie.click();
+    await expect(host).toHaveAttribute("data-collapsed", "true");
+    await expect(twistie).toHaveAttribute("aria-expanded", "false");
+    await twistie.click();
+    await expect(host).toHaveAttribute("data-collapsed", "false");
+
+    // And the row itself selects, which is the act a person expects of clicking
+    // the name of a thing. It used to only fold.
+    // Not asserted unpressed first: the studio is worker-scoped, so whatever ran
+    // before may have left this gear selected. What this claim is about is that
+    // clicking the row is what chooses, which is true from either state.
+    const row = host.locator('[data-composition-gear="api-gateway"]');
+    await row.click();
+    await expect(row).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      studio.page.locator('.gbx-composition-settings [data-gear-config="api-gateway"]'),
+      "selecting the row is what puts the gear's form on screen",
+    ).toBeVisible({ timeout: 30_000 });
 
     // The icon says what a leaf is, and it is chosen from `selected_by` rather
     // than from the id -- a gear is a plugin because something selected it as

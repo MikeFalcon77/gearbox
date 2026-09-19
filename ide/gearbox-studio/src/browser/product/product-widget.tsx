@@ -93,6 +93,14 @@ export class ProductWidget extends ReactWidget {
 
   /** Which branches are folded away. Widget state; nobody else's business. */
   protected collapsed = new Set<string>();
+  /**
+   * Which Composition hosts are folded shut.
+   *
+   * A second set rather than a prefix in `collapsed`: the two trees fold
+   * different things -- a topology branch is an application, a composition host
+   * is a gear -- and one id can legitimately be both.
+   */
+  protected foldedHosts = new Set<string>();
 
   /**
    * Which stage of the product a person is looking at.
@@ -581,7 +589,12 @@ export class ProductWidget extends ReactWidget {
         selection={selection} select={selected => { this.selection.select(selected); this.update(); }}
         add={(host, point) => void this.commands.executeCommand(ADD_GEAR.id, { host, point })}
         remove={(host, index) => void this.edits.removeComposition(host, index).then(ok => { if (ok) this.selection.select(undefined); })}
-        settings={this.renderSettings(selection)} reveals={this.reveals} />
+        settings={this.renderSettings(selection)} reveals={this.reveals}
+        folded={this.foldedHosts}
+        toggleFold={host => {
+          if (!this.foldedHosts.delete(host)) this.foldedHosts.add(host);
+          this.update();
+        }} />
     </>;
   }
 
