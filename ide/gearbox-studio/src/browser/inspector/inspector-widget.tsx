@@ -23,11 +23,10 @@
 
 import { codicon, ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
+import { CommandRegistry } from "@theia/core";
 import React from "@theia/core/shared/react";
 
 import { GearBlurb, GearDocs, GearHeading } from "../gear/gear-facts";
-import { GearSettings } from "../product/gear-settings";
-import { PluginSettings } from "../product/plugin-settings";
 import type { ExplanationGraph } from "../../common/generated/ExplanationGraph";
 import type { ExplanationNode } from "../../common/generated/ExplanationNode";
 import type { GearDescriptor } from "../../common/generated/GearDescriptor";
@@ -37,10 +36,10 @@ import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
 import type { Row } from "../../common/protocol";
 import { CatalogueStore } from "../catalogue-store";
 import { Focus, ProductStore } from "../product-store";
-import { ProductEditService } from "../product-edit-service";
-import { describeFocus, nodeIdOf, type ConfigSources } from "./effective-config";
+import { describeFocus, nodeIdOf } from "./effective-config";
 import { RevealLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
+import { ADD_GEAR, SHOW_PRODUCT } from "../shell/session-command-ids";
 import { Selection, SelectionService } from "../shell/selection-service";
 
 /** One rendered step: an edge, with both of its nodes resolved. */
@@ -115,7 +114,7 @@ export class InspectorWidget extends ReactWidget {
   @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
   @inject(ProductStore) protected readonly products!: ProductStore;
   @inject(RevealService) protected readonly reveals!: RevealService;
-  @inject(ProductEditService) protected readonly edits!: ProductEditService;
+  @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
 
   @postConstruct()
   protected init(): void {
@@ -132,11 +131,8 @@ export class InspectorWidget extends ReactWidget {
     this.toDispose.push(this.selection.onDidChange(() => this.update()));
     this.toDispose.push(this.catalogue.onChanged(() => this.update()));
     this.toDispose.push(this.products.onChanged(() => this.update()));
-    // The half-typed new-key boxes used to live here and had to be cleared by
-    // hand when a Discard happened elsewhere. They belong to `GearSettings` now
-    // and are reset by remounting it on the draft epoch, so this is a plain
-    // re-render like the others.
-    this.toDispose.push(this.edits.onDraftChanged(() => this.update()));
+    // No draft subscription: nothing here is edited any more, so a draft
+    // changing changes nothing this panel says.
     this.update();
   }
 
@@ -169,13 +165,11 @@ export class InspectorWidget extends ReactWidget {
 
   protected renderWhat(selection: Selection): React.ReactNode {
     if (selection.kind === "plugin") {
-      const state = this.products.current;
       const descriptor = this.catalogue.current.rows.find(row => row.kind === "projected" && row.gear.id === selection.id);
-      return <><PluginSettings key={`${selection.path}:${selection.host}:${selection.entryIndex}`} selection={selection} state={state}
-        descriptor={descriptor?.kind === "projected" ? descriptor.gear : undefined} edits={this.edits}
-        openGdl={() => { if (state.open) void this.reveals.revealPath(state.open.path); }}
-        remove={() => void this.edits.removeComposition(selection.host, selection.entryIndex).then(ok => { if (ok) this.selection.select({ kind: "gear", id: selection.host }); })} />
-        {descriptor?.kind === "projected" && this.renderProjected(descriptor.gear)}</>;
+      return <>
+        <div className="gbx-kv"><span>connected to</span><span>{selection.host}, connection {selection.entryIndex + 1}</span></div>
+        {descriptor?.kind === "projected" && this.renderProjected(descriptor.gear)}
+      </>;
     }
     const row = this.rowFor(selection);
     if (row === undefined) {
@@ -224,48 +218,56 @@ export class InspectorWidget extends ReactWidget {
     return (
       <>
         {this.renderProjected(row.gear)}
-        {this.renderProductGearEdit(selection, row.gear)}
+        {this.renderWayIn(row.gear.id)}
       </>
     );
   }
 
   /**
-   * Config and features for a gear the product asks for directly.
+   * The way from reading about a gear to setting it up.
    *
-   * The controls themselves live in `GearSettings`, which the Composition pane
-   * renders too. Keyed on the draft epoch so a Discard or an Apply remounts it
-   * and clears the half-typed boxes it owns -- this panel no longer holds them.
+   * **This panel no longer edits, and that is the decision this button pays
+   * for.** It rendered `GearSettings` for a gear the product asks for, which
+   * put a second editable copy of the Composition pane's form on screen over
+   * one draft -- two surfaces, one Apply, and no way to tell which of them an
+   * Apply belonged to. Configuring is the Composition pane's act now
+   * (`cpt-gearbox-adr-product-composition`, amended).
+   *
+   * So the panel keeps what Composition does not show -- the catalogue's facts
+   * and the explanation graph -- and offers one click back. Without it the split
+   * would merely have taken something away.
+   *
+   * Nothing is offered with no product open: a button that names a product there
+   * is none of is the fake link this codebase has already regretted once.
    */
-  protected renderProductGearEdit(
-    selection: Selection,
-    descriptor: GearDescriptor,
-  ): React.ReactNode {
-    if (selection.kind !== "gear") return undefined;
-    const intent = this.products.current.intent;
-    if (intent === undefined) return undefined;
-    const picked = intent.selected_gears.find((entry) => entry.gear === descriptor.id);
-    if (picked === undefined) return undefined;
-    return (
-      <GearSettings
-        key={`gear-${descriptor.id}-${this.edits.epoch}`}
-        descriptor={descriptor}
-        picked={picked}
-        edits={this.edits}
-        sources={this.configSources()}
-        profileKind={this.products.current.resolution?.product?.product.profile_kind}
-      />
+  protected renderWayIn(id: string): React.ReactNode {
+    const state = this.products.current;
+    if (state.open === undefined) return undefined;
+    const picked = state.intent?.selected_gears.some((entry) => entry.gear === id) === true;
+    // Select first, then show the stage: the pane renders from the selection, so
+    // the other order paints the previous subject for a frame. The sequence is
+    // the Add Gear dialog's, which lands on the same pane.
+    const go = (): void => {
+      this.selection.select({ kind: "gear", id });
+      void this.commands.executeCommand(SHOW_PRODUCT.id, "composition");
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLElement>(".gbx-composition-settings")?.focus(),
+      );
+    };
+    return picked ? (
+      <button type="button" className="gbx-choice" data-configure-in-product={id} onClick={go}>
+        Configure in product
+      </button>
+    ) : (
+      <button
+        type="button"
+        className="gbx-choice"
+        data-add-to-product={id}
+        onClick={() => void this.commands.executeCommand(ADD_GEAR.id, { gearId: id })}
+      >
+        Add to product
+      </button>
     );
-  }
-
-  /**
-   * The two services a config answer is derived from, as one value.
-   *
-   * The Inspector and the chat's tools ask `effective-config` the same
-   * questions, so the module takes its inputs rather than reaching for a
-   * widget's fields. This is the widget's side of that bargain.
-   */
-  protected configSources(): ConfigSources {
-    return { edits: this.edits, products: this.products };
   }
 
   protected renderProjected(gear: GearDescriptor): React.ReactNode {

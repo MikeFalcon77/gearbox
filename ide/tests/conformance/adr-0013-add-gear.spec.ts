@@ -8,7 +8,9 @@ import {
   openAdvancedKeys,
   openProduct,
   openProductById,
+  productSection,
   resetCatalogueView,
+  revealInspector,
   revealCatalogue,
   test,
 } from "../fixtures/studio";
@@ -525,5 +527,70 @@ test.describe("Add Gear shows consequences before the write", () => {
 
     await page.locator("[data-add-gear-cancel]").click();
     await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0);
+  });
+
+  test("the Inspector explains a gear and does not offer a second copy of its form [ADR-0023 §Amendment: one surface configures]", async ({
+    studio,
+  }) => {
+    // **A negative claim, and it is the only thing that stops the duplication
+    // coming back.** `GearSettings` was rendered by the Composition pane and by
+    // the Inspector, which put two editable copies of one form on screen over
+    // one draft -- so an Apply belonged to a draft, and neither surface said
+    // which. Nothing that asserts a form is present can notice a second one
+    // appearing beside it; this asserts the absence.
+    const { page } = studio;
+    await openProduct(page, "dev");
+    const form = await configureGear(page, "api-gateway");
+    await expect(form).toBeVisible({ timeout: 60_000 });
+
+    await revealInspector(page);
+    const inspector = page.locator(".gbx-inspector");
+    await expect(inspector).toBeVisible({ timeout: 30_000 });
+    await expect(inspector, "the panel is about this gear").toHaveAttribute(
+      "data-inspecting",
+      "gear:api-gateway",
+    );
+    // What it keeps: the facts Composition does not show.
+    // `.first()`: the explanation section below carries a title of its own.
+    await expect(inspector.locator(".gbx-detail-title").first()).toContainText("api-gateway");
+    // What it no longer has.
+    await expect(
+      inspector.locator("[data-gear-config]"),
+      "configuring is the Composition pane's act",
+    ).toHaveCount(0);
+    await expect(inspector.locator("[data-plugin-settings]")).toHaveCount(0);
+    // And exactly one form on the whole page, which is the point of the split.
+    await expect(page.locator('[data-gear-config="api-gateway"]')).toHaveCount(1);
+  });
+
+  test("Configure in product carries the gear from the Inspector to its form [ADR-0023 §Amendment: one surface configures]", async ({
+    studio,
+  }) => {
+    // The other half of the split. Taking the forms out of the Inspector only
+    // works if reading about a gear still leads to setting it up -- otherwise
+    // the change merely removed something.
+    const { page } = studio;
+    await openProduct(page, "dev");
+    await productSection(page, "overview");
+    await revealCatalogue(page);
+    await resetCatalogueView(page);
+    await page.locator(".gbx-widget-catalogue .gbx-row", { hasText: "api-gateway" }).click();
+    await revealInspector(page);
+
+    const go = page.locator('[data-configure-in-product="api-gateway"]');
+    await expect(go).toBeVisible({ timeout: 60_000 });
+    await go.click();
+
+    // One click lands on the stage *and* on the object: a button that showed
+    // Composition without carrying the selection would leave a person to find
+    // the gear again, which is the trip this exists to remove.
+    await expect(page.locator('[data-product-section="composition"]')).toHaveAttribute(
+      "aria-selected",
+      "true",
+      { timeout: 30_000 },
+    );
+    await expect(
+      page.locator('.gbx-composition-settings [data-gear-config="api-gateway"]'),
+    ).toBeVisible({ timeout: 30_000 });
   });
 });
