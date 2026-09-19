@@ -111,6 +111,20 @@ export interface DiagnosticsListProps {
    * render, rather than rendering and doing nothing.
    */
   readonly onExplain?: (selection: Selection) => void;
+  /**
+   * Take the person to the control that would fix this, for a gear.
+   *
+   * **Separate from `onExplain`, because they are different destinations.**
+   * `onExplain` points a panel at the subject so it can say *why*; this opens
+   * the form that would change it. A warning about `event-broker`'s `mode` could
+   * be explained and could be opened in the `.gdl`, and neither of those is the
+   * numeric box that sets it -- so the way to the box was to remember the gear's
+   * name, go to Composition and find it again.
+   *
+   * Omitted where there is no such destination, the way `onExplain` is: the
+   * Conflicts panel offers it, the Add Gear preview does not.
+   */
+  readonly onConfigure?: (gear: string) => void;
   /** Sorted worst-first unless the caller has already ordered it. */
   readonly sorted?: boolean;
 }
@@ -126,6 +140,7 @@ export function DiagnosticsList(props: DiagnosticsListProps): React.ReactElement
           diagnostic={diagnostic}
           onReveal={props.onReveal}
           onExplain={props.onExplain}
+          onConfigure={props.onConfigure}
         />
       ))}
     </ul>
@@ -136,12 +151,14 @@ export interface DiagnosticRowProps {
   readonly diagnostic: Diagnostic;
   readonly onReveal?: (location: Location) => void;
   readonly onExplain?: (selection: Selection) => void;
+  readonly onConfigure?: (gear: string) => void;
 }
 
 export function DiagnosticRow({
   diagnostic,
   onReveal,
   onExplain,
+  onConfigure,
 }: DiagnosticRowProps): React.ReactElement {
   const selection = selectionOf(diagnostic.subject);
   const help = diagnostic.help ?? undefined;
@@ -188,6 +205,20 @@ export function DiagnosticRow({
             <Where location={related.location} preposition="at" onReveal={onReveal} />
           </span>
         ))}
+        {/* **The form, not the file and not the explanation.** Offered only for a
+            gear, because a gear is the only subject with a settings form; an
+            application and a binding are things the resolver made, and there is
+            no box to take anyone to. */}
+        {selection?.kind === "gear" && onConfigure !== undefined && (
+          <button
+            type="button"
+            className="gbx-conflict-explain"
+            data-conflict-configure={selection.id}
+            onClick={() => onConfigure(selection.id)}
+          >
+            configure {selection.id}
+          </button>
+        )}
         {selection !== undefined && onExplain !== undefined && (
           <button
             type="button"

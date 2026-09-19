@@ -30,6 +30,7 @@ import {
   expectContext,
   openGraph,
   openProduct,
+  openProductById,
   productSection,
   resetCatalogueView,
   revealCatalogue,
@@ -717,5 +718,38 @@ test.describe("opening a product is one act", () => {
       // The studio is worker-scoped, so the viewport outlives this test.
       await page.setViewportSize({ width: 1600, height: 1000 });
     }
+  });
+
+  test("a diagnostic leads to the control that would fix it [plan §9.1: Validation is a screen]", async ({
+    studio,
+  }) => {
+    // **The stage stopped being a doorway and was still a dead end.** A warning
+    // about a gear's `mode` offered two destinations: the `.gdl` at a range, and
+    // a panel saying *why*. Neither is the box that sets it, so the way from the
+    // warning to the field was to remember the gear's name, go to Composition,
+    // and find it again.
+    const { page } = studio;
+    await openProductById(page, "configurable-gears", "dev");
+    await productSection(page, "validation");
+
+    const configure = page.locator("[data-conflict-configure]").first();
+    await expect(configure, "a diagnostic about a gear offers its form").toBeVisible({
+      timeout: 60_000,
+    });
+    const gear = await configure.getAttribute("data-conflict-configure");
+    expect(gear).not.toBeNull();
+    await configure.click();
+
+    // One act: the stage *and* the object, with the form on screen. A button
+    // that showed Composition without carrying the selection would leave the
+    // person exactly where they started.
+    await expect(page.locator('[data-product-section="composition"]')).toHaveAttribute(
+      "aria-selected",
+      "true",
+      { timeout: 30_000 },
+    );
+    await expect(
+      page.locator(`.gbx-composition-settings [data-gear-config="${String(gear)}"]`),
+    ).toBeVisible({ timeout: 30_000 });
   });
 });

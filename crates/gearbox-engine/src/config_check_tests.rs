@@ -433,6 +433,19 @@ fn a_required_field_with_no_default_and_no_value_is_reported() {
     assert_eq!(reported[0].severity, gearbox_ir::Severity::Warning);
     assert!(reported[0].message.contains("mode"), "{:?}", reported[0]);
 
+    // **And it names the gear, not only the line.** The location points at the
+    // `use_gear` entry, which is where the value would be *typed*; nobody sets
+    // config that way in the Studio, where the configurator is a form reached
+    // from a gear. Without a subject the Validation screen could offer the
+    // description and an explanation and nothing else, so the route from this
+    // very message to the field it names went through remembering the gear's id.
+    assert_eq!(
+        reported[0].subject.as_ref().map(gearbox_ir::NodeId::as_str),
+        Some("gear:demo"),
+        "{:?}",
+        reported[0]
+    );
+
     // And setting it is the remedy the help names.
     let mut diagnostics = Diagnostics::default();
     check(

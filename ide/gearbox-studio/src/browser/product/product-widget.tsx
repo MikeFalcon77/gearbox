@@ -1336,10 +1336,7 @@ export class ProductWidget extends ReactWidget {
           </div>
         </div>
         {diagnostics.length === 0 ? (
-          <div className="gbx-empty">
-            This profile resolved with nothing to report. Another profile may not: the same
-            description resolves differently under each one.
-          </div>
+          this.renderNothingToReport()
         ) : (
           <>
             <DiagnosticsList
@@ -1347,6 +1344,18 @@ export class ProductWidget extends ReactWidget {
               sorted
               onReveal={(location) => void this.reveals.revealLocation(location)}
               onExplain={(selection) => this.selection.select(selection)}
+              // **To the control, in one act.** `onReveal` ends in a text editor
+              // and `onExplain` ends in a panel saying why; neither is the box
+              // that sets the value. Without this the way from a warning about
+              // `mode` to the field named `mode` was to remember the gear, go to
+              // Composition, and find it again.
+              onConfigure={(gear) => {
+                this.selection.select({ kind: "gear", id: gear });
+                this.showSection("composition");
+                requestAnimationFrame(() =>
+                  document.querySelector<HTMLElement>(".gbx-composition-settings")?.focus(),
+                );
+              }}
             />
             <button
               type="button"
@@ -1359,6 +1368,47 @@ export class ProductWidget extends ReactWidget {
             </button>
           </>
         )}
+      </div>
+    );
+  }
+
+  /**
+   * The empty half of Validation, which is only empty for one reason.
+   *
+   * **An empty array is not a clean bill of health.** This rendered "this
+   * profile resolved with nothing to report" from `diagnostics.length === 0`
+   * alone, and three states produce an empty array without meaning it: `open()`
+   * clears the array while `status` is `loading`, `resolveCurrent` sets
+   * `resolving` without clearing anything, and `fail()` stores
+   * `diagnosticsOf(error) ?? []` -- so an engine error carrying no structured
+   * diagnostics rendered as success.
+   *
+   * Observed as `0 errors / 0 warnings` and the success sentence, with three
+   * warnings arriving a moment later. A screen whose job is to say whether
+   * anything is wrong must not say "no" while it is still finding out.
+   */
+  protected renderNothingToReport(): React.ReactNode {
+    const { status, error } = this.store.current;
+    if (status === "loading" || status === "resolving") {
+      return (
+        <div className="gbx-empty" role="status" data-validation-pending={status}>
+          {status === "loading" ? "Reading the description…" : "Resolving this profile…"} Nothing is
+          known about this profile yet.
+        </div>
+      );
+    }
+    if (status === "error") {
+      return (
+        <div className="gbx-empty gbx-error" role="alert" data-validation-failed>
+          This profile could not be resolved, so there is nothing to report *yet* rather than
+          nothing to report. {error ?? "The engine gave no reason."}
+        </div>
+      );
+    }
+    return (
+      <div className="gbx-empty" data-validation-clean>
+        This profile resolved with nothing to report. Another profile may not: the same description
+        resolves differently under each one.
       </div>
     );
   }

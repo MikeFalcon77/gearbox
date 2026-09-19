@@ -36,7 +36,7 @@ import type {
  * read the pass counts and called the suite green while the run was exiting 1.
  * If you are checking whether the suite passes, check the exit code.
  */
-const EXPECTED_TESTS = 183;
+const EXPECTED_TESTS = 184;
 
 
 type Status = "built" | "broken" | "not-built" | "unobserved";

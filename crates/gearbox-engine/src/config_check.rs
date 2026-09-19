@@ -202,22 +202,35 @@ fn report_unset_required(
         if derived.contains(field.name.as_str()) || selection.config.contains_key(&field.name) {
             continue;
         }
-        diagnostics.push(
-            Diagnostic::new(
-                DiagnosticCode::GdlRequiredConfigUnset,
-                format!(
-                    "`{}` requires `{}` and `{}` declares no default for it, and this \
+        let mut diagnostic = Diagnostic::new(
+            DiagnosticCode::GdlRequiredConfigUnset,
+            format!(
+                "`{}` requires `{}` and `{}` declares no default for it, and this \
                      description sets no value",
-                    selection.gear, field.name, schema.rust
-                ),
-            )
-            .with_help(format!(
-                "set `{}` in this gear's `config = {{...}}`, or the generated file will be \
+                selection.gear, field.name, schema.rust
+            ),
+        )
+        .with_help(format!(
+            "set `{}` in this gear's `config = {{...}}`, or the generated file will be \
                  missing a field the gear's loader refuses at startup",
-                field.name
-            ))
-            .at(location(selection, uri)),
-        );
+            field.name
+        ))
+        .at(location(selection, uri));
+        // **Named, so a client can offer the control that fixes it.** The
+        // location alone points at the `use_gear` line, which is where the value
+        // would be *typed* and not where anyone sets it in the Studio: the
+        // configurator is a form, reached from a gear. Without a subject the
+        // Validation stage could only offer the description and an explanation,
+        // and the way to the field named in this very message was to remember
+        // the gear, change stage, and find it again.
+        //
+        // `if let` rather than an `about` taking an `Option`, matching
+        // `resolve::bindings`: an id that cannot be built is a diagnostic
+        // without a subject, which is the ordinary case, not an error.
+        if let Some(node) = gearbox_ir::NodeKind::Gear.id_for(selection.gear.as_str()) {
+            diagnostic = diagnostic.about(node);
+        }
+        diagnostics.push(diagnostic);
     }
 }
 
