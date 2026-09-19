@@ -568,7 +568,37 @@ export class AddGearViewContribution extends ScopedViewContribution<Widget> {
     if (this.dialog && !this.dialog.isDisposed) { this.dialog.activate(); return; }
     const dialog = new AddGearDialog(this.catalogue, this.products, this.edits, this.selection, this.compositionCommands, state);
     this.dialog = dialog;
-    try { await dialog.open(); } finally { dialog.dispose(); if (this.dialog === dialog) this.dialog = undefined; }
+    try {
+      const added = await dialog.open();
+      // **Only when nothing was added.** A successful add moves the focus to
+      // the settings pane on purpose -- the gear is in the product and the next
+      // thing to do is configure it -- so restoring here would fight it.
+      if (added !== true) this.returnFocus(state);
+    } finally { dialog.dispose(); if (this.dialog === dialog) this.dialog = undefined; }
+  }
+
+  /**
+   * Put the keyboard back where it was when the dialog opened.
+   *
+   * **Theia already does this and it does not survive a re-render.**
+   * `AbstractDialog` saves `document.activeElement` at `open()` and focuses it
+   * on `close()`; but the Composition tree re-renders while the dialog is up --
+   * a resolve arrives, a draft changes -- so the node it saved is detached by
+   * then, focusing a detached element does nothing, and focus falls to the body.
+   * Escape closed the dialog and left the keyboard nowhere.
+   *
+   * So the control is found again by what it *is* rather than by the node it
+   * was, which is the same reason the conformance fixtures address controls by
+   * `data-*`. The choice that opened the dialog says which control that is.
+   */
+  protected returnFocus(state?: AddGearChoice): void {
+    const selector =
+      state?.host !== undefined && state.point !== undefined
+        ? `[data-add-plugin-for="${state.host}:${state.point}"]`
+        : state?.gearId !== undefined
+          ? `[data-toggle-gear="${state.gearId}"]`
+          : "[data-add-gear]";
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(selector)?.focus());
   }
 }
 

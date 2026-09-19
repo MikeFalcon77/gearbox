@@ -101,6 +101,15 @@ export class ProductWidget extends ReactWidget {
    * is a gear -- and one id can legitimately be both.
    */
   protected foldedHosts = new Set<string>();
+  /**
+   * What the Composition pane is about.
+   *
+   * The last selection made *in this product* -- a gear in the tree, a
+   * connection under it, a diagnostic's subject. Deliberately not
+   * `SelectionService.current`: that also carries what is selected in the
+   * catalogue, and this pane is not about the catalogue.
+   */
+  protected productSelection: Selection | undefined;
 
   /**
    * Which stage of the product a person is looking at.
@@ -142,7 +151,20 @@ export class ProductWidget extends ReactWidget {
 
   @postConstruct()
   protected init(): void {
-    this.toDispose.push(this.selection.onDidChange(() => this.update()));
+    this.toDispose.push(
+      this.selection.onDidChange((current) => {
+        // **Only a selection made in this product moves the settings pane.**
+        // A catalogue click is a different act (`catalogue-gear`), and letting
+        // it through replaced the form a person was working in with a card
+        // about a gear they had merely looked up. The wrong *explanation* was
+        // the first half of that defect; this is the other half -- independence
+        // of the two selections, not just honesty about them.
+        if (current?.kind === "gear" || current?.kind === "plugin") {
+          this.productSelection = current;
+        }
+        this.update();
+      }),
+    );
     this.toDispose.push(this.catalogue.onChanged(() => this.update()));
     this.id = ProductWidget.ID;
     this.title.label = ProductWidget.LABEL;
@@ -566,7 +588,7 @@ export class ProductWidget extends ReactWidget {
 
   protected renderComposition(): React.ReactNode {
     const state = this.store.current;
-    const selection = this.selection.current;
+    const selection = this.productSelection;
     return <>
       {/* **The count, not a second pair of buttons.** Apply and Discard live in
           the toolbar, once, because the draft is product-wide: two pairs gated
@@ -644,50 +666,11 @@ export class ProductWidget extends ReactWidget {
       return this.renderGearSettings(selection.id, descriptorFor(selection.id));
     }
 
-    // **A catalogue click is answered, not ignored.** It is a different act from
-    // choosing a gear in this product -- the pane must not start editing on it --
-    // but falling through to "select something" over a pane that plainly has a
-    // selection reads as a panel that broke. So it says which act happened, and
-    // offers the one that would change this product.
-    if (selection?.kind === "catalogue-gear") {
-      const picked = state.intent?.selected_gears.some((e) => e.gear === selection.id) === true;
-      return (
-        <div className="gbx-detail" data-catalogue-selected={selection.id}>
-          <GearHeading id={selection.id} descriptor={descriptorFor(selection.id)} />
-          <GearBlurb descriptor={descriptorFor(selection.id)} />
-          <div className="gbx-empty">
-            <code>{selection.id}</code> is selected in the catalogue.
-          </div>
-          {picked ? (
-            <button
-              type="button"
-              className="gbx-choice"
-              data-configure-in-product={selection.id}
-              onClick={() => {
-                this.selection.select({ kind: "gear", id: selection.id });
-                this.update();
-              }}
-            >
-              Configure in product
-            </button>
-          ) : (
-            state.open !== undefined && (
-              <button
-                type="button"
-                className="gbx-choice"
-                data-add-to-product={selection.id}
-                onClick={() =>
-                  void this.commands.executeCommand(ADD_GEAR.id, { gearId: selection.id })
-                }
-              >
-                Add to product
-              </button>
-            )
-          )}
-        </div>
-      );
-    }
-
+    // **A catalogue selection never reaches here**, because this pane reads
+    // `productSelection` rather than the service: looking a gear up in the
+    // catalogue is not a request to stop configuring the one in front of you.
+    // The Inspector is where a catalogue row is answered, and it opens itself
+    // for exactly that act.
     return (
       <div className="gbx-empty">
         Select a gear or a plugin connection in the tree to configure it.

@@ -54,8 +54,17 @@ export function Composition({ state, descriptors, selection, select, add, remove
   const automatic = Object.entries(state.resolution?.product?.gears ?? {}).filter(([id]) => !named.has(id) && !plugins.has(id));
   return <div className="gbx-composition" data-composition>
     <nav className="gbx-composition-tree" aria-label="Product composition">
-      <h3>Selected gears ({explicit.length})</h3>
-      {explicit.length === 0 && <div className="gbx-empty">Your product has no gears yet. Choose a gear, then configure it here.
+      <h3>Selected gears{explicit.length === 0 && (state.status === "loading" || state.status === "resolving") ? "" : ` (${explicit.length})`}</h3>
+      {/* **An empty intent is not an empty product while one is being read.**
+          `open()` sets `status: "loading"` with no intent yet, so a product
+          with six gears rendered `Selected gears (0)` and "your product has no
+          gears yet" for as long as the read took, and then filled in. A screen
+          that says a product is empty must be sure it is. */}
+      {explicit.length === 0 && (state.status === "loading" || state.status === "resolving") &&
+        <div className="gbx-empty" role="status" data-composition-loading={state.status}>
+          {state.status === "loading" ? "Reading the description…" : "Resolving…"}
+        </div>}
+      {explicit.length === 0 && state.status !== "loading" && state.status !== "resolving" && <div className="gbx-empty">Your product has no gears yet. Choose a gear, then configure it here.
         <button type="button" className="gbx-start-primary" onClick={() => add()}>Add gear</button>
       </div>}
       {explicit.map(host => {
@@ -131,7 +140,11 @@ export function Composition({ state, descriptors, selection, select, add, remove
             {points.map(point => <section className="gbx-composition-slot" key={point.key}>
               <h4>{point.label}</h4>
               {renderConnections(connections.filter(c => c.point && pointKey(c.point) === point.key))}
-              <button type="button" onClick={() => add(host.gear, point.key)}>Add compatible plugin</button>
+              {/* Marked so the dialog can hand the keyboard back to it: Theia
+                  restores focus to the *node* that was active, and this tree
+                  re-renders while the dialog is up. */}
+              <button type="button" data-add-plugin-for={`${host.gear}:${point.key}`}
+                onClick={() => add(host.gear, point.key)}>Add compatible plugin</button>
             </section>)}
             {unassigned.length > 0 && <section className="gbx-composition-slot"><h4>Connections needing review</h4>{renderConnections(unassigned)}</section>}
           </>}

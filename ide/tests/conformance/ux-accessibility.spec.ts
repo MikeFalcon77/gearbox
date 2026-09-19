@@ -15,7 +15,14 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { expect, openProduct, revealCatalogue, resetCatalogueView, test } from "../fixtures/studio";
+import {
+  expect,
+  openProduct,
+  productSection,
+  revealCatalogue,
+  resetCatalogueView,
+  test,
+} from "../fixtures/studio";
 
 const STUDIO_SRC = join(__dirname, "../../gearbox-studio/src");
 
@@ -110,5 +117,33 @@ test.describe("controls that can be operated can be named", () => {
     await expect(
       studio.page.locator('[data-in-product-badge="api-gateway"]'),
     ).toBeVisible();
+  });
+
+  test("closing the add dialog hands the keyboard back to the control that opened it [ADR-0011 §Confirmation]", async ({
+    studio,
+  }) => {
+    // **Theia does this already, and it does not survive a re-render.**
+    // `AbstractDialog` saves `document.activeElement` at `open()` and focuses it
+    // on `close()` -- but the Composition tree re-renders while the dialog is up,
+    // so the node it saved is detached by then. Focusing a detached element does
+    // nothing, and Escape left the keyboard on the body.
+    const { page } = studio;
+    await openProduct(page, "dev");
+    await productSection(page, "composition");
+
+    const opener = page.locator("[data-add-plugin-for]").first();
+    await expect(opener).toBeVisible({ timeout: 60_000 });
+    const marker = await opener.getAttribute("data-add-plugin-for");
+    await opener.click();
+    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0, { timeout: 30_000 });
+    await expect
+      .poll(
+        () => page.evaluate(() => document.activeElement?.getAttribute("data-add-plugin-for")),
+        { timeout: 15_000 },
+      )
+      .toBe(marker);
   });
 });

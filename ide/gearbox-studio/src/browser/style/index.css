@@ -1051,7 +1051,18 @@
    application, one way to switch between views of the same object -- with the
    Generate link set apart, because it leads out of this panel rather than
    changing what is in it. */
+/* **Sticky, because this panel scrolls as a whole.** With the pane narrow the
+   Composition grid stacks, so the settings sit below the entire gear list and a
+   person reading a form had scrolled the product's name, its profile switcher
+   and the stage tabs off the top -- there was nothing on screen saying which
+   product or which profile the form belonged to.
+
+   The nav alone, not the title block: a sticky header deep enough to hold
+   everything would cost more of a short pane than it returns. */
 .gbx-product-nav {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--theia-editor-background);
+
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   margin: 8px 0 6px; padding-bottom: 6px;
   border-bottom: 1px solid var(--theia-editorGroup-border);
@@ -1275,6 +1286,12 @@
    leaving a settings column worth reading. */
 @container (max-width: 800px) {
   .gbx-composition, .gbx-add-dialog-columns { grid-template-columns: 1fr; }
+  /* **The tree gets its own scroll once it is above the settings.** Stacked,
+     a six-gear tree with its connections pushed the form off the bottom of the
+     pane, so reaching the control meant scrolling past everything that is not
+     it. Side by side the two columns are independent already and this does not
+     apply. */
+  .gbx-composition-tree { max-height: 45vh; overflow: auto; }
   /* Stacked, the divider between the columns becomes a line down the left of a
      full-width block, which reads as a quote rather than as a division. */
   .gbx-composition-tree { border-right: none; padding-right: 0; border-bottom: 1px solid var(--theia-panel-border); padding-bottom: 12px; }

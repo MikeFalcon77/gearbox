@@ -592,4 +592,35 @@ test.describe("Add Gear shows consequences before the write", () => {
       page.locator('.gbx-composition-settings [data-gear-config="api-gateway"]'),
     ).toBeVisible({ timeout: 30_000 });
   });
+
+  test("looking a gear up in the catalogue does not stop configuring the one in front of you [ADR-0023 §Amendment: one surface configures]", async ({
+    studio,
+  }) => {
+    // **The other half of the selection split.** Normalising a catalogue row to
+    // `{kind:"gear"}` produced two defects, and the first fix only closed one.
+    // The Composition pane stopped claiming a catalogue gear was "included by
+    // another gear" -- but it still *replaced* the form being worked in with a
+    // card about the gear that had merely been looked up. Honesty about the two
+    // acts is not the same as independence between them.
+    const { page } = studio;
+    await openProduct(page, "dev");
+    const form = await configureGear(page, "api-gateway");
+    await expect(form).toBeVisible({ timeout: 60_000 });
+
+    await revealCatalogue(page);
+    await resetCatalogueView(page);
+    await page.locator(".gbx-widget-catalogue .gbx-row", { hasText: "Tenant Resolver" }).first().click();
+    // The catalogue's own selection did land -- this is not passing because the
+    // click missed.
+    await expect(page.locator(".gbx-widget-catalogue .gbx-row.gbx-selected")).toHaveCount(1);
+
+    await expect(
+      page.locator('.gbx-composition-settings [data-gear-config="api-gateway"]'),
+      "the pane is still configuring the gear the person chose in the product",
+    ).toBeVisible();
+    await expect(
+      page.locator(".gbx-composition-settings"),
+      "and has not been given the catalogue's subject instead",
+    ).not.toContainText("tenant-resolver");
+  });
 });

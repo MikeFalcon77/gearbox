@@ -257,7 +257,11 @@ export class AddGearDialog extends ReactDialog<boolean> {
         {!filtered.length && <p>No matching gears. Entries still being projected become available when ready.</p>}
       </nav><section aria-label="Addition preview">
         {!chosen ? <p>Choose a gear to see what it adds to your product.</p> : <>
-          <h3>{chosen.display_name || chosen.id}</h3><p>{chosen.description}</p><small>Source: {chosen.source}</small>
+          {/* Each fact on its own line. `<small>` and the `Host` label below it
+              are both inline-level with nothing between them, so they rendered
+              as `Source: gears-rustHost` -- two facts read as one word. */}
+          <h3>{chosen.display_name || chosen.id}</h3><p>{chosen.description}</p>
+          <div className="gbx-kv"><span>source</span><span>{chosen.source}</span></div>
           {chosen.fills && <><label data-add-gear-host data-add-gear-plugin={chosen.id}>Host<select data-add-gear-host-pick aria-label="Plugin host" value={this.host ?? ""} disabled={!!this.initial.host} onChange={e => { this.host = e.target.value; void this.refreshPreview(); }}><option value="">Choose a host</option>{this.hosts(chosen).map(h => <option key={h.id} value={h.id}>{h.id}</option>)}</select></label>
             {!this.hosts(chosen).length && <p data-add-gear-host-none>{this.pending()}</p>}
             <ProfileScope legend="Profiles for this connection" profiles={this.profiles}
