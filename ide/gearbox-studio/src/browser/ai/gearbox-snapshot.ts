@@ -60,7 +60,11 @@ export function selectionSnapshot(
   if (selection === undefined) return { kind: "none" };
   switch (selection.kind) {
     case "plugin": return selection;
+    // **Both acts snapshot as one gear.** The chat is being asked about the
+    // gear, and which panel the person clicked is not part of the question. The
+    // distinction exists to decide what may be *edited*, and nothing here edits.
     case "gear":
+    case "catalogue-gear":
       return { kind: "gear", id: selection.id };
     case "application":
       return { kind: "application", id: selection.id };
@@ -87,6 +91,7 @@ export function selectionLabel(
     case "plugin":
       return `${selection.host} / ${selection.id} (connection ${selection.entryIndex + 1})`;
     case "gear":
+    case "catalogue-gear":
       return selection.id;
     case "application":
       return selection.id;

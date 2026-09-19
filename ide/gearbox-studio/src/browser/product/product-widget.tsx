@@ -555,16 +555,6 @@ export class ProductWidget extends ReactWidget {
     this.update();
   }
 
-  /**
-   * Which stage is showing.
-   *
-   * Exposed for one reader: the Inspector opens itself on every selection, and
-   * over the Composition pane that means a second copy of the settings form the
-   * person is already looking at. It has to be able to ask.
-   */
-  public get currentSection(): ProductSection {
-    return this.section;
-  }
 
   protected renderComposition(): React.ReactNode {
     const state = this.store.current;
@@ -639,6 +629,50 @@ export class ProductWidget extends ReactWidget {
 
     if (selection?.kind === "gear") {
       return this.renderGearSettings(selection.id, descriptorFor(selection.id));
+    }
+
+    // **A catalogue click is answered, not ignored.** It is a different act from
+    // choosing a gear in this product -- the pane must not start editing on it --
+    // but falling through to "select something" over a pane that plainly has a
+    // selection reads as a panel that broke. So it says which act happened, and
+    // offers the one that would change this product.
+    if (selection?.kind === "catalogue-gear") {
+      const picked = state.intent?.selected_gears.some((e) => e.gear === selection.id) === true;
+      return (
+        <div className="gbx-detail" data-catalogue-selected={selection.id}>
+          <GearHeading id={selection.id} descriptor={descriptorFor(selection.id)} />
+          <GearBlurb descriptor={descriptorFor(selection.id)} />
+          <div className="gbx-empty">
+            <code>{selection.id}</code> is selected in the catalogue.
+          </div>
+          {picked ? (
+            <button
+              type="button"
+              className="gbx-choice"
+              data-configure-in-product={selection.id}
+              onClick={() => {
+                this.selection.select({ kind: "gear", id: selection.id });
+                this.update();
+              }}
+            >
+              Configure in product
+            </button>
+          ) : (
+            state.open !== undefined && (
+              <button
+                type="button"
+                className="gbx-choice"
+                data-add-to-product={selection.id}
+                onClick={() =>
+                  void this.commands.executeCommand(ADD_GEAR.id, { gearId: selection.id })
+                }
+              >
+                Add to product
+              </button>
+            )
+          )}
+        </div>
+      );
     }
 
     return (

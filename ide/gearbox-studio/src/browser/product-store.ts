@@ -24,7 +24,7 @@ import type { ProductIntent } from "../common/generated/ProductIntent";
 import type { ResolveResult } from "../common/generated/ResolveResult";
 import { GearboxService, ProductRef } from "../common/protocol";
 import {
-  isProductSelection,
+  asFocus,
   type ProductSelection,
   SelectionService,
 } from "./shell/selection-service";
@@ -149,11 +149,16 @@ export class ProductStore {
   }
 
   get focus(): Focus | undefined {
-    const selection = this.selection.current;
     // A pending catalogue row is not something a resolution can be asked about:
     // it has no `GearId` until S2 has run, and the explanation graph is keyed by
     // id. So it reads as "nothing focused" here, and the Inspector says why.
-    return isProductSelection(selection) ? selection : undefined;
+    //
+    // A gear chosen in the catalogue *is* askable, and `asFocus` flattens it:
+    // "why is this gear the way it is" has an answer for anything in the
+    // closure, and refusing it because the question came from the catalogue
+    // would blank the explanation panel exactly where it is most useful. What
+    // does not flatten is the right to edit, which the kind decides elsewhere.
+    return asFocus(this.selection.current);
   }
 
   setFocus(focus: Focus | undefined): void {

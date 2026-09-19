@@ -40,7 +40,7 @@ import { describeFocus, nodeIdOf } from "./effective-config";
 import { RevealLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
 import { ADD_GEAR, SHOW_PRODUCT } from "../shell/session-command-ids";
-import { Selection, SelectionService } from "../shell/selection-service";
+import { gearIdOf, Selection, SelectionService } from "../shell/selection-service";
 
 /** One rendered step: an edge, with both of its nodes resolved. */
 interface Step {
@@ -157,8 +157,10 @@ export class InspectorWidget extends ReactWidget {
   /** The row a selection points at, whichever way it was made. */
   protected rowFor(selection: Selection): Row | undefined {
     if (selection.kind === "catalogue-row") return this.catalogue.row(selection.key);
-    if (selection.kind !== "gear") return undefined;
-    return this.catalogue.current.rows.find(row => row.kind === "projected" && row.gear.id === selection.id);
+    // Either act: this panel explains a gear, and it is the same gear either way.
+    const id = gearIdOf(selection);
+    if (id === undefined) return undefined;
+    return this.catalogue.current.rows.find(row => row.kind === "projected" && row.gear.id === id);
   }
 
   // ---- what it is --------------------------------------------------------
@@ -564,6 +566,10 @@ function keyOf(selection: Selection): string {
     case "gear":
     case "application":
       return `${selection.kind}:${selection.id}`;
+    // Distinct from `gear:`, because the two are distinct selections and this
+    // value is how a test says which one it means.
+    case "catalogue-gear":
+      return `catalogue-gear:${selection.id}`;
     case "plugin":
       return `plugin:${selection.path}:${selection.host}:${selection.entryIndex}`;
     case "binding":

@@ -33,7 +33,7 @@ import type {
 import { CatalogueStore } from "../catalogue-store";
 import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
-import { SelectionService } from "../shell/selection-service";
+import { SelectionService, gearIdOf } from "../shell/selection-service";
 import { effectiveConfigOf } from "../inspector/effective-config";
 import {
   diagnosticsSnapshot,
@@ -207,7 +207,10 @@ export class GearboxContextContribution implements AIVariableResolver {
     request: AIVariableResolutionRequest,
   ): ResolvedAIContextVariable | undefined {
     const selection = this.selection.current;
-    if (selection === undefined || selection.kind !== "gear") {
+    // The subject, not the act: what a gear is configured to is the same
+    // question whether the person picked it in the catalogue or in the product.
+    const selected = gearIdOf(selection);
+    if (selected === undefined) {
       return this.resolved(request, "no gear selected", {
         gear: null,
         why:
@@ -216,7 +219,7 @@ export class GearboxContextContribution implements AIVariableResolver {
             : `The selection is a ${selection.kind}, which has no gear configuration.`,
       });
     }
-    const gearId = selection.id;
+    const gearId = selected;
     const declared = this.products.current.intent?.selected_gears?.find(
       (entry) => entry.gear === gearId,
     )?.config;
@@ -245,7 +248,8 @@ export class GearboxContextContribution implements AIVariableResolver {
       return undefined;
     }
     if (payload.kind === "gear") {
-      this.selection.select({ kind: "gear", id: payload.id });
+      // Dropped from the catalogue, which is where the gear drag comes from.
+      this.selection.select({ kind: "catalogue-gear", id: payload.id });
       return { variables: [{ variable: SELECTION_VARIABLE }] };
     }
     if (payload.kind === "diagnostic") {

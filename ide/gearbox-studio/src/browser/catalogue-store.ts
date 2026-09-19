@@ -17,7 +17,7 @@ import { Emitter, Event } from "@theia/core/lib/common/event";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 
 import { EngineConnectionService } from "./shell/engine-connection-service";
-import { SelectionService } from "./shell/selection-service";
+import { gearIdOf, SelectionService } from "./shell/selection-service";
 
 import type { CatalogueChanged } from "../common/generated/CatalogueChanged";
 import type { CatalogueDiagnostics } from "../common/generated/CatalogueDiagnostics";
@@ -160,9 +160,14 @@ export class CatalogueStore implements Omit<GearboxClient, "onDocumentDiagnostic
     const selection = this.selection.current;
     if (selection === undefined) return undefined;
     if (selection.kind === "catalogue-row") return selection.key;
-    if (selection.kind !== "gear") return undefined;
+    // **Both gear acts highlight the row, and this is an `if` chain rather than
+    // a switch, so the compiler would not have said so.** The catalogue shows
+    // where a gear is whether it was chosen here or in the product tree --
+    // that is the half of "one subject" this panel is responsible for.
+    const id = gearIdOf(selection);
+    if (id === undefined) return undefined;
     for (const [key, row] of this.rowsByKey) {
-      if (row.kind === "projected" && row.gear.id === selection.id) return key;
+      if (row.kind === "projected" && row.gear.id === id) return key;
     }
     return undefined;
   }
@@ -263,8 +268,15 @@ export class CatalogueStore implements Omit<GearboxClient, "onDocumentDiagnostic
       return;
     }
     const row = this.rowsByKey.get(key);
+    // `catalogue-gear`, not `gear`. This normalised to `gear`, which made a
+    // catalogue click indistinguishable from choosing the same gear in the open
+    // product -- so the Composition pane answered a catalogue click by replacing
+    // the product's settings with a message about a gear the product does not
+    // contain. The id is still the subject; the kind now says which act it was.
     this.selection.select(
-      row?.kind === "projected" ? { kind: "gear", id: row.gear.id } : { kind: "catalogue-row", key },
+      row?.kind === "projected"
+        ? { kind: "catalogue-gear", id: row.gear.id }
+        : { kind: "catalogue-row", key },
     );
   }
 
