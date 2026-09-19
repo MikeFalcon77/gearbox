@@ -8,6 +8,8 @@
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { restoreProducts } from "./fixtures/products-tree";
+
 import {
   configureGear,
   expect,
@@ -849,7 +851,13 @@ test.describe("the diagnostics count is a signpost, not a hijack", () => {
       writeFileSync(gdl, original.replace(DECLARED, WITH_ERROR));
       await body();
     } finally {
-      writeFileSync(gdl, original);
+      // **From `git`, not from the snapshot above.** This was the last place in
+      // the suite that put a description back from bytes it had read: writing
+      // `original` back assumes it was the committed text, and when it is not --
+      // because something else left an edit behind -- the restore re-writes the
+      // damage instead of undoing it. The other five sites moved to
+      // `restoreProducts` after that turned one failure into three.
+      restoreProducts(REPO);
     }
   }
 
