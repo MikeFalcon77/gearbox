@@ -32,6 +32,40 @@ function commentLines(text: string): number {
   return text.split("\n").filter((line) => line.trim().startsWith("#")).length;
 }
 
+/**
+ * Queue the removal of one free config key, and see that it took.
+ *
+ * Clicking and moving on is what this suite did, and it loses to a remount: the
+ * settings pane re-renders on the draft epoch and on every store change, so a
+ * click can land on a node that is already detached. The row going is the
+ * observable that says the edit reached the draft, so the click and that check
+ * retry together.
+ */
+async function removeKey(
+  form: import("@playwright/test").Locator,
+  key: string,
+): Promise<void> {
+  const row = form.locator(`[data-config-key="${key}"]`);
+  // It has to be there before it can be removed. Without this the retry below
+  // cannot tell "already gone" from "not rendered yet".
+  await expect(row, `${key} must be on screen to be removed`).toHaveCount(1, {
+    timeout: 30_000,
+  });
+  // **Absence counts as success only after a click.** The first version of this
+  // returned early whenever the row was missing, which reads as idempotence and
+  // is not: during a remount the row is missing because it has not come back,
+  // so the helper did nothing, queued nothing, and the Apply it was preparing
+  // for waited forever on a button that never appeared. A 360s timeout on the
+  // *next* line, from a helper that reported success.
+  let clicked = false;
+  await expect(async () => {
+    if (clicked && (await row.count()) === 0) return;
+    await form.locator(`[data-config-remove="${key}"]`).click({ timeout: 5_000 });
+    clicked = true;
+    await expect(row).toHaveCount(0, { timeout: 5_000 });
+  }).toPass({ timeout: 20_000 });
+}
+
 async function acceptPreview(page: import("@playwright/test").Page): Promise<void> {
   const dialog = page.locator(".dialogBlock", {
     has: page.locator(".gbx-edit-preview, .gbx-create-preview"),
@@ -548,6 +582,7 @@ test.describe("a gear created for a product ends up in it", () => {
 });
 
 test.describe("edit config and profiles in the open product", () => {
+
   test("a config edit changes one line [ADR-0013 §Confirmation]", async ({ studio }) => {
     expect(diffOf(DEMO_REL)).toBe("");
 
@@ -588,7 +623,7 @@ test.describe("edit config and profiles in the open product", () => {
       // the file behind the app leaves the store holding the edited description
       // (§9.1), and a reload of the shared worker page races the next test against
       // an empty catalogue `rootPaths()`.
-      await form.locator('[data-config-remove="demo_mode"]').click();
+      await removeKey(form, "demo_mode");
       await studio.page.locator(".gbx-toolbar [data-draft-apply]").click();
       await acceptPreview(studio.page);
       await expect(form.locator('[data-config-key="demo_mode"]')).toHaveCount(0, {
@@ -674,8 +709,15 @@ test.describe("edit config and profiles in the open product", () => {
       // they cannot be what says the write happened.
       await expect.poll(() => diffOf(DEMO_REL), { timeout: 30_000 }).not.toBe("");
 
-      await form.locator('[data-config-remove="draft_a"]').click();
-      await form.locator('[data-config-remove="draft_b"]').click();
+      // **Each removal asserts itself.** These were two blind clicks, and a
+      // remount between them -- the previous Apply's reload is still settling,
+      // since the poll above waits on the *file* and the re-resolve continues
+      // after it -- ate one. The Apply then carried a draft of one removal, the
+      // file kept the other key, and the failure read exactly like the race the
+      // poll below guards against. It was not a race: it was a lost click, and
+      // a stable wrong answer.
+      await removeKey(form, "draft_a");
+      await removeKey(form, "draft_b");
       await draft.locator("[data-draft-apply]").click();
       await acceptPreview(studio.page);
       // Polled, not sampled: accepting the preview starts the write, and reading
