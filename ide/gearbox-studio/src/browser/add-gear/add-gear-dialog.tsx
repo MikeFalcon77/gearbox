@@ -13,6 +13,7 @@ import { fillsPointOf, pointKey, pointsOf } from "../../common/extension-points"
 import { productIdentity } from "../shell/screens";
 import { impactOf, type Impact } from "./impact";
 import { DiagnosticsList } from "../diagnostics/diagnostics-list";
+import { diffText } from "../product-edit-service";
 import { ProfileScope } from "../product/profile-scope";
 
 export interface AddGearChoice { gearId?: string; host?: string; point?: string }
@@ -322,8 +323,19 @@ export class AddGearDialog extends ReactDialog<boolean> {
           {/* `closure` is the section that answers "what would be written", which
               is the serialization itself rather than a description of it. */}
           <section data-add-gear-section="closure">
+            {/* **The lines that change, not the file that contains them.** This
+                rendered `preview.after`, which is the whole `product.gdl` --
+                comments and all -- open by default, so the one line being added
+                was somewhere in a hundred. The full text stays, one click away,
+                because "what exactly will my description look like" is a fair
+                question; it is just not the first one. */}
             {this.preview?.changed
-              ? <details open><summary>What will be written</summary><pre className="gbx-edit-preview">{this.preview.after}</pre></details>
+              ? <>
+                  <pre className="gbx-edit-preview" data-add-gear-diff>{diffText(this.preview)}</pre>
+                  <details><summary>The whole description, as it would be written</summary>
+                    <pre className="gbx-edit-preview" data-add-gear-after>{this.preview.after}</pre>
+                  </details>
+                </>
               : <p>{this.pending()}</p>}
           </section>
           <p>Configuration continues in the product after adding.</p>

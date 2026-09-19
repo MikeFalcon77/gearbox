@@ -919,13 +919,7 @@ export class ProductEditService {
   }
 
   protected diffText(preview: EditGearResult): string {
-    const before = preview.before.split("\n");
-    const after = preview.after.split("\n");
-    const added = after.filter((line) => !before.includes(line));
-    const removed = before.filter((line) => !after.includes(line));
-    return [...removed.map((line) => `- ${line.trim()}`), ...added.map((line) => `+ ${line.trim()}`)].join(
-      "\n",
-    );
+    return diffText(preview);
   }
 
   /**
@@ -1150,6 +1144,31 @@ function describeEdit(edit: ProductEdit): string {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The lines that change, for a preview to show.
+ *
+ * A free function because three surfaces want it and one of them holds this
+ * service by composition rather than by inheritance: the Add Gear dialog could
+ * not call the `protected` method, so it showed `preview.after` -- the entire
+ * `product.gdl`, comments and all -- for a change of one line.
+ *
+ * **A set difference, not an LCS diff, and that is worth knowing before reusing
+ * it.** Identical lines are dropped wherever they appear, so a line moved rather
+ * than changed shows as neither; duplicate lines collapse; and every line is
+ * trimmed, so indentation is lost. That is honest for the edits this makes --
+ * one entry, one key, one profile list -- and would not be for a refactor.
+ */
+export function diffText(preview: EditGearResult): string {
+  const before = preview.before.split("\n");
+  const after = preview.after.split("\n");
+  const added = after.filter((line) => !before.includes(line));
+  const removed = before.filter((line) => !after.includes(line));
+  return [
+    ...removed.map((line) => `- ${line.trim()}`),
+    ...added.map((line) => `+ ${line.trim()}`),
+  ].join("\n");
 }
 
 /** Mirror of `gearbox_gdl::edit::is_secret_config_key` for draft-time refusal. */

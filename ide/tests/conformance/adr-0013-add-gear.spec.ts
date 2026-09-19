@@ -44,10 +44,9 @@ test.describe("product session and Add Gear", () => {
     // the configurator and writes nothing -- is asserted against the
     // confirmation's own class.
     await expect(studio.page.locator(".gbx-edit-confirm")).toHaveCount(0);
-    await expect(studio.page.locator("[data-add-gear-flow] .gbx-edit-preview")).toContainText(
-      "tenant-resolver",
-      { timeout: 30_000 },
-    );
+    await expect(studio.page.locator("[data-add-gear-diff]")).toContainText("tenant-resolver", {
+      timeout: 30_000,
+    });
     await studio.page.locator("[data-add-gear-cancel]").click();
   });
 });
@@ -79,9 +78,7 @@ test.describe("Add Gear shows consequences before the write", () => {
     await expect(arrival).toContainText("asked for");
 
     // Nothing has been written: the description still does not name it.
-    await expect(page.locator("[data-add-gear-flow] .gbx-edit-preview")).toContainText(
-      "tenant-resolver",
-    );
+    await expect(page.locator("[data-add-gear-diff]")).toContainText("tenant-resolver");
     await page.locator("[data-add-gear-cancel]").click();
   });
 
@@ -153,7 +150,9 @@ test.describe("Add Gear shows consequences before the write", () => {
     // run's text *is* what would be written.
     const page = studio.page;
     await configure(page, "tenant-resolver");
-    const preview = page.locator("[data-add-gear-flow] .gbx-edit-preview");
+    // The exact serialization is the `<details>`, not the diff: this claim is
+    // about the batch's whole text, which is what a person opens it to read.
+    const preview = page.locator("[data-add-gear-after]");
     await expect(preview).toContainText("tenant-resolver", { timeout: 60_000 });
 
     // **A plugin is what this batch can still stage, and config is not.**

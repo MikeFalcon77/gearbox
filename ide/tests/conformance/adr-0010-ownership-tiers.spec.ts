@@ -318,7 +318,10 @@ test.describe("tier 3: a description edited surgically", () => {
     await toggle.click();
 
     await expect(studio.page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
-    await expect(studio.page.locator("[data-add-gear-flow] .gbx-edit-preview")).toContainText(
+    // `[data-add-gear-diff]`: the preview is the lines that change now, with the
+    // whole description behind a `<details>`, so `.gbx-edit-preview` matches
+    // both.
+    await expect(studio.page.locator("[data-add-gear-diff]")).toContainText(
       'use_gear("tenant-resolver"',
       { timeout: 30_000 },
     );
