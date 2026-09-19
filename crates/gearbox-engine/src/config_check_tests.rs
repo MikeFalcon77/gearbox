@@ -445,6 +445,15 @@ fn a_required_field_with_no_default_and_no_value_is_reported() {
         "{:?}",
         reported[0]
     );
+    // **And which key, because the gear is not the answer either.** The subject
+    // opens the right form; the message names the field; a person should not
+    // have to read the name out of the sentence and find the row themselves.
+    assert_eq!(
+        reported[0].config_key.as_deref(),
+        Some("mode"),
+        "{:?}",
+        reported[0]
+    );
 
     // And setting it is the remedy the help names.
     let mut diagnostics = Diagnostics::default();

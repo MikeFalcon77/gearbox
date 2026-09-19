@@ -383,7 +383,32 @@
    two columns with a 230px floor were forced into a pane that could not hold
    them. The converse was just as wrong: collapsing both side panels on a small
    laptop gave a wide pane still pinned to one column. */
-.gbx-product { padding: 6px 10px; overflow: auto; height: 100%; container-type: inline-size; }
+.gbx-product {
+  /* `border-box`, or the padding is added to `height: 100%` and the panel ends
+     up taller than the widget that holds it -- 12px of content clipped at the
+     bottom by the widget's own `overflow: hidden`, with nothing scrollable to
+     reach it. */
+  box-sizing: border-box;
+  padding: 6px 10px; height: 100%; container-type: inline-size;
+  /* The panel itself no longer scrolls: the head stays and the body does. */
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.gbx-product-head { flex: 0 0 auto; }
+.gbx-product-body { flex: 1 1 auto; min-height: 0; overflow: auto; }
+/* **Composition scrolls per column, not as a page.** Its two halves are read
+   against each other -- the tree says what is there, the form says how it is
+   set up -- so scrolling one to reach a control must not carry the other away.
+   Every other stage is a document and scrolls as one. */
+.gbx-product-body-fill { overflow: hidden; display: flex; flex-direction: column; }
+.gbx-product-body-fill > .gbx-composition {
+  flex: 1 1 auto; min-height: 0;
+  /* **`stretch` and a bounded row, together.** `align-items: start` sizes each
+     column to its content, so a tall tree made a row taller than the grid and
+     overflowed it in silence -- the columns had `overflow: auto` and nothing to
+     scroll, because they were never smaller than what they held. */
+  align-items: stretch;
+  grid-template-rows: minmax(0, 1fr);
+}
 .gbx-product-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
 .gbx-gear { padding: 12px 16px; overflow: auto; height: 100%; }
 .gbx-gear-validate {
@@ -1051,17 +1076,7 @@
    application, one way to switch between views of the same object -- with the
    Generate link set apart, because it leads out of this panel rather than
    changing what is in it. */
-/* **Sticky, because this panel scrolls as a whole.** With the pane narrow the
-   Composition grid stacks, so the settings sit below the entire gear list and a
-   person reading a form had scrolled the product's name, its profile switcher
-   and the stage tabs off the top -- there was nothing on screen saying which
-   product or which profile the form belonged to.
-
-   The nav alone, not the title block: a sticky header deep enough to hold
-   everything would cost more of a short pane than it returns. */
 .gbx-product-nav {
-  position: sticky; top: 0; z-index: 2;
-  background: var(--theia-editor-background);
 
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   margin: 8px 0 6px; padding-bottom: 6px;
@@ -1241,7 +1256,7 @@
 /* `min-width: 0`, so the column may shrink below its content's min-content
    width instead of forcing the grid wider than the pane. The settings column has
    carried it since it was written; this one had not. */
-.gbx-composition-tree { border-right: 1px solid var(--theia-panel-border); padding-right: 16px; min-width: 0; }
+.gbx-composition-tree { border-right: 1px solid var(--theia-panel-border); padding-right: 16px; min-width: 0; min-height: 0; overflow: auto; }
 .gbx-composition-tree h3, .gbx-composition-settings h3 { margin-top: 8px; }
 .gbx-composition-host { border-bottom: 1px solid var(--theia-panel-border); padding: 10px 0; }
 /* The host's own line: disclosure, the name that selects, then the two things
@@ -1262,7 +1277,7 @@
 .gbx-composition-slot { margin: 12px 0 12px 12px; border-left: 2px solid var(--theia-panel-border); padding-left: 12px; }
 .gbx-composition-slot h4 { margin: 6px 0; overflow-wrap: anywhere; }
 .gbx-composition-connection { display: flex; flex-direction: column; align-items: flex-start; margin: 8px 0; }
-.gbx-composition-settings { min-width: 0; overflow-wrap: anywhere; }
+.gbx-composition-settings { min-width: 0; min-height: 0; overflow: auto; overflow-wrap: anywhere; }
 .gbx-composition-draft { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
 .gbx-composition fieldset, .gbx-add-dialog fieldset { margin: 12px 0; border: 1px solid var(--theia-panel-border); }
 .gbx-composition fieldset label, .gbx-add-dialog fieldset label { display: block; margin: 6px 0; }
@@ -1286,12 +1301,12 @@
    leaving a settings column worth reading. */
 @container (max-width: 800px) {
   .gbx-composition, .gbx-add-dialog-columns { grid-template-columns: 1fr; }
-  /* **The tree gets its own scroll once it is above the settings.** Stacked,
-     a six-gear tree with its connections pushed the form off the bottom of the
-     pane, so reaching the control meant scrolling past everything that is not
-     it. Side by side the two columns are independent already and this does not
-     apply. */
-  .gbx-composition-tree { max-height: 45vh; overflow: auto; }
+  /* Stacked, the two halves share the height rather than the first taking
+     whatever it wants and pushing the second out of reach. Written at the same
+     specificity as the rule it overrides, or it loses to it. */
+  .gbx-product-body-fill > .gbx-composition {
+    grid-template-rows: minmax(0, 0.45fr) minmax(0, 1fr);
+  }
   /* Stacked, the divider between the columns becomes a line down the left of a
      full-width block, which reads as a quote rather than as a division. */
   .gbx-composition-tree { border-right: none; padding-right: 0; border-bottom: 1px solid var(--theia-panel-border); padding-bottom: 12px; }

@@ -27,6 +27,22 @@ related?: Array<RelatedLocation>,
  */
 subject?: NodeId | null, 
 /**
+ * The configuration key this concerns, when one key is the whole subject.
+ *
+ * **Narrower than `subject` on purpose, and it exists because a location is
+ * not an answer.** `subject` names the gear, which is enough to open its
+ * settings; `location` names the `use_gear` line, which is where a value
+ * would be *typed*. Neither is the control. In the Studio configuration is
+ * a form, so "set `mode`" is answered by a box called `mode`, and reaching
+ * it from a message that names `mode` should not require a person to read
+ * the name out of the sentence and find it themselves.
+ *
+ * Only the rules that are *about* one key set it -- an unset required
+ * field, a key outside the schema. A diagnostic about a gear as a whole
+ * leaves it empty rather than picking one of its fields.
+ */
+config_key?: string | null, 
+/**
  * What to do about it. Required for errors
  * (`cpt-gearbox-nfr-actionable-diagnostics`).
  */

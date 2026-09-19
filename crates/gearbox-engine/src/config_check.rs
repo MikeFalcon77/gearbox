@@ -126,7 +126,8 @@ pub fn check(
                              generated YAML will deserialize"
                         ),
                     )
-                    .at(location(selection, uri)),
+                    .at(location(selection, uri))
+                    .about_config(key.clone()),
                 );
                 continue;
             };
@@ -215,7 +216,12 @@ fn report_unset_required(
                  missing a field the gear's loader refuses at startup",
             field.name
         ))
-        .at(location(selection, uri));
+        .at(location(selection, uri))
+        // The key *is* the subject here, and the Studio's answer to "set `mode`"
+        // is a box called `mode`. Naming it is what lets a person reach the
+        // control from the message rather than reading the name out of the
+        // sentence and finding it themselves.
+        .about_config(field.name.clone());
         // **Named, so a client can offer the control that fixes it.** The
         // location alone points at the `use_gear` line, which is where the value
         // would be *typed* and not where anyone sets it in the Studio: the

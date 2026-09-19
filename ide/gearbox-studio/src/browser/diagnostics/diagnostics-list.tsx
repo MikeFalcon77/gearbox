@@ -124,7 +124,7 @@ export interface DiagnosticsListProps {
    * Omitted where there is no such destination, the way `onExplain` is: the
    * Conflicts panel offers it, the Add Gear preview does not.
    */
-  readonly onConfigure?: (gear: string) => void;
+  readonly onConfigure?: (gear: string, field?: string) => void;
   /** Sorted worst-first unless the caller has already ordered it. */
   readonly sorted?: boolean;
 }
@@ -151,7 +151,7 @@ export interface DiagnosticRowProps {
   readonly diagnostic: Diagnostic;
   readonly onReveal?: (location: Location) => void;
   readonly onExplain?: (selection: Selection) => void;
-  readonly onConfigure?: (gear: string) => void;
+  readonly onConfigure?: (gear: string, field?: string) => void;
 }
 
 export function DiagnosticRow({
@@ -214,9 +214,13 @@ export function DiagnosticRow({
             type="button"
             className="gbx-conflict-explain"
             data-conflict-configure={selection.id}
-            onClick={() => onConfigure(selection.id)}
+            data-conflict-configure-field={diagnostic.config_key ?? undefined}
+            onClick={() => onConfigure(selection.id, diagnostic.config_key ?? undefined)}
           >
-            configure {selection.id}
+            {/* The key when the diagnostic is about one, because "configure
+                event-broker" and "configure event-broker's `mode`" are
+                different distances from the fix. */}
+            configure {diagnostic.config_key ? `${selection.id} · ${diagnostic.config_key}` : selection.id}
           </button>
         )}
         {selection !== undefined && onExplain !== undefined && (

@@ -402,6 +402,14 @@ export class ProductWidget extends ReactWidget {
 
     return (
       <div className="gbx-product">
+        {/* **A head that stays and a body that scrolls.** The panel was one
+            scrolling block, so reading a form in the settings column carried the
+            product's name, its profile switcher and the stage tabs off the top --
+            and scrolling anywhere moved everything, including the column the
+            person was not reading. Making the stage strip alone `sticky` fixed
+            neither: it pinned a strip in the middle of a header whose other
+            halves still left. */}
+        <div className="gbx-product-head">
         {/* **The id, on the panel, as a marker.** Which *kind* of context is
             current is on the toolbar (`data-context`), but which product is
             open was nowhere a reader could ask -- the display name is prose and
@@ -482,7 +490,6 @@ export class ProductWidget extends ReactWidget {
             because editing them is describing the product rather than reading
             it. */}
         {intent && (
-          <>
             <div className="gbx-kv">
               <span>profile</span>
               <span className="gbx-profiles">
@@ -514,16 +521,21 @@ export class ProductWidget extends ReactWidget {
                 </button>
               </span>
             </div>
-            {this.addingProfile && this.renderAddProfile()}
-            {this.section === "overview" &&
-              state.profile !== undefined &&
-              this.renderProfileEdit(
-                intent.profiles[state.profile],
-                state.profile,
-                intent.default_profile,
-              )}
-          </>
         )}
+        </div>
+
+        <div
+          className={`gbx-product-body${this.section === "composition" ? " gbx-product-body-fill" : ""}`}
+        >
+        {intent && this.addingProfile && this.renderAddProfile()}
+        {intent &&
+          this.section === "overview" &&
+          state.profile !== undefined &&
+          this.renderProfileEdit(
+            intent.profiles[state.profile],
+            state.profile,
+            intent.default_profile,
+          )}
 
         {state.status === "resolving" && <div className="gbx-progress">resolving…</div>}
 
@@ -549,6 +561,7 @@ export class ProductWidget extends ReactWidget {
             pair a UX pass called two nearly identical buttons. */}
         {this.section !== "validation" &&
           renderDiagnosticsSummary(state.diagnostics, () => this.showConflicts())}
+        </div>
       </div>
     );
   }
@@ -1332,12 +1345,29 @@ export class ProductWidget extends ReactWidget {
               // that sets the value. Without this the way from a warning about
               // `mode` to the field named `mode` was to remember the gear, go to
               // Composition, and find it again.
-              onConfigure={(gear) => {
+              onConfigure={(gear, field) => {
                 this.selection.select({ kind: "gear", id: gear });
                 this.showSection("composition");
-                requestAnimationFrame(() =>
-                  document.querySelector<HTMLElement>(".gbx-composition-settings")?.focus(),
-                );
+                // **The field when the diagnostic names one.** Focusing the pane
+                // put a person in front of the right form and left them to find
+                // the row the message had just named. `data-config-field` is the
+                // same hook the suite addresses controls by, so this is reading
+                // an existing contract rather than adding a second one.
+                requestAnimationFrame(() => {
+                  const pane = document.querySelector<HTMLElement>(".gbx-composition-settings");
+                  const control =
+                    field === undefined
+                      ? null
+                      : pane?.querySelector<HTMLElement>(
+                          `[data-config-field="${field}"] input, [data-config-field="${field}"] select`,
+                        ) ?? null;
+                  if (control === null) {
+                    pane?.focus();
+                    return;
+                  }
+                  control.scrollIntoView({ block: "center" });
+                  control.focus();
+                });
               }}
             />
             <button

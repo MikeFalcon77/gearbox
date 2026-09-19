@@ -1473,6 +1473,22 @@ pub struct Diagnostic {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<NodeId>,
 
+    /// The configuration key this concerns, when one key is the whole subject.
+    ///
+    /// **Narrower than `subject` on purpose, and it exists because a location is
+    /// not an answer.** `subject` names the gear, which is enough to open its
+    /// settings; `location` names the `use_gear` line, which is where a value
+    /// would be *typed*. Neither is the control. In the Studio configuration is
+    /// a form, so "set `mode`" is answered by a box called `mode`, and reaching
+    /// it from a message that names `mode` should not require a person to read
+    /// the name out of the sentence and find it themselves.
+    ///
+    /// Only the rules that are *about* one key set it -- an unset required
+    /// field, a key outside the schema. A diagnostic about a gear as a whole
+    /// leaves it empty rather than picking one of its fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_key: Option<String>,
+
     /// What to do about it. Required for errors
     /// (`cpt-gearbox-nfr-actionable-diagnostics`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1496,6 +1512,7 @@ impl Diagnostic {
             location: None,
             related: Vec::new(),
             subject: None,
+            config_key: None,
             help: None,
             evidence: None,
         }
@@ -1537,6 +1554,13 @@ impl Diagnostic {
     #[must_use]
     pub fn about(mut self, subject: NodeId) -> Self {
         self.subject = Some(subject);
+        self
+    }
+
+    /// Name the one configuration key this is about. See [`Self::config_key`].
+    #[must_use]
+    pub fn about_config(mut self, key: impl Into<String>) -> Self {
+        self.config_key = Some(key.into());
         self
     }
 

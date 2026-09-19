@@ -29,6 +29,7 @@ import {
   expect,
   expectContext,
   openGraph,
+  configureGear,
   openProduct,
   openProductById,
   productSection,
@@ -732,12 +733,14 @@ test.describe("opening a product is one act", () => {
     await openProductById(page, "configurable-gears", "dev");
     await productSection(page, "validation");
 
-    const configure = page.locator("[data-conflict-configure]").first();
+    const configure = page.locator("[data-conflict-configure-field]").first();
     await expect(configure, "a diagnostic about a gear offers its form").toBeVisible({
       timeout: 60_000,
     });
     const gear = await configure.getAttribute("data-conflict-configure");
+    const field = await configure.getAttribute("data-conflict-configure-field");
     expect(gear).not.toBeNull();
+    expect(field, "and this one is about one key, so it says which").not.toBeNull();
     await configure.click();
 
     // One act: the stage *and* the object, with the form on screen. A button
@@ -751,5 +754,77 @@ test.describe("opening a product is one act", () => {
     await expect(
       page.locator(`.gbx-composition-settings [data-gear-config="${String(gear)}"]`),
     ).toBeVisible({ timeout: 30_000 });
+
+    // **The control, not the panel.** Focusing the pane put a person in front of
+    // the right form and left them to find the row the message had just named.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() =>
+            document.activeElement?.closest("[data-config-field]")?.getAttribute("data-config-field"),
+          ),
+        { timeout: 15_000 },
+      )
+      .toBe(field);
+  });
+
+  test("scrolling one half of Composition leaves the other and the head alone [ADR-0023 §Amendment: one surface configures]", async ({
+    studio,
+  }) => {
+    // **The panel was one scrolling block.** Reading a form carried the
+    // product's name, its profile switcher and the stage tabs off the top, and
+    // scrolling to reach a gear moved the settings beside it. Making the stage
+    // strip `sticky` fixed neither: it pinned a strip in the middle of a header
+    // whose other halves still left.
+    //
+    // Two things had to be true before any of this could work, and both were
+    // silently false: the panel was 12px taller than the widget holding it
+    // (`height: 100%` plus padding under `content-box`), and the grid's row was
+    // sized to its content by `align-items: start`, so columns with
+    // `overflow: auto` were never smaller than what they held and had nothing to
+    // scroll.
+    const { page } = studio;
+    try {
+      await openProductById(page, "configurable-gears", "dev");
+      await productSection(page, "composition");
+      // **Chosen at the full size, then the window is shrunk.** Reversing these
+      // two cost a run: at 560px the row a click has to reach may be outside the
+      // pane, and Playwright retries an unactionable click until the *test*
+      // times out -- which reads as a hang with no failing assertion in it.
+      const form = await configureGear(page, "event-broker");
+      await expect(form).toBeVisible({ timeout: 60_000 });
+      // Short enough that the tree cannot fit, which is the state this is about.
+      await page.setViewportSize({ width: 1600, height: 560 });
+
+      const tree = page.locator(".gbx-composition-tree");
+      await expect
+        .poll(
+          () => tree.evaluate((el) => el.scrollHeight > el.clientHeight + 1),
+          { timeout: 15_000 },
+        )
+        .toBe(true);
+
+      const before = await page.evaluate(() => ({
+        name: Math.round(document.querySelector("[data-product-name]")!.getBoundingClientRect().top),
+        settings: Math.round(
+          document.querySelector(".gbx-composition-settings")!.getBoundingClientRect().top,
+        ),
+      }));
+      await tree.evaluate((el) => {
+        el.scrollTop = 300;
+      });
+      await expect.poll(() => tree.evaluate((el) => el.scrollTop), { timeout: 10_000 }).toBeGreaterThan(0);
+
+      const after = await page.evaluate(() => ({
+        name: Math.round(document.querySelector("[data-product-name]")!.getBoundingClientRect().top),
+        settings: Math.round(
+          document.querySelector(".gbx-composition-settings")!.getBoundingClientRect().top,
+        ),
+      }));
+      expect(after.name, "the product it belongs to stays on screen").toBe(before.name);
+      expect(after.settings, "and the form beside it does not move").toBe(before.settings);
+    } finally {
+      await page.setViewportSize({ width: 1600, height: 1000 });
+    }
   });
 });

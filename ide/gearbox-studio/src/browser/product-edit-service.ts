@@ -49,6 +49,7 @@ import { GearboxService } from "../common/protocol";
 import { ProductStore } from "./product-store";
 import { ProductSessionService } from "./shell/product-session-service";
 import { identityOf, type ContextIdentity } from "./shell/screens";
+import { EngineConnectionService } from "./shell/engine-connection-service";
 import { StudioContextService } from "./shell/studio-context-service";
 
 /**
@@ -73,6 +74,7 @@ export class ProductEditService {
   @inject(MessageService) protected readonly messages!: MessageService;
   // Read only, and only to know which subject a caller composed for.
   @inject(StudioContextService) protected readonly contexts!: StudioContextService;
+  @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
 
   /** Queued edits for the open product path, awaiting Apply or Discard. */
   protected drafts = new Map<string, ProductEdit[]>();
@@ -287,6 +289,28 @@ export class ProductEditService {
     return applied;
   }
 
+  /**
+   * Say what went wrong, and record it when it was the engine going away.
+   *
+   * **The inconsistency this closes was observed, not imagined.** A preview
+   * refused with `the engine is not initialized` while the panel's header still
+   * read `resolved` -- which is honest on its own terms, because that word is
+   * about the last resolution and not about the process -- and every button that
+   * asks `EngineConnectionService.isConnected` went on looking healthy. The
+   * failed call is itself proof the engine is down, so it is recorded where the
+   * rest of the application already looks.
+   *
+   * This does not explain *why* the engine went away, and does not pretend to.
+   */
+  protected reportFailure(error: unknown): void {
+    this.noteEngine(error);
+    this.messages.error(messageOf(error));
+  }
+
+  protected noteEngine(error: unknown): void {
+    if (isEngineGone(error)) this.engine.markDisconnected("the engine stopped");
+  }
+
   /** Saved config overlaid with draft set_config edits for `gear`. */
   draftConfig(gear: string, saved: Readonly<Record<string, unknown>>): Record<string, string> {
     const out: Record<string, string> = {};
@@ -477,7 +501,7 @@ export class ProductEditService {
     try {
       return await this.service.applyEdits(open.path, [...edits], true);
     } catch (error) {
-      this.messages.error(messageOf(error));
+      this.reportFailure(error);
       return undefined;
     }
   }
@@ -528,6 +552,7 @@ export class ProductEditService {
       // engine had said exactly what was wrong. The no-toast rule is unchanged:
       // this runs on every keystroke's debounce, and a message per failed
       // preview would be noise.
+      this.noteEngine(error);
       return { ok: false, reason: messageOf(error) };
     }
   }
@@ -570,7 +595,7 @@ export class ProductEditService {
     try {
       preview = await this.service.applyEdits(open.path, [...edits], true);
     } catch (error) {
-      this.messages.error(messageOf(error));
+      this.reportFailure(error);
       return false;
     }
     if (!preview.changed) {
@@ -587,7 +612,7 @@ export class ProductEditService {
     try {
       await this.service.applyEdits(open.path, [...edits], false, expectedBefore ?? preview.before);
     } catch (error) {
-      this.messages.error(messageOf(error));
+      this.reportFailure(error);
       await this.product.reload();
       return false;
     }
@@ -662,7 +687,7 @@ export class ProductEditService {
       // The engine's refusals carry their own reasons -- a `gears` list built by a
       // helper, a path outside the workspace -- and they are more useful than
       // anything this could invent.
-      this.messages.error(messageOf(error));
+      this.reportFailure(error);
       return false;
     }
 
@@ -691,7 +716,7 @@ export class ProductEditService {
         await this.service.removeGear(open.path, gear, false);
       }
     } catch (error) {
-      this.messages.error(messageOf(error));
+      this.reportFailure(error);
       return false;
     }
 
@@ -724,14 +749,14 @@ export class ProductEditService {
     try {
       preview = await this.service.createProduct({ ...params, dryRun: true });
     } catch (error) {
-      this.messages.error(messageOf(error));
+      this.reportFailure(error);
       return false;
     }
     if (!(await this.confirmCreate(params.name, preview))) return false;
     try {
       preview = await this.service.createProduct({ ...params, dryRun: true });
     } catch (error) {
-      this.messages.error(messageOf(error));
+      this.reportFailure(error);
       return false;
     }
     if (preview.after !== params.preview) {
@@ -745,7 +770,7 @@ export class ProductEditService {
     try {
       await this.service.createProduct({ ...params, dryRun: false });
     } catch (error) {
-      this.messages.error(messageOf(error));
+      this.reportFailure(error);
       return false;
     }
     await this.product.ensureDiscovered();
@@ -830,7 +855,7 @@ export class ProductEditService {
     try {
       preview = await args.dryRun();
     } catch (error) {
-      this.messages.error(messageOf(error));
+      this.reportFailure(error);
       return false;
     }
     if (!preview.changed) {
@@ -849,7 +874,7 @@ export class ProductEditService {
     try {
       again = await args.dryRun();
     } catch (error) {
-      this.messages.error(messageOf(error));
+      this.reportFailure(error);
       return false;
     }
     if (!again.changed || again.after !== preview.after) {
@@ -861,7 +886,7 @@ export class ProductEditService {
     try {
       await args.commit();
     } catch (error) {
-      this.messages.error(messageOf(error));
+      this.reportFailure(error);
       return false;
     }
     await this.product.reload();
@@ -980,7 +1005,7 @@ export class ProductEditService {
         ? await this.service.addGear(path, gear, source, true)
         : await this.service.removeGear(path, gear, true);
     } catch (error) {
-      this.messages.error(messageOf(error));
+      this.reportFailure(error);
       return false;
     }
     if (!again.changed || again.after !== preview.after) {
@@ -1144,6 +1169,18 @@ function describeEdit(edit: ProductEdit): string {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Whether this refusal is the backend saying the engine is gone.
+ *
+ * The exact sentence `GearboxServiceImpl.request` throws when `this.engine` is
+ * undefined or dead. Matched on rather than typed, because it crosses the Theia
+ * proxy as a plain `Error` and there is no code on it to match instead -- which
+ * is worth saying out loud, since a message match is a contract nobody declared.
+ */
+export function isEngineGone(error: unknown): boolean {
+  return messageOf(error).includes("the engine is not initialized");
 }
 
 /**
