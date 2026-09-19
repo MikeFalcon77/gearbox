@@ -6,6 +6,7 @@ import type { Selection } from "../shell/selection-service";
 import type { ProductState } from "../product-store";
 import type { ProductEditService } from "../product-edit-service";
 import { ConfigFields } from "../add-gear/config-fields";
+import { ProfileScope } from "./profile-scope";
 
 export function PluginSettings({ selection, state, descriptor, edits, openGdl, remove }: {
   selection: Extract<Selection, { kind: "plugin" }>; state: ProductState; descriptor?: GearDescriptor;
@@ -46,11 +47,8 @@ export function PluginSettings({ selection, state, descriptor, edits, openGdl, r
     <h3>{selection.host} / {selection.id}</h3>
     <p>Connection {selection.entryIndex + 1} · Profiles: {profiles.join(", ") || "All profiles"}</p>
     <p>{descriptor?.description || "Plugin descriptor unavailable. Saved settings remain editable."}</p>
-    <fieldset><legend>Profiles for this connection</legend>
-      <label><input type="checkbox" checked={profiles.length === 0} onChange={e => setProfiles(e.target.checked ? [] : [state.profile ?? profileIds[0] ?? ""])} />All profiles</label>
-      {profileIds.map(id => <label key={id}><input type="checkbox" checked={profiles.includes(id)} onChange={e => setProfiles(e.target.checked ? [...profiles, id] : profiles.filter(p => p !== id))} />{id}{!state.intent!.profiles[id] ? " (unknown profile)" : ""}</label>)}
-      <small>No individual profiles selected means All profiles.</small>
-    </fieldset>
+    <ProfileScope profiles={profiles} available={profileIds} viewing={state.profile ?? undefined}
+      declared={id => state.intent!.profiles[id] !== undefined} onChange={setProfiles} />
     <h4>Configuration</h4>
     <ConfigFields fields={fields} values={values} onChange={queue} onReset={k => queue(k, undefined)} provenanceOf={k => k in config ? "explicit" : "default"} isDrafted={k => draft.some(e => e.kind === "set_plugin_config" && e.key === k)} />
     {Object.entries(config).filter(([k]) => !fields.some(f => f.name === k)).map(([k, v]) => <div key={k}>

@@ -753,23 +753,27 @@ test.describe("edit config and profiles in the open product", () => {
       // Read as a map rather than as a list: the boxes are the product's
       // profiles, and asserting their *order* would be asserting how the intent
       // serialises its profile map, which is not this claim's business.
+      await expect(
+        form.locator("[data-profile-scope]"),
+        "the scope is narrow, and says so rather than leaving it to be inferred",
+      ).toHaveAttribute("data-profile-scope", "selected");
       expect(
         Object.fromEntries(
-          await form.locator("fieldset label").evaluateAll((labels) =>
-            labels.map((label) => [
-              label.textContent?.trim() ?? "",
-              label.querySelector("input")?.checked === true,
+          await form.locator("[data-profile]").evaluateAll((boxes) =>
+            boxes.map((box) => [
+              box.getAttribute("data-profile") ?? "",
+              (box as HTMLInputElement).checked,
             ]),
           ),
         ),
         "the boxes say what the description writes, and nothing more",
-      ).toEqual({ "All profiles": false, dev: true, local: true, prod: false });
+      ).toEqual({ dev: true, local: true, prod: false });
 
       // One scope change and one typed config value, into one draft. `priority`
       // is an `i16` on `StaticAuthNPluginConfig`, so the projected control is a
       // number box -- a field is typed here because Rust said so, which is the
       // half of this that a Rust test cannot reach.
-      await form.locator("fieldset label", { hasText: /^prod$/ }).locator("input").click();
+      await form.locator('[data-profile="prod"]').click();
       await form.locator('[data-config-field="priority"] input').fill("50");
       const toolbar = page.locator(".gbx-toolbar");
       await expect(toolbar.locator("[data-draft-apply]")).toHaveCount(1);
@@ -813,6 +817,60 @@ test.describe("edit config and profiles in the open product", () => {
       await removal.locator(".theia-button.secondary").click();
       await expect(removal).toHaveCount(0);
       expect(diffOf(DEMO_REL)).toBe("");
+    } finally {
+      if (diffOf(DEMO_REL) !== "") {
+        execFileSync("git", ["checkout", "--", DEMO_REL], { cwd: REPO });
+      }
+    }
+  });
+
+
+  test("narrowing a connection's scope cannot silently widen it [ADR-0013 §Amendment: a plugin is not a selected gear]", async ({
+    studio,
+  }) => {
+    // **The widest setting was reached by unchecking the last box.** An empty
+    // scope means every profile -- `gearbox_ir::intent::applies` is
+    // `scoped_to.is_empty() || scoped_to.contains(profile)`, and the writer
+    // emits no argument at all rather than `profiles = []`, which would read as
+    // "no profile". The model is right; the control lied about it, because
+    // clearing the last checkbox looks exactly like switching something off.
+    // The person who found this read the hint under the boxes and still had to
+    // open the preview to learn what had happened.
+    //
+    // Nothing is written here: the scope is a draft, and it is discarded.
+    const { page } = studio;
+    expect(diffOf(DEMO_REL), "the description must start clean").toBe("");
+    try {
+      await openProduct(page, "dev");
+      const form = await configureConnection(page, "authn-resolver", 0);
+
+      // Written `profiles = ["dev", "local"]`, so narrowing to one is a real
+      // move rather than an edge the fixture arranged.
+      await form.locator('[data-profile="local"]').click();
+      await expect(form.locator("[data-profile-scope]")).toHaveAttribute(
+        "data-profile-scope",
+        "selected",
+      );
+      const dev = form.locator('[data-profile="dev"]');
+      await expect(dev).toBeChecked();
+      await expect(
+        dev,
+        "the last profile standing refuses to be cleared, because clearing it means every profile",
+      ).toBeDisabled();
+
+      // And the widest setting is still reachable -- deliberately, by name.
+      await form.locator("[data-profile-scope-all]").click();
+      await expect(form.locator("[data-profile-scope]")).toHaveAttribute(
+        "data-profile-scope",
+        "all",
+      );
+      await expect(
+        form.locator("[data-profile]"),
+        "with every profile claimed there is nothing to pick from",
+      ).toHaveCount(0);
+
+      await page.locator(".gbx-toolbar [data-draft-discard]").click();
+      await expect.poll(() => diffOf(DEMO_REL), { timeout: 30_000 }).toBe("");
     } finally {
       if (diffOf(DEMO_REL) !== "") {
         execFileSync("git", ["checkout", "--", DEMO_REL], { cwd: REPO });

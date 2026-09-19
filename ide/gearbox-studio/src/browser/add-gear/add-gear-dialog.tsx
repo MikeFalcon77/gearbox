@@ -13,6 +13,7 @@ import { fillsPointOf, pointKey, pointsOf } from "../../common/extension-points"
 import { productIdentity } from "../shell/screens";
 import { impactOf, type Impact } from "./impact";
 import { DiagnosticsList } from "../diagnostics/diagnostics-list";
+import { ProfileScope } from "../product/profile-scope";
 
 export interface AddGearChoice { gearId?: string; host?: string; point?: string }
 
@@ -258,7 +259,10 @@ export class AddGearDialog extends ReactDialog<boolean> {
           <h3>{chosen.display_name || chosen.id}</h3><p>{chosen.description}</p><small>Source: {chosen.source}</small>
           {chosen.fills && <><label data-add-gear-host data-add-gear-plugin={chosen.id}>Host<select data-add-gear-host-pick aria-label="Plugin host" value={this.host ?? ""} disabled={!!this.initial.host} onChange={e => { this.host = e.target.value; void this.refreshPreview(); }}><option value="">Choose a host</option>{this.hosts(chosen).map(h => <option key={h.id} value={h.id}>{h.id}</option>)}</select></label>
             {!this.hosts(chosen).length && <p data-add-gear-host-none>{this.pending()}</p>}
-            <fieldset><legend>Profiles (none selected means All profiles)</legend>{Object.keys(this.products.current.intent?.profiles ?? {}).map(p => <label key={p}><input type="checkbox" checked={this.profiles.includes(p)} onChange={e => { this.profiles = e.target.checked ? [...this.profiles, p] : this.profiles.filter(v => v !== p); void this.refreshPreview(); }} />{p}</label>)}</fieldset>
+            <ProfileScope legend="Profiles for this connection" profiles={this.profiles}
+              available={Object.keys(this.products.current.intent?.profiles ?? {})}
+              viewing={this.products.current.profile ?? undefined}
+              onChange={(next: string[]) => { this.profiles = next; void this.refreshPreview(); }} />
             {this.host && !this.edits.inProduct(this.host) && <p>The host {this.host} will become an explicitly selected gear.</p>}
           </>}
           {!chosen.fills && (() => {
