@@ -120,11 +120,84 @@ computed without it.
 * A product with a resolution error is inspectable and editable, which it was not.
 * Plugin connections are fully manageable: add with a scope, remove one entry, set one key, change
   one scope — each leaving every neighbouring entry, comment and profile setting untouched.
-* The Inspector is a plain widget again, and the same forms serve both surfaces.
+* The Inspector is a plain widget again. It also renders the forms — **withdrawn**, see
+  Amendment 2026-09-19: one surface configures.
 * Three `cpt-gearbox-adr-domain-specific-ide-shell` claims were re-pointed; see that ADR's
   Amendment 2026-09-18.
 * Conformance claims that asserted config and features *inside* the add flow no longer describe it,
   and are re-pointed at the product.
+
+
+## Amendment 2026-09-19: one surface configures, and the tree's row is the selector
+
+A UX pass over the running app returned ten findings. Six of them were one thing: the Catalogue, the
+Composition pane, the Inspector and Validation were four surfaces competing for the same navigation,
+and two decisions in this ADR were holding the competition open.
+
+### The two-surface rule is withdrawn
+
+§*Settings are components, not a borrowed widget* said the Composition pane and the Inspector render
+the same forms, so that the catalogue and the other views keep a panel that can configure what they
+select. That is now false by decision: **`GearSettings` and `PluginSettings` are rendered by the
+Composition pane and by nothing else.**
+
+The rejected alternative recorded in that section is still the reason they are components at all,
+and still rejected. What this amendment adds is that making them components fixed only the half of
+the problem that was visible. The borrowed widget shared *half-typed boxes*; two components on two
+surfaces shared the **draft** — one Apply, two forms showing the same fields, and no way for a
+person editing in the right panel to tell which surface it belonged to. The person driving the app
+put it plainly: two identical editable forms side by side, over one product.
+
+So the Inspector keeps what Composition does not show — the descriptor facts and the explanation
+graph — and offers **Configure in product**, which selects the gear, shows Composition and focuses
+the pane. That button is what the split pays for: taking the forms out only works if reading about a
+gear still reaches setting it up, and without it the change would merely have removed something. A
+gear not in the product gets **Add to product** instead; with no product open neither is offered.
+
+The Composition pane gains what it lacked: its settings half now names the object, describes it,
+links its documents and lists the `selected_by` sentences. `GearSettings` lost its own heading,
+which read `in this product` — the only words above the fields, and they never said which gear.
+
+The cost, stated: the catalogue's **Show** and the Inspector's **Configure in product** are now the
+only two routes from browsing to editing, so both have to exist and keep working.
+
+### A gear chosen in the catalogue is not a gear chosen in the product
+
+`CatalogueStore.select` normalised a projected row to `{kind: "gear", id}`, byte-identical to
+choosing that gear in the tree, and the selection service called that deliberate. It is half right:
+the *subject* is one — the explanation graph, the catalogue highlight and the chat answer about the
+same gear either way. The *act* is not, and collapsing it is what let a catalogue click replace an
+open product's settings with a sentence about a gear the product does not contain.
+
+`gear` now means "chosen in the open product"; `catalogue-gear` is the other act. A new kind rather
+than an `origin` field, because `sameSelection` compares a gear by `id` and nothing else — a field
+would have left it compiling and still answering `true` across the two. `gearIdOf` and `asFocus`
+serve the readers that want the subject.
+
+### The tree's row is the selector
+
+A host offered three controls and the name of the thing did the least of them: the `<summary>`
+folded, the id link selected *and* opened the description, and a separate `Configure <gear>` button
+selected. Clicking the name chose nothing.
+
+`<details>` is why. Toggling is what activating a `<summary>` does, and a click on a descendant
+bubbles there, so a summary can name a gear or select it but not both — the extra button existed to
+supply the half the summary could not. The host is a plain element with a disclosure control of its
+own now, the row carries the name and the selection, and opening the description and removing the
+gear are secondary: things done *to* a gear that has been chosen, not ways of choosing it.
+
+### Confirmation
+
+* `ide/tests/conformance/adr-0013-add-gear.spec.ts` — the Inspector renders no `[data-gear-config]`
+  while a product gear is selected and the page holds exactly one form; **Configure in product**
+  lands on the Composition stage with that gear's form on screen. The first is negative on purpose:
+  nothing that asserts a form is *present* can notice a second appearing beside it.
+* `ide/tests/conformance/plan-widgets.spec.ts` — the host folds by its own control and says so, and
+  clicking the row is what puts the gear's form on screen.
+* Five claims that reached the form through the catalogue and the Inspector now reach it through the
+  Composition tree. They said they were about the Inspector; they were about *configuring*, and
+  reached the Inspector only because the Product panel was on Overview and rendering no form to
+  collide with.
 
 ## Confirmation
 

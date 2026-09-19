@@ -1000,3 +1000,43 @@ a weaker statement about the shell and a stronger one about the flow.
   unchanged for every screen that is still a screen.
 * Recorded in full by `cpt-gearbox-adr-product-composition`, which owns the composition scenario
   this dialog serves.
+
+## Amendment 2026-09-19: the Inspector opens for what it explains, not for what it configures
+
+Amendment 2026-09-08 settled the Inspector's *availability*: a context key, `gearbox.hasSelection`,
+rather than scope — "its emptiness is about an absent selection, not an absent product". That is
+reaffirmed unchanged. The Inspector stays `availableIn: all, lifetime: global`, and a product being
+open is not a reason to withhold the panel.
+
+What changes is the **opening**.
+
+`onStart` opened the panel on every selection change. Over the Composition stage that expanded a
+second editable copy of the form the person was already using, over one draft, and took the focus
+doing it — the duplication `cpt-gearbox-adr-product-composition` Amendment 2026-09-19 removes.
+
+The fix before this one suppressed the open while the Composition pane was the current main widget,
+by asking `ProductWidget` which stage it was on. That worked and was the wrong shape twice over: one
+widget interrogating another about layout, to work around a selection value that stood for two
+different acts. A layout question was standing in for a modelling one.
+
+The selection now carries the act, so the question is answerable where it is asked. `gear` and
+`plugin` are the Composition tree's own acts, and the pane beside that tree is already showing what
+was chosen; the panel does not open for those. Everything else — a catalogue gear, an application, a
+binding — is chosen somewhere that does not explain it, and the Inspector is where the explanation
+is, so it still opens. `catalogue-row` is skipped for the older reason: no descriptor join yet, and
+stealing focus for an empty "still parsing" panel is worse than waiting.
+
+`composedOnScreen()` is gone, and with it `ProductWidget.currentSection`, whose doc comment said
+"Exposed for one reader".
+
+**Deleting the subscription outright was tried first and was too much.** It failed the claim that
+the Inspector opens when an application is selected on Topology — a case this amendment means to
+keep, and one a narrower reading of "open it on request" never covered. The suppression is about the
+surface that already shows the answer, not about selections in general.
+
+### Traceability
+
+* Amends Amendment 2026-09-08 for the Inspector's opening only; the availability rule it set, and
+  the `ContextIdentity` scoping, are unchanged.
+* The duplication this removes, and the **Configure in product** route that replaces it, are owned
+  by `cpt-gearbox-adr-product-composition` Amendment 2026-09-19.
