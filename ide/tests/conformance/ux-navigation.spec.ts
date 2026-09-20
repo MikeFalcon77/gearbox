@@ -769,7 +769,7 @@ test.describe("opening a product is one act", () => {
   });
 
   test("scrolling one half of Composition leaves the other and the head alone [ADR-0023 §Amendment: one surface configures]", async ({
-    studio,
+    freshStudio,
   }) => {
     // **The panel was one scrolling block.** Reading a form carried the
     // product's name, its profile switcher and the stage tabs off the top, and
@@ -777,54 +777,73 @@ test.describe("opening a product is one act", () => {
     // strip `sticky` fixed neither: it pinned a strip in the middle of a header
     // whose other halves still left.
     //
-    // Two things had to be true before any of this could work, and both were
+    // Two things had to be true before any of that could work, and both were
     // silently false: the panel was 12px taller than the widget holding it
     // (`height: 100%` plus padding under `content-box`), and the grid's row was
-    // sized to its content by `align-items: start`, so columns with
+    // sized to its content by `align-items: start`, so columns carrying
     // `overflow: auto` were never smaller than what they held and had nothing to
     // scroll.
-    const { page } = studio;
-    try {
-      await openProductById(page, "configurable-gears", "dev");
-      await productSection(page, "composition");
-      // **Chosen at the full size, then the window is shrunk.** Reversing these
-      // two cost a run: at 560px the row a click has to reach may be outside the
-      // pane, and Playwright retries an unactionable click until the *test*
-      // times out -- which reads as a hang with no failing assertion in it.
-      const form = await configureGear(page, "event-broker");
-      await expect(form).toBeVisible({ timeout: 60_000 });
-      // Short enough that the tree cannot fit, which is the state this is about.
-      await page.setViewportSize({ width: 1600, height: 560 });
+    //
+    // **Set up by dragging the sash, not by shrinking the window**, and the
+    // difference is why this claim exists twice. The first version made the
+    // *viewport* small and left the side panels wherever the previous claim had
+    // them — so it never reproduced the arrangement the report came from, and I
+    // called the defect fixed on the strength of it. What the report describes
+    // is a **layout**: a wide Inspector and a Product panel around 630px, inside
+    // a window that is not small at all.
+    const { page } = freshStudio;
+    await openProductById(page, "configurable-gears", "dev");
+    await productSection(page, "composition");
+    await revealCatalogue(page);
+    await revealInspector(page);
+    const form = await configureGear(page, "event-broker");
+    await expect(form).toBeVisible({ timeout: 60_000 });
 
-      const tree = page.locator(".gbx-composition-tree");
-      await expect
-        .poll(
-          () => tree.evaluate((el) => el.scrollHeight > el.clientHeight + 1),
-          { timeout: 15_000 },
-        )
-        .toBe(true);
+    // The handle between the main area and the right panel: the rightmost one
+    // tall enough to be a real divider rather than a collapsed placeholder.
+    const handle = await page.evaluate(() =>
+      Array.from(document.querySelectorAll(".lm-SplitPanel-handle"))
+        .filter((h) => !h.classList.contains("lm-mod-hidden"))
+        .map((h) => h.getBoundingClientRect())
+        .filter((r) => r.height > 100)
+        .sort((a, b) => b.x - a.x)
+        .map((r) => ({ x: Math.round(r.x), y: Math.round(r.y + r.height / 2) }))[0],
+    );
+    expect(handle, "the Inspector has to be resizable for this to be set up").toBeDefined();
+    await page.mouse.move(handle.x, handle.y);
+    await page.mouse.down();
+    await page.mouse.move(handle.x - 360, handle.y, { steps: 12 });
+    await page.mouse.up();
 
-      const before = await page.evaluate(() => ({
+    const product = page.locator(".gbx-product");
+    await expect
+      .poll(async () => Math.round((await product.boundingBox())?.width ?? 0), { timeout: 15_000 })
+      .toBeLessThan(800);
+    expect(
+      page.viewportSize()?.width ?? 0,
+      "and the window is not the reason — a rule keyed on it would not fire here",
+    ).toBeGreaterThan(1200);
+
+    const tree = page.locator(".gbx-composition-tree");
+    await expect
+      .poll(() => tree.evaluate((el) => el.scrollHeight > el.clientHeight + 1), { timeout: 15_000 })
+      .toBe(true);
+
+    const tops = () =>
+      page.evaluate(() => ({
         name: Math.round(document.querySelector("[data-product-name]")!.getBoundingClientRect().top),
         settings: Math.round(
           document.querySelector(".gbx-composition-settings")!.getBoundingClientRect().top,
         ),
       }));
-      await tree.evaluate((el) => {
-        el.scrollTop = 300;
-      });
-      await expect.poll(() => tree.evaluate((el) => el.scrollTop), { timeout: 10_000 }).toBeGreaterThan(0);
+    const before = await tops();
+    await tree.evaluate((el) => {
+      el.scrollTop = 300;
+    });
+    await expect.poll(() => tree.evaluate((el) => el.scrollTop), { timeout: 10_000 }).toBeGreaterThan(0);
 
-      const after = await page.evaluate(() => ({
-        name: Math.round(document.querySelector("[data-product-name]")!.getBoundingClientRect().top),
-        settings: Math.round(
-          document.querySelector(".gbx-composition-settings")!.getBoundingClientRect().top,
-        ),
-      }));
-      expect(after.name, "the product it belongs to stays on screen").toBe(before.name);
-      expect(after.settings, "and the form beside it does not move").toBe(before.settings);
-    } finally {
-      await page.setViewportSize({ width: 1600, height: 1000 });
-    }
+    const after = await tops();
+    expect(after.name, "the product it belongs to stays on screen").toBe(before.name);
+    expect(after.settings, "and the form beside it does not move").toBe(before.settings);
   });
 });
