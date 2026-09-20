@@ -17,6 +17,8 @@ import { join } from "node:path";
 
 import { expect, test as base, type Browser, type Locator, type Page } from "@playwright/test";
 
+import { noteTest } from "./description-watch";
+import { liveCopies } from "./product-copy";
 import { productsDiff, productsStatus, restoreProducts } from "./products-tree";
 import { corpusDiff, corpusStatus, restoreCorpus } from "./corpus-files";
 import {
@@ -497,47 +499,6 @@ async function revealView(page: Page, command: string, selector: string): Promis
 // use `freshStudio` and are timing-sensitive; pulling `studio` into every test
 // would instantiate the shared session for them. Write stacks are also appended
 // to the trace file from `open()`, so the file is enough for this guard.
-base.afterEach(async ({}, testInfo) => {
-  const repo = join(__dirname, "../..");
-  await flushWriteTraces();
-  const dirty = productsStatus(repo);
-  const traces = readWriteTraces();
-  const traceBlock = formatWriteTraces(traces);
-  if (dirty === "") {
-    resetWriteTraces();
-    return;
-  }
-
-  const diff = productsDiff(repo, dirty);
-  restoreProducts(repo);
-  resetWriteTraces();
-  throw new Error(
-    `"${testInfo.title}" left the product descriptions changed:\n${dirty}\n\n${diff}\n\n` +
-      traceBlock +
-      `The tree has been restored. Three claims edit a description on purpose and put ` +
-      `it back; anything else writing there is the defect this guard exists to name.`,
-  );
-});
-
-// The same question for the gear descriptions this suite edits, one repository
-// over. Separate hook rather than a branch in the one above: the two have
-// different remedies -- that one may remove untracked entries, this one must
-// never touch anything but the files it names -- and a single hook that did both
-// would have to explain which half it was in.
-base.afterEach(async ({}, testInfo) => {
-  const repo = join(__dirname, "../..");
-  const dirty = corpusStatus(repo);
-  if (dirty === "") return;
-  const diff = corpusDiff(repo);
-  restoreCorpus(repo);
-  throw new Error(
-    `"${testInfo.title}" left a gear description changed:\n${dirty}\n\n${diff}\n\n` +
-      `The named files have been restored. Two claims rewrite a \`gear.gdl\` on purpose ` +
-      `and put it back in a \`finally\`; anything else writing there is the defect this ` +
-      `guard exists to name.`,
-  );
-});
-
 export async function openGraph(page: Page): Promise<void> {
   await revealView(page, "Gearbox Graph", ".gbx-svg");
 }
@@ -1149,7 +1110,86 @@ export async function openProduct(page: Page, profile: string): Promise<void> {
   await openProductById(page, "payments-demo", profile);
 }
 
-export const test = base.extend<{ freshStudio: Studio }, { studio: Studio }>({
+export const test = base.extend<
+  { freshStudio: Studio; guarded: void },
+  { studio: Studio }
+>({
+  /**
+   * The per-test guards, and they are a fixture because hooks did not work.
+   *
+   * **`base.afterEach` at the top level of *this* file reached one spec file per
+   * worker.** Playwright attaches a hook declared while a module is loading to
+   * the suite of the file that triggered the load, and this module is imported
+   * once and cached — so the guard that names the test which left a description
+   * dirty was watching the first file loaded and none of the other nineteen.
+   * Proved rather than reasoned: two probe specs, the second one leaving
+   * `products/` dirty, both passed, and only `global-teardown` noticed.
+   *
+   * That is also why a stray write had no test attached to it. The guard could
+   * not see the run.
+   *
+   * An automatic fixture follows the `test` object instead of the file, so it
+   * runs for every claim in every spec. Being automatic it is also set up first
+   * and therefore torn down **last**, after `freshStudio` has closed its page —
+   * which is the window a late write lands in.
+   *
+   * It deliberately does not request `studio`: the staged-loading claims use
+   * `freshStudio` and are timing-sensitive, and pulling the shared session into
+   * every test would boot it for them. Write stacks reach the trace file from
+   * `open()`, so the file is enough.
+   */
+  guarded: [
+    async ({}, use, testInfo) => {
+      noteTest("begin", testInfo.title);
+      await use();
+      noteTest("end", testInfo.title);
+
+      // **Three levels, not two.** This file is `tests/fixtures/studio.ts`, so
+      // `../..` is `ide` — where there is no `products` directory at all, and
+      // `git status -- products` answers with silence. The corpus half was wrong
+      // the same way and swallowed its own error. Between that and the hook
+      // scope above, this guard has never once fired.
+      const repo = join(__dirname, "../../..");
+      await flushWriteTraces();
+      // A claim's own copy is expected dirt: it is untracked by design and
+      // goes when the claim does. Anything else is the defect this names.
+      const dirty = productsStatus(repo)
+        .split("\n")
+        .filter((line) => line !== "" && !liveCopies().some((copy) => line.includes(copy)))
+        .join("\n");
+      const traceBlock = formatWriteTraces(readWriteTraces());
+      if (dirty !== "") {
+        const diff = productsDiff(repo, dirty);
+        restoreProducts(repo);
+        resetWriteTraces();
+        throw new Error(
+          `"${testInfo.title}" left the product descriptions changed:\n${dirty}\n\n${diff}\n\n` +
+            traceBlock +
+            `The tree has been restored. Three claims edit a description on purpose and put ` +
+            `it back; anything else writing there is the defect this guard exists to name.`,
+        );
+      }
+      resetWriteTraces();
+
+      // The same question for the gear descriptions this suite edits, one
+      // repository over. Checked after the products half rather than beside it:
+      // the two have different remedies — that one may remove untracked
+      // entries, this one must never touch anything but the files it names.
+      const corpus = corpusStatus(repo);
+      if (corpus !== "") {
+        const diff = corpusDiff(repo);
+        restoreCorpus(repo);
+        throw new Error(
+          `"${testInfo.title}" left a gear description changed:\n${corpus}\n\n${diff}\n\n` +
+            `The named files have been restored. Two claims rewrite a \`gear.gdl\` on purpose ` +
+            `and put it back in a \`finally\`; anything else writing there is the defect this ` +
+            `guard exists to name.`,
+        );
+      }
+    },
+    { auto: true },
+  ],
+
   studio: [
     async ({ browser }, use) => {
       const { studio, close } = await open(browser);

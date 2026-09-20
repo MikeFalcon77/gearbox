@@ -14,6 +14,7 @@ import { join } from "node:path";
 
 import { productsStatus, restoreCommand } from "./fixtures/products-tree";
 import { corpusStatus, restoreCorpusCommand } from "./fixtures/corpus-files";
+import { startWatching } from "./fixtures/description-watch";
 import { resetWriteTraces } from "./fixtures/write-traces";
 
 /** The newest mtime under a directory tree. */
@@ -171,4 +172,8 @@ export default function globalSetup(): void {
   }
 
   resetWriteTraces();
+  // **Last, after every guard.** The watcher records writes; starting it before
+  // the generate step above would log that step as one, which is exactly the
+  // noise a reader would have to learn to ignore.
+  startWatching(join(IDE, ".."));
 }

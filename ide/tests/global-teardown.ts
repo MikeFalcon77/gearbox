@@ -18,6 +18,7 @@ import { join } from "node:path";
 
 import { productsDiff, productsStatus, restoreProducts } from "./fixtures/products-tree";
 import { corpusDiff, corpusStatus, restoreCorpus } from "./fixtures/corpus-files";
+import { stopWatching } from "./fixtures/description-watch";
 import {
   flushWriteTraces,
   formatWriteTraces,
@@ -27,6 +28,7 @@ import {
 
 export default async function globalTeardown(): Promise<void> {
   const repo = join(__dirname, "../..");
+  stopWatching();
   await flushWriteTraces();
   // The corpus first, because its remedy is narrower and its message is
   // unambiguous: nothing in a normal run should have touched it after the last

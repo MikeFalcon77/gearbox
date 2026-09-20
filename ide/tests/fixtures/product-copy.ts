@@ -25,6 +25,23 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 
+/**
+ * The copies that exist right now, by id.
+ *
+ * The per-test guard asks `git status -- products` and refuses anything it did
+ * not expect — correctly, and a live copy is untracked, so without this every
+ * claim in a file that makes one would be reported for the copy's own existence.
+ * A copy is expected only while it is *live*: `dispose` unregisters it, so one a
+ * claim forgets to remove is still reported, by the teardown that asks without
+ * this filter.
+ */
+const live = new Set<string>();
+
+/** Porcelain path prefixes the guard should treat as expected. */
+export function liveCopies(): string[] {
+  return [...live].map((id) => `products/${id}/`);
+}
+
 /** One claim's private copy of a shipped product. */
 export interface ProductCopy {
   /** The id the copy declares, and therefore the name of its generated tree. */
@@ -73,6 +90,7 @@ export function copyProduct(repo: string, source: string, slug: string): Product
   const dir = join(repo, "products", id);
   const path = join(dir, "product.gdl");
   mkdirSync(dir, { recursive: true });
+  live.add(id);
   // One occurrence only. `source(id = "gears-rust", …)` matches the same shape,
   // and renaming *that* would point the copy at a corpus that does not exist.
   writeFileSync(path, committed.replace(declared, `id = "${id}"`));
@@ -104,6 +122,7 @@ export function copyProduct(repo: string, source: string, slug: string): Product
       // on that git does not track yet.
       rmSync(dir, { recursive: true, force: true });
       rmSync(join(repo, ".gearbox", id), { recursive: true, force: true });
+      live.delete(id);
     },
   };
 }

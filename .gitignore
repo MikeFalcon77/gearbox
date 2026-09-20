@@ -92,3 +92,4 @@ dist/
 .env
 .env.*
 !.env.example
+ide/tests/.description-watch.log
