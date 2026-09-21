@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { corpusStatus, restoreCorpus } from "../fixtures/corpus-files";
-import { productsStatus, restoreProducts } from "../fixtures/products-tree";
+import { copyProduct, type ProductCopy } from "../fixtures/product-copy";
 import {
   expect,
   openConflicts,
@@ -45,7 +45,6 @@ const GEAR_GDL = join(REPO, "../gears-rust/gears/system/api-gateway/gear.gdl");
  * the rewrite is undone in a `finally`. `adr-0010` mutates the same file for the
  * same kind of round trip.
  */
-const PRODUCT_GDL = join(REPO, "products/payments-demo/product.gdl");
 
 /** The line the fixture rewrites, and the text that must be there to rewrite. */
 const GOOD_PROFILE = 'embedded(id = "dev")';
@@ -215,6 +214,32 @@ test.describe("diagnostics reach a person", () => {
     // its removal made this claim fail the day such a diagnostic first existed.
   });
 
+  /**
+   * The description this claim breaks, and it is not the shipped one.
+   *
+   * **This test is where the stray `embeddedd` came from.** It writes a typo
+   * into a `product.gdl` on purpose -- that is the whole mechanism, an evaluator
+   * error with a span to underline -- and put it back in a `finally`. Which
+   * holds right up until the run does not reach the `finally`: a crash, a
+   * `--grep` interrupted, a machine put to sleep. Then a shipped description
+   * carries a deliberate typo into the next run, where two unrelated claims fail
+   * and neither names the cause. That happened, and it is what the per-claim
+   * copies exist for.
+   *
+   * Made in `beforeAll` rather than in the test, because this claim reaches the
+   * file through the **explorer tree**: the directory has to exist before the
+   * page is built, or the node is not there to expand.
+   */
+  let broken: ProductCopy;
+
+  test.beforeAll(() => {
+    broken = copyProduct(REPO, "payments-demo", "typo");
+  });
+
+  test.afterAll(() => {
+    broken?.dispose();
+  });
+
   test("description diagnostics arrive over a language-server interface with source ranges [PRD cpt-gearbox-fr-editor-diagnostics]", async ({
     freshStudio,
   }) => {
@@ -236,12 +261,11 @@ test.describe("diagnostics reach a person", () => {
     // `product.gdl`, which `prd-explain` locates by `data-uri` and would then
     // match twice.
     const { page } = freshStudio;
-    // The same precondition as the corpus claim above, and for the same reason.
-    expect(
-      productsStatus(REPO),
-      "this claim rewrites the description, so it must start from the committed one",
-    ).toBe("");
-    const original = readFileSync(PRODUCT_GDL, "utf8");
+    // No precondition about the tree any more, and that is the point rather than
+    // an omission: `copyProduct` reads the committed text with `git show HEAD:`,
+    // so this claim starts from the committed description by construction rather
+    // than by checking that somebody else left one alone.
+    const original = readFileSync(broken.path, "utf8");
     // A typo in a profile constructor: the evaluator reports the name it could
     // not resolve, and the span it gives is the token itself rather than the
     // enclosing call -- which is what makes the underlined text checkable.
@@ -251,13 +275,13 @@ test.describe("diagnostics reach a person", () => {
     const line = original.split("\n").findIndex((text) => text.includes(GOOD_PROFILE)) + 1;
 
     try {
-      writeFileSync(PRODUCT_GDL, original.replace(GOOD_PROFILE, `${TYPO}(id = "dev")`));
+      writeFileSync(broken.path, original.replace(GOOD_PROFILE, `${TYPO}(id = "dev")`));
 
       // Broken *before* it is opened, deliberately. Opening reads the file, so
       // this exercises `didOpen` with no dependency on a file watcher noticing a
       // change to a buffer that is already up -- a race that would make this
       // claim flake for a reason that has nothing to do with what it asserts.
-      const node = await revealInExplorer(page, "gearbox", ["products", "payments-demo"], "product.gdl");
+      const node = await revealInExplorer(page, "gearbox", ["products", broken.id], "product.gdl");
       await node.dblclick();
 
       const editor = page.locator('.monaco-editor[data-uri*="product.gdl"]');
@@ -306,8 +330,13 @@ test.describe("diagnostics reach a person", () => {
       expect(markers.some((marker) => marker.includes(`Ln ${line}`)), shown).toBe(true);
       expect(markers.some((marker) => marker.includes(TYPO)), shown).toBe(true);
     } finally {
-      // From `git`, for the reason given on the corpus restore above.
-      restoreProducts(REPO);
+      // **Put back, and not because anything depends on it.** The copy is
+      // removed wholesale in `afterAll`, and nothing else reads it -- so this is
+      // the cheapest way to leave the file readable if a later failure sends
+      // somebody to look at it, not a repair the suite relies on. That reliance
+      // is what moved: a restore that does not run can no longer damage anything
+      // a person owns.
+      writeFileSync(broken.path, original);
     }
   });
 });
