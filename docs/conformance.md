@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **188** — 187 built, 0 not built, 0 broken, 1 not observed.
+Claims: **194** — 193 built, 0 not built, 0 broken, 1 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -275,6 +275,9 @@ Rust, and the ADRs' own Confirmation sections say which.
 | an icon-only button carries an accessible name | `ADR-0011 §Confirmation` | ✅ built |  |
 | the catalogue's action names the act it performs, in both states | `ADR-0011 §Confirmation` | ✅ built |  |
 | closing the add dialog hands the keyboard back to the control that opened it | `ADR-0011 §Confirmation` | ✅ built |  |
+| Escape closes the add dialog while an answer is outstanding | `ADR-0011 §Confirmation` | ✅ built |  |
+| Cancel closes the add dialog after its preview failed | `ADR-0011 §Confirmation` | ✅ built |  |
+| a refused preview under a host closes, and the slot's own button gets the keyboard back | `ADR-0011 §Confirmation` | ✅ built |  |
 
 ## `conformance/ux-navigation.spec.ts`
 
@@ -295,3 +298,6 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Composition stacks when its pane is narrow, whatever the window is | `ADR-0023 §Amendment: one surface configures` | ✅ built |  |
 | a diagnostic leads to the control that would fix it | `plan §9.1: Validation is a screen` | ✅ built |  |
 | scrolling one half of Composition leaves the other and the head alone | `ADR-0023 §Amendment: one surface configures` | ✅ built |  |
+| a resolve in flight is said, and nothing calls the profile clean meanwhile | `plan §9.1: Validation is a screen` | ✅ built |  |
+| a resolve that failed says so, and does not leave the old verdict standing | `plan §9.1: Validation is a screen` | ✅ built |  |
+| a product being re-read does not look like a product with nothing in it | `plan §9.1: opening is staged` | ✅ built |  |
