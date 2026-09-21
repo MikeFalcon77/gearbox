@@ -267,13 +267,17 @@ the preview names it as its own addition, so the review says that attaching plug
 product does not have is several edits rather than one.
 
 The *other* route has a sentence for the same fact -- "the host will become an explicitly selected
-gear", for a host that is in the resolution but not in `selected_gears` -- and **it is not
-reachable on the current corpus**, which is worth recording rather than leaving as an untested
-branch. Only two hosts have catalogued plugins, `authn-resolver` and `tenant-resolver`; in
-`payments-demo` the first is explicitly selected with both its plugins already attached, and the
-second is absent from the resolution altogether, so the host picker never offers a host in the
-state the sentence describes. `adr-0013-add-gear.spec.ts` already says the same thing about a
-successful attach through that route.
+gear", for a host that is in the resolution but not in `selected_gears`. **No shipped description
+puts a host in that state**: only two hosts have catalogued plugins, and in `payments-demo` one is
+selected explicitly with both its plugins attached while the other is absent from the resolution
+altogether.
+
+Recording that is not the same as checking it, so the claim derives a description instead:
+`payments-demo` with its `use_gear("authn-resolver", ...)` entry removed. The host still arrives --
+the `colocated_deps` closure is a link-time fact the resolver may never sever -- and the product no
+longer names it, which is the state exactly. Attaching a plugin to it then writes the host down as
+a selection of its own, with the connection's scope, and the panel is left on the connection that
+was written.
 
 ### What the dialog does when the engine stops
 
@@ -292,7 +296,9 @@ same product is neither.
 * `ide/tests/conformance/adr-0013-add-gear.spec.ts` -- two plugins staged onto one new host keep
   their own scopes and reach the description with them; the host is written explicitly; a scope
   survives the preview being recomputed, including a second plugin being staged and removed;
-  Cancel and Escape write nothing with a staged proposal on screen.
+  Cancel and Escape write nothing with a staged proposal on screen; and, against a derived
+  description, a host that arrived only through the closure becomes an explicit selection when a
+  plugin is attached to it.
 * `ide/tests/wedge/attach-plugin.spec.ts` -- a proposal across a lost engine: the preview
   half-arrives, recovery is offered in place of a refresh, and both staged plugins keep their own
   answers afterwards.

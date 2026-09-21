@@ -4,7 +4,7 @@ import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { copyProduct, type ProductCopy } from "../fixtures/product-copy";
+import { copyProduct, withoutGear, type ProductCopy } from "../fixtures/product-copy";
 
 import {
   configureGear,
@@ -819,5 +819,97 @@ test.describe("Attach plugin carries a scope of its own", () => {
     await page.keyboard.press("Escape");
     await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0, { timeout: 30_000 });
     expect(readFileSync(copy.path, "utf8"), "Escape writes nothing either").toBe(before);
+  });
+});
+
+/**
+ * A host the product never asked for, and a plugin attached to it.
+ *
+ * **The corpus cannot produce this state, so the claim derives one.** Only two
+ * hosts in `gears-rust` have catalogued plugins; in `payments-demo` one is
+ * selected explicitly with both its plugins already attached, and the other is
+ * absent from the resolution altogether. So the state the dialog's sentence is
+ * about -- a host that arrived through the `colocated_deps` closure and is *not*
+ * in `selected_gears` -- exists in no shipped description, and the sentence had
+ * never been read by anything.
+ *
+ * Recording that in an ADR is not the same as checking it. The description here
+ * is `payments-demo` with its `use_gear("authn-resolver", ...)` entry removed:
+ * the host still arrives, because the closure is a link-time fact the resolver
+ * may never sever, and the product no longer names it.
+ */
+test.describe("a host that arrived only as a dependency", () => {
+  let derived: ProductCopy;
+
+  test.beforeEach(() => {
+    derived = copyProduct(REPO, "payments-demo", "host-joins", (text) =>
+      withoutGear(text, "authn-resolver"),
+    );
+  });
+
+  test.afterEach(() => {
+    derived?.dispose();
+  });
+
+  test("attaching a plugin to it makes it an explicitly selected gear [ADR-0023 §2.4: a connection is addressed by where it is written]", async ({
+    freshStudio,
+  }) => {
+    const { page } = freshStudio;
+    expect(
+      readFileSync(derived.path, "utf8"),
+      "the premise: the host is not named by the description",
+    ).not.toContain('use_gear("authn-resolver"');
+
+    await openProductById(page, derived.id, "dev");
+    await page.locator("[data-add-gear]").click();
+    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+    await page.locator('[data-add-gear-select="static-authn-plugin"]').click();
+
+    // The other premise, and the one that makes the host offerable at all: it is
+    // in the resolution. A host that were absent from both would not be listed.
+    const host = page.locator("[data-add-gear-host-pick]");
+    await expect(host).toBeVisible({ timeout: 60_000 });
+    await host.selectOption("authn-resolver");
+
+    await expect(
+      page.locator('[data-add-gear-host-joins="authn-resolver"]'),
+      "the review says the addition is two edits, not one",
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator("[data-add-gear-after]")).toContainText("authn-resolver", {
+      timeout: 60_000,
+    });
+
+    // And the connection carries a scope on this route too.
+    // One control on this route: the connection being created is the only thing
+    // in the dialog that has a scope. (The staged route has one per plugin, and
+    // that difference is the subject of the claims above.)
+    const scope = page.locator("[data-profile-scope]");
+    await expect(scope).toHaveCount(1);
+    await scope.locator("[data-profile-scope-selected]").click();
+    await expect(scope).toHaveAttribute("data-profile-scope", "selected");
+
+    await page.locator("[data-add-gear-apply]").click();
+    await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0, { timeout: 90_000 });
+
+    const written = readFileSync(derived.path, "utf8");
+    expect(
+      written,
+      "the host is written down, rather than left to a closure the description does not state",
+    ).toMatch(/use_gear\(\s*"authn-resolver"/);
+    expect(written).toMatch(/plugin\(\s*"static-authn-plugin"/);
+    expect(written, "with the scope that was chosen for it").toMatch(
+      /plugin\(\s*"static-authn-plugin"[^)]*profiles\s*=\s*\[\s*"dev"\s*\]/,
+    );
+
+    // The connection just written is what the product is left looking at.
+    await expect(page.locator('[data-product-section="composition"]')).toHaveAttribute(
+      "aria-selected",
+      "true",
+      { timeout: 60_000 },
+    );
+    await expect(page.locator(".gbx-composition-settings")).toContainText(
+      "static-authn-plugin",
+      { timeout: 60_000 },
+    );
   });
 });

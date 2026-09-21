@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **198** — 197 built, 0 not built, 0 broken, 1 not observed.
+Claims: **199** — 198 built, 0 not built, 0 broken, 1 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -129,6 +129,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | two plugins staged onto one new host keep their own scopes, and the host joins explicitly | `ADR-0023 §2.4: a connection is addressed by where it is written` | ✅ built |  |
 | a staged scope survives the preview being recomputed | `ADR-0023 §2.4: a connection is addressed by where it is written` | ✅ built |  |
 | Cancel and Escape leave the description alone, staged scopes and all | `ADR-0013 §the write is one act` | ✅ built |  |
+| attaching a plugin to it makes it an explicitly selected gear | `ADR-0023 §2.4: a connection is addressed by where it is written` | ✅ built |  |
 
 ## `conformance/adr-0013-create-product.spec.ts`
 
