@@ -34,13 +34,15 @@ export const LOG = join(WEDGE_DIR, "engine.jsonl");
 /**
  * The operation whose answer is withheld.
  *
- * `resolve` and not a write, for two reasons that point the same way. It is
+ * `resolve` and not a write, for the claims that are about the *mechanism*: it is
  * reachable from the screen by one click -- the profile switcher -- so the claim
- * spends no steps getting there; and it is idempotent, so the engine doing the
- * work it is never allowed to report changes nothing on disk. A withheld
- * *write* is the more interesting state and it belongs to the recovery step,
- * where the question is what a person is offered afterwards rather than whether
- * the mechanism fires.
+ * spends no steps getting there, and it is idempotent, so the engine doing work
+ * it is never allowed to report changes nothing on disk.
+ *
+ * A withheld **write** is the harder state and has its own target, `HELD_WRITE`
+ * below: there the engine finishes the job and the answer is thrown away, so the
+ * description on disk and the panel disagree and a draft describes a change that
+ * is already saved. `engine-recovery.spec.ts` is about that one.
  */
 export const HELD_METHOD = "gearbox/product/resolve";
 
@@ -87,6 +89,23 @@ export function readLog(): WedgeRecord[] {
     .map((line) => JSON.parse(line) as WedgeRecord);
 }
 
+/**
+ * Where the log has got to, as a baseline for `since`.
+ *
+ * **One server, one log, four claims.** Anything counted absolutely -- "one
+ * withheld write", "nothing withheld on the way in" -- is counting the run and
+ * not the claim, and it passes until a second claim is added. Which is how both
+ * of these first failed.
+ */
+export function logMark(): number {
+  return readLog().length;
+}
+
+/** The records written since `mark`. */
+export function since(mark: number): WedgeRecord[] {
+  return readLog().slice(mark);
+}
+
 /** Every engine the backend has spawned on this server, oldest first. */
 export function engines(): WedgeRecord[] {
   return readLog().filter((record) => record.kind === "start");
@@ -113,11 +132,31 @@ export function resetSeam(): void {
   release();
 }
 
-/** Withhold the chosen method's answer from now on. */
-export function hold(): void {
-  mkdirSync(WEDGE_DIR, { recursive: true });
-  writeFileSync(SENTINEL, "");
+/** What to withhold: a method, and optionally a substring of its request body. */
+export interface HoldTarget {
+  readonly method: string;
+  /**
+   * Matched against the raw request body.
+   *
+   * Needed because a method is not always a precise enough target: a write goes
+   * out twice, once as the dry run the confirmation is built from and once as
+   * the commit, so `"dry_run":false` is what names the second alone. Holding the
+   * first is a different scenario with a different screen.
+   */
+  readonly bodyIncludes?: string;
 }
+
+/** Withhold an answer from now on. The default target is `HELD_METHOD`. */
+export function hold(what?: HoldTarget): void {
+  mkdirSync(WEDGE_DIR, { recursive: true });
+  writeFileSync(SENTINEL, what === undefined ? "" : JSON.stringify(what));
+}
+
+/** The commit half of a draft apply -- the write whose outcome is unknowable. */
+export const HELD_WRITE: HoldTarget = {
+  method: "gearbox/product/applyEdits",
+  bodyIncludes: '"dry_run":false',
+};
 
 /** Answer normally again. Affects the next request, not one already withheld. */
 export function release(): void {

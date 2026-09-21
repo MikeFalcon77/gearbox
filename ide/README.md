@@ -86,6 +86,16 @@ change:
   and `reuseExistingServer: false` means a busy port fails the run instead of quietly testing
   something else.
 
+What that reaches, beyond the timeout itself: **a write the engine finished and never reported.**
+The proxy forwards the request it withholds the answer to, so the description on disk really does
+change while the panel really does not hear about it -- which is the one state a recovery path
+cannot be designed for by reasoning, because the tempting answer (re-send the write) is wrong
+precisely there. `tests/wedge/engine-recovery.spec.ts` holds what a person is offered afterwards:
+that the panel says the screen is no longer current, that the way back re-establishes the session
+rather than re-reading through an engine that is not there, that the profile, selection and draft
+survive it, that nothing re-sends the write, and that a draft the description already contains is
+ended rather than left pending for ever.
+
 The staged-loading tests sample the DOM on a timeline rather than after loading finishes, because
 the claim under test is that a row is useful *before* it is complete. A snapshot taken at the end
 would pass even if the tree had appeared all at once. The sampler is installed with

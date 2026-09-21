@@ -28,9 +28,10 @@ import {
   alive,
   engines,
   hold,
-  readLog,
+  logMark,
   release,
   requestsTo,
+  since,
 } from "./seam";
 
 const REPO = join(__dirname, "../../..");
@@ -57,7 +58,12 @@ test.describe("an engine that misses its deadline", () => {
     freshStudio,
   }) => {
     const { page } = freshStudio;
-    const held = () => readLog().filter((record) => record.kind === "withhold");
+    // **From here, not from the start of the run.** One server serves every
+    // claim in this project, so the log is the run's and the baseline is this
+    // claim's. Counted absolutely, "nothing was withheld on the way in" passed
+    // until a second claim existed to withhold something.
+    const mark = logMark();
+    const held = () => since(mark).filter((record) => record.kind === "withhold");
 
     // **Waited for, because `freshStudio` does not.** Only the worker-scoped
     // fixture boots and settles; a test-scoped one hands over a page that has
@@ -119,7 +125,7 @@ test.describe("an engine that misses its deadline", () => {
     // machine's. A log line saying a child exited is a claim made by the process
     // whose death is in question.
     await expect
-      .poll(() => readLog().some((record) => record.kind === "engine-exit"), { timeout: 20_000 })
+      .poll(() => since(mark).some((record) => record.kind === "engine-exit"), { timeout: 20_000 })
       .toBe(true);
     await expect
       .poll(() => alive(engine!.pid) || alive(engine!.enginePid), { timeout: 20_000 })

@@ -1040,3 +1040,107 @@ surface that already shows the answer, not about selections in general.
   the `ContextIdentity` scoping, are unchanged.
 * The duplication this removes, and the **Configure in product** route that replaces it, are owned
   by `cpt-gearbox-adr-product-composition` Amendment 2026-09-19.
+
+## Amendment 2026-09-21: an engine that stopped is re-established on request, and never replays
+
+The engine's request cap is fatal to the session: a missed deadline disposes the handle, so every
+later product call answers `cannot call …: the engine is not initialized` until something calls
+`initialize` again. That has been true for as long as the supervisor has existed and was never
+reachable by a test, because reaching it costs sixty seconds. It is reachable now — a second
+Playwright project, a pass-through proxy that withholds one answer, and the cap read from the
+environment — and what it turned up is recorded here rather than in a commit message, because three
+of the four things below are decisions and not repairs.
+
+### The decision: restart on request, never retry
+
+**A timed-out write's outcome is unknown, so replaying it is not available.** The request reached
+the engine; only the answer was lost. Measured, against a real engine: the change was on disk, the
+panel showed the text from before it, and the only report was a toast. A path that re-sent the write
+would have applied it twice in precisely the case where it least wanted to.
+
+So the offer is to re-establish the session — `ProductSessionService.reconnect`, which is the whole
+open sequence for the product already open — and nothing else is automatic. Apply, add, remove and
+Generate are never replayed; the next write rebuilds its preview from the current document first,
+which it already did.
+
+### What survives it, and where each one lives
+
+The profile being viewed, the selection, and the unapplied draft. None of them is carried through
+the recovery path, and that is deliberate: each already has an owner, and a recovery that
+re-installed them would be a second source of truth for three things that have one.
+
+* the **profile** in `ProductStore.open`, which keeps the one being viewed when the re-read
+  description still offers it. It used to answer `intent.default_profile` unconditionally, so
+  recovering while looking at `prod` put the panel back on `dev` — silently, with the switcher
+  agreeing, which makes it a wrong answer rather than a lost preference. The same was true of the
+  websocket-reconnect path, where nobody had asked for a re-read at all.
+* the **selection** in `SelectionService`, which the store drops only when the product changes.
+* the **draft** in `ProductEditService`, keyed by path rather than by session.
+
+### Staleness is a separate fact from an error, and it reaches four places
+
+`ProductState.stale` exists because the state it describes has no error in it. A resolution on
+screen after the engine stops is a real answer, correctly drawn — and `resolved` in the header is
+honest about the last resolution while reading as an all-clear about the process. The resolution is
+therefore kept and marked, not discarded.
+
+Marked in four places, because a person reads whichever one they are looking at:
+
+* the **header** keeps `resolved` and says it has not been re-read since the engine stopped;
+* the **diagnostics count** goes unknown rather than absent. It used to vanish — and a tab with no
+  badge is how this panel says *nothing to report*, so a failed resolution read as a clean bill of
+  health;
+* **Generate** is not offered. Its own gate is `EngineConnectionService.isConnected`, so it was a
+  button that led to a refusal one click away;
+* the **pending-changes line** stops saying "pending" when the last write was never confirmed, and
+  says the state is unknown until the description has been re-read.
+
+Staleness is cleared by a resolution arriving, **not** by the engine coming back. A fresh process
+says nothing about whether this panel has been re-read.
+
+### Retry was the wrong offer, not a missing one
+
+`Retry` is `ProductStore.reload()`: a re-read through the engine. With no engine to read with, the
+re-read clears the intent and then fails, so one press turned a product with a failed resolve into
+an empty panel — the name, the profile switcher, the composition and the pending-changes line all
+gone, replaced by a second copy of the same refusal. Measured.
+
+Retry stays for the case it was written for: a description that did not evaluate, where the engine
+answered and the answer was a refusal. Which offer appears is decided by whether the session is
+gone, not by the person.
+
+### A draft the description already contains is ended, not applied again
+
+The engine already answers `changed: false` for an edit the file makes no difference to, and the
+write path already refused to write in that case. What it did not do was tell its caller *why* it
+had not written, so the draft stayed queued: after a write of unknown fate the panel offered to
+apply a change that was already saved, for ever, with Discard as the only way out. The outcome is
+now three-valued, and `unchanged` ends the draft and re-reads the description rather than reporting
+a failure.
+
+### A product opened during a recovery wins
+
+An open was non-reentrant by answering every caller with the in-flight promise. That is right for
+two opens of the same product and wrong for a different one: the switch silently did nothing and
+reported the other product's result — and going to open something else is exactly what a person does
+while waiting on a broken product. A generation counter abandons the open in flight when a different
+product is asked for, checked immediately before the answer is installed. `ProductStore`'s epoch
+guards the same edge one layer down, deliberately: two independent guards for a state this hard to
+see by hand, neither load-bearing alone.
+
+### What this does not settle
+
+**Why** an operation hangs long enough to reach the cap, and whether sixty seconds destroying the
+session is the right design. The recovery removes the dead end; it explains nothing. Both are open.
+
+### Traceability
+
+* `cpt-gearbox-fr-*`: none directly — this is the shell's behaviour when the engine stops, which no
+  functional requirement states.
+* Verified by `ide/tests/wedge/engine-recovery.spec.ts` (three claims) and
+  `ide/tests/wedge/engine-timeout.spec.ts` (the mechanism), on a second server whose engine is a
+  wedging proxy. Each of the three claims was run with its fix reverted and fails on the assertion
+  it is named for.
+* The cap itself is `productTimeoutMs` in `node/gearbox-service-impl.ts`: 60 seconds unless
+  `GEARBOX_PRODUCT_TIMEOUT_MS` says otherwise, and a malformed value is refused rather than
+  defaulted.

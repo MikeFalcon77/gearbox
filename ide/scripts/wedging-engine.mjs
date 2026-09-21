@@ -23,9 +23,17 @@
 // by environment, because the backend owns the argv:
 //
 //   GEARBOX_WEDGE_ENGINE    the real binary to spawn         (required)
-//   GEARBOX_WEDGE_METHOD    the JSON-RPC method to withhold  (required)
+//   GEARBOX_WEDGE_METHOD    the method withheld by default   (required)
 //   GEARBOX_WEDGE_SENTINEL  withhold while this file exists  (required)
 //   GEARBOX_WEDGE_LOG       JSONL record of what happened    (required)
+//
+// **The sentinel may also say what to withhold**, as
+// `{"method": "...", "bodyIncludes": "..."}`, because one method is not always a
+// precise enough target. A write goes out twice -- once as a dry run for the
+// confirmation, once as the commit -- and withholding "applyEdits" would hold the
+// preview, which is a different scenario with a different screen. `bodyIncludes`
+// matches the raw request body, so `"dry_run":false` names the commit alone.
+// An empty sentinel means the default method with any parameters.
 //
 // The log is the evidence, and it is per-process rather than per-run: every
 // line carries this proxy's pid and its child's, so "the old process ended",
@@ -33,7 +41,7 @@
 // restart" are all questions about lines rather than about timing.
 
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 function required(name) {
@@ -119,6 +127,37 @@ function parse(body) {
 /** Request ids whose answer is not to come back. */
 const withheld = new Set();
 
+/**
+ * What is being withheld right now, or `undefined` for nothing.
+ *
+ * Read per request rather than cached: the sentinel is how a claim changes its
+ * mind between two steps, and a cached answer would make the second step depend
+ * on when this process happened to look.
+ */
+function target() {
+  let content;
+  try {
+    content = readFileSync(sentinel, "utf8").trim();
+  } catch {
+    return undefined;
+  }
+  if (content === "") return { method: heldMethod };
+  try {
+    const parsed = JSON.parse(content);
+    return { method: parsed.method ?? heldMethod, bodyIncludes: parsed.bodyIncludes };
+  } catch {
+    note("sentinel-unreadable", { content });
+    return { method: heldMethod };
+  }
+}
+
+function withholds(message, body) {
+  const wanted = target();
+  if (wanted === undefined || message.method !== wanted.method) return false;
+  if (wanted.bodyIncludes === undefined) return true;
+  return body.toString("utf8").includes(wanted.bodyIncludes);
+}
+
 process.stdin.on(
   "data",
   frames((frame, body) => {
@@ -127,7 +166,7 @@ process.stdin.on(
       // Every request, not only the held one: the count of these is how a claim
       // asks whether an abandoned operation was replayed behind somebody's back.
       note("request", { method: message.method, id: message.id });
-      if (message.method === heldMethod && existsSync(sentinel)) {
+      if (withholds(message, body)) {
         withheld.add(message.id);
         note("withhold", { method: message.method, id: message.id });
       }
