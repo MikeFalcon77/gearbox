@@ -180,15 +180,29 @@ export class GearboxServiceImpl implements GearboxService {
     // the next `loadCatalogue` sends a request into a disposed connection and
     // reports "engine not initialized" for something that was.
     void engine.exited.then((reason) => {
-      if (this.engine === engine) {
-        this.engine = undefined;
-      }
+      // The log line is about *this* handle whatever became of it: a replaced
+      // engine exiting is worth reading in a log, and reading it there is how
+      // the guard below was noticed.
       this.client?.onLog(`engine ${reason}`);
-      // And told as an event, not only as a log line. `loadCatalogue` answers at
-      // the S1/S2 boundary, so an engine that dies during projection has no
-      // outstanding request left to reject and the `$/progress done` that would
-      // have ended the load died with it. Only the client knows whether a load
-      // was live, so the decision is left there.
+      // **The event only when this handle is still the engine.** It used to fire
+      // unconditionally, outside this check — so *replacing* an engine told the
+      // browser the engine had exited, and `CatalogueStore.onEngineExit` marks
+      // the connection dead without asking which engine it was. The result is
+      // the mirror of the defect it was written for: a session reporting a dead
+      // engine while a healthy one answers every call.
+      //
+      // The race is in the timing. `dispose()` gives the child a second before
+      // SIGTERM and three before SIGKILL, so the old handle's `exited` settles
+      // *after* the new one is live and serving. Which is precisely when the
+      // notification used to arrive.
+      //
+      // Told as an event and not only as a log line, for the reason it always
+      // was: `loadCatalogue` answers at the S1/S2 boundary, so an engine that
+      // dies during projection has no outstanding request left to reject and
+      // the `$/progress done` that would have ended the load died with it. Only
+      // the client knows whether a load was live, so that decision stays there.
+      if (this.engine !== engine) return;
+      this.engine = undefined;
       this.client?.onEngineExit(reason);
     });
 

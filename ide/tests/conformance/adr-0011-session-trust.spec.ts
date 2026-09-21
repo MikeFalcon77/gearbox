@@ -201,4 +201,56 @@ test.describe("session trust [ADR-0011 amendment 2026-09-02]", () => {
     await revealInspector(studio.page);
     await expect(studio.page.locator("[data-explaining], .gbx-detail-title").first()).toBeVisible();
   });
+
+  test("replacing the engine does not report the old one's death [ADR-0011 §Amendment: Product openView]", async ({
+    rpc,
+    stalledStudio,
+  }) => {
+    // **The mirror of the claim above, and the order is the claim.** That one
+    // kills the engine and requires the shell to say so. This one replaces it —
+    // every `initialize` disposes the previous handle — and requires the shell
+    // *not* to say so, because a healthy engine is answering.
+    //
+    // `exited` for the disposed handle settles late by construction:
+    // `dispose()` gives the child a second before SIGTERM and three before
+    // SIGKILL. So the sequence this reproduces is exactly the one that was
+    // broken — new engine live and serving, old engine's exit arriving
+    // afterwards — and the notification used to be sent regardless of which
+    // handle it was about, which marked the connection dead.
+    const { page } = stalledStudio;
+    const exits = rpc.observe("onEngineExit");
+
+    // **A working session is shown by work, not by a badge.** There is no
+    // "connected" marker in this shell — only `data-engine-status="disconnected"`,
+    // which the Start screen and the create wizard raise when the engine is
+    // down. So the evidence that a healthy engine is answering is that the
+    // catalogue it projects is on screen.
+    await settled(page);
+    await revealCatalogue(page);
+    const rows = page.locator(".gbx-widget-catalogue .gbx-row");
+    await expect(rows.first()).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator('[data-engine-status="disconnected"]')).toHaveCount(0);
+
+    // Reloading the catalogue re-initializes, which is what replaces the engine.
+    await runCommand(page, "Gearbox: Reload Catalogue");
+    await settled(page);
+    await expect(rows.first(), "the new engine answers").toBeVisible({ timeout: 60_000 });
+
+    // **Past the old child's death, not merely past the reload.** SIGKILL is
+    // three seconds out; asserting before that would pass on a notification
+    // that had not been sent yet.
+    await page.waitForTimeout(5000);
+
+    expect(
+      exits(),
+      "a replaced engine's exit is not news about the connection, so it is not sent",
+    ).toBe(0);
+    await expect(
+      page.locator('[data-engine-status="disconnected"]'),
+      "and the shell does not report a break while a healthy engine answers",
+    ).toHaveCount(0);
+
+    // And the session still works, which is what makes the absence meaningful.
+    await expect(rows.first()).toBeVisible();
+  });
 });

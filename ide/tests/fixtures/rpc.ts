@@ -128,6 +128,8 @@ export class RpcControl {
   private readonly holding = new Map<number, (string | Buffer)[]>();
   /** Request id -> how to let its answer out. */
   private readonly forward = new Map<number, (frame: string | Buffer) => void>();
+  /** Method name -> how many server-to-client calls of it have arrived. */
+  private readonly counted = new Map<string, number>();
 
   /**
    * Intercept this context's websockets.
@@ -163,6 +165,12 @@ export class RpcControl {
       const deliver = (frames: (string | Buffer)[]): void => {
         const attachment = frames.find((f) => typeof f !== "string");
         const message = attachment === undefined ? undefined : parse(attachment);
+        // Counted before anything else: a claim may be about a call the backend
+        // should *not* have made, and absence is only assertable if arrivals are
+        // recorded.
+        if (message?.method !== undefined && this.counted.has(message.method)) {
+          this.counted.set(message.method, (this.counted.get(message.method) ?? 0) + 1);
+        }
         const answered = message?.type === REPLY || message?.type === REPLY_ERR;
         const id = answered ? message?.id : undefined;
         const entry =
@@ -233,6 +241,18 @@ export class RpcControl {
    */
   failNext(method: string, message: string): Stall {
     return this.intercept(method, message);
+  }
+
+  /**
+   * Start counting server-to-client calls of `method`, and read the count.
+   *
+   * For claims whose subject is a message that must **not** be sent. A UI that
+   * merely looks healthy is weaker evidence than a notification that never
+   * arrived: the first can be true because the client ignored the message.
+   */
+  observe(method: string): () => number {
+    this.counted.set(method, 0);
+    return () => this.counted.get(method) ?? 0;
   }
 
   private intercept(method: string, fail: string | undefined): Stall {
