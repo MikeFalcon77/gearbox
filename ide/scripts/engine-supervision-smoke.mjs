@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { spawnEngine } from "../gearbox-studio/lib/node/gearbox-engine-process.js";
+import { productTimeoutMs } from "../gearbox-studio/lib/node/gearbox-service-impl.js";
 
 let failures = 0;
 function check(ok, what) {
@@ -131,6 +132,34 @@ if (process.platform === "win32") {
     );
     check(outcome === "rejected", `a product RPC on a wedged engine rejects (got ${outcome})`);
     engine.dispose();
+  }
+}
+
+// --------------------------------------------- the cap, read and refused
+
+// The seam the browser-level wedge needs, checked where it is cheap to check.
+// Every one of these used to be unobservable: the cap was a constant, so
+// "60 seconds by default" was a line of source rather than a statement anybody
+// had asked the code for.
+{
+  check(productTimeoutMs({}) === 60_000, "an unset cap is 60 seconds");
+  check(productTimeoutMs({ GEARBOX_PRODUCT_TIMEOUT_MS: "" }) === 60_000, "and so is an empty one");
+  check(
+    productTimeoutMs({ GEARBOX_PRODUCT_TIMEOUT_MS: " 8000 " }) === 8_000,
+    "a whole number of milliseconds is taken, surrounding space and all",
+  );
+  // **Refused rather than defaulted, and this is the important half.** A typo
+  // silently falling back to 60s makes a wedge test pass for the wrong reason:
+  // the request answers normally, long before a timeout nobody configured, and
+  // the claim reports on a mechanism it never reached.
+  for (const bad of ["abc", "30s", "1e4", "-1", "0", "600001"]) {
+    let refused = false;
+    try {
+      productTimeoutMs({ GEARBOX_PRODUCT_TIMEOUT_MS: bad });
+    } catch (error) {
+      refused = String(error.message).includes("GEARBOX_PRODUCT_TIMEOUT_MS");
+    }
+    check(refused, `a cap of \`${bad}\` is refused, by name`);
   }
 }
 

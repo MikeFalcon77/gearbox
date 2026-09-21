@@ -66,7 +66,58 @@ const LOAD_TIMEOUT_MS = 120_000;
  * serialize a lock. Generous enough that a real answer is never cut off, short
  * enough that the Resolve button stops spinning while someone still cares.
  */
-const PRODUCT_TIMEOUT_MS = 60_000;
+const PRODUCT_TIMEOUT_DEFAULT_MS = 60_000;
+
+/** The narrowest and the widest cap this accepts from the environment. */
+const PRODUCT_TIMEOUT_MIN_MS = 1_000;
+const PRODUCT_TIMEOUT_MAX_MS = 600_000;
+
+/**
+ * The product cap, overridable for a test that has to *reach* it.
+ *
+ * A 60s wait is not something a claim can sit through, which is the reason this
+ * behaviour has never been tested: the timeout is what disposes the handle, and
+ * everything downstream of that -- every later call refusing, the child ending,
+ * `initialize` being the only way back -- has therefore only ever been reasoned
+ * about. So the cap becomes a seam. Not a behaviour change: unset, it is the
+ * same 60s constant it has always been, and nothing in the application writes
+ * this variable.
+ *
+ * **Validated, and loudly.** A cap that silently fell back to 60s on a typo
+ * would make a wedge test pass for the wrong reason -- the request answering
+ * normally, long before a timeout nobody had configured -- and that is the same
+ * mistake as reading an unreadable default as an absent one. A malformed value
+ * is an error naming the variable and what it said.
+ *
+ * Read per call rather than at module load, like `enginePath()` above: a throw
+ * during module initialisation takes the whole Theia backend down with a stack
+ * trace, while a throw here surfaces where every other product failure does.
+ */
+export function productTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.GEARBOX_PRODUCT_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === "") {
+    return PRODUCT_TIMEOUT_DEFAULT_MS;
+  }
+  // Digits only. `parseInt` would accept `30s` as 30 and `1e4` as 1, and a cap
+  // of one millisecond derived from a plausible-looking value is worse than no
+  // cap at all.
+  if (!/^[0-9]+$/.test(raw.trim())) {
+    throw new Error(
+      `GEARBOX_PRODUCT_TIMEOUT_MS is \`${raw}\`, which is not a whole number of ` +
+        `milliseconds. Unset it for the default of ${PRODUCT_TIMEOUT_DEFAULT_MS}ms.`,
+    );
+  }
+  const ms = Number(raw.trim());
+  if (ms < PRODUCT_TIMEOUT_MIN_MS || ms > PRODUCT_TIMEOUT_MAX_MS) {
+    throw new Error(
+      `GEARBOX_PRODUCT_TIMEOUT_MS is ${ms}ms, outside ` +
+        `${PRODUCT_TIMEOUT_MIN_MS}..${PRODUCT_TIMEOUT_MAX_MS}. Below the floor every real ` +
+        `answer is cut off and the panel only ever reports a dead engine; above the ceiling ` +
+        `the cap is longer than any wait a person will sit through.`,
+    );
+  }
+  return ms;
+}
 
 /**
  * The repository root, found by looking for the Cargo workspace manifest.
@@ -609,7 +660,7 @@ export class GearboxServiceImpl implements GearboxService {
       throw new Error(`cannot call ${method}: the engine is not initialized`);
     }
     try {
-      return await engine.request<T>(method, params, PRODUCT_TIMEOUT_MS);
+      return await engine.request<T>(method, params, productTimeoutMs());
     } catch (error) {
       throw withEngineData(error);
     }
@@ -672,7 +723,7 @@ export class GearboxServiceImpl implements GearboxService {
       return await engine.request<T>(
         engineMethod,
         { textDocument: { uri }, position: { line, character } },
-        PRODUCT_TIMEOUT_MS,
+        productTimeoutMs(),
       );
     } catch (error) {
       this.logger.warn(`gearbox: ${engineMethod} failed: ${String(error)}`);
