@@ -43,6 +43,37 @@ import {
 
 const IDE = join(__dirname, "../..");
 
+/**
+ * Take width from the Product panel by dragging the sash beside it.
+ *
+ * The right-hand divider, found by geometry rather than by an index: Lumino
+ * keeps a handle for every split including the collapsed ones, and only the
+ * tall visible ones are dividers a person could drag.
+ */
+async function narrowThePane(
+  page: import("@playwright/test").Page,
+  by: number,
+): Promise<void> {
+  const handle = await page.evaluate(() =>
+    Array.from(document.querySelectorAll(".lm-SplitPanel-handle"))
+      .filter((h) => !h.classList.contains("lm-mod-hidden"))
+      .map((h) => h.getBoundingClientRect())
+      .filter((r) => r.height > 100)
+      .sort((a, b) => b.x - a.x)
+      .map((r) => ({ x: Math.round(r.x), y: Math.round(r.y + r.height / 2) }))[0],
+  );
+  expect(handle, "the Inspector has to be resizable for this to be set up").toBeDefined();
+  await page.mouse.move(handle.x, handle.y);
+  await page.mouse.down();
+  await page.mouse.move(handle.x - by, handle.y, { steps: 12 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => Math.round((await page.locator(".gbx-product").boundingBox())?.width ?? 0), {
+      timeout: 15_000,
+    })
+    .toBeLessThan(900);
+}
+
 /** The Composition grid as it actually lays out, with the room it was given. */
 async function measurePane(
   page: import("@playwright/test").Page,
@@ -683,42 +714,39 @@ test.describe("opening a product is one act", () => {
   });
 
   test("Composition stacks when its pane is narrow, whatever the window is [ADR-0023 §Amendment: one surface configures]", async ({
-    studio,
+    freshStudio,
   }) => {
     // **The pane, not the window, and the difference was the defect.** The only
     // rule that could stack this grid was a `@media (max-width: 800px)`, keyed
-    // on the viewport -- and the Product panel is the main area, which is the
+    // on the viewport — and the Product panel is the main area, which is the
     // window minus whatever the left and right panels take. With both open on a
     // 1708px window the pane had 606px and was still forced into two columns
-    // with a 230px floor. The converse was equally wrong: collapsing both side
-    // panels on a small laptop gave a wide pane still pinned to one column.
+    // with a 230px floor.
     //
-    // So the assertion is deliberately a *disagreement* between the two numbers:
-    // a window comfortably over the threshold, a pane comfortably under it, and
-    // one column. A rule keyed on the window cannot produce that.
-    const { page } = studio;
-    try {
-      await openProduct(page, "dev");
-      await productSection(page, "composition");
-      await revealCatalogue(page);
-      await revealInspector(page);
+    // **Narrowed by dragging, not by resizing the window**, and that is the
+    // second lesson. Shrinking the viewport made the measurement depend on
+    // where the previous claim had left the side panels: this asserted a pane
+    // under 900px and got 988 the day a neighbour left the Inspector closed.
+    // Dragging states the arrangement instead of inheriting it, and it makes
+    // the disagreement exact — the window never changes at all.
+    const { page } = freshStudio;
+    await openProductById(page, "configurable-gears", "dev");
+    await productSection(page, "composition");
+    await revealCatalogue(page);
+    await revealInspector(page);
 
-      await page.setViewportSize({ width: 1400, height: 900 });
-      const narrow = await measurePane(page);
-      expect(narrow.window, "the window is wide enough that a viewport rule would not fire").toBeGreaterThan(
-        900,
-      );
-      expect(narrow.pane, "and the pane it leaves is not").toBeLessThan(900);
-      expect(narrow.columns, "so the columns stack").toBe(1);
+    const wide = await measurePane(page);
+    expect(wide.columns, "it starts as two columns, or the narrowing proves nothing").toBe(2);
 
-      // And widening genuinely brings the second column back -- otherwise "one
-      // column" would be satisfied by a grid that simply never has two.
-      await page.setViewportSize({ width: 1800, height: 900 });
-      await expect.poll(async () => (await measurePane(page)).columns, { timeout: 15_000 }).toBe(2);
-    } finally {
-      // The studio is worker-scoped, so the viewport outlives this test.
-      await page.setViewportSize({ width: 1600, height: 1000 });
-    }
+    await narrowThePane(page, 360);
+
+    const narrow = await measurePane(page);
+    expect(narrow.window, "the window never moved, and it is over any viewport threshold").toBe(
+      wide.window,
+    );
+    expect(narrow.window).toBeGreaterThan(1200);
+    expect(narrow.pane, "and the pane it leaves is under one").toBeLessThan(900);
+    expect(narrow.columns, "so the columns stack").toBe(1);
   });
 
   test("a diagnostic leads to the control that would fix it [plan §9.1: Validation is a screen]", async ({
@@ -845,5 +873,69 @@ test.describe("opening a product is one act", () => {
     const after = await tops();
     expect(after.name, "the product it belongs to stays on screen").toBe(before.name);
     expect(after.settings, "and the form beside it does not move").toBe(before.settings);
+  });
+
+  test("a resolve in flight is said, and nothing calls the profile clean meanwhile [plan §9.1: Validation is a screen]", async ({
+    rpc,
+    stalledStudio,
+  }) => {
+    // **Caused, not waited for.** This state used to be checked by opening a
+    // product and hoping to catch the moment — twice, and twice the report came
+    // back "could not confirm". The answer to `resolve` is withheld here, so the
+    // moment lasts as long as the claim needs it.
+    //
+    // What it is about: `resolveCurrent` sets `status: "resolving"` *without*
+    // clearing the diagnostics array, and the empty state used to be decided by
+    // `diagnostics.length === 0` alone — so a profile that had nothing to report
+    // yet announced that it had resolved with nothing to report, and three
+    // warnings arrived a moment later.
+    //
+    // This is a claim about the **frontend**. The request reaches the backend
+    // and a healthy engine answers it; what is held is the answer's journey
+    // back. Nothing here says anything about the engine's own timeout.
+    const { page } = stalledStudio;
+    // **The second resolve, not the first.** Opening a product waits for one to
+    // land — the profile switcher is rendered from it — so stalling the opening
+    // resolve stalls the helper rather than the screen. A profile switch is the
+    // ordinary way a person starts another one, and it is the state the report
+    // described: a product already on screen, re-resolving.
+    // **From the clean profile to the one with warnings**, and the direction is
+    // the claim. `resolveCurrent` does not clear the diagnostics it holds, so a
+    // re-resolve from a profile that *had* warnings keeps showing them — stale,
+    // and nothing says so, which is its own defect and belongs to the stale-
+    // status work. Starting clean is what puts the screen in the state this is
+    // about: an empty array that has not been earned yet.
+    await openProductById(page, "configurable-gears", "dev");
+    await productSection(page, "validation");
+    const validationStage = page.locator("[data-product-validation]");
+    await expect(validationStage).toBeVisible({ timeout: 60_000 });
+
+    const resolving = rpc.stallNext("resolve");
+    await page.locator('[data-profile="prod"]').click();
+    await resolving.held;
+
+    const validation = validationStage;
+    // The panel says it is working, for as long as the answer is withheld.
+    await expect(page.locator("[data-product-resolving]")).toBeVisible({ timeout: 30_000 });
+    await expect(
+      validation.locator("[data-validation-clean]"),
+      "a profile that has not resolved has not resolved with nothing to report",
+    ).toHaveCount(0);
+
+    // And releasing it finishes the wait, which is what says the answer was
+    // held rather than lost.
+    resolving.release();
+    await expect(page.locator("[data-product-resolving]")).toHaveCount(0, { timeout: 30_000 });
+    // A verdict, whichever one: this profile may resolve cleanly, and the claim
+    // is that the wait *ended* — that the answer was held on its way back and
+    // not lost. Naming one of the two outcomes would be asserting the corpus.
+    await expect
+      .poll(
+        async () =>
+          (await validation.locator("[data-validation-clean]").count()) +
+          (await validation.locator("[data-conflict-code]").count()),
+        { timeout: 30_000 },
+      )
+      .toBeGreaterThan(0);
   });
 });

@@ -15,9 +15,17 @@
 
 import { join } from "node:path";
 
-import { expect, test as base, type Browser, type Locator, type Page } from "@playwright/test";
+import {
+  expect,
+  test as base,
+  type Browser,
+  type BrowserContext,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 
 import { noteTest } from "./description-watch";
+import { RpcControl } from "./rpc";
 import { liveCopies } from "./product-copy";
 import { productsDiff, productsStatus, restoreProducts } from "./products-tree";
 import { corpusDiff, corpusStatus, restoreCorpus } from "./corpus-files";
@@ -128,8 +136,19 @@ function installSampler(): void {
   }, 25);
 }
 
-async function open(browser: Browser): Promise<{ studio: Studio; close: () => Promise<void> }> {
+async function open(
+  browser: Browser,
+  /**
+   * Run against the context before anything navigates.
+   *
+   * For a websocket route, which has to be installed while the socket is still
+   * unopened — the connection this suite cares about is made during the first
+   * load, and a route added afterwards sees none of it.
+   */
+  beforeNavigate?: (context: BrowserContext) => Promise<void>,
+): Promise<{ studio: Studio; close: () => Promise<void> }> {
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
+  await beforeNavigate?.(context);
   const page = await context.newPage();
 
   const consoleErrors: string[] = [];
@@ -1111,7 +1130,7 @@ export async function openProduct(page: Page, profile: string): Promise<void> {
 }
 
 export const test = base.extend<
-  { freshStudio: Studio; guarded: void },
+  { freshStudio: Studio; stalledStudio: Studio; rpc: RpcControl; guarded: void },
   { studio: Studio }
 >({
   /**
@@ -1202,6 +1221,24 @@ export const test = base.extend<
 
   freshStudio: async ({ browser }, use) => {
     const { studio, close } = await open(browser);
+    await use(studio);
+    await close();
+  },
+
+  /**
+   * A controller for the RPC between this page and the backend.
+   *
+   * Requested *before* `stalledStudio` by depending on it, so the route is on
+   * the context when the page is created. A claim that only wants a page uses
+   * `freshStudio`; this pair exists for the claims that need an answer to be
+   * outstanding while they look at the screen.
+   */
+  rpc: async ({}, use) => {
+    await use(new RpcControl());
+  },
+
+  stalledStudio: async ({ browser, rpc }, use) => {
+    const { studio, close } = await open(browser, (context) => rpc.install(context));
     await use(studio);
     await close();
   },

@@ -537,7 +537,13 @@ export class ProductWidget extends ReactWidget {
             intent.default_profile,
           )}
 
-        {state.status === "resolving" && <div className="gbx-progress">resolving…</div>}
+        {/* Addressable, because a claim drives this state on purpose now: the
+            RPC seam holds the answer to `resolve` so the moment lasts. */}
+        {state.status === "resolving" && (
+          <div className="gbx-progress" data-product-resolving>
+            resolving…
+          </div>
+        )}
 
         {/* The product was read but something after it was not -- a failed
             resolve, most often. The composition below is still this product's,
