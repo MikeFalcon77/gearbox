@@ -280,6 +280,28 @@
   color: var(--theia-editor-background);
   background: var(--theia-editorWarning-foreground);
 }
+/* Not a severity, and deliberately not coloured like one: the count is unknown
+   rather than bad. An em dash in the badge's own colours, outlined so it reads
+   as a placeholder where a number belongs. */
+.gbx-stage-count-stale {
+  background: transparent;
+  color: var(--theia-descriptionForeground);
+  border: 1px dashed var(--theia-panel-border);
+}
+
+/* A staleness banner is a warning, not an error: nothing is broken, what is on
+   screen is simply older than the product. Distinguished from the error box it
+   shares a class with, rather than given one of its own, so a panel that shows
+   both an error and staleness does not draw two differently-shaped boxes. */
+.gbx-error[data-product-stale] {
+  color: var(--theia-editorWarning-foreground);
+  border-color: var(--theia-editorWarning-foreground);
+}
+.gbx-error[data-product-stale][data-write-unknown="true"] {
+  color: var(--theia-editorError-foreground);
+  border-color: var(--theia-editorError-foreground);
+}
+.gbx-stale-note { opacity: 0.75; font-style: italic; }
 
 /* The shared arrowhead markers live in a zero-height SVG, which must not take a
    line box of its own. */

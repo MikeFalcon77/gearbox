@@ -128,6 +128,23 @@ export class ProductSessionService {
   protected inFlight: Promise<boolean> | undefined;
 
   /**
+   * Which open is the current one.
+   *
+   * **Because recovery made "an open in flight" a state a person acts during.**
+   * A reconnect is a full open -- two engine spawns, a catalogue load, a re-read
+   * -- and the thing a person is most likely to do while waiting on a broken
+   * product is go and open a different one. The sequence below has five awaits
+   * and installs its answer into `ProductStore` at the end of them, so without
+   * this the abandoned open would finish and put product A on screen with B
+   * open, which is the one failure mode a recovery path must not have.
+   *
+   * `ProductStore`'s epoch guards the same edge one layer down, and that is
+   * deliberate: two independent guards for a state that is this hard to see by
+   * hand, and neither is load-bearing alone.
+   */
+  protected generation = 0;
+
+  /**
    * Which product is being opened, while it is being opened.
    *
    * An open takes two engine spawns and a catalogue load -- measured at roughly
@@ -194,8 +211,16 @@ export class ProductSessionService {
     this.onDidChangeOpeningEmitter.fire(this.openingState);
   }
 
+  /** Whether this open is still the one being waited for. */
+  protected current(generation: number): boolean {
+    return this.generation === generation;
+  }
+
   /** Move to the next step of the open in flight. Ignored once it has ended. */
-  protected enterStage(stage: OpeningStage): void {
+  protected enterStage(stage: OpeningStage, generation: number): void {
+    // An abandoned open must not narrate. Without this it goes on publishing
+    // steps for product A while the panel is waiting on B.
+    if (!this.current(generation)) return;
     if (this.openingState.status !== "opening") return;
     this.openingState = { status: "opening", stage, product: this.openingState.product };
     this.onDidChangeOpeningEmitter.fire(this.openingState);
@@ -209,7 +234,11 @@ export class ProductSessionService {
    * panel that was showing the steps can show which one stopped instead of
    * reverting to a picker as though nothing had been attempted.
    */
-  protected failStage(stage: OpeningStage, reason: string): false {
+  protected failStage(stage: OpeningStage, reason: string, generation: number): false {
+    // Nor must it complain. A reconnect abandoned because somebody opened
+    // another product did not fail; saying so would put A's refusal in front of
+    // B for no reason.
+    if (!this.current(generation)) return false;
     if (this.openingState.status === "opening") {
       this.openingState = { status: "failed", stage, product: this.openingState.product, reason };
       this.onDidChangeOpeningEmitter.fire(this.openingState);
@@ -389,10 +418,23 @@ export class ProductSessionService {
    */
   async open(ref: ProductRef): Promise<boolean> {
     const pending = this.inFlight;
-    if (pending !== undefined) return pending;
+    // **Deduplicated for the same product, abandoned for a different one.** The
+    // non-reentrancy above is about two opens of *one* product interleaving
+    // their engine spawns, and four callers ask for that independently. A
+    // different product is a different request, and answering it with the
+    // in-flight one's result meant a switch during an open silently did nothing
+    // -- which is precisely what a person does while a recovery is under way.
+    if (
+      pending !== undefined &&
+      this.openingState.status !== "idle" &&
+      this.openingState.product.path === ref.path
+    ) {
+      return pending;
+    }
+    const generation = ++this.generation;
     this.openingState = { status: "opening", stage: "workspace", product: ref };
     this.onDidChangeOpeningEmitter.fire(this.openingState);
-    const started = this.doOpen(ref);
+    const started = this.doOpen(ref, generation);
     this.inFlight = started;
     try {
       return await started;
@@ -404,7 +446,7 @@ export class ProductSessionService {
     }
   }
 
-  protected async doOpen(ref: ProductRef): Promise<boolean> {
+  protected async doOpen(ref: ProductRef, generation: number): Promise<boolean> {
     const directory = parentOf(ref.path);
     const workspace = this.workspaceFor(ref.path, directory);
 
@@ -426,6 +468,7 @@ export class ProductSessionService {
     // load has not finished. `initialize` treats that empty list as "use defaults"
     // rather than "open nothing", so this step stays safe in that window.
     await this.catalogue.load({ roots: this.catalogue.rootPaths(), workspace });
+    if (!this.current(generation)) return false;
     // **`load` does not reject, and that is the whole reason this line exists.**
     // `CatalogueStore.load` records a failure as `status: "error"` on its own
     // state -- the panel renders it -- and returns normally. So awaiting it and
@@ -435,12 +478,12 @@ export class ProductSessionService {
       this.catalogue.current,
       `The engine could not be started on ${ref.label}'s folder`,
     );
-    if (!spawned.ok) return this.failStage("workspace", spawned.reason);
+    if (!spawned.ok) return this.failStage("workspace", spawned.reason, generation);
 
     // Step 2: read what the description declares. `loadProduct` is evaluation
     // only -- nothing is joined against the catalogue -- which is exactly why it
     // works with no roots declared yet.
-    this.enterStage("describe");
+    this.enterStage("describe", generation);
     let intent;
     try {
       intent = (await this.service.loadProduct(ref.path)).intent;
@@ -448,25 +491,31 @@ export class ProductSessionService {
       return this.failStage(
         "describe",
         `${ref.label} could not be evaluated, so it cannot be opened: ${messageOf(error)}`,
+        generation,
       );
     }
+    if (!this.current(generation)) return false;
 
     const sources = sourceRootsOf(intent, (at) => resolveFrom(directory, at));
     const usable = sourcesUsable(ref.label, sources);
-    if (!usable.ok) return this.failStage("describe", usable.reason);
+    if (!usable.ok) return this.failStage("describe", usable.reason, generation);
     const roots = [...sources.roots];
 
     // Step 3 and 4: the real session, then the catalogue and the product.
-    this.enterStage("catalogue");
+    this.enterStage("catalogue", generation);
     const session: StudioSession = { roots, workspace };
     await this.catalogue.load(session);
+    if (!this.current(generation)) return false;
     const loaded = catalogueUsable(
       this.catalogue.current,
       `${ref.label}'s gears could not be loaded from ${roots.join(", ")}`,
     );
-    if (!loaded.ok) return this.failStage("catalogue", loaded.reason);
+    if (!loaded.ok) return this.failStage("catalogue", loaded.reason, generation);
 
-    this.enterStage("resolve");
+    this.enterStage("resolve", generation);
+    // **The last checkpoint, immediately before the answer is installed.** Every
+    // one above it saves work; this one is the correctness of the whole guard.
+    if (!this.current(generation)) return false;
     await this.products.open(ref);
     const resolved = openedSuccessfully(ref, this.products.current);
     if (resolved.ok) {
@@ -476,7 +525,32 @@ export class ProductSessionService {
     // The store also renders its own error, and that is the surface a person
     // should end up on: this stops the open and says why, and the panel shows
     // the product with its error rather than four steps still in progress.
-    return this.failStage("resolve", resolved.reason);
+    return this.failStage("resolve", resolved.reason, generation);
+  }
+
+  /**
+   * Establish the engine again for the product already open, and re-read it.
+   *
+   * The whole open sequence rather than a narrower repair, because that sequence
+   * *is* what a session is: an engine initialized on the product's roots and
+   * write boundary, a catalogue loaded from them, and the description read and
+   * resolved against it. A cheaper reconnect would be a second, slightly
+   * different definition of the same thing -- and the difference between the two
+   * would be discovered as a product that resolves against the wrong roots.
+   *
+   * What survives it, and where each one lives: the **profile** in
+   * `ProductStore.open`, which keeps the one being viewed when the description
+   * still offers it; the **selection** in `SelectionService`, which the store
+   * drops only when the product changes; and the **draft** in
+   * `ProductEditService`, keyed by path and not by session. None of them is
+   * carried through here, and that is deliberate -- a recovery path that
+   * re-installed them would be a second source of truth for three things that
+   * already have one.
+   */
+  async reconnect(): Promise<boolean> {
+    const ref = this.products.current.open;
+    if (ref === undefined) return false;
+    return this.open(ref);
   }
 }
 

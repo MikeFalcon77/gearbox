@@ -37,7 +37,7 @@ import { Composition } from "./composition";
 import { GearBlurb, GearDocs, GearHeading, InclusionReasons } from "../gear/gear-facts";
 import { GearSettings } from "./gear-settings";
 import { PluginSettings } from "./plugin-settings";
-import { ProductStore } from "../product-store";
+import { ProductStore, type Staleness } from "../product-store";
 import { GenerateService } from "../generate/generate-service";
 import { ProductEditService } from "../product-edit-service";
 import { PendingCreateGear } from "../create/pending-create-gear";
@@ -247,7 +247,26 @@ export class ProductWidget extends ReactWidget {
    * reader to stop seeing it, which is the same argument that keeps the
    * Conflicts panel from opening at startup to say "no conflicts".
    */
-  protected renderStageCount(diagnostics: readonly Diagnostic[]): React.ReactNode {
+  protected renderStageCount(
+    diagnostics: readonly Diagnostic[],
+    stale: Staleness | undefined,
+  ): React.ReactNode {
+    // **Silence is an answer here, and it was the wrong one.** A failed
+    // resolution clears the list, so the count simply vanished -- and a tab with
+    // no badge is how this panel says "nothing to report". Measured: three
+    // problems before the timeout, no badge after it, with the engine dead and
+    // nothing re-read. The badge now says it does not know.
+    if (stale !== undefined) {
+      return (
+        <span
+          className="gbx-stage-count gbx-stage-count-stale"
+          data-validation-stale
+          title="These counts are from before the engine stopped answering. Reconnect to re-read."
+        >
+          —
+        </span>
+      );
+    }
     if (diagnostics.length === 0) return undefined;
     const worst = worstOf(diagnostics) ?? "info";
     return (
@@ -463,7 +482,8 @@ export class ProductWidget extends ReactWidget {
                   affordance sent people to a second panel at the bottom
                   instead. The count is on the tab because that is where a
                   person looks to decide which stage to open. */}
-              {section.id === "validation" && this.renderStageCount(state.diagnostics)}
+              {section.id === "validation" &&
+                this.renderStageCount(state.diagnostics, state.stale)}
             </button>
           ))}
           {/* **Still a link out, now a visible one.** That it navigates rather
@@ -472,10 +492,21 @@ export class ProductWidget extends ReactWidget {
               a question the Generate view already answers". What changes is the
               weight: `gbx-start-link` drew the last step of composing a product
               as body text in link colour, at the end of a row of four tabs. */}
+          {/* **Not offered while the screen is not current.** Generation reads
+              the resolution, and the Generate view's own gate is
+              `EngineConnectionService.isConnected` -- so with a dead engine this
+              was a button that led to a refusal one click away. A control that
+              cannot do its job says so where it is. */}
           <button
             type="button"
             className="gbx-view-tab gbx-view-tab-next"
             data-product-section-generate
+            disabled={state.stale !== undefined}
+            title={
+              state.stale === undefined
+                ? undefined
+                : "Not available: this product has not been re-read since the engine stopped."
+            }
             onClick={() => this.showGenerate()}
           >
             Generate →
@@ -548,7 +579,12 @@ export class ProductWidget extends ReactWidget {
         {/* The product was read but something after it was not -- a failed
             resolve, most often. The composition below is still this product's,
             so the failure is reported beside it rather than replacing it. */}
-        {state.error !== undefined && this.renderRecovery(state.error)}
+        {/* **Or staleness with no error at all**, which is the state a write of
+            unknown fate leaves: the resolution on screen is a real answer, the
+            engine that gave it is gone, and until this existed the only trace
+            was a toast that had already faded. */}
+        {(state.error !== undefined || state.stale !== undefined) &&
+          this.renderRecovery(state.error)}
         {/* Composition and Validation render from the intent and the
             diagnostics, so they survive a resolution that did not arrive.
             Overview and Topology are views *of* a resolution and wait for one. */}
@@ -573,22 +609,57 @@ export class ProductWidget extends ReactWidget {
   }
 
   /**
-   * What went wrong, and the two things that can be done about it.
+   * What went wrong, and the one thing that can be done about it.
    *
    * One renderer for both places it appears -- the panel-wide recovery state
    * when nothing could be read, and the line above a composition that survived
-   * whatever failed after it. Reload and Open GDL are the whole repertoire:
-   * everything else a person might do about a broken description happens in the
-   * description.
+   * whatever failed after it.
+   *
+   * **The action depends on what is broken, because the wrong one destroyed the
+   * panel.** `Retry` is `ProductStore.reload()`, which re-reads the description
+   * through the engine -- and with no engine there to read it, the re-read
+   * clears the intent and then fails, so the product's name, its profile
+   * switcher, its composition and its pending-changes line all disappeared and
+   * were replaced by a second copy of the same refusal. Measured, against a real
+   * timeout: one press turned a product with a failed resolve into a panel with
+   * nothing in it.
+   *
+   * So when the session is what is gone, the offer is to re-establish it:
+   * `ProductSessionService.reconnect`, which is the whole open sequence for the
+   * product already open. Retry stays for the case it was written for -- a
+   * description that did not evaluate, where the engine answered and the answer
+   * was a refusal.
    */
   protected renderRecovery(error: string | undefined): React.ReactNode {
-    const path = this.store.current.open?.path;
+    const state = this.store.current;
+    const path = state.open?.path;
+    const stale = state.stale;
     return (
-      <div className="gbx-error" role="alert" data-product-error>
-        <span>{error}</span>
-        <button type="button" onClick={() => void this.store.reload()}>
-          Retry
-        </button>
+      <div
+        className="gbx-error"
+        role="alert"
+        data-product-error
+        {...(stale !== undefined
+          ? { "data-product-stale": true, "data-write-unknown": stale.writeUnknown }
+          : {})}
+      >
+        <span>{error ?? stale?.reason}</span>
+        {/* **The sentence, not just the marker.** A person reading this needs to
+            know that what is still on screen is from before the engine stopped
+            -- the composition, the counts and the profile are all still drawn,
+            correctly, from an answer that is no longer current. */}
+        {stale !== undefined && error !== undefined && error !== stale.reason && (
+          <span data-stale-reason>{stale.reason}</span>
+        )}
+        {stale !== undefined ? (
+          <button type="button" data-reconnect-engine onClick={() => void this.session.reconnect()}>
+            Reconnect engine
+          </button>
+        ) : (
+          <button type="button" data-retry-read onClick={() => void this.store.reload()}>
+            Retry
+          </button>
+        )}
         {path !== undefined && (
           <button type="button" onClick={() => void this.reveals.revealPath(path)}>
             Open GDL
@@ -618,10 +689,23 @@ export class ProductWidget extends ReactWidget {
           pending, beside the composition the pending edits are about. */}
       <div className="gbx-composition-draft" aria-live="polite">
         {this.edits.hasDraft() ? (
-          <span>
-            {this.edits.draftEdits().length} pending change
-            {this.edits.draftEdits().length === 1 ? "" : "s"} — Apply or Discard above
-          </span>
+          /* **"Pending" is a claim, and after a write of unknown fate it is the
+             wrong one.** The engine may have saved exactly these edits and never
+             said so -- measured, with the file changed on disk and this line
+             still offering to change it. So the line says what is actually known
+             until the description has been re-read. */
+          state.stale?.writeUnknown === true ? (
+            <span data-draft-unverified>
+              {this.edits.draftEdits().length} change
+              {this.edits.draftEdits().length === 1 ? "" : "s"} of unknown state — the last write
+              was never confirmed. Reconnect to re-read the description.
+            </span>
+          ) : (
+            <span>
+              {this.edits.draftEdits().length} pending change
+              {this.edits.draftEdits().length === 1 ? "" : "s"} — Apply or Discard above
+            </span>
+          )
         ) : (
           <span>Saved</span>
         )}
@@ -1053,11 +1137,21 @@ export class ProductWidget extends ReactWidget {
               because "three profiles, three distinct locks" is a fact still worth
               asserting, and it stays visible in the Lock view, where the lock is
               the subject rather than a footnote. */}
+          {/* **The word `resolved` is about the last resolution, and after the
+              engine stops that is exactly the problem.** The observation this
+              closes: a refused write beside a header still reading `resolved`,
+              which is honest on its own terms and reads as an all-clear. The
+              resolution is kept -- it was a real answer and throwing it away
+              would lose the graph -- and marked. */}
           <span
             data-resolved-profile={product.product.profile}
             data-lock-hash={product.product.lock_hash}
+            {...(this.store.current.stale !== undefined ? { "data-resolved-stale": true } : {})}
           >
             {product.product.profile} · {product.product.profile_kind}
+            {this.store.current.stale !== undefined && (
+              <span className="gbx-stale-note"> · not re-read since the engine stopped</span>
+            )}
           </span>
         </div>
 

@@ -46,6 +46,7 @@ import type { PluginTarget } from "../common/generated/PluginTarget";
 import type { ProductEdit } from "../common/generated/ProductEdit";
 import type { ResolveResult } from "../common/generated/ResolveResult";
 import { GearboxService } from "../common/protocol";
+import { isEngineGone, isOutcomeUnknown } from "./engine-failure";
 import { ProductStore } from "./product-store";
 import { ProductSessionService } from "./shell/product-session-service";
 import { identityOf, type ContextIdentity } from "./shell/screens";
@@ -61,6 +62,17 @@ import { StudioContextService } from "./shell/studio-context-service";
  * the second where the second belongs, instead of attaching a whole-proposal
  * failure to whichever row was edited last.
  */
+/**
+ * What a write attempt came to.
+ *
+ * Three answers rather than two, because the middle one used to be reported as a
+ * failure: `unchanged` is the engine saying the description already contains the
+ * edit, which is the ordinary idempotent case *and* what a person finds after a
+ * write whose answer never arrived. A caller that cannot tell it from a refusal
+ * cannot drop a draft that is already saved.
+ */
+export type EditOutcome = "written" | "unchanged" | "refused";
+
 export type ResolutionPreview =
   | { readonly ok: true; readonly resolution: ResolveResult }
   | { readonly ok: false; readonly reason: string };
@@ -214,7 +226,7 @@ export class ProductEditService {
         : "gear" in edit && edit.gear === gear && entryIndex === undefined;
     const count = this.draftEdits().filter(affected).length;
     let before: string | undefined;
-    const ok = await this.applyDescriptionEdit({
+    const ok = "written" === (await this.applyDescriptionEdit({
       title: "Remove from product",
       ok: "Remove",
       path: open.path,
@@ -230,7 +242,7 @@ export class ProductEditService {
       },
       commit: () => this.service.applyEdits(open.path, [operation], false, before),
       log: "remove composition entry",
-    });
+    }));
     if (ok) {
       // What is left addresses entries after the removed one, which have all
       // moved up by one. Rebased here rather than dropped, so configuring two
@@ -259,7 +271,7 @@ export class ProductEditService {
     }
     let approvedBefore: string | undefined;
     const touched = profilesTouchedBy(edits);
-    const applied = await this.applyDescriptionEdit({
+    const outcome = await this.applyDescriptionEdit({
       title: "Apply changes",
       ok: "Apply",
       // **The profiles are named, and only when there are any.** A draft mixes
@@ -279,14 +291,32 @@ export class ProductEditService {
       commit: () => this.service.applyEdits(open.path, edits, false, approvedBefore),
       log: `apply ${edits.length} draft edit(s)`,
     });
-    if (applied) {
-      this.drafts.delete(open.path);
-      // Same remount as a discard: the controls now have to read the saved
-      // intent, which is what the write just changed.
-      this.draftEpoch += 1;
-      this.onDraftChangedEmitter.fire();
+    if (outcome === "refused") return false;
+    // **Both remaining answers end the draft, and the reason they do is the
+    // same.** `written` means the file now says it; `unchanged` means the file
+    // already said it -- which is what a person finds after a write whose answer
+    // never came back, with the change on disk and the panel still offering to
+    // make it. Keeping the draft in that case left one way out, Discard, for an
+    // edit that had been saved; and a person who pressed Apply again got the
+    // same "nothing to change" for ever.
+    this.drafts.delete(open.path);
+    // Same remount as a discard: the controls now have to read the saved
+    // intent, which is what the write just changed.
+    this.draftEpoch += 1;
+    this.onDraftChangedEmitter.fire();
+    if (outcome === "unchanged") {
+      this.messages.info(
+        `${this.productName(open.label)} already contains ` +
+          `${edits.length === 1 ? "this change" : "these changes"}. The draft is cleared.`,
+      );
+      // The description on disk is the answer, so make the panel show it. Not
+      // a repeat of the write -- nothing is sent but a read.
+      await this.product.reload();
+      // Nothing was written *by this call*, and saying otherwise would be a
+      // claim about an operation nobody observed.
+      return false;
     }
-    return applied;
+    return true;
   }
 
   /**
@@ -309,6 +339,31 @@ export class ProductEditService {
 
   protected noteEngine(error: unknown): void {
     if (isEngineGone(error)) this.engine.markDisconnected("the engine stopped");
+  }
+
+  /**
+   * Record a failed write against the product, and say whether it may have landed.
+   *
+   * **The two are not the same failure and must not look the same.** A write
+   * that never left -- `the engine is not initialized`, thrown before anything
+   * was sent -- changed nothing, and the draft that produced it is still a
+   * pending change. A write that went out and was never answered may be on disk
+   * already: measured against a real engine, with the file changed and the panel
+   * still showing the text from before it. That one makes the draft
+   * unverifiable rather than pending, and the description has to be re-read
+   * before anything decides what is left to do.
+   */
+  protected noteWriteFailure(error: unknown): void {
+    this.noteEngine(error);
+    if (isOutcomeUnknown(error)) {
+      this.product.markStale(
+        `${messageOf(error)} — the change may already be saved; reconnect and re-read ` +
+          `before applying it again`,
+        true,
+      );
+    } else if (isEngineGone(error)) {
+      this.product.markStale(messageOf(error), false);
+    }
   }
 
   /** Saved config overlaid with draft set_config edits for `gear`. */
@@ -651,7 +706,7 @@ export class ProductEditService {
   ): Promise<boolean> {
     if (edits.length === 0) return false;
     if (!this.ownsSubject(owner)) return false;
-    return this.applyDescriptionEdit({
+    return "written" === (await this.applyDescriptionEdit({
       title: "Add to product",
       ok: "Add",
       summary: `${edits.length} edit${edits.length === 1 ? "" : "s"} on ${target.label}`,
@@ -661,7 +716,7 @@ export class ProductEditService {
       dryRun: () => this.service.applyEdits(target.path, [...edits], true),
       commit: () => this.service.applyEdits(target.path, [...edits], false),
       log: `apply ${edits.length} edit(s) to ${target.path}`,
-    });
+    }));
   }
 
   /**
@@ -801,7 +856,7 @@ export class ProductEditService {
   ): Promise<boolean> {
     const open = this.product.current.open;
     if (open === undefined) return false;
-    return this.applyDescriptionEdit({
+    return "written" === (await this.applyDescriptionEdit({
       title: "Add profile",
       ok: "Add",
       summary: `profile ${id}`,
@@ -810,13 +865,13 @@ export class ProductEditService {
       dryRun: () => this.service.addProfile(open.path, kind, id, fields, true),
       commit: () => this.service.addProfile(open.path, kind, id, fields, false),
       log: `add profile ${id}`,
-    });
+    }));
   }
 
   async removeProfile(id: string): Promise<boolean> {
     const open = this.product.current.open;
     if (open === undefined) return false;
-    return this.applyDescriptionEdit({
+    return "written" === (await this.applyDescriptionEdit({
       title: "Remove profile",
       ok: "Remove",
       summary: `profile ${id}`,
@@ -825,7 +880,7 @@ export class ProductEditService {
       dryRun: () => this.service.removeProfile(open.path, id, true),
       commit: () => this.service.removeProfile(open.path, id, false),
       log: `remove profile ${id}`,
-    });
+    }));
   }
 
   /**
@@ -852,53 +907,65 @@ export class ProductEditService {
     log: string;
     /** The edits this preview is of, named in the dialog. See `describeEdit`. */
     targets?: readonly ProductEdit[];
-  }): Promise<boolean> {
+  }): Promise<EditOutcome> {
     if (this.isDirty(args.path)) {
       this.messages.error(
         `${args.label} has unsaved changes. Save or revert them first — writing now would discard your edit.`,
       );
-      return false;
+      return "refused";
     }
     let preview: EditGearResult;
     try {
       preview = await args.dryRun();
     } catch (error) {
       this.reportFailure(error);
-      return false;
+      return "refused";
     }
     if (!preview.changed) {
-      this.messages.info("Nothing to change.");
-      return false;
+      // **Not a refusal, and the caller has to be able to tell.** The engine
+      // answering `changed: false` means the description already says this --
+      // the ordinary idempotent case, and also the state a write of unknown fate
+      // leaves behind. A draft in that state was reported as pending for ever:
+      // the only way out was Discard, for a change that had been saved. See
+      // `applyDraft`, which is the caller that can say something useful about it.
+      return "unchanged";
     }
     const at = this.product.revision;
     if (!(await this.confirmEdit(args.title, args.ok, args.summary, preview, args.targets ?? [])))
-      return false;
+      return "refused";
     const open = this.product.current.open;
     if (this.product.revision !== at || open?.path !== args.path || this.isDirty(args.path)) {
       this.messages.warn("Nothing was written: the product changed while the preview was open.");
-      return false;
+      return "refused";
     }
     let again: EditGearResult;
     try {
       again = await args.dryRun();
     } catch (error) {
       this.reportFailure(error);
-      return false;
+      return "refused";
     }
     if (!again.changed || again.after !== preview.after) {
       this.messages.warn("Nothing was written: the description on disk is not the one previewed.");
-      return false;
+      // `unchanged` when the second dry run says the file already contains it:
+      // between the preview and the confirmation somebody -- or the engine,
+      // finishing a write nobody heard about -- got there first.
+      return again.changed ? "refused" : "unchanged";
     }
     // eslint-disable-next-line no-console
     console.info(`Gearbox: writing ${args.log} to ${args.path}`, new Error("write path").stack);
     try {
       await args.commit();
     } catch (error) {
-      this.reportFailure(error);
-      return false;
+      // **The write half, not the read half.** `reportFailure` says what went
+      // wrong; this also records whether what went wrong leaves the description
+      // in a state nobody knows.
+      this.noteWriteFailure(error);
+      this.messages.error(messageOf(error));
+      return "refused";
     }
     await this.product.reload();
-    return true;
+    return "written";
   }
 
   protected async confirmEdit(
@@ -1177,18 +1244,6 @@ function describeEdit(edit: ProductEdit): string {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * Whether this refusal is the backend saying the engine is gone.
- *
- * The exact sentence `GearboxServiceImpl.request` throws when `this.engine` is
- * undefined or dead. Matched on rather than typed, because it crosses the Theia
- * proxy as a plain `Error` and there is no code on it to match instead -- which
- * is worth saying out loud, since a message match is a contract nobody declared.
- */
-export function isEngineGone(error: unknown): boolean {
-  return messageOf(error).includes("the engine is not initialized");
 }
 
 /**
