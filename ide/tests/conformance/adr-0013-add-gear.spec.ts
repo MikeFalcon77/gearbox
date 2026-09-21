@@ -1,6 +1,10 @@
 // Product-session chrome and the Add Gear configurator (Phases 4–5).
 
 import type { Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { copyProduct, type ProductCopy } from "../fixtures/product-copy";
 
 import {
   configureGear,
@@ -14,6 +18,9 @@ import {
   revealCatalogue,
   test,
 } from "../fixtures/studio";
+
+/** The repository root, for the claims below that write to their own copy. */
+const REPO = join(__dirname, "../../..");
 
 test.describe("product session and Add Gear", () => {
   test("Product has an Add Gear button that opens the configurator", async ({ studio }) => {
@@ -622,5 +629,195 @@ test.describe("Add Gear shows consequences before the write", () => {
       page.locator(".gbx-composition-settings"),
       "and has not been given the catalogue's subject instead",
     ).not.toContainText("tenant-resolver");
+  });
+});
+
+/**
+ * Attaching plugins to a host that is not in the product yet.
+ *
+ * The other route to the same edit -- a plugin chosen from the catalogue, with a
+ * host picked from the ones already there -- has carried a scope control since
+ * the connection editor got one. This route hardcoded `profiles: []`, which is
+ * not "no profiles" but **every** profile (`ProductIntent::applies` is
+ * `scoped_to.is_empty() || scoped_to.contains(profile)`). So two routes to one
+ * edit disagreed about what the edit meant, and the one that read as the
+ * careful, staged, preview-everything path was the one that silently applied a
+ * connection everywhere.
+ *
+ * Its own copy of the product, under its own id: these claims write, and
+ * `.gearbox/` is keyed on the declared id. See `fixtures/product-copy.ts`.
+ */
+test.describe("Attach plugin carries a scope of its own", () => {
+  let copy: ProductCopy;
+
+  // **One copy per claim, not one per file.** The first of these writes
+  // `tenant-resolver` into the description, and the two after it are about
+  // staging that host for the first time -- so sharing a copy would have the
+  // second and third reading the first one's result as their starting point,
+  // which is the same failure the copies exist to prevent, one scope smaller.
+  test.beforeEach(() => {
+    copy = copyProduct(REPO, "payments-demo", "attach-scope");
+  });
+
+  test.afterEach(() => {
+    copy?.dispose();
+  });
+
+  /** Open the configurator on `tenant-resolver`, a host this product does not have. */
+  async function stageHost(page: Page): Promise<void> {
+    await openProductById(page, copy.id, "dev");
+    await page.locator("[data-add-gear]").click();
+    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+    await page.locator('[data-add-gear-select="tenant-resolver"]').click();
+    await expect(page.locator("[data-add-gear-plugin-pick]")).toBeVisible({ timeout: 60_000 });
+  }
+
+  async function attach(page: Page, plugin: string): Promise<void> {
+    await page.locator("[data-add-gear-plugin-pick]").selectOption(plugin);
+    await page.locator("[data-add-gear-plugin-add]").click();
+    await expect(page.locator(`[data-add-gear-staged="${plugin}"]`)).toBeVisible({
+      timeout: 60_000,
+    });
+  }
+
+  /** Narrow one staged plugin's scope to exactly `profile`. */
+  async function scopeTo(page: Page, plugin: string, profile: string): Promise<void> {
+    const staged = page.locator(`[data-add-gear-staged="${plugin}"]`);
+    await staged.locator("[data-profile-scope-selected]").click();
+    // Switching to a narrow scope starts at the profile being viewed, so the
+    // wanted one is checked and the starting one unchecked -- in that order,
+    // because the last remaining profile refuses to be turned off.
+    const wanted = staged.locator(`input[data-profile="${profile}"]`);
+    if (!(await wanted.isChecked())) await wanted.check();
+    for (const other of await staged.locator("input[data-profile]").all()) {
+      const id = await other.getAttribute("data-profile");
+      if (id !== profile && (await other.isChecked())) await other.uncheck();
+    }
+    await expect(staged.locator("[data-profile-scope]")).toHaveAttribute(
+      "data-profile-scope",
+      "selected",
+    );
+  }
+
+  test("two plugins staged onto one new host keep their own scopes, and the host joins explicitly [ADR-0023 §2.4: a connection is addressed by where it is written]", async ({
+    freshStudio,
+  }) => {
+    const { page } = freshStudio;
+    await stageHost(page);
+
+    // **Disjoint scopes, and that is the claim rather than a convenience.** Two
+    // plugins filling one extension point under one host in the *same* profile
+    // is a collision the evaluator refuses -- which is why a connection carries a
+    // scope at all, and why "one control for the whole dialog" would not do.
+    await attach(page, "single-tenant-tr-plugin");
+    await scopeTo(page, "single-tenant-tr-plugin", "dev");
+    await attach(page, "rg-tr-plugin");
+    await scopeTo(page, "rg-tr-plugin", "local");
+
+    // **One radio group per plugin.** `ProfileScope` names its group after its
+    // legend, so two controls sharing one would be one group: narrowing the
+    // second would put the first back to every profile with nothing saying so.
+    await expect(
+      page
+        .locator('[data-add-gear-staged="single-tenant-tr-plugin"] [data-profile-scope]')
+        .first(),
+    ).toHaveAttribute("data-profile-scope", "selected");
+
+    // The preview is the whole serialization, and the host is in it as an
+    // addition of its own: attaching a plugin to a gear the product does not
+    // have is two edits, and the review says so before anything is written.
+    const preview = page.locator("[data-add-gear-after]");
+    await expect(preview).toContainText("tenant-resolver", { timeout: 60_000 });
+    await expect(preview).toContainText("single-tenant-tr-plugin");
+    await expect(preview).toContainText("rg-tr-plugin");
+
+    await page.locator("[data-add-gear-apply]").click();
+    await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0, { timeout: 90_000 });
+
+    // ---- what reached the description
+
+    await expect
+      .poll(() => readFileSync(copy.path, "utf8"), { timeout: 60_000 })
+      .toContain("tenant-resolver");
+    const written = readFileSync(copy.path, "utf8");
+    expect(
+      written,
+      "the host is written as an explicitly selected gear, not left to the closure",
+    ).toMatch(/use_gear\(\s*"tenant-resolver"/);
+    expect(written, "each connection carries the scope it was staged at").toMatch(
+      /plugin\(\s*"single-tenant-tr-plugin"[^)]*profiles\s*=\s*\[\s*"dev"\s*\]/,
+    );
+    expect(written).toMatch(/plugin\(\s*"rg-tr-plugin"[^)]*profiles\s*=\s*\[\s*"local"\s*\]/);
+
+    // And the product is left looking at what was added, on the stage that
+    // configures it.
+    await expect(page.locator('[data-product-section="composition"]')).toHaveAttribute(
+      "aria-selected",
+      "true",
+      { timeout: 60_000 },
+    );
+    await expect(
+      page.locator('.gbx-composition-settings [data-gear-config="tenant-resolver"]'),
+      "the host is the subject: the plugins were staged onto it",
+    ).toBeVisible({ timeout: 60_000 });
+  });
+
+  test("a staged scope survives the preview being recomputed [ADR-0023 §2.4: a connection is addressed by where it is written]", async ({
+    freshStudio,
+  }) => {
+    const { page } = freshStudio;
+    await stageHost(page);
+    await attach(page, "single-tenant-tr-plugin");
+    await scopeTo(page, "single-tenant-tr-plugin", "local");
+
+    // Every one of these recomputes the preview, and each was a chance to hand
+    // the scope back to its default. Staging a second plugin is the interesting
+    // one: the list is rebuilt, and a list of ids could not have carried the
+    // first entry's answer through it.
+    await attach(page, "rg-tr-plugin");
+    await page.locator(`[data-add-gear-plugin-remove="rg-tr-plugin"]`).click();
+    await expect(page.locator('[data-add-gear-staged="rg-tr-plugin"]')).toHaveCount(0);
+
+    const staged = page.locator('[data-add-gear-staged="single-tenant-tr-plugin"]');
+    await expect(staged.locator("[data-profile-scope]")).toHaveAttribute(
+      "data-profile-scope",
+      "selected",
+    );
+    await expect(staged.locator('input[data-profile="local"]')).toBeChecked();
+    await expect(staged.locator('input[data-profile="dev"]')).not.toBeChecked();
+
+    await page.locator("[data-add-gear-cancel]").click();
+  });
+
+  test("Cancel and Escape leave the description alone, staged scopes and all [ADR-0013 §the write is one act]", async ({
+    freshStudio,
+  }) => {
+    const { page } = freshStudio;
+    const before = readFileSync(copy.path, "utf8");
+
+    await stageHost(page);
+    await attach(page, "single-tenant-tr-plugin");
+    await scopeTo(page, "single-tenant-tr-plugin", "dev");
+    await page.locator("[data-add-gear-cancel]").click();
+    await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0, { timeout: 30_000 });
+    expect(readFileSync(copy.path, "utf8"), "Cancel writes nothing").toBe(before);
+
+    // The second door, and it has to be checked separately: Escape is Theia's,
+    // dispatched on `document.body` to the topmost dialog, and a staged proposal
+    // is exactly the state where a dialog has something to lose.
+    await stageHost(page);
+    await attach(page, "rg-tr-plugin");
+    await scopeTo(page, "rg-tr-plugin", "local");
+    // **One press, and nothing else may take it.** Theia binds Escape on
+    // `document.body` and hands it to the topmost dialog -- but a visible
+    // notification takes it first, one press per toast, which is how a dialog
+    // that "would not close" turned out to be a dialog nobody had reached.
+    await expect(
+      page.locator(".theia-notification-list-item"),
+      "no toast to swallow the key",
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0, { timeout: 30_000 });
+    expect(readFileSync(copy.path, "utf8"), "Escape writes nothing either").toBe(before);
   });
 });

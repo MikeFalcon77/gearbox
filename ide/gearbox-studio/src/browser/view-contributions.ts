@@ -506,6 +506,10 @@ export class GearAuthorViewContribution extends ScopedViewContribution<GearAutho
 @injectable()
 export class AddGearViewContribution extends ScopedViewContribution<Widget> {
   @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
+  // Handed to the dialog, which needs a way back when the engine stops while it
+  // is open: a modal dialog covers the panel's own Reconnect button, so
+  // recovery has to be reachable from inside the thing that is on top.
+  @inject(ProductSessionService) protected readonly addSession!: ProductSessionService;
   @inject(ProductEditService) protected readonly edits!: ProductEditService;
   @inject(SelectionService) protected readonly selection!: SelectionService;
   @inject(CommandRegistry) protected readonly compositionCommands!: CommandRegistry;
@@ -566,7 +570,7 @@ export class AddGearViewContribution extends ScopedViewContribution<Widget> {
   async openAdd(state?: AddGearChoice): Promise<void> {
     if (!this.products.current.open || !this.engine.isConnected) return;
     if (this.dialog && !this.dialog.isDisposed) { this.dialog.activate(); return; }
-    const dialog = new AddGearDialog(this.catalogue, this.products, this.edits, this.selection, this.compositionCommands, state);
+    const dialog = new AddGearDialog(this.catalogue, this.products, this.edits, this.selection, this.compositionCommands, this.addSession, state);
     this.dialog = dialog;
     try {
       const added = await dialog.open();

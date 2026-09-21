@@ -227,3 +227,79 @@ own, because it is not inside the panel.
 * Extends `cpt-gearbox-adr-create-product`, which left plugin-entry editing out of scope.
 * Tier 3 of `cpt-gearbox-adr-authoring-ownership-tiers`: surgical edits, never re-serialisation.
 * Amends `cpt-gearbox-adr-domain-specific-ide-shell` for the Add Gear surface.
+
+## Amendment 2026-09-21: Attach plugin carries a scope, because it writes a connection
+
+A connection is scoped: `plugin("static-authn-plugin", profiles = ["dev", "local"])` is a fact
+about which profiles the entry applies under, and an entry with no `profiles` argument applies
+under **every** profile -- `ProductIntent::applies` is `scoped_to.is_empty() ||
+scoped_to.contains(profile)`, and the writer deliberately emits no argument rather than
+`profiles = []`.
+
+There are two routes in the Add Gear dialog to writing one. The route that picks a plugin from the
+catalogue and a host from the gears already in the product has had a scope control since the
+connection editor got one. The route that adds a **host** and stages plugins onto it before it
+exists passed `profiles: []` for every staged entry.
+
+So two routes to one edit disagreed about what the edit meant, and the one that reads as the
+careful path -- stage, preview, review the whole serialization, then write -- was the one that
+silently applied every connection under every profile.
+
+### The decision
+
+Each staged plugin carries its own scope, using the same `ProfileScope` control as the other route.
+`staged` becomes a list of `{ plugin, profiles }` rather than of ids, because two staged plugins can
+want different answers: that is what a per-connection scope is *for*, and a list of ids cannot hold
+it.
+
+**Disjoint scopes are the point, not a nicety.** Two plugins filling one extension point under one
+host in the same profile is a collision the evaluator refuses, so a dialog that could only offer one
+scope for the whole batch could not express the ordinary case of two implementations for two
+deployments.
+
+**One radio group per plugin, and that is load-bearing.** `ProfileScope` names its radio group after
+its legend; two controls sharing a legend would be one group, so narrowing the second plugin would
+put the first back to every profile with nothing on screen saying so.
+
+**The host is written as an explicit selection.** It always was -- `proposal()` emits `add_gear`
+before the connections, because `add_plugin_selection` refuses a host that is not selected -- and
+the preview names it as its own addition, so the review says that attaching plugins to a gear the
+product does not have is several edits rather than one.
+
+The *other* route has a sentence for the same fact -- "the host will become an explicitly selected
+gear", for a host that is in the resolution but not in `selected_gears` -- and **it is not
+reachable on the current corpus**, which is worth recording rather than leaving as an untested
+branch. Only two hosts have catalogued plugins, `authn-resolver` and `tenant-resolver`; in
+`payments-demo` the first is explicitly selected with both its plugins already attached, and the
+second is absent from the resolution altogether, so the host picker never offers a host in the
+state the sentence describes. `adr-0013-add-gear.spec.ts` already says the same thing about a
+successful attach through that route.
+
+### What the dialog does when the engine stops
+
+It is modal, so the panel's **Reconnect engine** button is underneath it, and the only offer it had
+-- `Refresh preview` -- re-asks an engine that is not there. When the failure is a lost session it
+now offers recovery instead, through the same `ProductSessionService.reconnect` the panel uses, so
+there is one definition of what a session is.
+
+The proposal is untouched by it: the candidate, the host, the staged plugins and each one's scope
+are fields of the dialog, and re-reading the product does not go near them. The dialog also stays
+open -- it closes only when the product is gone or a *different* one is open, and a re-read of the
+same product is neither.
+
+### Verification
+
+* `ide/tests/conformance/adr-0013-add-gear.spec.ts` -- two plugins staged onto one new host keep
+  their own scopes and reach the description with them; the host is written explicitly; a scope
+  survives the preview being recomputed, including a second plugin being staged and removed;
+  Cancel and Escape write nothing with a staged proposal on screen.
+* `ide/tests/wedge/attach-plugin.spec.ts` -- a proposal across a lost engine: the preview
+  half-arrives, recovery is offered in place of a refresh, and both staged plugins keep their own
+  answers afterwards.
+
+### Traceability
+
+* Extends this ADR's §2.4: a connection is addressed by where it is written, and its scope is part
+  of what is written.
+* The recovery offer is `cpt-gearbox-adr-domain-specific-ide-shell` Amendment 2026-09-21, which
+  decided that a stopped engine is re-established on request and never replays.

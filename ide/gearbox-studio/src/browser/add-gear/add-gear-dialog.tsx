@@ -15,8 +15,31 @@ import { impactOf, type Impact } from "./impact";
 import { DiagnosticsList } from "../diagnostics/diagnostics-list";
 import { diffText } from "../product-edit-service";
 import { ProfileScope } from "../product/profile-scope";
+import { ProductSessionService } from "../shell/product-session-service";
+import { isSessionLost } from "../engine-failure";
 
 export interface AddGearChoice { gearId?: string; host?: string; point?: string }
+
+/**
+ * One plugin staged onto the gear being added, with the scope it is staged at.
+ *
+ * **The scope was hardcoded to every profile**, which is what `profiles: []`
+ * means: `gearbox_ir::intent::applies` is `scoped_to.is_empty() ||
+ * scoped_to.contains(profile)`. So a plugin attached here landed in every
+ * profile of the product, silently, while the *other* path to the same edit --
+ * attaching a plugin to a host already in the product -- has had a scope control
+ * since the connection editor got one. Two routes to one edit, disagreeing about
+ * what the edit means.
+ *
+ * A record rather than an id, because two staged plugins can want different
+ * answers: that is the whole point of a per-connection scope, and a list of ids
+ * cannot hold it.
+ */
+interface StagedPlugin {
+  readonly plugin: string;
+  /** As written. Empty means every profile -- see `ProfileScope`. */
+  readonly profiles: readonly string[];
+}
 
 /** Candidate selection stays local until the confirmed write succeeds. */
 export class AddGearDialog extends ReactDialog<boolean> {
@@ -34,7 +57,7 @@ export class AddGearDialog extends ReactDialog<boolean> {
    * way: they change nothing about which gears arrive, so they wait for the
    * product (§2.4 of the composition ADR).
    */
-  private staged: string[] = [];
+  private staged: StagedPlugin[] = [];
   private pluginPick = "";
   private preview?: EditGearResult;
   private impact?: Impact;
@@ -47,7 +70,8 @@ export class AddGearDialog extends ReactDialog<boolean> {
 
   constructor(private readonly catalogue: CatalogueStore, private readonly products: ProductStore,
     private readonly edits: ProductEditService, private readonly selection: SelectionService,
-    private readonly commands: CommandRegistry, private readonly initial: AddGearChoice = {}) {
+    private readonly commands: CommandRegistry, private readonly session: ProductSessionService,
+    private readonly initial: AddGearChoice = {}) {
     super({ title: initial.host ? `Add plugin to ${initial.host}` : "Add gear to product", maxWidth: 1120 });
     this.node.classList.add("gbx-add-dialog");
     this.path = products.current.open!.path;
@@ -153,10 +177,14 @@ export class AddGearDialog extends ReactDialog<boolean> {
     if (!gear.fills) {
       return [
         { kind: "add_gear", gear: gear.id, source: gear.source },
-        // Each staged plugin, attached to the gear the same batch adds. Order
-        // matters: `add_plugin_selection` refuses a host that is not selected.
-        ...this.staged.map(plugin => ({
-          kind: "add_plugin_selection" as const, gear: gear.id, plugin, profiles: [],
+        // Each staged plugin, attached to the gear the same batch adds, **at the
+        // scope it was staged at**. Order matters: `add_plugin_selection`
+        // refuses a host that is not selected.
+        ...this.staged.map(entry => ({
+          kind: "add_plugin_selection" as const,
+          gear: gear.id,
+          plugin: entry.plugin,
+          profiles: [...entry.profiles],
         })),
       ];
     }
@@ -168,6 +196,24 @@ export class AddGearDialog extends ReactDialog<boolean> {
       { kind: "add_plugin_selection", gear: host.id, plugin: gear.id, profiles: this.profiles },
     ];
   }
+  /**
+   * Put the session back and recompute this proposal against it.
+   *
+   * The whole open sequence, through `ProductSessionService.reconnect` -- the
+   * same one the panel offers -- so there is one definition of what a session
+   * is. The dialog stays open throughout: `products.onChanged` closes it only
+   * when the product is gone or a *different* one is open, and a re-read of the
+   * same product is neither.
+   */
+  private async recover(): Promise<void> {
+    this.error = undefined;
+    this.resolving = true;
+    this.update();
+    await this.session.reconnect();
+    if (this.isDisposed) return;
+    await this.refreshPreview();
+  }
+
   private async refreshPreview(): Promise<void> {
     const token = ++this.token;
     this.preview = undefined; this.impact = undefined; this.error = undefined;
@@ -273,10 +319,12 @@ export class AddGearDialog extends ReactDialog<boolean> {
               available={Object.keys(this.products.current.intent?.profiles ?? {})}
               viewing={this.products.current.profile ?? undefined}
               onChange={(next: string[]) => { this.profiles = next; void this.refreshPreview(); }} />
-            {this.host && !this.edits.inProduct(this.host) && <p>The host {this.host} will become an explicitly selected gear.</p>}
+            {/* Addressable, because it is the one statement that says this
+                addition is two edits rather than one. */}
+            {this.host && !this.edits.inProduct(this.host) && <p data-add-gear-host-joins={this.host}>The host {this.host} will become an explicitly selected gear.</p>}
           </>}
           {!chosen.fills && (() => {
-            const points = pointsOf(chosen), offer = this.compatible(chosen).filter(p => !this.staged.includes(p.id));
+            const points = pointsOf(chosen), offer = this.compatible(chosen).filter(p => !this.staged.some(entry => entry.plugin === p.id));
             return <section className="gbx-features-list" data-add-gear-plugins data-add-gear-section="plugins">
               <h4>Plugins</h4>
               {/* **Extension points first, and the offer only if there are any.**
@@ -287,8 +335,22 @@ export class AddGearDialog extends ReactDialog<boolean> {
                   and the plugin's `fills.point` -- so the offer was the defect. */}
               {!points.length ? <p data-add-gear-plugins-none>Extension points: none declared. This gear takes no plugins.</p> : <>
                 <p>Extension points: {points.map(point => point.trait_ident).join(", ")}</p>
-                {this.staged.map(id => <p key={id} data-add-gear-plugin={id}>{id}
-                  <button type="button" onClick={() => { this.staged = this.staged.filter(v => v !== id); void this.refreshPreview(); }}>Remove</button></p>)}
+                {this.staged.map(entry => <div key={entry.plugin} data-add-gear-staged={entry.plugin}>
+                  <p data-add-gear-plugin={entry.plugin}>{entry.plugin}
+                  <button type="button" data-add-gear-plugin-remove={entry.plugin} onClick={() => { this.staged = this.staged.filter(v => v.plugin !== entry.plugin); void this.refreshPreview(); }}>Remove</button></p>
+                  {/* **A legend per plugin, and it is not decoration.**
+                      `ProfileScope` names its radio group after the legend, so
+                      two controls sharing one would be one group: choosing a
+                      narrow scope for the second plugin would clear the first
+                      back to "all profiles" with nothing on screen saying so. */}
+                  <ProfileScope legend={`Profiles for ${entry.plugin}`} profiles={entry.profiles}
+                    available={Object.keys(this.products.current.intent?.profiles ?? {})}
+                    viewing={this.products.current.profile ?? undefined}
+                    onChange={(next: string[]) => {
+                      this.staged = this.staged.map(v => v.plugin === entry.plugin ? { plugin: v.plugin, profiles: next } : v);
+                      void this.refreshPreview();
+                    }} />
+                </div>)}
                 {offer.length ? <>
                   <select data-add-gear-plugin-pick aria-label="Plugin to attach" value={this.pluginPick}
                     onChange={e => { this.pluginPick = e.target.value; this.update(); }}>
@@ -296,14 +358,27 @@ export class AddGearDialog extends ReactDialog<boolean> {
                     {offer.map(p => <option key={p.id} value={p.id}>{p.id}</option>)}
                   </select>
                   <button type="button" data-add-gear-plugin-add disabled={!this.pluginPick}
-                    onClick={() => { if (this.pluginPick) { this.staged = [...this.staged, this.pluginPick]; this.pluginPick = ""; void this.refreshPreview(); } }}>Attach plugin</button>
+                    onClick={() => { if (this.pluginPick) { this.staged = [...this.staged, { plugin: this.pluginPick, profiles: [] }]; this.pluginPick = ""; void this.refreshPreview(); } }}>Attach plugin</button>
                 </> : <p data-add-gear-plugins-unfilled>Every plugin that fills these points is already staged.</p>}
               </>}
             </section>;
           })()}
           {this.edits.hasDraft() && <p role="note">Impact uses the saved product. Pending configuration changes stay in your draft and are not applied by Add.</p>}
           {this.resolving && <p role="status">Calculating changes…</p>}
-          {this.error && <p role="alert" data-add-gear-impact-error>{this.error}<button type="button" onClick={() => void this.refreshPreview()}>Refresh preview</button></p>}
+          {/* **Two different failures, two different offers.** `Refresh preview`
+              re-asks the engine, which is the right thing when the engine
+              answered and the answer was a refusal. When the session is what
+              went -- a missed deadline, a child that died -- re-asking is asking
+              nothing, and the panel's own Reconnect button is underneath this
+              dialog. So recovery is offered here, and the proposal on screen
+              (the candidate, the host, the staged plugins and each one's profile
+              scope) is untouched by it: they are fields of this dialog, and a
+              re-read of the product does not go near them. */}
+          {this.error && <p role="alert" data-add-gear-impact-error>{this.error}
+            {isSessionLost(this.error)
+              ? <button type="button" data-add-gear-reconnect onClick={() => void this.recover()}>Reconnect engine</button>
+              : <button type="button" data-add-gear-refresh onClick={() => void this.refreshPreview()}>Refresh preview</button>}
+          </p>}
           {/* **Said beside the button, and the button stays live.** Building a
               product is add-a-gear-then-configure-it, so a resolution that
               complains in between is a waypoint: refusing the write would make
