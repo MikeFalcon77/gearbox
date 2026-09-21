@@ -154,6 +154,22 @@ export class DescriptionWatchService implements FrontendApplicationContribution 
       // an answer about text they have already moved past. Their own save
       // fires this again.
       if (hasUnsavedEdits(this.models, path)) return;
+      // **Nor while a draft is queued, which is the rule the gear path below
+      // already states.** The two paths disagreed, and the product one was
+      // wrong: `ProductStore.reload` bumps the store's revision, and
+      // `ProductEditService` refuses a write whose preview was computed against
+      // an older one. So a second Apply started within the settle window of the
+      // first was refused with "the product changed while the preview was open"
+      // -- when the only thing that had changed was that the application
+      // re-read its own write. Measured: two runs in three, from a claim that
+      // queues an edit during a write and then applies it.
+      //
+      // Nothing is lost by waiting. A write re-reads the product itself when it
+      // lands, so the change that woke this watcher is already on screen; and
+      // applying or discarding the draft re-resolves anyway. An edit made in the
+      // editor while a draft is open waits for the same moment, which is the
+      // trade-off the gear path took for the same reason.
+      if (this.edits.hasDraft(path)) return;
       void this.products.reload();
     }, SETTLE_MS);
   }

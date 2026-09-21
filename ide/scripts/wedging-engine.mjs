@@ -124,8 +124,21 @@ function parse(body) {
   }
 }
 
-/** Request ids whose answer is not to come back. */
+/** Request ids whose answer is not to come back yet. */
 const withheld = new Set();
+
+/**
+ * Answers that arrived while they were withheld, waiting for the sentinel to go.
+ *
+ * **Held rather than dropped, so a claim can ask for the other ending.** The
+ * timeout scenarios never release, and for them a buffer that dies with the
+ * process is indistinguishable from a bin. What needs the buffer is the state
+ * where a write *succeeds* while the person goes on editing: the commit is in
+ * flight, another change is queued behind it, and then the answer lands. There is
+ * no way to reach that by dropping the answer -- the request would end in a
+ * timeout, which is a different claim.
+ */
+const holding = [];
 
 /**
  * What is being withheld right now, or `undefined` for nothing.
@@ -151,6 +164,35 @@ function target() {
   }
 }
 
+/** Which method each withheld id belongs to, so a release can be selective. */
+const methodOf = new Map();
+
+/**
+ * Let go of anything the sentinel no longer withholds.
+ *
+ * On a timer because a release has no traffic of its own: the sentinel is
+ * removed by the claim, out of band, and the engine has already said everything
+ * it is going to say.
+ */
+function releaseHeld() {
+  if (holding.length === 0) return;
+  const wanted = target();
+  const stillHeld = [];
+  for (const answer of holding) {
+    if (wanted !== undefined && wanted.method === answer.method) {
+      stillHeld.push(answer);
+      continue;
+    }
+    note("released-answer", { id: answer.id, method: answer.method });
+    withheld.delete(answer.id);
+    process.stdout.write(answer.frame);
+  }
+  holding.length = 0;
+  holding.push(...stillHeld);
+}
+
+setInterval(releaseHeld, 100);
+
 function withholds(message, body) {
   const wanted = target();
   if (wanted === undefined || message.method !== wanted.method) return false;
@@ -168,6 +210,7 @@ process.stdin.on(
       note("request", { method: message.method, id: message.id });
       if (withholds(message, body)) {
         withheld.add(message.id);
+        methodOf.set(message.id, message.method);
         note("withhold", { method: message.method, id: message.id });
       }
     }
@@ -183,7 +226,8 @@ child.stdout.on(
   frames((frame, body) => {
     const message = parse(body);
     if (message?.id !== undefined && withheld.has(message.id)) {
-      note("dropped-answer", { id: message.id });
+      note("held-answer", { id: message.id });
+      holding.push({ id: message.id, method: methodOf.get(message.id), frame });
       return;
     }
     process.stdout.write(frame);

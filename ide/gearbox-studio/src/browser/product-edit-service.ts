@@ -299,7 +299,19 @@ export class ProductEditService {
     // make it. Keeping the draft in that case left one way out, Discard, for an
     // edit that had been saved; and a person who pressed Apply again got the
     // same "nothing to change" for ever.
-    this.drafts.delete(open.path);
+    //
+    // **Exactly the edits that were sent, and not the draft as it now stands.**
+    // `edits` was captured before the dry run, and what the engine was asked
+    // about -- twice, and then committed -- is that list. Everything after it
+    // takes real time: a dry run, a confirmation somebody reads, and the commit
+    // itself. An edit queued in that window was never previewed, never sent and
+    // never written, and `drafts.delete` threw it away with the ones that were.
+    // `mergeDraft` keeps untouched entries by reference, so identity is the right
+    // test -- and an edit that re-touched the same slot is a *new* object, which
+    // is correct: the newer value has not been written either.
+    const remaining = (this.drafts.get(open.path) ?? []).filter((edit) => !edits.includes(edit));
+    if (remaining.length === 0) this.drafts.delete(open.path);
+    else this.drafts.set(open.path, remaining);
     // Same remount as a discard: the controls now have to read the saved
     // intent, which is what the write just changed.
     this.draftEpoch += 1;
@@ -307,7 +319,11 @@ export class ProductEditService {
     if (outcome === "unchanged") {
       this.messages.info(
         `${this.productName(open.label)} already contains ` +
-          `${edits.length === 1 ? "this change" : "these changes"}. The draft is cleared.`,
+          `${edits.length === 1 ? "this change" : "these changes"}.` +
+          (remaining.length === 0
+            ? " The draft is cleared."
+            : ` ${remaining.length} later change${remaining.length === 1 ? "" : "s"} ` +
+              `${remaining.length === 1 ? "is" : "are"} still pending.`),
       );
       // The description on disk is the answer, so make the panel show it. Not
       // a repeat of the write -- nothing is sent but a read.
