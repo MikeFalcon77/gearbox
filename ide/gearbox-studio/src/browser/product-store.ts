@@ -28,6 +28,8 @@ import {
   type ProductSelection,
   SelectionService,
 } from "./shell/selection-service";
+import { EngineConnectionService } from "./shell/engine-connection-service";
+import { isSessionLost } from "./engine-failure";
 
 export type ProductStatus = "idle" | "loading" | "resolving" | "ready" | "error";
 
@@ -67,6 +69,36 @@ export interface ProductState {
   readonly lockError: string | undefined;
   readonly diagnostics: readonly Diagnostic[];
   readonly error: string | undefined;
+  /**
+   * Why what is on screen may no longer describe the product.
+   *
+   * Separate from `error` because the two are asked by different surfaces and
+   * one of them has no error at all. A write whose answer never came leaves the
+   * panel with a *correct* resolution, no failure beside it, and a description
+   * on disk the engine may already have changed -- measured: the composition
+   * went on showing the text from before the write, the draft went on offering
+   * to make a change that was already saved, and the only trace was a toast.
+   *
+   * `undefined` means the screen is as current as the last answer. It is cleared
+   * by a resolution arriving, not by the engine coming back: a live connection
+   * says nothing about whether this panel has been re-read since.
+   */
+  readonly stale: Staleness | undefined;
+}
+
+/** What is no longer trustworthy, and how badly. */
+export interface Staleness {
+  /** One sentence, for the panel. */
+  readonly reason: string;
+  /**
+   * A write went out and its outcome was never reported.
+   *
+   * The distinction is not cosmetic: it decides whether a draft may be offered
+   * as a pending change. A write that never left can be repeated; one that may
+   * have landed cannot, and the description has to be re-read before anybody --
+   * person or program -- decides what is left to do. See `engine-failure.ts`.
+   */
+  readonly writeUnknown: boolean;
 }
 
 const EMPTY: ProductState = {
@@ -80,6 +112,7 @@ const EMPTY: ProductState = {
   lockError: undefined,
   diagnostics: [],
   error: undefined,
+  stale: undefined,
 };
 
 /**
@@ -116,6 +149,16 @@ export class ProductStore {
    */
   @inject(SelectionService) protected readonly selection!: SelectionService;
   /**
+   * Read to hear the engine go, not to ask whether it is there.
+   *
+   * A child that dies with nothing in flight rejects no promise, so no `fail()`
+   * runs and nothing here would ever know -- and the panel would go on
+   * presenting a whole resolution as current. `onEngineExit` already reaches
+   * `EngineConnectionService`, so this is one subscription rather than a second
+   * client callback.
+   */
+  @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
+  /**
    * Guards the lazy lock fetch against the render that triggers it.
    *
    * The Lock widget asks on render, and the answer causes another render, so
@@ -126,6 +169,37 @@ export class ProductStore {
   @postConstruct()
   protected init(): void {
     this.selection.onDidChange(() => this.onChangedEmitter.fire());
+    this.engine.onDidChange((connected) => {
+      // Only the loss, and only with a product open. Coming *back* is not news
+      // about this panel: the resolution on screen is still from the session
+      // that ended until something re-reads it, and saying otherwise is the
+      // false all-clear this field exists to prevent.
+      if (connected || this.state.open === undefined) return;
+      this.markStale(this.engine.disconnectReason, false);
+    });
+  }
+
+  /**
+   * Record that the screen may no longer describe the product.
+   *
+   * Public because two of the three ways to learn it are outside this store: a
+   * write refused in `ProductEditService`, and the engine going away with
+   * nothing in flight. The third is `fail()` below.
+   *
+   * **`writeUnknown` never goes back to false while the staleness stands.** Two
+   * failures in a row -- a write nobody knows the fate of, then a read that
+   * refuses -- must not have the second one downgrade what the first
+   * established.
+   */
+  markStale(reason: string, writeUnknown: boolean): void {
+    if (this.state.open === undefined) return;
+    const already = this.state.stale;
+    this.update({
+      stale: {
+        reason,
+        writeUnknown: writeUnknown || (already?.writeUnknown ?? false),
+      },
+    });
   }
 
   get current(): ProductState {
@@ -256,7 +330,18 @@ export class ProductStore {
     if (this.state.open?.path !== ref.path) {
       this.selection.select(undefined);
     }
-    this.update({ status: "loading", open: ref, intent: undefined, source: undefined, resolution: undefined, diagnostics: [], error: undefined });
+    // **The profile being viewed is kept across a re-read of the same product.**
+    // Captured before anything awaits, because `reload()` is now also how a
+    // session recovers: re-reading always answered with
+    // `intent.default_profile`, so recovering from a failure while looking at
+    // `prod` put the panel back on `dev` -- silently, with the switcher agreeing,
+    // which is a wrong answer rather than a lost preference. The same was true of
+    // the websocket-reconnect path, where nobody had asked for a re-read at all.
+    const rereading = this.state.open?.path === ref.path;
+    const viewing = rereading ? this.state.profile : undefined;
+    // Staleness goes while the re-read is in flight: this *is* the act that
+    // makes the screen current again, and the panel says `loading` meanwhile.
+    this.update({ status: "loading", open: ref, intent: undefined, source: undefined, resolution: undefined, diagnostics: [], error: undefined, stale: undefined });
     try {
       const loaded = await this.service.loadProduct(ref.path);
       if (epoch !== this.epoch) return;
@@ -265,8 +350,14 @@ export class ProductStore {
         source: loaded.source,
         open: { ...ref, label: loaded.intent.display_name || loaded.intent.id },
         // The product's own default, so the first thing shown comes from the
-        // description rather than from a guess made here.
-        profile: loaded.intent.default_profile,
+        // description rather than from a guess made here -- unless the same
+        // product was already open at another profile the description still
+        // offers. A profile that has since been removed falls back rather than
+        // asking the engine to resolve something that is not there.
+        profile:
+          viewing !== undefined && viewing in loaded.intent.profiles
+            ? viewing
+            : loaded.intent.default_profile,
         diagnostics: loaded.diagnostics ?? [],
       });
       await this.resolveCurrent(epoch);
@@ -342,6 +433,10 @@ export class ProductStore {
         resolution,
         diagnostics: resolution.diagnostics ?? [],
         error: undefined,
+        // **An answer, and only an answer, makes the screen current again.** Not
+        // the engine reconnecting: a fresh process says nothing about whether
+        // this panel has been re-read since the old one stopped.
+        stale: undefined,
       });
     } catch (error) {
       this.fail(epoch, error);
@@ -437,6 +532,20 @@ export class ProductStore {
       lock: undefined,
       error: messageOf(error),
       diagnostics: diagnosticsOf(error) ?? [],
+      // **Only when the session is what failed.** A description that does not
+      // evaluate is not staleness -- the engine answered, the answer was a
+      // refusal, and re-reading is the right thing to offer. Staleness is for
+      // the case where there is nothing left to re-read *with*.
+      //
+      // `writeUnknown` is never *raised* here: everything that reaches `fail` is
+      // a read. What it must not do is lower it -- a write of unknown fate
+      // followed by a read that refuses is still a write of unknown fate.
+      stale: isSessionLost(error)
+        ? {
+            reason: messageOf(error),
+            writeUnknown: this.state.stale?.writeUnknown ?? false,
+          }
+        : this.state.stale,
     });
   }
 
