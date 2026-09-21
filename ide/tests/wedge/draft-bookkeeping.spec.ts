@@ -111,4 +111,82 @@ test.describe("a draft while a write is in flight", () => {
       .poll(() => readFileSync(product.path, "utf8").includes("enable_docs"), { timeout: 30_000 })
       .toBe(true);
   });
+
+  test("the same field edited again during the write keeps the newer value", async ({
+    freshStudio,
+  }) => {
+    // **The case a key-based cleanup would lose.** The claim above queues a
+    // *different* key, which survives however the sent edits are removed. This
+    // one re-touches the key that is being written: at the end the draft holds
+    // an edit for the same gear and the same key as one of the edits just
+    // committed, and it is the newer value -- the one nobody has written.
+    // Removing "the edits that were sent" by their key would delete it and
+    // report `Saved` for a value that never left the browser.
+    //
+    // Identity is what makes the difference: `mergeDraft` drops the entry for a
+    // slot and pushes a new object, so the newer edit is not in the captured
+    // list and stays.
+    const { page } = freshStudio;
+    const mark = logMark();
+    await settled(page);
+    await openProductById(page, product.id, "dev");
+
+    const form = await configureGear(page, "tenant-resolver");
+    const field = form.locator('[data-config-field="vendor"] input');
+    await field.fill("first-value");
+    await page.locator('[data-composition-gear="tenant-resolver"]').click();
+    await expect(page.locator(".gbx-composition-draft")).toContainText("1 pending change");
+
+    hold(HELD_WRITE);
+    await page.locator("[data-draft-apply]").click();
+    const dialog = page.locator(".dialogBlock");
+    await dialog.waitFor({ state: "visible", timeout: 60_000 });
+    await dialog.locator("button.theia-button.main").click();
+    await expect
+      .poll(() => since(mark).some((r) => r.kind === "withhold"), { timeout: 30_000 })
+      .toBe(true);
+
+    // The same field again, while its earlier value is on its way to the disk.
+    const again = await configureGear(page, "tenant-resolver");
+    await again.locator('[data-config-field="vendor"] input').fill("second-value");
+    await page.locator('[data-composition-gear="tenant-resolver"]').click();
+    await expect(page.locator(".gbx-composition-draft")).toContainText("1 pending change");
+
+    release();
+    await expect
+      .poll(() => since(mark).some((r) => r.kind === "released-answer"), { timeout: 30_000 })
+      .toBe(true);
+
+    // What was written is the value that was sent.
+    await expect
+      .poll(() => readFileSync(product.path, "utf8").includes("first-value"), { timeout: 60_000 })
+      .toBe(true);
+    // And what is still owed is the value that was not.
+    await expect(page.locator(".gbx-composition-draft")).toContainText("1 pending change", {
+      timeout: 60_000,
+    });
+    expect(
+      readFileSync(product.path, "utf8").includes("second-value"),
+      "the later value was never sent, so it cannot be on disk",
+    ).toBe(false);
+    await expect(
+      (await configureGear(page, "tenant-resolver")).locator(
+        '[data-config-field="vendor"] input',
+      ),
+      "the control shows the edit that is still pending, not the one that landed",
+    ).toHaveValue("second-value");
+
+    // And applying it now writes the newer value over the older one.
+    await page.locator("[data-draft-apply]").click();
+    const last = page.locator(".dialogBlock");
+    await last.waitFor({ state: "visible", timeout: 60_000 });
+    await expect(last).toContainText("second-value");
+    await last.locator("button.theia-button.main").click();
+    await expect(page.locator(".gbx-composition-draft")).toContainText("Saved", {
+      timeout: 60_000,
+    });
+    await expect
+      .poll(() => readFileSync(product.path, "utf8").includes("second-value"), { timeout: 30_000 })
+      .toBe(true);
+  });
 });
