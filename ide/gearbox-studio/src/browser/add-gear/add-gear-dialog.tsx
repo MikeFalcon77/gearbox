@@ -174,12 +174,16 @@ export class AddGearDialog extends ReactDialog<boolean> {
     const proposal = this.proposal();
     if (!proposal.length) { this.resolving = false; this.update(); return; }
     this.resolving = true; this.update();
-    const [preview, resolved] = await Promise.all([
+    const [staged, resolved] = await Promise.all([
       this.edits.previewStagedAdd(proposal, productIdentity(this.path)), this.edits.previewResolution(proposal),
     ]);
     if (token !== this.token || this.isDisposed) return;
-    this.resolving = false; this.preview = preview;
-    if (!preview) this.error = "This proposal cannot be written. Review connection profiles or inspect the description in GDL.";
+    this.resolving = false;
+    this.preview = staged.ok ? staged.preview : undefined;
+    // **The reason it gave, not a sentence about reasons.** This showed "this
+    // proposal cannot be written" whatever had happened, while the actual
+    // refusal went past as a notification — which also took the Escape key.
+    if (!staged.ok) this.error = staged.reason;
     if (resolved.ok && resolved.resolution.product) this.impact = impactOf(this.products.current.resolution?.product ?? undefined,
       resolved.resolution.product, this.products.current.diagnostics, resolved.resolution.diagnostics ?? []);
     else if (!resolved.ok) this.error = resolved.reason;
@@ -190,7 +194,8 @@ export class AddGearDialog extends ReactDialog<boolean> {
     const gear = this.chosen(); if (!gear) return;
     const proposal = this.proposal(), expected = this.preview;
     this.writing = true; this.update();
-    const fresh = await this.edits.previewStagedAdd(proposal, productIdentity(this.path));
+    const again = await this.edits.previewStagedAdd(proposal, productIdentity(this.path));
+    const fresh = again.ok ? again.preview : undefined;
     if (!fresh || fresh.before !== expected.before || fresh.after !== expected.after) {
       this.writing = false; await this.refreshPreview();
       this.error = "The document changed. Review the updated preview and confirm again.";

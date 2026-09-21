@@ -19,6 +19,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 import { restoreCorpus } from "../fixtures/corpus-files";
+import { copyProduct, type ProductCopy } from "../fixtures/product-copy";
 import { restoreProducts } from "../fixtures/products-tree";
 import { join } from "node:path";
 
@@ -937,5 +938,98 @@ test.describe("opening a product is one act", () => {
         { timeout: 30_000 },
       )
       .toBeGreaterThan(0);
+  });
+
+  test("a resolve that failed says so, and does not leave the old verdict standing [plan §9.1: Validation is a screen]", async ({
+    rpc,
+    stalledStudio,
+  }) => {
+    // **Driven, because this one never happened on demand.** `fail()` stores
+    // `diagnosticsOf(error) ?? []`, so an engine error carrying no structured
+    // diagnostics used to render as "this profile resolved with nothing to
+    // report" — a clean bill of health for a resolution that did not happen.
+    //
+    // A forged failure, not a held answer: the difference between "still
+    // working" and "ended badly" is the whole claim, and a hold can only
+    // produce the first.
+    const { page } = stalledStudio;
+    await openProductById(page, "configurable-gears", "dev");
+    await productSection(page, "validation");
+    const validation = page.locator("[data-product-validation]");
+    await expect(validation).toBeVisible({ timeout: 60_000 });
+
+    const refused = rpc.failNext("resolve", "the engine refused this profile");
+    await page.locator('[data-profile="prod"]').click();
+    await refused.held;
+
+    await expect(
+      validation.locator("[data-validation-failed]"),
+      "a profile that could not be resolved has not been found clean",
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(validation.locator("[data-validation-failed]")).toContainText(
+      "the engine refused this profile",
+    );
+    await expect(validation.locator("[data-validation-clean]")).toHaveCount(0);
+    await expect(
+      validation.locator("[data-conflict-code]"),
+      "and the previous profile's findings are not shown as this one's",
+    ).toHaveCount(0);
+  });
+
+});
+
+test.describe("a description being re-read", () => {
+  // A product of this claim's own: it touches the file to make the watcher
+  // re-read it, and a shipped description is nobody's to touch. Made in
+  // `beforeAll` because `ProductStore.ensureDiscovered` returns early once it
+  // holds a list — a product created after a page booted is never offered.
+  let copy: ProductCopy | undefined;
+
+  test.beforeAll(() => {
+    copy = copyProduct(REPO, "configurable-gears", "reload");
+  });
+
+  test.afterAll(() => {
+    copy?.dispose();
+    copy = undefined;
+  });
+
+  test("a product being re-read does not look like a product with nothing in it [plan §9.1: opening is staged]", async ({
+    rpc,
+    stalledStudio,
+  }) => {
+    // `ProductStore.open()` sets `status: "loading"` with no intent yet, so the
+    // tree used to render `Selected gears (0)` and "your product has no gears
+    // yet" for as long as the read took — a six-gear product announcing it was
+    // empty. Fixed, and until now unclaimed, because the state lasts a moment.
+    //
+    // **A re-read, because the first read has no panel to be wrong on.** With
+    // the opening answer held the session never establishes and the context
+    // stays on Home; the state that was reported is one where the panel is
+    // already on screen and the description is read again. Saving the file is
+    // how a person causes that, and `DescriptionWatchService` is what turns it
+    // into a reload.
+    const product = copy;
+    expect(product, "the copy is made in beforeAll").toBeDefined();
+    const { page } = stalledStudio;
+    await openProductById(page, product!.id, "dev");
+    await productSection(page, "composition");
+    const tree = page.locator(".gbx-composition-tree");
+    await expect(tree.locator("[data-asked-for]").first()).toBeVisible({ timeout: 60_000 });
+
+    const reading = rpc.stallNext("loadProduct");
+    // A comment, so the bytes change and nothing else does.
+    writeFileSync(product!.path, `${readFileSync(product!.path, "utf8")}\n# re-read\n`);
+    await reading.held;
+
+    await expect(tree.locator("[data-composition-loading]")).toBeVisible({ timeout: 30_000 });
+    await expect(
+      tree,
+      "a product still being read has not been found to be empty",
+    ).not.toContainText("no gears yet");
+
+    reading.release();
+    await expect(tree.locator("[data-composition-loading]")).toHaveCount(0, { timeout: 60_000 });
+    await expect(tree.locator("[data-asked-for]").first()).toBeVisible({ timeout: 60_000 });
   });
 });

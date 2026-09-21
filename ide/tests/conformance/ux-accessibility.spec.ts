@@ -18,6 +18,7 @@ import { join } from "node:path";
 import {
   expect,
   openProduct,
+  openProductById,
   productSection,
   revealCatalogue,
   resetCatalogueView,
@@ -137,6 +138,142 @@ test.describe("controls that can be operated can be named", () => {
     await opener.click();
     await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
 
+    await page.keyboard.press("Escape");
+    await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0, { timeout: 30_000 });
+    await expect
+      .poll(
+        () => page.evaluate(() => document.activeElement?.getAttribute("data-add-plugin-for")),
+        { timeout: 15_000 },
+      )
+      .toBe(marker);
+  });
+
+  test("Escape closes the add dialog while an answer is outstanding [ADR-0011 §Confirmation]", async ({
+    rpc,
+    stalledStudio,
+  }) => {
+    // **Checked on its own, because the link was a guess.** Escape failing and
+    // the engine failing were seen in the same minute and I wrote the first
+    // down as downstream of the second. They are two observations. This drives
+    // the state deliberately: the preview's answer is withheld, so the dialog
+    // is genuinely waiting, and Escape has to work anyway.
+    const { page } = stalledStudio;
+    await openProduct(page, "dev");
+    // **Add Gear, not Add compatible plugin.** The plugin path under a host
+    // produces no preview to hold — the dialog opens with its host fixed and
+    // asks for nothing until more is chosen — so holding there would be
+    // holding nothing. Choosing a gear is the path that computes one.
+    const opener = page.locator("[data-add-gear]");
+    await expect(opener).toBeVisible({ timeout: 60_000 });
+    await opener.click();
+    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+
+    // The preview is a dry-run edit; holding its answer leaves the dialog
+    // genuinely waiting for one.
+    const previewing = rpc.stallNext("applyEdits");
+    await page.locator('[data-add-gear-select="tenant-resolver"]').click();
+    await previewing.held;
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0, { timeout: 30_000 });
+    await expect
+      .poll(
+        () => page.evaluate(() => document.activeElement?.hasAttribute("data-add-gear") ?? false),
+        { timeout: 15_000 },
+      )
+      .toBe(true);
+
+    // **And the answer arriving afterwards changes nothing.** A dialog that
+    // reopened itself, or a selection that moved, would be the application
+    // acting on a question nobody is asking any more.
+    const selectedBefore = await page.evaluate(
+      () => document.querySelector(".gbx-composition-settings")?.textContent ?? "",
+    );
+    previewing.release();
+    await page.waitForTimeout(1500);
+    await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => document.querySelector(".gbx-composition-settings")?.textContent ?? "",
+      ),
+      "a late answer does not move what the product is showing",
+    ).toBe(selectedBefore);
+  });
+
+  test("Cancel closes the add dialog after its preview failed [ADR-0011 §Confirmation]", async ({
+    rpc,
+    stalledStudio,
+  }) => {
+    // The other half, and the other control: a refusal on screen must not make
+    // the dialog unclosable, and Cancel is the path a person takes when Escape
+    // is not where their hands are.
+    const { page } = stalledStudio;
+    await openProduct(page, "dev");
+    const opener = page.locator("[data-add-gear]");
+    await expect(opener).toBeVisible({ timeout: 60_000 });
+    await opener.click();
+    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+
+    const refused = rpc.failNext("applyEdits", "the engine refused this preview");
+    await page.locator('[data-add-gear-select="tenant-resolver"]').click();
+    await refused.held;
+
+    await expect(page.locator("[data-add-gear-impact-error]")).toBeVisible({ timeout: 30_000 });
+    await page.locator("[data-add-gear-cancel]").click();
+    await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0, { timeout: 30_000 });
+    await expect
+      .poll(
+        () => page.evaluate(() => document.activeElement?.hasAttribute("data-add-gear") ?? false),
+        { timeout: 15_000 },
+      )
+      .toBe(true);
+  });
+
+  test("a refused preview under a host closes, and the slot's own button gets the keyboard back [ADR-0011 §Confirmation]", async ({
+    rpc,
+    stalledStudio,
+  }) => {
+    // **The path the failure was actually seen on**, and the two claims above
+    // do not cover it: they go through Add Gear, where a gear is chosen from
+    // the whole catalogue. This is *Add compatible plugin* under a host — the
+    // dialog opens with its host fixed, asks for nothing until a plugin is
+    // picked, and asks then. The report's `engine is not initialized` arrived
+    // at exactly that moment.
+    //
+    // `configurable-gears` and `tenant-resolver`, because its extension point
+    // has compatible plugins and none attached: under a host whose slot is
+    // already filled the edit is a no-op and there is no preview to refuse.
+    const { page } = stalledStudio;
+    await openProductById(page, "configurable-gears", "dev");
+    await productSection(page, "composition");
+
+    const slot = page.locator('[data-add-plugin-for^="tenant-resolver:"]').first();
+    await expect(slot).toBeVisible({ timeout: 60_000 });
+    const marker = await slot.getAttribute("data-add-plugin-for");
+    await slot.click();
+    await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+
+    const refused = rpc.failNext("applyEdits", "the engine is not initialized");
+    await page.locator('[data-add-gear-select="static-tr-plugin"]').click();
+    await refused.held;
+
+    await expect(
+      page.locator("[data-add-gear-impact-error]"),
+      "the refusal is said, beside the button rather than instead of the dialog",
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(
+      page.locator("[data-add-gear-impact-error]"),
+      "and it is the engine's own words, not a sentence about refusals",
+    ).toContainText("the engine is not initialized");
+    // **And it is said once.** A refusal that also raised a notification was
+    // how the dialog lost its Escape key: Theia hands Escape to a visible toast
+    // before the dialog underneath, one press per toast.
+    await expect(
+      page.locator(".theia-notification-list-item"),
+      "a dry run's refusal belongs to the window that asked for it",
+    ).toHaveCount(0);
+
+    // One press, not two.
     await page.keyboard.press("Escape");
     await expect(page.locator("[data-add-gear-flow]")).toHaveCount(0, { timeout: 30_000 });
     await expect

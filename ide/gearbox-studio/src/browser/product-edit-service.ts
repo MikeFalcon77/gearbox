@@ -484,25 +484,33 @@ export class ProductEditService {
   async previewStagedAdd(
     edits: readonly ProductEdit[],
     owner?: ContextIdentity,
-  ): Promise<EditGearResult | undefined> {
-    if (!this.ownsSubject(owner)) return undefined;
+  ): Promise<StagedPreview> {
+    if (!this.ownsSubject(owner)) {
+      return { ok: false, reason: "This proposal belongs to a product that is no longer open." };
+    }
     const open = this.product.current.open;
     if (open === undefined) {
-      this.messages.warn("Open a product before adding gears to it.");
-      return undefined;
+      return { ok: false, reason: "Open a product before adding gears to it." };
     }
     if (this.isDirty(open.path)) {
-      this.messages.error(
-        `${open.label} has unsaved changes. Save or revert them first — ` +
+      return {
+        ok: false,
+        reason:
+          `${open.label} has unsaved changes. Save or revert them first — ` +
           `writing now would discard your edit.`,
-      );
-      return undefined;
+      };
     }
     try {
-      return await this.service.applyEdits(open.path, [...edits], true);
+      return { ok: true, preview: await this.service.applyEdits(open.path, [...edits], true) };
     } catch (error) {
-      this.reportFailure(error);
-      return undefined;
+      // **Recorded, not announced.** A dry run is a question, and the answer
+      // belongs to the window that asked it. Raising a global notification here
+      // said the same thing twice — and cost the dialog its Escape key, because
+      // Theia gives Escape to a visible toast before the dialog underneath it:
+      // one press per toast, and only then the dialog. That is the whole of
+      // "Escape did not close it and Cancel did".
+      this.noteEngine(error);
+      return { ok: false, reason: messageOf(error) };
     }
   }
 
@@ -1207,6 +1215,17 @@ export function diffText(preview: EditGearResult): string {
     ...added.map((line) => `+ ${line.trim()}`),
   ].join("\n");
 }
+
+/**
+ * What a dry run answered: the text it would write, or why it could not.
+ *
+ * The same shape `previewResolution` already returns, and for the same reason —
+ * a preview's failure is information for whoever asked, not an event for the
+ * whole application.
+ */
+export type StagedPreview =
+  | { readonly ok: true; readonly preview: EditGearResult }
+  | { readonly ok: false; readonly reason: string };
 
 /** Mirror of `gearbox_gdl::edit::is_secret_config_key` for draft-time refusal. */
 export function isSecretConfigKey(key: string): boolean {

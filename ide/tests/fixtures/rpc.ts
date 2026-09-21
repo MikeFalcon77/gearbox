@@ -26,15 +26,27 @@ import type { BrowserContext } from "@playwright/test";
 /* eslint-disable @typescript-eslint/no-var-requires */
 const {
   MsgPackMessageDecoder,
+  MsgPackMessageEncoder,
+  registerMsgPackExtensions,
 } = require("@theia/core/lib/common/message-rpc/rpc-message-encoder");
 const {
   Uint8ArrayReadBuffer,
+  Uint8ArrayWriteBuffer,
 } = require("@theia/core/lib/common/message-rpc/uint8-array-message-buffer");
 /* eslint-enable @typescript-eslint/no-var-requires */
 
-/** Theia's `MessageTypes`: 1 is a request, 3 the reply to one. */
+/** The msgpack extensions, registered on first use and never again. */
+let registered = false;
+function extensions(): void {
+  if (registered) return;
+  registerMsgPackExtensions();
+  registered = true;
+}
+
+/** Theia's `MessageTypes`: 1 is a request, 3 a reply, 4 a reply that failed. */
 const REQUEST = 1;
 const REPLY = 3;
+const REPLY_ERR = 4;
 
 /** One answer being withheld. */
 export interface Stall {
@@ -45,10 +57,39 @@ export interface Stall {
 }
 
 interface Parsed {
+  readonly kind: number;
   readonly channel: string;
   readonly type: number;
   readonly id?: number;
   readonly method?: string;
+}
+
+/**
+ * The failure the backend would have sent, in the shape the client parses.
+ *
+ * **Forged with the same encoder the application decodes with**, and only the
+ * payload: the socket.io announcement frame that came with the real answer is
+ * reused, so the client's binary reassembly sees the sequence it expects. A
+ * hand-written frame would have had to reproduce that framing too, and getting
+ * it subtly wrong is how the first version of the hold desynchronised the
+ * stream.
+ */
+function forgeError(kind: number, channel: string, id: number, message: string): Buffer {
+  // **A real `Error`, through the extensions the protocol registers.** A plain
+  // object with a `message` field encodes as a map, and the client revives a
+  // map as a map — which reached the panel as `[object Object]`. The extension
+  // is what makes an error survive the wire as an error, and using it is the
+  // difference between driving the failure path and driving a lookalike.
+  //
+  // Once per process: registering twice throws `Another MsgPack extension with
+  // the tag '1' is already registered`, which a single claim never sees and a
+  // full run does on its second forged failure.
+  extensions();
+  const write = new Uint8ArrayWriteBuffer();
+  write.writeUint8(kind);
+  write.writeString(channel);
+  new MsgPackMessageEncoder().replyErr(write, id, new Error(message));
+  return Buffer.from(write.getCurrentContents());
 }
 
 /**
@@ -61,7 +102,7 @@ function parse(frame: string | Buffer): Parsed | undefined {
   if (typeof frame === "string") return undefined;
   try {
     const read = new Uint8ArrayReadBuffer(new Uint8Array(frame));
-    read.readUint8();
+    const kind: number = read.readUint8();
     const channel: string = read.readString();
     if (!channel.includes("gearbox")) return undefined;
     const message = new MsgPackMessageDecoder().parse(read) as {
@@ -69,7 +110,7 @@ function parse(frame: string | Buffer): Parsed | undefined {
       id?: number;
       method?: string;
     };
-    return { channel, type: message.type, id: message.id, method: message.method };
+    return { kind, channel, type: message.type, id: message.id, method: message.method };
   } catch {
     // A frame this codec cannot read is a frame for somebody else. Forwarded
     // untouched, which is the default for everything here.
@@ -78,8 +119,11 @@ function parse(frame: string | Buffer): Parsed | undefined {
 }
 
 export class RpcControl {
-  /** Method name -> the stall waiting for its request to go out. */
-  private readonly wanted = new Map<string, { id?: number; announce: () => void }>();
+  /** Method name -> what to do with its next answer, and the id once seen. */
+  private readonly wanted = new Map<
+    string,
+    { id?: number; announce: () => void; fail?: string }
+  >();
   /** Request id -> the frames of its answer, while they are being withheld. */
   private readonly holding = new Map<number, (string | Buffer)[]>();
   /** Request id -> how to let its answer out. */
@@ -119,14 +163,30 @@ export class RpcControl {
       const deliver = (frames: (string | Buffer)[]): void => {
         const attachment = frames.find((f) => typeof f !== "string");
         const message = attachment === undefined ? undefined : parse(attachment);
-        const id = message?.type === REPLY ? message.id : undefined;
-        if (id !== undefined && [...this.wanted.values()].some((s) => s.id === id)) {
-          this.holding.set(id, frames);
-          this.forward.set(id, (held) => ws.send(held));
-          for (const stall of this.wanted.values()) if (stall.id === id) stall.announce();
+        const answered = message?.type === REPLY || message?.type === REPLY_ERR;
+        const id = answered ? message?.id : undefined;
+        const entry =
+          id === undefined ? undefined : [...this.wanted.values()].find((s) => s.id === id);
+        if (entry === undefined || id === undefined || message === undefined) {
+          for (const held of frames) ws.send(held);
           return;
         }
-        for (const held of frames) ws.send(held);
+        if (entry.fail !== undefined) {
+          // The announcement is the real one; only the payload is replaced, so
+          // the client reassembles the sequence it was promised.
+          for (const held of frames) {
+            ws.send(
+              typeof held === "string"
+                ? held
+                : forgeError(message.kind, message.channel, id, entry.fail),
+            );
+          }
+          entry.announce();
+          return;
+        }
+        this.holding.set(id, frames);
+        this.forward.set(id, (held) => ws.send(held));
+        entry.announce();
       };
 
       server.onMessage((frame) => {
@@ -162,11 +222,25 @@ export class RpcControl {
    * an answer, not a backend that never heard the question.
    */
   stallNext(method: string): Stall {
+    return this.intercept(method, undefined);
+  }
+
+  /**
+   * Answer the next call of `method` with a failure the client will surface.
+   *
+   * For the states a hold cannot produce: a resolve that *ended* badly, and a
+   * preview that refused. `held` settles when the failure has been delivered.
+   */
+  failNext(method: string, message: string): Stall {
+    return this.intercept(method, message);
+  }
+
+  private intercept(method: string, fail: string | undefined): Stall {
     let announce = (): void => undefined;
     const held = new Promise<void>((resolve) => {
       announce = resolve;
     });
-    const entry = { id: undefined as number | undefined, announce };
+    const entry = { id: undefined as number | undefined, announce, fail };
     this.wanted.set(method, entry);
     return {
       held,
