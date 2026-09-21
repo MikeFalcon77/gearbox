@@ -1120,10 +1120,18 @@ export class ProductWidget extends ReactWidget {
    * rendered from the resolved product cannot be.
    */
   protected renderOverview(product: ResolvedProduct): React.ReactNode {
+    const stale = this.store.current.stale;
     return (
       <>
-        <div className="gbx-kv">
-          <span>resolved</span>
+        <div className="gbx-kv" {...(stale !== undefined ? { "data-header-stale": true } : {})}>
+          {/* **The loss is the row, and the resolve is the footnote.** Marking a
+              row still labelled `resolved` was not enough: the label is what a
+              person reads first, and "resolved · not re-read since the engine
+              stopped" leads with the reassurance and qualifies it afterwards.
+              What the panel knows, in the order it knows it: the connection is
+              gone, so these results are stale, and the last one that *did* answer
+              was for this profile. */}
+          <span>{stale === undefined ? "resolved" : "connection lost"}</span>
           {/* The profile is taken from the *resolved header*, not from the switch
               above. They should agree, and stating both is what makes a
               disagreement visible instead of leaving the panel labelled one way
@@ -1146,11 +1154,25 @@ export class ProductWidget extends ReactWidget {
           <span
             data-resolved-profile={product.product.profile}
             data-lock-hash={product.product.lock_hash}
-            {...(this.store.current.stale !== undefined ? { "data-resolved-stale": true } : {})}
+            {...(stale !== undefined ? { "data-resolved-stale": true } : {})}
           >
-            {product.product.profile} · {product.product.profile_kind}
-            {this.store.current.stale !== undefined && (
-              <span className="gbx-stale-note"> · not re-read since the engine stopped</span>
+            {stale === undefined ? (
+              <>
+                {product.product.profile} · {product.product.profile_kind}
+              </>
+            ) : (
+              <>
+                {/* First, and in the row's own weight. The previous resolution is
+                    kept -- it was a real answer, and discarding it would lose the
+                    graph the panel is drawn from -- but it is no longer the
+                    headline. */}
+                <strong data-stale-headline>results are stale</strong>
+                <span className="gbx-stale-note">
+                  {" "}
+                  — last resolved for {product.product.profile} ·{" "}
+                  {product.product.profile_kind}, not re-read since
+                </span>
+              </>
             )}
           </span>
         </div>

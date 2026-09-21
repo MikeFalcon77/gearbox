@@ -179,14 +179,23 @@ test.describe("recovery after the engine stops", () => {
     ).toBeVisible();
     await expect(page.locator("[data-product-section-generate]")).toBeDisabled();
 
-    // **And the header stops standing alone.** `resolved` is about the last
-    // resolution, which is still a real answer -- so it is kept and marked,
-    // rather than thrown away. Observed on Overview, which is where it renders.
+    // **And the header leads with the loss.** `resolved` is about the last
+    // resolution, which is still a real answer -- so it is kept, because the
+    // graph is drawn from it -- but it is no longer the headline. Marking a row
+    // still *labelled* `resolved` was the first attempt and was not enough: the
+    // label is what a person reads first, and "resolved · not re-read since the
+    // engine stopped" leads with the reassurance and qualifies it afterwards.
     await productSection(page, "overview");
-    await expect(page.locator("[data-resolved-profile]")).toHaveAttribute(
-      "data-resolved-stale",
-      "true",
-    );
+    const header = page.locator("[data-header-stale]");
+    await expect(header).toBeVisible();
+    await expect(header.locator("span").first()).toHaveText("connection lost");
+    const resolved = page.locator("[data-resolved-profile]");
+    await expect(resolved).toHaveAttribute("data-resolved-stale", "true");
+    await expect(resolved.locator("[data-stale-headline]")).toHaveText("results are stale");
+    // The order, not merely the presence: the staleness comes first and the past
+    // resolution reads as the footnote it now is.
+    expect((await resolved.innerText()).trim()).toMatch(/^results are stale\b/);
+    await expect(resolved).toContainText("last resolved for dev");
     await productSection(page, "composition");
 
     // Nothing re-sent it in the meantime, and nothing will.

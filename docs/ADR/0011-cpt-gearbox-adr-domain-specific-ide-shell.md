@@ -1086,7 +1086,12 @@ therefore kept and marked, not discarded.
 
 Marked in four places, because a person reads whichever one they are looking at:
 
-* the **header** keeps `resolved` and says it has not been re-read since the engine stopped;
+* the **header** leads with the loss and demotes the resolve: the row reads `connection lost` /
+  *results are stale*, with "last resolved for `<profile>` · `<kind>`, not re-read since" after it.
+  Marking a row still *labelled* `resolved` was the first attempt and was not enough -- the label is
+  what a person reads first, so "resolved · not re-read since the engine stopped" leads with the
+  reassurance and qualifies it afterwards. The resolution itself is still kept, because the graph is
+  drawn from it;
 * the **diagnostics count** goes unknown rather than absent. It used to vanish — and a tab with no
   badge is how this panel says *nothing to report*, so a failed resolution read as a clean bill of
   health;
@@ -1118,6 +1123,24 @@ apply a change that was already saved, for ever, with Discard as the only way ou
 now three-valued, and `unchanged` ends the draft and re-reads the description rather than reporting
 a failure.
 
+**And only the edits that were sent are cleared.** The draft is captured before the dry run, and
+what follows it takes real time: a dry run, a confirmation somebody reads, and the commit. An edit
+queued in that window was never previewed, never sent and never written -- and clearing the draft
+wholesale threw it away with the ones that had been, silently, with the panel then reporting
+`Saved`. The written edits are removed by identity, which `mergeDraft` preserves for untouched
+entries; an edit that re-touched the same slot is a new object and stays, because the newer value
+has not been written either. This is the condition under which clearing on `unchanged` is correct
+at all: the dry run has to have been about the whole draft as it now stands.
+
+**A re-read the application asked for is not a reason to refuse the next write.**
+`DescriptionWatchService` re-reads the product 300ms after its description changes, which bumps
+`ProductStore.revision` -- and a write whose preview was computed against an older revision is
+refused. So a second Apply started inside the settle window of the first was refused with "the
+product changed while the preview was open", when the only thing that had changed was the
+application re-reading its own write. Two runs in three. The watcher's product path now waits while
+a draft is queued, which is the rule its *gear* path already stated and documented; nothing is lost,
+because a write re-reads the product itself and applying or discarding a draft re-resolves anyway.
+
 ### A product opened during a recovery wins
 
 An open was non-reentrant by answering every caller with the in-flight promise. That is right for
@@ -1137,10 +1160,11 @@ session is the right design. The recovery removes the dead end; it explains noth
 
 * `cpt-gearbox-fr-*`: none directly — this is the shell's behaviour when the engine stops, which no
   functional requirement states.
-* Verified by `ide/tests/wedge/engine-recovery.spec.ts` (three claims) and
+* Verified by `ide/tests/wedge/engine-recovery.spec.ts` (three claims),
+  `ide/tests/wedge/draft-bookkeeping.spec.ts` (an edit queued while the commit is in flight) and
   `ide/tests/wedge/engine-timeout.spec.ts` (the mechanism), on a second server whose engine is a
-  wedging proxy. Each of the three claims was run with its fix reverted and fails on the assertion
-  it is named for.
+  wedging proxy. Each claim was run with its fix reverted and fails on the assertion it is named
+  for.
 * The cap itself is `productTimeoutMs` in `node/gearbox-service-impl.ts`: 60 seconds unless
   `GEARBOX_PRODUCT_TIMEOUT_MS` says otherwise, and a malformed value is refused rather than
   defaulted.
