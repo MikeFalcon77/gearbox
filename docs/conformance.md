@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **194** — 193 built, 0 not built, 0 broken, 1 not observed.
+Claims: **195** — 194 built, 0 not built, 0 broken, 1 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -85,6 +85,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Add profile uses an in-panel form, not window.prompt | `ADR-0013 §Amendment: no window.prompt` | ✅ built |  |
 | Home has no Product menu while Start is showing | `ADR-0011 §Amendment: no Product menu on Home` | ✅ built |  |
 | Inspector opens when an application is selected | `ADR-0011 §Amendment: Inspector from selection` | ✅ built |  |
+| replacing the engine does not report the old one's death | `ADR-0011 §Amendment: Product openView` | ✅ built |  |
 
 ## `conformance/adr-0011-settings.spec.ts`
 
