@@ -51,6 +51,7 @@ GEARBOX_ENGINE=/path/to/gearbox GEARBOX_ROOT=/path/to/gears npm run start:browse
 npm run engine       # cargo build -p gearbox-cli -- the binary the backend spawns
 npm run smoke        # JSON-RPC over real vscode-jsonrpc framing, no browser
 npm run conformance  # Playwright; starts the app itself
+npm run wedge        # Playwright again, on a second server whose engine can be wedged
 npm run verify       # all of the above, plus the build and two more smokes
 ```
 
@@ -65,6 +66,25 @@ name, so it is present, counted and traceable rather than absent. The run writes
 `docs/conformance.md`. The number of collected claims is pinned: a claim that stops being collected
 fails the run, because the script this replaced had eleven checks inside `if` guards and reported a
 smaller denominator as "all passed".
+
+**`npm run wedge` is a second configuration, on its own port, and it is not part of the claim
+count.** One thing the suite could not reach is the engine's own deadline: `PRODUCT_TIMEOUT_MS` was
+a 60-second constant, so everything downstream of missing it -- the handle being disposed, the child
+process ending, every later call refusing, `initialize` being the only way back -- had only ever
+been reasoned about. Three pieces make it reachable, and each is a seam rather than a behaviour
+change:
+
+* `GEARBOX_PRODUCT_TIMEOUT_MS`, read per call and **validated** -- a malformed value is refused by
+  name rather than falling back, because a silent fallback makes a wedge test pass for the wrong
+  reason. Unset, which is every other run, the cap is the same 60 seconds it always was.
+* `scripts/wedging-engine.mjs`, a pass-through over the real `gearbox rpc` that withholds the answer
+  to one chosen method while a sentinel file exists. A stub that answered nothing could only show the
+  *first* call failing; what has to be shown is a working session losing its engine and getting
+  another.
+* `scripts/start-studio-wedge.mjs`, a backend of its own with its own Theia configuration directory.
+  The claim ends an engine on purpose, so it never runs against a server somebody else is using --
+  and `reuseExistingServer: false` means a busy port fails the run instead of quietly testing
+  something else.
 
 The staged-loading tests sample the DOM on a timeline rather than after loading finishes, because
 the claim under test is that a row is useful *before* it is complete. A snapshot taken at the end

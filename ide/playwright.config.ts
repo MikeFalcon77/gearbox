@@ -14,6 +14,13 @@ const URL = process.env.GEARBOX_STUDIO_URL ?? "http://127.0.0.1:3000/";
 export default defineConfig({
   testDir: "tests",
 
+  // **`tests/wedge/` is somebody else's server.** Those specs need a backend
+  // whose engine is a wedging proxy and whose cap is eight seconds, and they get
+  // one from `playwright.wedge.config.ts`. Collected here they would run against
+  // this server, where nothing is ever withheld, and report a timeout mechanism
+  // they never reached.
+  testIgnore: "wedge/**",
+
   // One Theia backend, one engine process, and `catalogue/load` is stateful:
   // two workers would race over the same server. Serial also keeps the
   // conformance report in document order, which is how it is meant to be read.
