@@ -173,11 +173,21 @@ export function spawnEngine(
       let timer: NodeJS.Timeout | undefined;
       const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
+          // **Rejected first, then ended, and the order is the message.**
+          // `dispose()` disposes the connection, which rejects the pending
+          // `sendRequest` synchronously with `vscode-jsonrpc`'s own
+          // "Pending response rejected since connection got disposed" -- and
+          // `Promise.race` keeps whichever settled first. So disposing before
+          // rejecting handed the panel a sentence about a connection instead of
+          // the one written here, which is the only one that names the method
+          // and the deadline. Measured against a real engine held past a real
+          // cap; no test read this text before, so it had been wrong for as long
+          // as it had existed.
+          reject(new Error(`the engine did not answer \`${requestMethod}\` in ${timeoutMs}ms`));
           // Ended, not merely abandoned. See `EngineHandle.request`: a wedged
           // engine that later finishes its load would otherwise overwrite the
           // error the client is already showing.
           handle.dispose();
-          reject(new Error(`the engine did not answer \`${requestMethod}\` in ${timeoutMs}ms`));
         }, timeoutMs);
       });
       const died = exited.then((reason): never => {
