@@ -40,6 +40,7 @@ import { hasUnsavedEdits } from "./shell/unsaved";
 import { MonacoTextModelService } from "@theia/monaco/lib/browser/monaco-text-model-service";
 import { inject, injectable } from "@theia/core/shared/inversify";
 
+import type { ClusterPrimitive } from "../common/generated/ClusterPrimitive";
 import type { ConfigValue } from "../common/generated/ConfigValue";
 import type { EditGearResult } from "../common/generated/EditGearResult";
 import type { PluginTarget } from "../common/generated/PluginTarget";
@@ -380,6 +381,61 @@ export class ProductEditService {
     } else if (isEngineGone(error)) {
       this.product.markStale(messageOf(error), false);
     }
+  }
+
+  /**
+   * Queue one provider option, or clear it.
+   *
+   * Addressed by where the binding is written, and the position comes from the
+   * intent rather than from this side's idea of the order: `ClusterScopeIntent`
+   * carries it, because a scope bound twice in one profile is reported and
+   * skipped, which makes the intent's array shorter than the file's list.
+   */
+  setProviderOption(
+    scope: string,
+    entryIndex: number,
+    primitive: ClusterPrimitive,
+    key: string,
+    value: ConfigValue | undefined,
+  ): boolean {
+    return this.queueDraft({
+      kind: "set_provider_option",
+      scope,
+      entry_index: entryIndex,
+      primitive,
+      key,
+      value: value ?? null,
+    });
+  }
+
+  /** The option values for one binding, saved text overlaid with the draft. */
+  draftProviderOptions(
+    entryIndex: number,
+    primitive: ClusterPrimitive,
+    saved: Readonly<Record<string, unknown>>,
+  ): Map<string, ConfigValue> {
+    const out = new Map<string, ConfigValue>();
+    for (const [key, value] of Object.entries(saved)) {
+      if (isConfigValue(value)) out.set(key, value);
+    }
+    for (const edit of this.draftEdits()) {
+      if (edit.kind !== "set_provider_option") continue;
+      if (edit.entry_index !== entryIndex || edit.primitive !== primitive) continue;
+      if (edit.value === null) out.delete(edit.key);
+      else out.set(edit.key, edit.value);
+    }
+    return out;
+  }
+
+  /** Whether this option of this binding has an unapplied edit. */
+  providerOptionDrafted(entryIndex: number, primitive: ClusterPrimitive, key: string): boolean {
+    return this.draftEdits().some(
+      (edit) =>
+        edit.kind === "set_provider_option" &&
+        edit.entry_index === entryIndex &&
+        edit.primitive === primitive &&
+        edit.key === key,
+    );
   }
 
   /** Saved config overlaid with draft set_config edits for `gear`. */
@@ -1230,6 +1286,11 @@ function describeEdit(edit: ProductEdit): string {
         : `gear \`${edit.gear}\`: config \`${edit.key}\` = ${JSON.stringify(edit.value)}`;
     case "set_features":
       return `gear \`${edit.gear}\`: features = [${edit.features.join(", ")}]`;
+    case "set_provider_option":
+      return edit.value === null
+        ? `cluster \`${edit.scope}\`/${edit.primitive}: clear option \`${edit.key}\``
+        : `cluster \`${edit.scope}\`/${edit.primitive}: \`${edit.key}\` = ` +
+            `${JSON.stringify(edit.value)}`;
     case "add_plugin":
       return `gear \`${edit.gear}\`: add plugin \`${edit.plugin}\``;
     case "add_plugin_selection":
@@ -1358,9 +1419,35 @@ function mergeDraft(existing: ProductEdit[], edit: ProductEdit): ProductEdit[] {
     if (edit.kind === "set_profile_field" && other.kind === "set_profile_field") {
       return other.profile === edit.profile && other.field === edit.field;
     }
+    // One option of one binding. The address is the written position rather than
+    // the scope name: two `cluster_profile(...)` entries can share a name for
+    // disjoint deployment profiles, so the name alone would merge two different
+    // bindings' edits into one.
+    if (edit.kind === "set_provider_option" && other.kind === "set_provider_option") {
+      return (
+        other.entry_index === edit.entry_index &&
+        other.primitive === edit.primitive &&
+        other.key === edit.key
+      );
+    }
     return false;
   };
   const without = existing.filter((other) => !sameSlot(other));
   without.push(edit);
   return without;
 }
+/**
+ * Whether a saved option value is one a control can render and write back.
+ *
+ * A provider's options are `serde_json::Value` on the wire, so a nested object
+ * or a list can be in there -- and a control that turned one into a string
+ * would rewrite it on the next Apply. Those keep their written text and are
+ * shown as-is, which is the treatment an undeclared gear config key already
+ * gets.
+ */
+function isConfigValue(value: unknown): value is ConfigValue {
+  return (
+    typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+  );
+}
+

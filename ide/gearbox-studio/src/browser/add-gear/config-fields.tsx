@@ -67,6 +67,20 @@ export interface ConfigFieldsProps {
    * until Apply -- so "reset" is as reversible as typing was.
    */
   readonly onReset?: (key: string) => void;
+  /**
+   * Whether the description supplies a value for this key at all.
+   *
+   * **Needed because `values` cannot hold every value there is.** It is a map of
+   * scalars, so a key whose written value is a list or a nested map is dropped
+   * on the way in -- and a field that is `required` with no readable default
+   * then wears "must be supplied" over a value that *is* supplied, in a control
+   * that deliberately refuses to render it. Reachable as soon as a schema is
+   * shown unfiltered, which is what a backend's options struct is: nobody
+   * curated it with `exposes`.
+   *
+   * Absent means "ask `values`", which is what every caller did before.
+   */
+  readonly isSet?: (key: string) => boolean;
 }
 
 /** How each provenance reads in the panel. */
@@ -100,8 +114,10 @@ function provenanceShown(
   field: ConfigFieldDecl,
   value: ConfigValue | undefined,
   provenance: ConfigProvenance | undefined,
+  set: boolean,
 ): ConfigProvenance | undefined {
   if (provenance !== "default") return provenance;
+  if (set) return "explicit";
   return valueMissing(field, value) ? "unset" : "default";
 }
 
@@ -118,7 +134,19 @@ function placeholder(field: ConfigFieldDecl): string {
  * (`cpt-gearbox-fr-no-secrets-in-values`), so the control says so up front
  * rather than letting someone fill a box that Apply will reject.
  */
-function refusal(field: ConfigFieldDecl): string | undefined {
+function refusal(
+  field: ConfigFieldDecl,
+  set = false,
+  renderable = true,
+): string | undefined {
+  // **A value nothing here can show is a value nothing here may replace.**
+  // Whatever the field's declared type, if the description wrote a list or a
+  // nested map under this key then `values` dropped it -- and an empty text box
+  // over it is an offer to convert it on the next keystroke. Refused instead,
+  // and the description keeps what it says.
+  if (set && !renderable) {
+    return "a value is set that is not a scalar — edit this one in the description";
+  }
   if (field.type.kind === "complex") {
     return "not a scalar — edit this one in the description";
   }
@@ -141,13 +169,16 @@ export function ConfigFields(props: ConfigFieldsProps): React.ReactElement {
 function ConfigField(
   props: ConfigFieldsProps & { readonly field: ConfigFieldDecl },
 ): React.ReactElement {
-  const { field, values, onChange, provenanceOf, isDrafted, onReset } = props;
+  const { field, values, onChange, provenanceOf, isDrafted, onReset, isSet } = props;
   const value = values.get(field.name);
-  const blocked = refusal(field);
-  const provenance = provenanceShown(field, values.get(field.name), provenanceOf?.(field.name));
+  // Set, whether or not this form can show it. See `ConfigFieldsProps.isSet`.
+  const set = value !== undefined || isSet?.(field.name) === true;
+  const blocked = refusal(field, set, value !== undefined);
+  const provenance = provenanceShown(field, value, provenanceOf?.(field.name), set);
   const drafted = isDrafted?.(field.name) === true;
   const problem = blocked === undefined ? valueProblem(field, value) : undefined;
-  const missing = blocked === undefined && problem === undefined && valueMissing(field, value);
+  const missing =
+    blocked === undefined && problem === undefined && !set && valueMissing(field, value);
 
   return (
     <label

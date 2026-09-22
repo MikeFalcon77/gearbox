@@ -12,6 +12,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
+import { copyProduct, withoutGear, type ProductCopy } from "../fixtures/product-copy";
 import {
   closeGraph,
   expect,
@@ -20,6 +21,7 @@ import {
   openGraph,
   openGraphView,
   openProduct,
+  openProductById,
   productSection,
   resetCatalogueView,
   revealCatalogue,
@@ -416,5 +418,231 @@ test.describe("cpt-gearbox-fr-studio, clause by clause", () => {
         return mechanisms.filter((m) => text.includes(`"${m}"`)).map((m) => `${file}: "${m}"`);
       });
     expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * A cluster binding's options, which had no editor and no check at all.
+ *
+ * The options were carried verbatim from the description into the generated
+ * YAML and nothing looked at a key: the authority was always there -- every
+ * backend deserializes them into a struct with `#[serde(deny_unknown_fields)]`
+ * -- but it was an authority that spoke at *backend startup*, in a deployed
+ * system, where the description that caused the failure is not to hand. What
+ * was missing was the join key, which `cluster_plugin(cache_options = "...")`
+ * now declares.
+ *
+ * Configured on Topology rather than in Composition, and that is not a second
+ * surface: a cluster binding is not a gear and has no row in the Composition
+ * tree. The stage that shows it configures it.
+ */
+test.describe("a cluster binding's options are the backend's own struct", () => {
+  let copy: ProductCopy;
+
+  test.beforeEach(() => {
+    copy = copyProduct(REPO, "payments-demo", "provider-options");
+  });
+
+  test.afterEach(() => {
+    copy?.dispose();
+  });
+
+  /** Reach the form for `event-broker/cache` under the profile that uses postgres. */
+  async function openOptions(page: import("@playwright/test").Page): Promise<void> {
+    await openProductById(page, copy.id, "prod");
+    await productSection(page, "topology");
+    await expect(page.locator('[data-provider-options="event-broker/cache"]')).toBeVisible({
+      timeout: 60_000,
+    });
+  }
+
+  test("an option is edited, previewed against the binding it names, and written to it [PRD cpt-gearbox-fr-studio: edits and resolves a product]", async ({
+    freshStudio,
+  }) => {
+    const { page } = freshStudio;
+    await openOptions(page);
+    const form = page.locator('[data-provider-options="event-broker/cache"]');
+
+    // **The addressee, in full.** The scope name alone does not say which
+    // binding this writes to: `payments-demo` declares `event-broker` twice, for
+    // disjoint deployment profiles, with different providers.
+    const head = form.locator("[data-provider-options-head]");
+    await expect(head).toContainText("event-broker");
+    await expect(head).toContainText("cache");
+    await expect(head.locator("[data-provider-options-provider]")).toHaveText("postgres");
+    await expect(head.locator("[data-provider-options-profiles]")).toHaveText("local, prod");
+    await expect(form).toHaveAttribute("data-provider-options-rust", "PostgresClusterConfig");
+
+    await form.locator('[data-config-field="pool_max_size"] input').fill("20");
+    await head.click();
+    // **The product's one draft, and the toolbar is where it lives.** The
+    // `N pending changes` line belongs to the Composition stage; this edit is
+    // made on Topology, so what says the change is queued is the pair in the
+    // toolbar -- which is product-wide by design -- and the control's own
+    // modified cue, which says *where* the unapplied edit is.
+    await expect(page.locator("[data-draft-apply]")).toBeVisible();
+    await expect(
+      form.locator('[data-config-field="pool_max_size"]'),
+      "the field says its value is not the file's yet",
+    ).toHaveAttribute("data-field-modified", "true");
+
+    await page.locator("[data-draft-apply]").click();
+    const dialog = page.locator(".dialogBlock");
+    await dialog.waitFor({ state: "visible", timeout: 60_000 });
+    // The edit is named as what it is, not as "a change to the product".
+    await expect(dialog.locator("[data-edit-target]")).toContainText("event-broker");
+    await expect(dialog.locator("[data-edit-target]")).toContainText("pool_max_size");
+    await expect(dialog.locator(".gbx-edit-preview")).toContainText("pool_max_size");
+    await dialog.locator("button.theia-button.main").click();
+
+    await expect
+      .poll(() => readFileSync(copy.path, "utf8"), { timeout: 60_000 })
+      .toContain("pool_max_size = 20");
+    const written = readFileSync(copy.path, "utf8");
+    // The neighbour with the same name, and the comments, are where they were.
+    expect(written, "the dev scope was rewritten").toContain(
+      'cache = provider("standalone"),',
+    );
+    expect(written, "a comment inside the edited call was lost").toContain(
+      "# The reference, not the credential.",
+    );
+
+    // And the panel is showing what is on disk, not what was typed.
+    await expect(
+      page.locator('[data-provider-options="event-broker/cache"] [data-config-field="pool_max_size"] input'),
+    ).toHaveValue("20", { timeout: 60_000 });
+    await expect(
+      page.locator("[data-draft-apply]"),
+      "nothing is owed once it is written",
+    ).toHaveCount(0);
+  });
+
+  test("the credential has no box and a way to write the reference instead [PRD cpt-gearbox-fr-no-secrets-in-values]", async ({
+    freshStudio,
+  }) => {
+    const { page } = freshStudio;
+    await openOptions(page);
+    const form = page.locator('[data-provider-options="event-broker/cache"]');
+
+    // `connection_string` is a plain `String` in Rust, so nothing in the
+    // projection marks it and the Studio's name heuristic misses it. The plugin
+    // declares which option it is, and the form does not offer to save one.
+    await expect(form.locator('[data-config-field="connection_string"]')).toHaveCount(0);
+    const note = form.locator("[data-provider-credential]");
+    await expect(note).toHaveAttribute("data-provider-credential", "connection_string");
+    await expect(note, "the syntax, not just a refusal").toContainText("secret_ref");
+    await expect(note).toContainText("${VAR}");
+
+    // **A way there, not only a sentence about it.** The description may be
+    // long and the same provider may be bound twice, so the button opens the
+    // file at the `provider(...)` the note is about.
+    await note.locator("[data-provider-credential-edit]").click();
+    await expect(
+      page.locator('.monaco-editor[data-uri*="product.gdl"]'),
+      "the description opened at the call",
+    ).toBeVisible({ timeout: 60_000 });
+  });
+
+  test("a default the projection cannot read is not a value somebody must supply [ADR-0002: the catalogue is projected]", async ({
+    freshStudio,
+  }) => {
+    const { page } = freshStudio;
+    await openOptions(page);
+    const form = page.locator('[data-provider-options="event-broker/cache"]');
+
+    // Three states, not two. `replication_mode` carries `#[serde(default)]`
+    // whose value is not a literal this projection can read, so it has no
+    // default to show *and* needs nothing from anybody -- and a form that
+    // collapsed the two would demand a value the backend already supplies.
+    const unreadable = form.locator('[data-config-field="replication_mode"]');
+    await expect(unreadable).toHaveAttribute("data-config-provenance", "default");
+    await expect(unreadable).not.toHaveAttribute("data-config-provenance", "unset");
+    // And one the description does set reads as set, with a way to drop it.
+    await expect(form.locator('[data-config-field="schema"]')).toHaveAttribute(
+      "data-config-provenance",
+      "explicit",
+    );
+  });
+});
+
+/**
+ * A written value this form cannot render, and must therefore not replace.
+ *
+ * Its own describe because it needs a different description: no shipped one
+ * writes a non-scalar under a provider option, and the corpus's option structs
+ * declare no nested field either -- so the state has to be derived. The state is
+ * ordinary enough in principle (the options are `serde_json::Value` on the wire)
+ * and the failure it guards against is silent: an empty text box over a list is
+ * an offer to convert it on the next keystroke.
+ */
+test.describe("an option value the form cannot show is one it must not rewrite", () => {
+  let copy: ProductCopy;
+  let unknownKey: ProductCopy;
+
+  test.beforeEach(() => {
+    copy = copyProduct(REPO, "payments-demo", "provider-complex", (text) =>
+      text.replace('schema = "cluster"', 'schema = ["a", "b"]'),
+    );
+    unknownKey = copyProduct(REPO, "payments-demo", "provider-stray", (text) =>
+      text.replace('schema = "cluster",', 'schema = "cluster",\n                pool_maximum_size = 10,'),
+    );
+  });
+
+  test.afterEach(() => {
+    copy?.dispose();
+    unknownKey?.dispose();
+  });
+
+  test("a list written under a scalar option is refused by the control and survives a write beside it [ADR-0023 §2.4: nothing is silently converted]", async ({
+    freshStudio,
+  }) => {
+    const { page } = freshStudio;
+    await openProductById(page, copy.id, "prod");
+    await productSection(page, "topology");
+    const form = page.locator('[data-provider-options="event-broker/cache"]');
+    await expect(form).toBeVisible({ timeout: 60_000 });
+
+    const written = form.locator('[data-config-field="schema"]');
+    // Set -- so not "a value somebody must supply" -- and refused, so there is
+    // no box offering to replace it.
+    await expect(written).toHaveAttribute("data-config-provenance", "explicit");
+    await expect(written).toContainText("not a scalar");
+    await expect(written.locator("input")).toHaveCount(0);
+
+    // A write beside it leaves it exactly as the description has it.
+    await form.locator('[data-config-field="pool_max_size"] input').fill("21");
+    await form.locator("[data-provider-options-head]").click();
+    await page.locator("[data-draft-apply]").click();
+    const dialog = page.locator(".dialogBlock");
+    await dialog.waitFor({ state: "visible", timeout: 60_000 });
+    await dialog.locator("button.theia-button.main").click();
+
+    await expect
+      .poll(() => readFileSync(copy.path, "utf8"), { timeout: 60_000 })
+      .toContain("pool_max_size = 21");
+    expect(
+      readFileSync(copy.path, "utf8"),
+      "the value the form could not render was rewritten",
+    ).toContain('schema = ["a", "b"]');
+  });
+
+  test("a key the backend does not read is shown with what it says, not dropped [ADR-0023 §2.4: nothing is silently converted]", async ({
+    freshStudio,
+  }) => {
+    // The form renders the struct's fields, so a key that is not one of them
+    // would otherwise be invisible on the only screen that shows this binding:
+    // written in the description, refused by the engine, and absent here.
+    const { page } = freshStudio;
+    await openProductById(page, unknownKey.id, "prod");
+    await productSection(page, "topology");
+    const form = page.locator('[data-provider-options="event-broker/cache"]');
+    await expect(form).toBeVisible({ timeout: 60_000 });
+
+    const stray = form.locator('[data-provider-option-unknown="pool_maximum_size"]');
+    await expect(stray).toBeVisible();
+    await expect(stray, "with the value it was given").toContainText("10");
+    await expect(stray, "and what to do about it").toContainText("does not read this key");
+    // Not a control: nothing here knows what it was meant to be.
+    await expect(stray.locator("input")).toHaveCount(0);
   });
 });

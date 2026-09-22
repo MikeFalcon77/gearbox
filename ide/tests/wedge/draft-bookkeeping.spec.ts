@@ -16,7 +16,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { copyProduct, type ProductCopy } from "../fixtures/product-copy";
-import { configureGear, expect, openProductById, settled, test } from "../fixtures/studio";
+import {
+  configureGear,
+  expect,
+  openProductById,
+  productSection,
+  settled,
+  test,
+} from "../fixtures/studio";
 import { HELD_WRITE, hold, logMark, release, since } from "./seam";
 
 const REPO = join(__dirname, "../../..");
@@ -187,6 +194,81 @@ test.describe("a draft while a write is in flight", () => {
     });
     await expect
       .poll(() => readFileSync(product.path, "utf8").includes("second-value"), { timeout: 30_000 })
+      .toBe(true);
+  });
+});
+
+/**
+ * The same, for a cluster binding's options.
+ *
+ * A different edit kind with a different address -- a written position rather
+ * than a gear id -- so "the same field, edited again during the write" is a
+ * different slot rule, in a different branch of `mergeDraft`. It has to be
+ * checked where it is written rather than argued from the gear case.
+ */
+test.describe("a provider option edited again during its own write", () => {
+  let product: ProductCopy;
+
+  test.beforeAll(() => {
+    product = copyProduct(REPO, "payments-demo", "provider-race");
+  });
+
+  test.afterAll(() => {
+    product?.dispose();
+    release();
+  });
+
+  test("the newer value is still owed after the older one lands", async ({ freshStudio }) => {
+    const { page } = freshStudio;
+    const mark = logMark();
+    await settled(page);
+    await openProductById(page, product.id, "prod");
+    await productSection(page, "topology");
+    const form = page.locator('[data-provider-options="event-broker/cache"]');
+    await expect(form).toBeVisible({ timeout: 60_000 });
+
+    await form.locator('[data-config-field="pool_max_size"] input').fill("30");
+    await form.locator("[data-provider-options-head]").click();
+    await expect(page.locator("[data-draft-apply]")).toBeVisible();
+
+    hold(HELD_WRITE);
+    await page.locator("[data-draft-apply]").click();
+    const dialog = page.locator(".dialogBlock");
+    await dialog.waitFor({ state: "visible", timeout: 60_000 });
+    await dialog.locator("button.theia-button.main").click();
+    await expect
+      .poll(() => since(mark).some((r) => r.kind === "withhold"), { timeout: 30_000 })
+      .toBe(true);
+
+    // The same option again, while the earlier value is on its way to the disk.
+    await form.locator('[data-config-field="pool_max_size"] input').fill("31");
+    await form.locator("[data-provider-options-head]").click();
+
+    release();
+    await expect
+      .poll(() => since(mark).some((r) => r.kind === "released-answer"), { timeout: 30_000 })
+      .toBe(true);
+
+    // What was sent is what was written.
+    await expect
+      .poll(() => readFileSync(product.path, "utf8").includes("pool_max_size = 30"), {
+        timeout: 60_000,
+      })
+      .toBe(true);
+    // And what was not sent is still owed, rather than cleared with it.
+    await expect(page.locator("[data-draft-apply]")).toBeVisible({ timeout: 60_000 });
+    await expect(
+      page.locator('[data-provider-options="event-broker/cache"] [data-config-field="pool_max_size"] input'),
+    ).toHaveValue("31");
+
+    await page.locator("[data-draft-apply]").click();
+    const again = page.locator(".dialogBlock");
+    await again.waitFor({ state: "visible", timeout: 60_000 });
+    await again.locator("button.theia-button.main").click();
+    await expect
+      .poll(() => readFileSync(product.path, "utf8").includes("pool_max_size = 31"), {
+        timeout: 60_000,
+      })
       .toBe(true);
   });
 });

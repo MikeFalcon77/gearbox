@@ -23,6 +23,7 @@ import type { Diagnostic } from "../../common/generated/Diagnostic";
 import type { Discovery } from "../../common/generated/Discovery";
 import type { ResolvedBinding } from "../../common/generated/ResolvedBinding";
 import type { ResolvedApplication } from "../../common/generated/ResolvedApplication";
+import type { ResolvedClusterBinding } from "../../common/generated/ResolvedClusterBinding";
 import type { ResolvedProduct } from "../../common/generated/ResolvedProduct";
 import type { ProductRef } from "../../common/protocol";
 import {
@@ -37,6 +38,7 @@ import { Composition } from "./composition";
 import { GearBlurb, GearDocs, GearHeading, InclusionReasons } from "../gear/gear-facts";
 import { GearSettings } from "./gear-settings";
 import { PluginSettings } from "./plugin-settings";
+import { ConfigFields } from "../add-gear/config-fields";
 import { ProductStore, type Staleness } from "../product-store";
 import { GenerateService } from "../generate/generate-service";
 import { ProductEditService } from "../product-edit-service";
@@ -1399,12 +1401,170 @@ export class ProductWidget extends ReactWidget {
                       </>
                     )}
                   </span>
+                  {this.renderProviderOptions(binding)}
                 </div>
               ))}
             </>
           ),
         )}
       </>
+    );
+  }
+
+  /**
+   * The options a cluster binding was given, as the controls its backend reads.
+   *
+   * **The comment above this used to say `options` is deliberately not
+   * rendered**, and it was right while the options were an untyped bag: a panel
+   * that printed whatever the description passed was one schema change away from
+   * putting a connection string on screen. What changed is that the backend's
+   * own struct is now projected -- `cluster_plugin(cache_options = "...")`
+   * supplies the join key Rust has no way to state -- so the panel knows which
+   * key is the credential, and shows that one as the reference it is.
+   *
+   * Configured here rather than in Composition, and that is not a second
+   * surface: a cluster binding is not a gear and has no row in the Composition
+   * tree. The stage that shows it is the stage that configures it, which is the
+   * rule ADR-0023's amendment states, applied to an object it did not have.
+   */
+  protected renderProviderOptions(binding: ResolvedClusterBinding): React.ReactNode {
+    const state = this.store.current;
+    const profile = state.profile;
+    // The entry that applies to the profile being viewed. An empty `profiles`
+    // means every profile, which is the same rule the engine's scoping uses.
+    const scope = (state.intent?.cluster_scopes ?? []).find(
+      (candidate) =>
+        candidate.scope === binding.scope &&
+        (candidate.profiles === undefined ||
+          candidate.profiles.length === 0 ||
+          (profile !== undefined && candidate.profiles.includes(profile))),
+    );
+    if (scope === undefined) return undefined;
+    const declared =
+      binding.primitive === "cache"
+        ? scope.cache
+        : binding.primitive === "lock"
+          ? scope.lock
+          : scope.leader_election;
+    if (!declared) return undefined;
+
+    const provider = this.catalogue.current.rows
+      .flatMap((row) => (row.kind === "projected" ? (row.gear.cluster_providers ?? []) : []))
+      .find((decl) => decl.name === declared.provider);
+    const schema = provider?.options?.[binding.primitive];
+    if (provider === undefined || schema === undefined) return undefined;
+
+    const entryIndex = scope.entry_index;
+    const values = this.edits.draftProviderOptions(
+      entryIndex,
+      binding.primitive,
+      declared.options ?? {},
+    );
+    const credential = provider.credential_option ?? undefined;
+
+    return (
+      <div
+        className="gbx-provider-options"
+        data-provider-options={`${binding.scope}/${binding.primitive}`}
+        data-provider-options-rust={schema.rust}
+        data-provider-options-entry={entryIndex}
+      >
+        {/* **Which binding this form writes to, in full.** The scope name alone
+            does not say: a product may declare the same scope twice for disjoint
+            deployment profiles -- `payments-demo` does -- and the two have
+            different providers and different options. So the header names the
+            scope, the primitive, the provider whose struct these controls come
+            from, and the profiles the entry applies under. */}
+        <div className="gbx-kv" data-provider-options-head>
+          <span>configuring</span>
+          <span>
+            <code>{binding.scope}</code>/{binding.primitive} ·{" "}
+            <code data-provider-options-provider>{declared.provider}</code> ·{" "}
+            <span data-provider-options-profiles>
+              {scope.profiles === undefined || scope.profiles.length === 0
+                ? "every profile"
+                : scope.profiles.join(", ")}
+            </span>{" "}
+            · read into <code>{schema.rust}</code>
+          </span>
+        </div>
+        <ConfigFields
+          key={`${entryIndex}/${binding.primitive}/${this.edits.epoch}`}
+          fields={(schema.fields ?? []).filter((field) => field.name !== credential)}
+          values={values}
+          isDrafted={(key) =>
+            this.edits.providerOptionDrafted(entryIndex, binding.primitive, key)
+          }
+          // Set by this product, or left to the backend. The same two answers
+          // the gear settings give, from the only place that knows: the written
+          // options of the binding this form is for.
+          provenanceOf={(key) =>
+            Object.prototype.hasOwnProperty.call(declared.options ?? {}, key)
+              ? "explicit"
+              : "default"
+          }
+          // A value the description supplies that this form cannot render -- a
+          // list, a nested map -- is still a value. Without this a required
+          // field carrying one would be marked as needing to be supplied.
+          isSet={(key) => Object.prototype.hasOwnProperty.call(declared.options ?? {}, key)}
+          onChange={(key, value) =>
+            void this.edits
+              .setProviderOption(binding.scope, entryIndex, binding.primitive, key, value)
+          }
+          onReset={(key) =>
+            void this.edits
+              .setProviderOption(binding.scope, entryIndex, binding.primitive, key, undefined)
+          }
+        />
+        {/* **The credential is named and not offered as a box.** Its field is a
+            plain `String` in Rust, so nothing in the projection marks it -- the
+            plugin declares which option it is, for the same reason it declares
+            `process_local`. A form that saved a value here would be offering to
+            commit a password, which is the refusal `GBX0116` makes one layer
+            down. */}
+        {/* **A key the backend does not read is still written down.** The form
+            renders the struct's fields, so a key that is not one of them would
+            otherwise be invisible here -- present in the description, refused by
+            the engine (GBX0522), and absent from the only screen that shows this
+            binding. Listed with what it says, and not offered as a control:
+            nothing here knows what it was meant to be. */}
+        {Object.keys(declared.options ?? {})
+          .filter(
+            (key) =>
+              key !== credential &&
+              !(schema.fields ?? []).some((field) => field.name === key),
+          )
+          .map((key) => (
+            <p className="gbx-config-note" key={key} data-provider-option-unknown={key}>
+              <code>{key}</code> = <code>{JSON.stringify(declared.options?.[key])}</code> —{" "}
+              <code>{schema.rust}</code> does not read this key. It stays as written; remove it in
+              the description, or correct the spelling.
+            </p>
+          ))}
+        {credential !== undefined && (
+          <p className="gbx-config-note" data-provider-credential={credential}>
+            <code>{credential}</code> carries this backend&apos;s credential, so there is no box
+            for it here. Reference it instead, on this <code>provider(...)</code>:{" "}
+            <code>secret_ref = &quot;env:PG_PASSWORD&quot;</code> for an externally managed
+            secret, or <code>{`${credential} = "…\${VAR}…"`}</code> for a value the backend
+            expands at startup. A literal is refused by the engine (GBX0116) rather than written.
+            {/* **A way there, not only a sentence about it.** A hidden control
+                that names a syntax and leaves the person to find the call is
+                half an answer: the description may be long and the same provider
+                may be bound twice. This opens the file at the `provider(...)`
+                the note is about. */}
+            {declared.declared_at != null && (
+              <button
+                type="button"
+                data-provider-credential-edit
+                onClick={() => void this.reveals.revealLocation(declared.declared_at!)}
+              >
+                Edit in the description
+              </button>
+            )}
+          </p>
+        )}
+      </div>
     );
   }
 

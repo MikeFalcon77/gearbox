@@ -92,6 +92,7 @@ The authority split:
 | `serves` | `config_key` and `default_port` are runtime-configuration facts |
 | `cluster_plugins[].package` | the registry names a library identifier (`standalone_cluster_plugin`); nothing in that expression says which directory the crate is in |
 | `cluster_plugins[].process_local`, `.needs_credentials` | deployment semantics with no Rust representation at all — see below |
+| `cluster_plugins[].cache_options`, `.leader_election_options`, `.lock_options`, `.credential_option` | join keys the provider traits do not carry — see Amendment 2026-09-22 |
 | `consumes[].critical` | resolver input, product-level |
 | `declared_roles`, `config_schema` | forward compatibility and an opaque pointer |
 
@@ -437,3 +438,93 @@ rather than having its variants guessed.
 * `config_schema` is **not** carried into the lock. `ResolvedGear` records what was *decided*, and a
   catalogue's account of what a gear *can* be configured with is not a decision. The field's old doc
   comment claimed the opposite and was never true.
+
+## Amendment 2026-09-22: a backend's options are projected from the struct it already reads
+
+A cluster `provider(...)` takes backend-specific options — `provider("postgres", schema = "cluster",
+pool_max_size = 10)` — and until now nothing checked a single key. They were carried verbatim from
+the description through `ProviderBinding` into the generated YAML.
+
+**The authority already existed and was not reachable.** Every options struct in the corpus is
+`#[derive(Deserialize)]` with `#[serde(deny_unknown_fields)]`, so a mistyped key is already an
+error — at backend startup, in a deployed system, where the description that caused it is not to
+hand. What was missing was the **join key**: the provider traits carry `provider()` and
+`build_*(options: &serde_json::Map)`, and the type on the other side of that map is named only
+inside the `build_*` body, which the projector's method-call search cannot see.
+
+### What is declared, and why it is declared rather than read
+
+`cluster_plugin(cache_options = "RedisClusterConfig", lock_options = "RedisLockConfig")`, beside
+`process_local`, and for the same reason this ADR already gives for that field: **no Rust construct
+states the link.** Reading it out of a `build_cache` body — "the first `serde_json::from_value`
+turbofish" — would be our inference about somebody else's code rather than a statement the code
+makes. One key per primitive, because a crate answers several: redis's lock reads a different
+struct from its cache, and its own comment at the call site says why.
+
+Everything else stays projected. The name comes from `fn provider()`, the primitives from
+`provider_registry()`, the capabilities from the backend impl, and now the fields, their types,
+their enum variants, their defaults and their doc comments from the named struct — through
+`project_config_fields`, the same projector a gear's `config_schema` uses. **A plugin that declares
+no options struct keeps today's behaviour exactly**: an untyped bag, checked by nothing until the
+backend starts.
+
+A name that resolves to nothing is `GBX0521` on the declaration, not a silent fall back to the
+bag — falling back would make every option validate, because nothing would be checking.
+
+### What it buys, each an existing mechanism
+
+* an unknown key is `GBX0522` against the description, the statement `GBX0115` already makes for a
+  gear's config key;
+* a wrong type, or a variant of a closed set that does not exist, is `GBX0523` — the comparison
+  `GBX0113` already makes. `watch_mode = "disbaled"` is refused at the control;
+* a required option nobody supplied is `GBX0524`. **Required means serde would fail**: no
+  `#[serde(default)]`, no `default = "fn"`, not an `Option<T>`. A default this projection cannot
+  *read* — `Duration::from_secs(5)`, a `const` — is still a default, and a field carrying one is
+  never reported. That is why `required` and `default` are two fields and not one nullable one, and
+  the form shows all three states rather than two;
+* the Studio gains an editor for provider options, which it had none of.
+
+### The credential, decided rather than footnoted
+
+`connection_string` and `url` are plain `String`. The projector marks `secret` from a `secrecy`
+wrapper and there is none, and the client-side name heuristic catches the first and misses the
+second. So `credential_option` is declared too — the plugin knows which of its options it will not
+work without, and that is a statement it can make.
+
+A literal under it is refused (`GBX0116`, the rule that already exists for a gear's config), and the
+form offers no box for it. **A hidden control is not an answer on its own**: the note carries the
+syntax — `secret_ref = "env:PG_PASSWORD"`, or an expansion the backend resolves at startup — and a
+button that opens the description at that `provider(...)` call. A value written with `${VAR}` is
+neither a literal credential nor a type error: it is a string on the wire whatever the field's type
+is, and it is the shape the plugins' own `deserialize_and_expand` reads.
+
+Teaching the projector a `secrecy` wrapper upstream is the better answer and is a change to the
+plugin crates, decided separately.
+
+### Editing, and the two things a written position does not replace
+
+An option is addressed by **where it is written** — a product may declare one scope twice for
+disjoint deployment profiles, which `payments-demo` does — and the address is checked against the
+name found there, so a stale address is refused rather than applied to whatever now sits at that
+position.
+
+That is not a document version, and does not pretend to be one. `expected_before` still carries the
+text the preview was computed from, compared **on the engine** before a single edit is applied:
+a client that forgot to re-check cannot write against text nobody reviewed. And the position is
+carried in `ClusterScopeIntent.entry_index` rather than derived from the intent's array — a scope
+bound twice in one profile is reported and skipped, so that array is shorter than the file's list
+and the index would address the entry after the one on screen.
+
+### Traceability
+
+* Extends this ADR's declared/projected split with four locator fields.
+* `crates/gearbox-engine/src/resolve/cluster_options.rs` and its tests — the four refusals and the
+  three things that are deliberately not refused: an expansion, a provider with no declared
+  options, and a provider that is not registered at all.
+* `crates/gearbox-gdl/src/edit_tests.rs` — the surgery: the addressed entry is edited and its
+  same-named neighbour and the comment between them are not.
+* `crates/gearbox-rpc/src/write_gate_tests.rs` — the document version, for a repeated name.
+* `ide/tests/conformance/prd-studio.spec.ts` — the form: what it names, what it writes, what it
+  refuses to render, and the credential's path into the description.
+* `ide/tests/wedge/draft-bookkeeping.spec.ts` — an option edited again while its own write is in
+  flight.

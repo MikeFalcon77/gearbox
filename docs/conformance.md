@@ -8,7 +8,7 @@ the feature is not there yet. A ⚪ row is a claim this run could not put
 itself in a position to observe, which is reported rather than counted as a
 pass.
 
-Claims: **199** — 198 built, 0 not built, 0 broken, 1 not observed.
+Claims: **203** — 201 built, 0 not built, 1 broken, 1 not observed.
 
 Only browser-observable claims appear here. Engine-side claims are tested in
 Rust, and the ADRs' own Confirmation sections say which.
@@ -102,7 +102,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | both repositories are workspace roots | `ADR-0011 §Consequences: Explorer remains` | ✅ built |  |
 | the watcher does not walk the Rust target directories | `ADR-0011 §Scope: which packages are present` | ✅ built |  |
 | Source Control lists both repositories | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
-| the change count is the repository's, not a placeholder | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
+| the change count is the repository's, not a placeholder | `ADR-0011 §Consequences: Git remains` | ❌ broken | Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m |
 | git decorates the Explorer | `ADR-0011 §Consequences: Git remains` | ✅ built |  |
 | a product.lock opened as a file is read-only | `PRD cpt-gearbox-fr-lock-read-only` | ✅ built |  |
 
@@ -271,6 +271,10 @@ Rust, and the ADRs' own Confirmation sections say which.
 | it previews and applies generation | `PRD cpt-gearbox-fr-generate-preview` | ✅ built |  |
 | the resolver notice is gone, and gone because the engine says so | `PRD cpt-gearbox-fr-rpc-api` | ✅ built |  |
 | it contains no resolution logic of its own | `PRD cpt-gearbox-fr-studio: no resolution logic` | ✅ built |  |
+| an option is edited, previewed against the binding it names, and written to it | `PRD cpt-gearbox-fr-studio: edits and resolves a product` | ✅ built |  |
+| the credential has no box and a way to write the reference instead | `PRD cpt-gearbox-fr-no-secrets-in-values` | ✅ built |  |
+| a default the projection cannot read is not a value somebody must supply | `ADR-0002: the catalogue is projected` | ✅ built |  |
+| a list written under a scalar option is refused by the control and survives a write beside it | `ADR-0023 §2.4: nothing is silently converted` | ✅ built |  |
 
 ## `conformance/ux-accessibility.spec.ts`
 
