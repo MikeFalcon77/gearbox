@@ -13,6 +13,7 @@
 pub mod bindings;
 pub mod closure;
 pub mod cluster;
+pub mod cluster_options;
 pub mod cuts;
 pub mod partition;
 pub mod product;

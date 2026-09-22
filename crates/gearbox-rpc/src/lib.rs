@@ -1532,6 +1532,21 @@ fn apply_product_edits(
             ProductEdit::SetFeatures { gear, features } => {
                 gearbox_gdl::edit::set_gear_features(uri, &current, gear, features)?
             }
+            ProductEdit::SetProviderOption {
+                scope,
+                entry_index,
+                primitive,
+                key,
+                value,
+            } => gearbox_gdl::edit::set_provider_option(
+                uri,
+                &current,
+                scope,
+                *entry_index,
+                primitive,
+                key,
+                value.as_ref(),
+            )?,
             ProductEdit::AddPlugin { gear, plugin } => {
                 gearbox_gdl::edit::add_gear_plugin(uri, &current, gear, plugin)?
             }

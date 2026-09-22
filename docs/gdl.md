@@ -173,10 +173,15 @@ consume(contract, rust, sdk, critical = False, resolving_client?)
 ### `cluster_plugin(...)` → cluster_plugin
 
 ```
-cluster_plugin(package, process_local = False, needs_credentials = False, backend?)
+cluster_plugin(package, process_local = False, needs_credentials = False, backend?,
+               cache_options?, leader_election_options?, lock_options?, credential_option?)
 ```
 
-`package` is a `cargo(...)`: a locator plus the two flags Rust does not state. Providers themselves are projected. `backend` is an optional path to the impl, relative to the plugin crate.
+`package` is a `cargo(...)`: a locator plus the flags Rust does not state. Providers themselves are projected. `backend` is an optional path to the impl, relative to the plugin crate.
+
+`*_options` names the struct a primitive's options are deserialized into — a **join key**, not a schema. The struct is already the authority (`#[serde(deny_unknown_fields)]`); what Rust has no way to state is which type the `&Map` handed to `build_cache` is read as, because that is named only inside the function body. Given, the fields, their types, their enum variants and their defaults are projected and an option key is checked against them (**GBX0521** if the name resolves to nothing, **GBX0522** for a key the backend does not read, **GBX0523** for a value the field cannot take, **GBX0524** for a required option nobody supplied). Omitted, the options stay the untyped bag they always were.
+
+`credential_option` names the option that carries the backend's credential, for a plugin that needs one. Declared for the same reason: `connection_string` and `url` are plain `String`, so nothing in the type marks them. A literal under it is **GBX0116**; write `secret_ref = "..."` on the `provider(...)`, or a value with `${VAR}` the backend expands at startup.
 
 ### `cluster.*` → cluster require
 
@@ -509,8 +514,8 @@ product(
         cluster_profile(
             name = "event-broker",
             profiles = ["local", "prod"],
-            cache = provider("postgres", connection_string = "postgres://…", schema = "cluster",
-                             secret_ref = "env:PG_PASSWORD"),
+            cache = provider("postgres", connection_string = "postgres://${PG_HOST}/payments",
+                             schema = "cluster", secret_ref = "env:PG_PASSWORD"),
         ),
     ],
     applications = [application("audit", anchor = "api-contracts-consumer", replicas = 2,

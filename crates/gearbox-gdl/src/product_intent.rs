@@ -501,7 +501,7 @@ fn build_cluster_scopes(
     let mut out = Vec::new();
     let mut claimed = Claims::new();
 
-    for record in &decl.cluster_profiles {
+    for (written, record) in decl.cluster_profiles.iter().enumerate() {
         let scoped = scoped_profiles(
             uri,
             &record.profiles,
@@ -521,7 +521,7 @@ fn build_cluster_scopes(
             ));
             continue;
         }
-        out.push(cluster_scope(record, scoped));
+        out.push(cluster_scope(record, scoped, written));
     }
     out
 }
@@ -676,6 +676,7 @@ fn claim(claimed: &mut Claims, subject: &str, key: &str, scoped: &BTreeSet<Profi
 fn cluster_scope(
     record: &ClusterProfileRecord,
     profiles: BTreeSet<ProfileId>,
+    entry_index: usize,
 ) -> ClusterScopeIntent {
     ClusterScopeIntent {
         scope: record.scope.clone(),
@@ -684,6 +685,7 @@ fn cluster_scope(
         lock: record.lock.as_ref().map(provider_binding),
         profiles,
         declared_at: record.declared_at.clone(),
+        entry_index,
     }
 }
 

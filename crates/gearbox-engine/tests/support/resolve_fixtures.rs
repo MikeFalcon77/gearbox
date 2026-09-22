@@ -470,6 +470,8 @@ pub fn postgres() -> ClusterProviderDecl {
         process_local: false,
         needs_credentials: true,
         runtime_determined: BTreeSet::new(),
+        options: BTreeMap::new(),
+        credential_option: None,
     }
 }
 
@@ -492,6 +494,8 @@ pub fn standalone() -> ClusterProviderDecl {
         process_local: true,
         needs_credentials: false,
         runtime_determined: BTreeSet::new(),
+        options: BTreeMap::new(),
+        credential_option: None,
     }
 }
 
@@ -512,6 +516,8 @@ pub fn runtime_determined_provider() -> ClusterProviderDecl {
         runtime_determined: [ClusterPrimitive::Cache, ClusterPrimitive::Lock]
             .into_iter()
             .collect(),
+        options: BTreeMap::new(),
+        credential_option: None,
     }
 }
 
@@ -563,5 +569,6 @@ pub fn bind_cluster(
         profiles: BTreeSet::new(),
         // Built here, not read from a description -- see `pin_role`.
         declared_at: None,
+        entry_index: intent.cluster_scopes.len(),
     });
 }

@@ -1662,3 +1662,142 @@ fn add_then_remove_is_an_inverse_for_a_connection() {
 
     assert_eq!(back, HOST_WITH_PLUGINS);
 }
+
+/// Two cluster profiles under one name, for disjoint deployment profiles.
+///
+/// The shape `payments-demo` actually has, and the reason a provider option is
+/// addressed by written position: the name alone picks one of two.
+const TWO_SCOPES: &str = r#"product(
+    id = "payments-demo",
+    cluster_profiles = [
+        cluster_profile(
+            name = "event-broker",
+            cache = provider("standalone"),
+            profiles = ["dev"],
+        ),
+        # The one an operator configures.
+        cluster_profile(
+            name = "event-broker",
+            profiles = ["local", "prod"],
+            cache = provider(
+                "postgres",
+                secret_ref = "env:PG_PASSWORD",
+                schema = "cluster",
+            ),
+        ),
+    ],
+)
+"#;
+
+#[test]
+fn a_provider_option_is_set_on_the_entry_it_addresses() {
+    let edited = crate::edit::set_provider_option(
+        URI,
+        TWO_SCOPES,
+        "event-broker",
+        1,
+        "cache",
+        "pool_max_size",
+        Some(&gearbox_ir::ConfigValue::Int(10)),
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    assert!(
+        edited.contains("pool_max_size = 10"),
+        "the option was not written:\n{edited}"
+    );
+    // The *other* entry is untouched, which is the whole point of the address.
+    assert!(
+        edited.contains(r#"cache = provider("standalone"),"#),
+        "the dev scope was rewritten:\n{edited}"
+    );
+    // And the comment between them survives, as everywhere else in this module.
+    assert!(edited.contains("# The one an operator configures."));
+}
+
+#[test]
+fn a_provider_option_is_removed_by_clearing_it() {
+    let edited = crate::edit::set_provider_option(
+        URI,
+        TWO_SCOPES,
+        "event-broker",
+        1,
+        "cache",
+        "schema",
+        None,
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+
+    assert!(!edited.contains("schema ="), "the option stayed:\n{edited}");
+    assert!(
+        edited.contains(r#"secret_ref = "env:PG_PASSWORD""#),
+        "its sibling went with it:\n{edited}"
+    );
+}
+
+#[test]
+fn an_address_that_names_another_scope_is_refused() {
+    // The stale-address case. Position 0 is `event-broker` too, so this is the
+    // narrower failure: right name, wrong subject.
+    let refused = crate::edit::set_provider_option(
+        URI,
+        TWO_SCOPES,
+        "audit",
+        0,
+        "cache",
+        "pool_max_size",
+        Some(&gearbox_ir::ConfigValue::Int(10)),
+    );
+    assert!(refused.is_err(), "a stale address was applied");
+
+    let past_the_end = crate::edit::set_provider_option(
+        URI,
+        TWO_SCOPES,
+        "event-broker",
+        7,
+        "cache",
+        "pool_max_size",
+        Some(&gearbox_ir::ConfigValue::Int(10)),
+    );
+    assert!(past_the_end.is_err(), "a position past the end was applied");
+}
+
+#[test]
+fn a_primitive_the_scope_does_not_bind_is_refused() {
+    // Neither entry binds a lock. Refused rather than invented: writing
+    // `lock = provider(...)` here would bind a backend nobody chose.
+    let refused = crate::edit::set_provider_option(
+        URI,
+        TWO_SCOPES,
+        "event-broker",
+        1,
+        "lock",
+        "lock_name_cardinality_warn_threshold",
+        Some(&gearbox_ir::ConfigValue::Int(64)),
+    );
+    assert!(refused.is_err(), "an unbound primitive was edited");
+}
+
+#[test]
+fn setting_an_option_to_what_it_already_says_changes_nothing() {
+    let edit = crate::edit::set_provider_option(
+        URI,
+        TWO_SCOPES,
+        "event-broker",
+        1,
+        "cache",
+        "schema",
+        Some(&str_value("cluster")),
+    )
+    .expect("editable");
+    assert!(
+        edit.changed().is_none(),
+        "an idempotent edit reported a change"
+    );
+}

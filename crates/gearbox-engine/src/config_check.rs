@@ -22,7 +22,7 @@ use gearbox_ir::{
 };
 
 /// What a JSON value is, named as a diagnostic should name it.
-fn actual(value: &serde_json::Value) -> &'static str {
+pub(crate) fn actual(value: &serde_json::Value) -> &'static str {
     match value {
         serde_json::Value::Null => "null",
         serde_json::Value::Bool(_) => "a boolean",
@@ -39,7 +39,7 @@ fn actual(value: &serde_json::Value) -> &'static str {
 /// Returns `None` when the value fits. `Complex` always fits: the projector
 /// could not read a shape for it, and inventing an expectation from an absence
 /// would refuse descriptions that were always correct.
-fn mismatch(ty: &ConfigFieldType, value: &serde_json::Value) -> Option<String> {
+pub(crate) fn mismatch(ty: &ConfigFieldType, value: &serde_json::Value) -> Option<String> {
     let ok = match ty {
         ConfigFieldType::Complex => true,
         ConfigFieldType::Str => value.is_string(),

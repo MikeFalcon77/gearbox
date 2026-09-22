@@ -295,6 +295,26 @@ gdl_record! {
         /// escape hatch for a crate that grows a second one, and its absence is
         /// what GBX0510 tells the author to supply.
         pub backend: Option<String>,
+        /// The struct a primitive's options are deserialized into, if declared.
+        ///
+        /// The join key the provider traits do not carry: they have
+        /// `provider()` and `build_*(options: &serde_json::Map)`, and the type
+        /// on the other side of that map is named only inside the `build_*`
+        /// body. Declared here for the reason [`Self::process_local`] is --
+        /// no Rust construct states it, and inferring it from a function body
+        /// would be our reading rather than the code's statement.
+        pub cache_options: Option<String>,
+        pub leader_election_options: Option<String>,
+        pub lock_options: Option<String>,
+        /// Which option carries the credential, for a plugin that needs one.
+        ///
+        /// Declared for the same reason again, and a sharper case of it: the
+        /// fields in question -- postgres's `connection_string`, redis's `url`
+        /// -- are plain `String`, so the projector's `secrecy` test says nothing
+        /// about them and a name heuristic catches one of the two. What the
+        /// plugin *does* know is which of its options it will not work without,
+        /// and that is a statement it can make here.
+        pub credential_option: Option<String>,
         /// Where `cluster_plugin(...)` was written.
         #[allocative(skip)]
         pub declared_at: Option<gearbox_ir::Location>,

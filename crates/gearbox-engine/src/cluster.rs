@@ -93,7 +93,31 @@ struct Plugin {
     /// Optional narrowing path to the backend impl, when the crate holds more
     /// than one and the trait alone cannot pick.
     backend: Option<String>,
+    /// The struct each primitive's options are deserialized into, if declared.
+    options: BTreeMap<ClusterPrimitive, String>,
+    /// Which option carries the credential, if the plugin says.
+    credential_option: Option<String>,
     files: std::sync::Arc<[RustFile]>,
+}
+
+/// The three `*_options` names a `cluster_plugin(...)` may carry, by primitive.
+fn declared_options(
+    record: &gearbox_gdl::records::ClusterPluginRecord,
+) -> BTreeMap<ClusterPrimitive, String> {
+    let mut out = BTreeMap::new();
+    for (primitive, declared) in [
+        (ClusterPrimitive::Cache, &record.cache_options),
+        (
+            ClusterPrimitive::LeaderElection,
+            &record.leader_election_options,
+        ),
+        (ClusterPrimitive::Lock, &record.lock_options),
+    ] {
+        if let Some(root) = declared {
+            out.insert(primitive, root.clone());
+        }
+    }
+    out
 }
 
 fn providers(
@@ -137,6 +161,8 @@ fn providers(
                         process_local: record.process_local,
                         needs_credentials: record.needs_credentials,
                         backend: record.backend.clone(),
+                        options: declared_options(record),
+                        credential_option: record.credential_option.clone(),
                         files,
                     },
                 );
@@ -239,6 +265,37 @@ fn providers(
         // diagnostics at all. The resolver says it where it bites instead.
         let capabilities = read.declared;
 
+        // **The options schema, from the struct the backend already reads.**
+        // Projected here rather than declared again: every one of them is a
+        // `#[derive(Deserialize)]` with `#[serde(deny_unknown_fields)]`, so the
+        // authority for what a key may be exists in Rust and only the join key
+        // was missing. A declaration naming a struct that cannot be read is an
+        // error rather than a fall back to the untyped bag -- falling back would
+        // make every option validate, silently, because nothing was checking.
+        let options = match plugin.options.get(&reg.primitive) {
+            None => None,
+            Some(root) => match gearbox_project::project_config_fields(&plugin.files, root) {
+                Ok(fields) => Some(crate::config::schema_of(root.clone(), &fields)),
+                Err(e) => {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            DiagnosticCode::ClusterProviderOptionsUnprojectable,
+                            format!(
+                                "`{}_options = \"{root}\"` on the `{}` plugin cannot be read: {e}",
+                                reg.primitive.config_key(),
+                                reg.plugin_lib
+                            ),
+                            "the name is resolved against that plugin crate alone; check the \
+                             spelling, and that the struct has named fields and serde attributes \
+                             this can read to their end",
+                        )
+                        .at(Location::file(uri.to_owned())),
+                    );
+                    None
+                }
+            },
+        };
+
         let entry = by_name
             .entry(name.clone())
             .or_insert_with(|| ClusterProviderDecl {
@@ -248,9 +305,14 @@ fn providers(
                 process_local: plugin.process_local,
                 needs_credentials: plugin.needs_credentials,
                 runtime_determined: std::collections::BTreeSet::new(),
+                options: BTreeMap::new(),
+                credential_option: plugin.credential_option.clone(),
             });
         entry.primitives.insert(reg.primitive);
         entry.capabilities.insert(reg.primitive, capabilities);
+        if let Some(schema) = options {
+            entry.options.insert(reg.primitive, schema);
+        }
         if !read.runtime_determined.is_empty() {
             entry.runtime_determined.insert(reg.primitive);
         }

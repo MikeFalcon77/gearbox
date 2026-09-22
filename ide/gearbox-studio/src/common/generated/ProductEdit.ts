@@ -22,4 +22,16 @@ export type ProductEdit = { "kind": "add_gear", gear: string, source: string, } 
  * `None` removes the key. A scalar, because a control writes scalars
  * and a nested literal has no control to render it.
  */
-value: ConfigValue | null, } | { "kind": "set_features", gear: string, features: Array<string>, } | { "kind": "add_plugin", gear: string, plugin: string, } | { "kind": "add_plugin_selection", gear: string, plugin: string, profiles: Array<string>, } | { "kind": "remove_plugin", target: PluginTarget, } | { "kind": "set_plugin_config", target: PluginTarget, key: string, value: ConfigValue | null, } | { "kind": "set_plugin_profiles", target: PluginTarget, profiles: Array<string>, } | { "kind": "set_plugins", gear: string, plugins: Array<string>, } | { "kind": "set_profile_field", profile: string, field: string, value: string | null, };
+value: ConfigValue | null, } | { "kind": "set_features", gear: string, features: Array<string>, } | { "kind": "set_provider_option", scope: string, 
+/**
+ * The written position of the `cluster_profile(...)` entry.
+ */
+entry_index: number, 
+/**
+ * `cache`, `leader_election` or `lock`.
+ */
+primitive: string, key: string, 
+/**
+ * `None` removes the option.
+ */
+value: ConfigValue | null, } | { "kind": "add_plugin", gear: string, plugin: string, } | { "kind": "add_plugin_selection", gear: string, plugin: string, profiles: Array<string>, } | { "kind": "remove_plugin", target: PluginTarget, } | { "kind": "set_plugin_config", target: PluginTarget, key: string, value: ConfigValue | null, } | { "kind": "set_plugin_profiles", target: PluginTarget, profiles: Array<string>, } | { "kind": "set_plugins", gear: string, plugins: Array<string>, } | { "kind": "set_profile_field", profile: string, field: string, value: string | null, };

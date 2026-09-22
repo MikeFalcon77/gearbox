@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **92**.
+Codes: **96**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -899,6 +899,10 @@ is one string in one attribute.
 | [GBX0517](#gbx0517) | info | several plugins share a vendor for one extension point |
 | [GBX0518](#gbx0518) | error | plugin fills a point its host does not declare |
 | [GBX0520](#gbx0520) | info | cluster backend decides a capability at run time |
+| [GBX0521](#gbx0521) | error | a declared provider options struct cannot be read |
+| [GBX0522](#gbx0522) | error | provider option is not one the backend reads |
+| [GBX0523](#gbx0523) | error | provider option value does not match the field's type |
+| [GBX0524](#gbx0524) | error | a required provider option was not supplied |
 
 ### GBX0501
 
@@ -1118,6 +1122,58 @@ refused against it, because at composition time nobody can promise what
 depends on the server the operator will point at.
 
 *Asserts a limitation of the runtime, so every occurrence cites the source that proves it.*
+
+### GBX0521
+
+**a declared provider options struct cannot be read**
+
+A `cluster_plugin(*_options = "...")` names a struct that cannot be read.
+
+The declaration is a join key -- it says which type a primitive's options
+are deserialized into -- and a key that resolves to nothing is a mistake
+in the declaration rather than a reason to fall back to an untyped bag.
+Falling back would be the worse failure: every option would validate,
+silently, because nothing was checking.
+
+A plugin that declares no options struct at all is not this: it keeps the
+untyped bag it always had, deliberately.
+
+### GBX0522
+
+**provider option is not one the backend reads**
+
+A `provider(...)` option the backend does not read.
+
+The same statement `GBX0115` makes for a gear's config key, one layer
+down: every options struct in the corpus is `#[serde(deny_unknown_fields)]`,
+so an unknown key is already an error -- at backend startup, in a
+deployed system, where the description that caused it is not to hand.
+
+*Prevents `ConfigError::InvalidConfig` in `cf-gears-toolkit`. The reference is resolved against the `gears-rust` checkout by `gearbox-project`'s corpus test.*
+
+### GBX0523
+
+**provider option value does not match the field's type**
+
+A `provider(...)` option whose value the field cannot take.
+
+A wrong scalar type, or a variant of a closed set that does not exist:
+`watch_mode = "disbaled"` is refused here rather than at the moment the
+backend parses its configuration. The same comparison `GBX0113` makes for
+a gear's config value.
+
+### GBX0524
+
+**a required provider option was not supplied**
+
+A `provider(...)` that omits an option the backend cannot supply itself.
+
+Required means serde would fail: no `#[serde(default)]` on the field or
+its container, no `default = "fn"`, and not an `Option<T>`. A default
+this projection cannot *read* -- `Duration::from_secs(5)`, a `const` --
+is still a default, and a field carrying one is never reported here. That
+distinction is the whole reason `required` and `default` are two fields
+rather than one nullable one.
 
 ## `GBX06xx` — Capabilities the runtime does not implement
 

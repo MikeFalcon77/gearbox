@@ -307,12 +307,28 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     ///
     /// Providers themselves are projected from
     /// `ClusterGear::provider_registry()`; this only says where to look and
-    /// carries the two flags Rust does not state.
+    /// carries the facts Rust does not state.
+    ///
+    /// `*_options` names the struct a primitive's options are deserialized
+    /// into. **A join key, not a schema**: the struct is already the authority
+    /// -- every one of them is `#[derive(Deserialize)]` with
+    /// `#[serde(deny_unknown_fields)]` -- and what does not exist in Rust is
+    /// anything connecting it to the primitive. `build_cache(options: &Map)`
+    /// reads it with `serde_json::from_value` inside its own body, which the
+    /// projector's method-call search cannot see, and reading the link out of
+    /// that body would be our inference rather than the code's statement. Same
+    /// argument as `process_local`, one level down.
+    ///
+    /// Omitted, the options stay the untyped bag they are today.
     fn cluster_plugin<'v>(
         #[starlark(require = named)] package: &'v CargoRecord,
         #[starlark(require = named, default = false)] process_local: bool,
         #[starlark(require = named, default = false)] needs_credentials: bool,
         #[starlark(require = named)] backend: Option<&str>,
+        #[starlark(require = named)] cache_options: Option<&str>,
+        #[starlark(require = named)] leader_election_options: Option<&str>,
+        #[starlark(require = named)] lock_options: Option<&str>,
+        #[starlark(require = named)] credential_option: Option<&str>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ClusterPluginRecord> {
         Ok(ClusterPluginRecord {
@@ -320,6 +336,10 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             process_local,
             needs_credentials,
             backend: backend.map(str::to_owned),
+            cache_options: cache_options.map(str::to_owned),
+            leader_election_options: leader_election_options.map(str::to_owned),
+            lock_options: lock_options.map(str::to_owned),
+            credential_option: credential_option.map(str::to_owned),
             declared_at: crate::declarative::call_location(eval),
         })
     }

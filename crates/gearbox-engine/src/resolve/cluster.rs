@@ -91,6 +91,20 @@ pub fn resolve(
             .find(|b| b.scope == scope && b.primitive == ClusterPrimitive::Cache)
             .and_then(|b| b.resolved.effective_provider().map(str::to_owned));
 
+        // **Against the binding as written.** The options belong to the
+        // `provider(...)` call somebody typed, so they are checked whether or
+        // not resolution ends up choosing that provider -- and if the name is
+        // not registered, `GBX0505` has already said so and there is no schema.
+        if let Some(written) = declared {
+            crate::resolve::cluster_options::check(
+                &providers,
+                primitive,
+                written,
+                uri,
+                diagnostics,
+            );
+        }
+
         let binding = decide(
             &Context {
                 scope: &scope,

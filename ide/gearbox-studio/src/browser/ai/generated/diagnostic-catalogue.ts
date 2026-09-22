@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 92, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 96, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -660,6 +660,39 @@ export const DIAGNOSTIC_CATALOGUE: {
     domain: "cluster",
     docs: "A cluster backend decides a capability at run time, so none is claimed\nfor it at composition time.\n\nNot a defect and not a gap in the projection: the backend genuinely has\nno answer to give yet. The redis cache reads its consistency off the\nserver it connects to -- single node and cluster mode differ -- so\n`consistency()` returns a field its startup preflight set, and\n`features()` computes prefix-watch the same way. Nothing in Rust states\nthe value, so nothing can be projected as if it did.\n\nWhat follows is exactly right and worth saying out loud: such a provider\ncan be named and configured like any other, answers the primitives it\nregisters for, and satisfies **only a requirement that asks for no\ncapability**. A `requires = [cluster.cache(capabilities = [...])]` is\nrefused against it, because at composition time nobody can promise what\ndepends on the server the operator will point at.",
     requiresEvidence: true,
+  },
+  GBX0521: {
+    code: "GBX0521",
+    title: "a declared provider options struct cannot be read",
+    severity: "error",
+    domain: "cluster",
+    docs: "A `cluster_plugin(*_options = \"...\")` names a struct that cannot be read.\n\nThe declaration is a join key -- it says which type a primitive's options\nare deserialized into -- and a key that resolves to nothing is a mistake\nin the declaration rather than a reason to fall back to an untyped bag.\nFalling back would be the worse failure: every option would validate,\nsilently, because nothing was checking.\n\nA plugin that declares no options struct at all is not this: it keeps the\nuntyped bag it always had, deliberately.",
+    requiresEvidence: false,
+  },
+  GBX0522: {
+    code: "GBX0522",
+    title: "provider option is not one the backend reads",
+    severity: "error",
+    domain: "cluster",
+    docs: "A `provider(...)` option the backend does not read.\n\nThe same statement `GBX0115` makes for a gear's config key, one layer\ndown: every options struct in the corpus is `#[serde(deny_unknown_fields)]`,\nso an unknown key is already an error -- at backend startup, in a\ndeployed system, where the description that caused it is not to hand.",
+    requiresEvidence: false,
+    prevents: "ConfigError::InvalidConfig in cf-gears-toolkit",
+  },
+  GBX0523: {
+    code: "GBX0523",
+    title: "provider option value does not match the field's type",
+    severity: "error",
+    domain: "cluster",
+    docs: "A `provider(...)` option whose value the field cannot take.\n\nA wrong scalar type, or a variant of a closed set that does not exist:\n`watch_mode = \"disbaled\"` is refused here rather than at the moment the\nbackend parses its configuration. The same comparison `GBX0113` makes for\na gear's config value.",
+    requiresEvidence: false,
+  },
+  GBX0524: {
+    code: "GBX0524",
+    title: "a required provider option was not supplied",
+    severity: "error",
+    domain: "cluster",
+    docs: "A `provider(...)` that omits an option the backend cannot supply itself.\n\nRequired means serde would fail: no `#[serde(default)]` on the field or\nits container, no `default = \"fn\"`, and not an `Option<T>`. A default\nthis projection cannot *read* -- `Duration::from_secs(5)`, a `const` --\nis still a default, and a field carrying one is never reported here. That\ndistinction is the whole reason `required` and `default` are two fields\nrather than one nullable one.",
+    requiresEvidence: false,
   },
   GBX0602: {
     code: "GBX0602",

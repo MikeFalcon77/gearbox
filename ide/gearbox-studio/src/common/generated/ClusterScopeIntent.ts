@@ -23,4 +23,17 @@ profiles?: Array<ProfileId>,
 /**
  * Where `cluster_profile(...)` was written in the product description.
  */
-declared_at?: Location | null, };
+declared_at?: Location | null, 
+/**
+ * The entry's position in the written `cluster_profiles` list.
+ *
+ * **Carried rather than derived, and the difference is a real edit going
+ * to the wrong place.** An option is addressed by written position -- two
+ * entries can share a `name` for disjoint deployment profiles, which
+ * `payments-demo` does -- and the obvious way to get that position is the
+ * index in this list. It is not the same number: a scope bound twice in one
+ * profile is reported and **skipped**, so from that point on this list is
+ * shorter than the one in the file. Reading the position off this array
+ * would then address the entry after the one on screen.
+ */
+entry_index: number, };

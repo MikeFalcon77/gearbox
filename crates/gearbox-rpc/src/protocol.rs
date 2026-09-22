@@ -609,6 +609,25 @@ pub enum ProductEdit {
         gear: String,
         features: Vec<String>,
     },
+    /// Set, change or remove one option on a cluster `provider(...)`.
+    ///
+    /// **Addressed by where it is written**, like a plugin connection: a product
+    /// may hold two `cluster_profile(...)` entries under one name for disjoint
+    /// deployment profiles, so the name alone picks one of two. `entry_index` is
+    /// the written position, and `scope` is checked against what is found there
+    /// -- an address computed against text that has since changed is refused
+    /// rather than applied to whatever now sits at that position.
+    SetProviderOption {
+        scope: String,
+        /// The written position of the `cluster_profile(...)` entry.
+        entry_index: usize,
+        /// `cache`, `leader_election` or `lock`.
+        primitive: String,
+        key: String,
+        /// `None` removes the option.
+        #[serde(default)]
+        value: Option<ConfigValue>,
+    },
     /// Attach one plugin to a host gear, leaving its other plugins alone.
     ///
     /// **Not `SetPlugins` with one more entry, and the difference is data.**

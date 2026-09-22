@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::catalogue::ConfigSchema;
 use crate::ids::{CapabilityId, ContractId, GearId, RequirementId};
 
 /// The cluster coordination primitives the runtime implements.
@@ -256,7 +257,11 @@ impl Requirement {
 /// `needs_credentials` have no representation anywhere in Rust, so they are
 /// declared. Every other field here is read out of source, which is what keeps a
 /// provider registered in code from silently missing from the catalogue.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+// **`PartialEq` without `Eq`, since `options` arrived.** A projected default is
+// a `serde_json::Value`, which is `PartialEq` and deliberately not `Eq` -- `f64`
+// has no total equality. Nothing compares providers for hashing or set
+// membership; they are values in a map keyed by name.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 pub struct ClusterProviderDecl {
     /// The name used in configuration, e.g. `postgres`.
     pub name: String,
@@ -295,6 +300,40 @@ pub struct ClusterProviderDecl {
     /// until it connects*.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub runtime_determined: BTreeSet<ClusterPrimitive>,
+
+    /// The shape of the options this backend accepts, per primitive.
+    ///
+    /// **Projected from the struct the backend already deserializes into**, not
+    /// written a second time: every one of them is `#[derive(Deserialize)]` with
+    /// `#[serde(deny_unknown_fields)]`, so the authority for what an option key
+    /// may be already exists in Rust. What did not exist is the *join key* --
+    /// the provider traits carry `provider()` and `build_*(options: &Map)` and
+    /// nothing that names the type those options are read into -- so
+    /// `cluster_plugin(cache_options = "...")` declares it, for the same reason
+    /// `process_local` is declared: no Rust construct states the link, and
+    /// reading it out of a `build_*` body would be our inference rather than the
+    /// code's statement.
+    ///
+    /// Absent for a primitive whose plugin declares no options struct, which
+    /// keeps today's behaviour exactly: an untyped bag, checked by nothing until
+    /// the backend starts.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub options: BTreeMap<ClusterPrimitive, ConfigSchema>,
+
+    /// Which option carries the credential, when this backend needs one.
+    ///
+    /// Declared rather than projected, and the reason is sharper here than for
+    /// `process_local`: the fields in question are plain `String`, so the
+    /// projector's `secret` flag -- which reads `secrecy` wrappers and nothing
+    /// else -- is false for both, and a name heuristic catches
+    /// `connection_string` and misses `url`. A form that will *save* one of
+    /// these must not offer a plaintext box for it, so the fact has to be
+    /// stated somewhere, and the plugin is what knows it.
+    ///
+    /// Teaching the projector a `secrecy` wrapper upstream is the better answer
+    /// and is a change to the plugin crates, decided separately.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_option: Option<String>,
 }
 
 impl ClusterProviderDecl {

@@ -158,6 +158,32 @@ pub fn project(
     Some(ConfigSchema { rust: root, fields })
 }
 
+/// Every projected field, as a schema.
+///
+/// **No `exposes` filter, and the difference is the subject.** A gear's
+/// description curates which of its struct's fields an integrator should see --
+/// a product judgement Rust cannot hold. A backend's options struct is not
+/// curated by anybody: it is `#[serde(deny_unknown_fields)]`, so every field it
+/// declares is a key an operator may set and every key it does not declare is
+/// already an error at startup. Filtering here would hide a legal key and then
+/// report it as unknown.
+pub(crate) fn schema_of(rust: String, projected: &[gearbox_project::ConfigField]) -> ConfigSchema {
+    ConfigSchema {
+        rust,
+        fields: projected
+            .iter()
+            .map(|field| ConfigFieldDecl {
+                name: field.name.clone(),
+                ty: field.ty.clone(),
+                required: field.required,
+                default: field.default.clone(),
+                doc: field.doc.clone(),
+                secret: field.secret,
+            })
+            .collect(),
+    }
+}
+
 /// `at` rather than `uri`: every one of these is about the `config(...)` call,
 /// and the caller is the only one holding it.
 fn report(diagnostics: &mut Diagnostics, at: &Location, message: String, help: &str) {

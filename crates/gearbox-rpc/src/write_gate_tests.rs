@@ -894,3 +894,96 @@ fn every_scaffold_shape_evaluates_and_carries_its_own_hints() {
         }
     }
 }
+
+/// The two `cluster_profile(...)` entries `payments-demo` has, minimised.
+const TWO_SCOPES: &str = r#"product(
+    id = "p",
+    name = "P",
+    version = "0.1.0",
+    sources = [source(id = "s", at = path("."))],
+    profiles = [embedded(id = "dev"), kubernetes(id = "prod", discovery = "static",
+                namespace = "n", image_registry = "r")],
+    default_profile = "dev",
+    gears = [use_gear("g", source = "s")],
+    cluster_profiles = [
+        cluster_profile(name = "event-broker", cache = provider("standalone"), profiles = ["dev"]),
+        cluster_profile(name = "event-broker", profiles = ["prod"],
+                        cache = provider("postgres", schema = "cluster")),
+    ],
+)
+"#;
+
+/// **The document version, which a written position cannot stand in for.**
+///
+/// A provider option is addressed by where it is written, and two entries here
+/// share a name -- so position 1 is meaningful only against the text the preview
+/// was computed from. If the file changed underneath, position 1 may be a
+/// different entry, or the same entry with different options. `expected_before`
+/// is what refuses that, before a single edit is applied, and it is checked on
+/// the engine rather than in the browser: a client that forgot to re-check would
+/// otherwise write against text nobody reviewed.
+#[test]
+fn a_stale_document_is_refused_before_any_edit_is_applied() {
+    let dir = scratch("stale-doc");
+    let path = dir.join("product.gdl");
+    std::fs::write(&path, TWO_SCOPES).expect("write");
+    let mut state = write_state(dir);
+
+    let edits = vec![ProductEdit::SetProviderOption {
+        scope: "event-broker".to_owned(),
+        entry_index: 1,
+        primitive: "cache".to_owned(),
+        key: "pool_max_size".to_owned(),
+        value: Some(gearbox_ir::ConfigValue::Int(10)),
+    }];
+
+    // The text the caller believed it was editing, which is not what is there.
+    let outdated = TWO_SCOPES.replace("schema = \"cluster\"", "schema = \"other\"");
+    let refused = edit_apply_edits(
+        &mut state,
+        RequestId::from(1),
+        &ApplyEditsParams {
+            expected_before: Some(outdated),
+            path: path.display().to_string(),
+            dry_run: false,
+            edits: edits.clone(),
+        },
+    );
+    let rendered = format!("{refused:?}");
+    assert!(
+        rendered.contains("the document changed after preview"),
+        "a stale document was written against: {rendered}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read"),
+        TWO_SCOPES,
+        "the file was modified despite the refusal"
+    );
+
+    // And with the text it really holds, the same edit lands -- on the entry the
+    // position names, leaving the one before it alone.
+    let accepted = edit_apply_edits(
+        &mut state,
+        RequestId::from(2),
+        &ApplyEditsParams {
+            expected_before: Some(TWO_SCOPES.to_owned()),
+            path: path.display().to_string(),
+            dry_run: false,
+            edits,
+        },
+    );
+    let rendered = format!("{accepted:?}");
+    assert!(
+        !rendered.contains("the document changed"),
+        "the honest document was refused: {rendered}"
+    );
+    let written = std::fs::read_to_string(&path).expect("read");
+    assert!(
+        written.contains("pool_max_size = 10"),
+        "the option was not written:\n{written}"
+    );
+    assert!(
+        written.contains(r#"cache = provider("standalone"), profiles = ["dev"]"#),
+        "the other entry with the same name was rewritten:\n{written}"
+    );
+}

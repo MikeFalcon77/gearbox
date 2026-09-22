@@ -666,6 +666,108 @@ pub fn set_profile_field(
     })
 }
 
+/// The `name = "..."` of a `cluster_profile(...)` entry.
+fn scope_name(source: &str, entry: Span) -> Option<String> {
+    let text = slice(source, entry);
+    let ast = AstModule::parse("file:///entry.gdl", text.to_owned(), &dialect()).ok()?;
+    let args = call_args(ast.statement())?;
+    args.iter().find_map(|arg| match &arg.node {
+        ArgumentP::Named(name, value) if name.node == "name" => string_literal(value),
+        _ => None,
+    })
+}
+
+/// The span of the `provider(...)` call bound to `primitive`, inside an entry's text.
+fn provider_call_span(uri: &str, entry_text: &str, primitive: &str) -> Result<Span, Diagnostics> {
+    let ast = parse_call(uri, entry_text)?;
+    let args = call_args(ast.statement()).ok_or_else(|| {
+        refuse(
+            uri,
+            "expected a `cluster_profile(...)` call",
+            "fix the entry shape",
+        )
+    })?;
+    let bound = args.iter().find_map(|arg| match &arg.node {
+        ArgumentP::Named(name, value) if name.node == primitive => Some(value),
+        _ => None,
+    });
+    let Some(value) = bound else {
+        return Err(refuse(
+            uri,
+            &format!("this cluster profile binds no `{primitive}`"),
+            "bind a provider for that primitive before setting an option on it",
+        ));
+    };
+    if !matches!(&value.node, ExprP::Call(..)) {
+        return Err(refuse(
+            uri,
+            &format!("`{primitive}` is not written as a `provider(...)` call"),
+            "an option can only be set on a binding written as a call here; edit the \
+             description by hand if it is written another way",
+        ));
+    }
+    Ok(value.span)
+}
+
+/// Set, change or remove one option on a `provider(...)` in a cluster profile.
+///
+/// **Addressed by where it is written**, the way a plugin connection is: a
+/// product may hold two `cluster_profile(...)` entries with the same `name` for
+/// disjoint deployment profiles -- `payments-demo` does -- so the name alone
+/// picks one of two. `entry_index` is the written position in
+/// `cluster_profiles`, and `scope` is checked against the entry found there: an
+/// address computed against text that has since changed is refused rather than
+/// applied to whatever now sits at that position.
+///
+/// # Errors
+/// Refuses a stale address, a scope that binds nothing for the primitive, a
+/// binding not written as a call, or a description that does not parse.
+pub fn set_provider_option(
+    uri: &str,
+    source: &str,
+    scope: &str,
+    entry_index: usize,
+    primitive: &str,
+    key: &str,
+    value: Option<&ConfigValue>,
+) -> Result<Edit, Diagnostics> {
+    require_gdl_identifier(uri, key, "provider option")?;
+    let list = named_list_literal(uri, source, "cluster_profiles")?;
+    let Some(entry) = list.entries.get(entry_index).copied() else {
+        return Err(refuse(
+            uri,
+            &format!(
+                "there is no cluster profile at position {entry_index}; the description has {}",
+                list.entries.len()
+            ),
+            "the description changed since this edit was computed: re-read it and try again",
+        ));
+    };
+    if scope_name(source, entry).as_deref() != Some(scope) {
+        return Err(refuse(
+            uri,
+            &format!("the cluster profile at position {entry_index} is not `{scope}`"),
+            "the description changed since this edit was computed: re-read it and try again",
+        ));
+    }
+
+    let entry_text = slice(source, entry);
+    let inner = provider_call_span(uri, entry_text, primitive)?;
+    let (begin, end) = (
+        offset(inner.begin(), entry_text),
+        offset(inner.end(), entry_text),
+    );
+    let rendered = value.map(render_config_value);
+    let new_inner = set_named_arg_on_call(uri, &entry_text[begin..end], key, rendered.as_deref())?;
+    if new_inner == entry_text[begin..end] {
+        return Ok(Edit::Unchanged);
+    }
+    let new_entry = format!("{}{new_inner}{}", &entry_text[..begin], &entry_text[end..]);
+    Ok(Edit::Changed {
+        source: replace_span(source, entry, &new_entry),
+    })
+}
+
 /// Parameters for a new product description from the Studio wizard.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateProductParams {

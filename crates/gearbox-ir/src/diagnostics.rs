@@ -1091,6 +1091,45 @@ diagnostic_codes! {
     /// depends on the server the operator will point at.
     ClusterCapabilityRuntimeDetermined = "GBX0520", Cluster, Info, true, "cluster backend decides a capability at run time";
 
+    /// A `cluster_plugin(*_options = "...")` names a struct that cannot be read.
+    ///
+    /// The declaration is a join key -- it says which type a primitive's options
+    /// are deserialized into -- and a key that resolves to nothing is a mistake
+    /// in the declaration rather than a reason to fall back to an untyped bag.
+    /// Falling back would be the worse failure: every option would validate,
+    /// silently, because nothing was checking.
+    ///
+    /// A plugin that declares no options struct at all is not this: it keeps the
+    /// untyped bag it always had, deliberately.
+    ClusterProviderOptionsUnprojectable = "GBX0521", Cluster, Error, false, "a declared provider options struct cannot be read";
+
+    /// A `provider(...)` option the backend does not read.
+    ///
+    /// The same statement `GBX0115` makes for a gear's config key, one layer
+    /// down: every options struct in the corpus is `#[serde(deny_unknown_fields)]`,
+    /// so an unknown key is already an error -- at backend startup, in a
+    /// deployed system, where the description that caused it is not to hand.
+    ClusterUnknownProviderOption = "GBX0522", Cluster, Error, false, "provider option is not one the backend reads",
+        prevents = Prevents::error("cf-gears-toolkit", "ConfigError", "InvalidConfig");
+
+    /// A `provider(...)` option whose value the field cannot take.
+    ///
+    /// A wrong scalar type, or a variant of a closed set that does not exist:
+    /// `watch_mode = "disbaled"` is refused here rather than at the moment the
+    /// backend parses its configuration. The same comparison `GBX0113` makes for
+    /// a gear's config value.
+    ClusterProviderOptionTypeMismatch = "GBX0523", Cluster, Error, false, "provider option value does not match the field's type";
+
+    /// A `provider(...)` that omits an option the backend cannot supply itself.
+    ///
+    /// Required means serde would fail: no `#[serde(default)]` on the field or
+    /// its container, no `default = "fn"`, and not an `Option<T>`. A default
+    /// this projection cannot *read* -- `Duration::from_secs(5)`, a `const` --
+    /// is still a default, and a field carrying one is never reported here. That
+    /// distinction is the whole reason `required` and `default` are two fields
+    /// rather than one nullable one.
+    ClusterProviderOptionMissing = "GBX0524", Cluster, Error, false, "a required provider option was not supplied";
+
     // ---------------------------------------------------------------- GBX06xx
     // GBX0601 is deliberately absent. It said roles were "not supported by the
     // runtime" and cited `OopRunOptions.gear_name` for it. Both halves were
