@@ -663,13 +663,23 @@ test.describe("edit config and profiles in the open product", () => {
       // that did it came from the *previous* test's trailing reload, which is to
       // say from outside this test entirely; a fold is recoverable, so this
       // recovers from it rather than reading it as a failure.
+      //
+      // **And the whole add is inside the retry, not just the key.** The value
+      // and the Add button fold with the key: with the key alone guarded, the
+      // remount landed one line later -- twice, on the value `fill` and then on
+      // the click -- in full-file runs, while the claim passed on its own. The
+      // row appearing is what "added" means, so it is the condition; a second
+      // pass after a click that did land replaces the same draft slot.
       const queue = async (key: string, value: string): Promise<void> => {
         await expect(async () => {
           await openAdvancedKeys(studio.page, ".gbx-composition-settings");
           await form.locator("[data-config-new-key]").fill(key, { timeout: 5_000 });
+          await form.locator("[data-config-new-value]").fill(value, { timeout: 5_000 });
+          await form.locator('[data-add-config="api-gateway"]').click({ timeout: 5_000 });
+          await expect(form.locator(`[data-config-key="${key}"]`)).toBeVisible({
+            timeout: 5_000,
+          });
         }).toPass({ timeout: 30_000 });
-        await form.locator("[data-config-new-value]").fill(value);
-        await form.locator('[data-add-config="api-gateway"]').click();
       };
       await queue("draft_a", "one");
       await queue("draft_b", "two");
