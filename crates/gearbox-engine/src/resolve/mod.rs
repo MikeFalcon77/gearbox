@@ -128,6 +128,13 @@ pub fn resolve_at(
     // The same shape, for features: a gear declares which deployment kinds a
     // feature belongs to, and only a resolution knows which one is being built.
     crate::feature_check::check(catalogue, intent, &[profile], &uri, &mut diagnostics);
+    // **On this path too, and that is the point of it.** `validate` alone would
+    // leave the one caller that matters uncovered: `generate` and the Studio
+    // both come through here, and a binding to a provider the build will not
+    // contain resolves perfectly -- the lock records it and the process fails at
+    // startup, or, for leader election, does not fail and elects one leader per
+    // replica.
+    crate::provider_feature_check::check(catalogue, intent, &uri, &mut diagnostics);
 
     // Step 4 -- processes. An unknown profile is reported rather than assumed,
     // because guessing `embedded` would silently resolve the wrong topology.
@@ -209,7 +216,7 @@ pub fn resolve_at(
         &closure,
         &partition,
         &scoped,
-        &intent.preferences,
+        intent,
         &uri,
         &mut diagnostics,
     );

@@ -675,3 +675,60 @@ fn cluster_resolution_is_stable_across_runs() {
 
 #[path = "support/resolve_fixtures.rs"]
 mod support;
+
+/// A registration behind a cargo feature is not a candidate until the product
+/// selects it, and naming it anyway is refused rather than resolved.
+///
+/// **The silent half is the one that matters.** Refusing an explicit binding
+/// would leave the automatic path open: the resolver picks a provider itself
+/// when a scope leaves a primitive unbound, so a gated leader election would
+/// have been chosen for a product that never asked, resolved cleanly, written
+/// to the lock, and elected one leader per replica at run time. Nothing on the
+/// way there says a word — which is the same shape as `GBX0503`, one level up.
+#[test]
+fn a_gated_primitive_is_not_a_candidate_without_its_feature() {
+    let mut cat = support::cluster_catalogue(vec![(ClusterPrimitive::Cache, "main", &[][..])]);
+    // One provider, answering the one primitive, and only under `k8s`.
+    let gear = cat
+        .gears
+        .get_mut(&gearbox_ir::GearId::new("cluster").unwrap())
+        .expect("the cluster gear");
+    let mut gated = support::postgres();
+    gated.name = "k8s".to_owned();
+    gated.primitives = [ClusterPrimitive::Cache].into_iter().collect();
+    gated.gated_by = [(
+        ClusterPrimitive::Cache,
+        gearbox_ir::FeatureGate::Feature("k8s".to_owned()),
+    )]
+    .into_iter()
+    .collect();
+    gear.cluster_providers = vec![gated];
+
+    // Nobody selects the feature, and nobody binds the primitive.
+    let unselected = single(&cat, &support::intent(&["app"]));
+    assert!(
+        unselected
+            .cluster
+            .iter()
+            .all(|b| b.resolved.effective_provider() != Some("k8s")),
+        "a backend this build does not link was chosen anyway: {:?}",
+        unselected.cluster
+    );
+
+    // Naming it explicitly is refused, with the remedy.
+    let mut bound = support::intent(&["app"]);
+    support::bind_cluster(&mut bound, "main", "k8s", None);
+    let named = single(&cat, &bound);
+    assert!(
+        codes(&named).contains(&DiagnosticCode::ClusterProviderNeedsFeature),
+        "expected GBX0525, got {:?}",
+        codes(&named)
+    );
+    let help = named
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::ClusterProviderNeedsFeature)
+        .and_then(|d| d.help.clone())
+        .expect("the remedy is named");
+    assert!(help.contains("features = [\"k8s\"]"), "{help}");
+}

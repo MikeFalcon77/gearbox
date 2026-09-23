@@ -2,10 +2,9 @@
 import type { CapabilityId } from "./CapabilityId";
 import type { ClusterPrimitive } from "./ClusterPrimitive";
 import type { ConfigSchema } from "./ConfigSchema";
+import type { FeatureGate } from "./FeatureGate";
 
 /**
- * A cluster provider, projected from the cluster gear's Rust.
- *
  * Assembled from three places, because no single one of them has the whole
  * answer: `ClusterGear::provider_registry()` says which provider types are
  * registered and for which primitive, the provider's own `fn provider()` says
@@ -78,6 +77,19 @@ runtime_determined?: Array<ClusterPrimitive>,
  * the backend starts.
  */
 options?: { [key in ClusterPrimitive]?: ConfigSchema }, 
+/**
+ * Which primitives this backend registers only under a cargo feature.
+ *
+ * **Absence means "in every build", which is every provider but one.** The
+ * Kubernetes plugin registers its three behind `#[cfg(feature = "k8s")]`,
+ * and the cluster crate's own comment states the consequence: "a profile
+ * binding `provider: k8s` requires a build with this feature". A catalogue
+ * that recorded those registrations as unconditional would let a product
+ * bind a backend its build does not link -- which is exactly the failure
+ * `no_provider_registers_leader_election` was written to keep impossible
+ * while no native leader election existed.
+ */
+gated_by?: { [key in ClusterPrimitive]?: FeatureGate }, 
 /**
  * Which option carries the credential, when this backend needs one.
  *

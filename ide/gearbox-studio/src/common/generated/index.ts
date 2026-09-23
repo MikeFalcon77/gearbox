@@ -52,6 +52,7 @@ export * from "./ExplanationGraph";
 export * from "./ExplanationNode";
 export * from "./ExtensionPointDecl";
 export * from "./FailedRoot";
+export * from "./FeatureGate";
 export * from "./FileAction";
 export * from "./FileKind";
 export * from "./FilePlan";

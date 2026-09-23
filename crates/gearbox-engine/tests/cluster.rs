@@ -65,7 +65,7 @@ fn provider_names_are_projected_not_declared() {
         .collect();
     assert_eq!(
         names,
-        vec!["postgres", "redis", "standalone"],
+        vec!["k8s", "postgres", "redis", "standalone"],
         "names come from each plugin's `PROVIDER_NAME`; the description names \
          none of them -- it only says where each crate is"
     );
@@ -114,17 +114,39 @@ fn the_capability_matrix_comes_out_of_rust() {
     );
 }
 
+/// **This claim asserted the opposite, and the corpus had already falsified
+/// it.** While nothing registered leader election, "it always falls through to
+/// the SDK compare-and-swap default" was worth pinning, and the sentence went
+/// on to name the risk: *a provider claiming it would let the resolver bless a
+/// binding the runtime cannot make.* `K8sLeaderElectionProvider` arrived on
+/// 2026-09-02 and is exactly such a provider -- it is linked only under a cargo
+/// feature.
+///
+/// So the claim becomes the one the risk implies: the registration is in the
+/// catalogue, and it is recorded as conditional. What keeps the resolver from
+/// blessing it is `a_gated_primitive_is_not_a_candidate_without_its_feature`
+/// below.
 #[test]
-fn no_provider_registers_leader_election() {
+fn leader_election_is_registered_only_under_a_feature() {
     let catalogue = require_tree!();
-    assert!(
-        !cluster_gear(&catalogue)
-            .cluster_providers
-            .iter()
-            .any(|p| p.primitives.contains(&ClusterPrimitive::LeaderElection)),
-        "leader election always falls through to the SDK compare-and-swap \
-         default over the profile's cache; a provider claiming it would let the \
-         resolver bless a binding the runtime cannot make"
+    let gear = cluster_gear(&catalogue);
+    let leader: Vec<&gearbox_ir::ClusterProviderDecl> = gear
+        .cluster_providers
+        .iter()
+        .filter(|p| p.primitives.contains(&ClusterPrimitive::LeaderElection))
+        .collect();
+    assert_eq!(
+        leader.len(),
+        1,
+        "the k8s plugin is the only one that registers leader election, got {:?}",
+        leader.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        leader[0].gated_by.get(&ClusterPrimitive::LeaderElection),
+        Some(&gearbox_ir::FeatureGate::Feature("k8s".to_owned())),
+        "recorded as unconditional, it would promise a backend a default build \
+         does not link -- and the failure is the silent one: a scope that looks \
+         bound and elects a leader per replica"
     );
 }
 

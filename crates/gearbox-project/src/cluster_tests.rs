@@ -38,18 +38,37 @@ fn cluster_crate() -> Option<Vec<RustFile>> {
 // ---------------------------------------------------------------- registry
 
 /// Mirrors `ClusterGear::provider_registry()` verbatim.
-const REGISTRY: &str = r"
+///
+/// **Including its shape, which is the part that drifted.** The corpus stopped
+/// being one builder chain when the native Kubernetes plugin landed: the chain
+/// is bound to a local, a `#[cfg(feature = "k8s")]` block adds three more
+/// registrations, and the local is returned. The fixture kept the old shape, so
+/// `registry_projects_from_the_real_tree` was the only thing that could notice
+/// -- and what it noticed was five expected against **nothing** projected,
+/// because the projector was reading the tail expression alone.
+const REGISTRY: &str = r#"
 impl ClusterGear {
+    #[cfg_attr(not(feature = "k8s"), allow(unused_mut))]
     fn provider_registry() -> ProviderRegistry {
-        ProviderRegistry::new()
+        let mut registry = ProviderRegistry::new()
             .with_cache_provider(Arc::new(standalone_cluster_plugin::StandaloneCacheProvider))
             .with_cache_provider(Arc::new(postgres_cluster_plugin::PostgresCacheProvider))
             .with_lock_provider(Arc::new(postgres_cluster_plugin::PostgresLockProvider))
             .with_cache_provider(Arc::new(redis_cluster_plugin::RedisCacheProvider))
-            .with_lock_provider(Arc::new(redis_cluster_plugin::RedisLockProvider))
+            .with_lock_provider(Arc::new(redis_cluster_plugin::RedisLockProvider));
+        #[cfg(feature = "k8s")]
+        {
+            registry = registry
+                .with_cache_provider(Arc::new(k8s_cluster_plugin::K8sCacheProvider))
+                .with_leader_election_provider(Arc::new(
+                    k8s_cluster_plugin::K8sLeaderElectionProvider,
+                ))
+                .with_lock_provider(Arc::new(k8s_cluster_plugin::K8sLockProvider));
+        }
+        registry
     }
 }
-";
+"#;
 
 #[test]
 fn registry_projects_in_source_order() {
@@ -87,20 +106,113 @@ fn registry_projects_in_source_order() {
                 "redis_cluster_plugin",
                 "RedisLockProvider"
             ),
+            (
+                ClusterPrimitive::Cache,
+                "k8s_cluster_plugin",
+                "K8sCacheProvider"
+            ),
+            (
+                ClusterPrimitive::LeaderElection,
+                "k8s_cluster_plugin",
+                "K8sLeaderElectionProvider"
+            ),
+            (
+                ClusterPrimitive::Lock,
+                "k8s_cluster_plugin",
+                "K8sLockProvider"
+            ),
         ],
         "the chain must project in source order, since operator config resolves \
          a provider by name and the registry is last-write-wins"
     );
 }
 
+/// **This claim used to assert the opposite, and the corpus had already
+/// falsified it.** For as long as there was no native leader election, "nothing
+/// registers it, so it always falls through to the SDK compare-and-swap
+/// default" was a fact worth pinning. `K8sLeaderElectionProvider` is the first
+/// one in the tree, and it arrived on 2026-09-02 -- but this test kept passing,
+/// because it asserts against the fixture and the fixture had not moved.
+///
+/// What is true now, and is the thing the resolver needs: leader election is
+/// registered **only** under a cargo feature. A build without `k8s` still falls
+/// through to the SDK default, and a catalogue that recorded the registration
+/// as unconditional would say otherwise.
 #[test]
-fn registry_registers_no_leader_election_provider() {
+fn leader_election_is_registered_only_under_a_feature() {
     let got = project_provider_registry(&[file(REGISTRY)], "fixture").expect("project");
+    let leader: Vec<&ProjectedClusterProvider> = got
+        .iter()
+        .filter(|p| p.primitive == ClusterPrimitive::LeaderElection)
+        .collect();
+    assert_eq!(
+        leader.len(),
+        1,
+        "the k8s plugin is the only one, got {leader:?}"
+    );
+    assert_eq!(
+        leader[0].gated_by,
+        FeatureGate::Feature("k8s".to_owned()),
+        "an unconditional record would promise a backend a default build does not link"
+    );
     assert!(
-        !got.iter()
-            .any(|p| p.primitive == ClusterPrimitive::LeaderElection),
-        "no plugin registers leader election; it always falls through to the \
-         SDK compare-and-swap default, and the catalogue must say so"
+        got.iter()
+            .filter(|p| p.plugin_lib != "k8s_cluster_plugin")
+            .all(|p| p.gated_by == FeatureGate::Always),
+        "the providers that are always there must not be marked as gated"
+    );
+}
+
+/// The shape that broke, reduced: a body this cannot read is an error, and not
+/// an empty registry.
+///
+/// The two were the same value, so `GBX0509`'s help told the reader to check a
+/// builder chain that was there all along -- and every cluster provider left the
+/// catalogue, not only the ones the new shape added.
+#[test]
+fn a_body_that_cannot_be_read_is_an_error_not_an_empty_registry() {
+    let src = r"
+impl ClusterGear {
+    fn provider_registry() -> ProviderRegistry {
+        build_it_somehow()
+    }
+}
+";
+    let err = project_provider_registry(&[file(src)], "fixture").unwrap_err();
+    assert!(
+        matches!(err, ClusterProjectionError::RegistryUnreadable { .. }),
+        "expected RegistryUnreadable, got {err}"
+    );
+}
+
+/// A predicate that is not one feature is recorded as unreadable, never as
+/// "always".
+///
+/// The distinction is the whole reason `FeatureGate` has three states: a
+/// registration nobody can place in a build must not be indistinguishable from
+/// one that is in every build.
+#[test]
+fn a_cfg_this_cannot_reduce_to_one_feature_is_not_read_as_unconditional() {
+    let src = r#"
+impl ClusterGear {
+    fn provider_registry() -> ProviderRegistry {
+        let mut registry = ProviderRegistry::new()
+            .with_cache_provider(Arc::new(standalone_cluster_plugin::StandaloneCacheProvider));
+        #[cfg(all(feature = "k8s", target_os = "linux"))]
+        {
+            registry = registry.with_lock_provider(Arc::new(k8s_cluster_plugin::K8sLockProvider));
+        }
+        registry
+    }
+}
+"#;
+    let got = project_provider_registry(&[file(src)], "fixture").expect("project");
+    assert_eq!(got.len(), 2);
+    assert_eq!(got[0].gated_by, FeatureGate::Always);
+    assert!(
+        matches!(got[1].gated_by, FeatureGate::Unreadable(_)),
+        "got {:?}",
+        got[1].gated_by
     );
 }
 

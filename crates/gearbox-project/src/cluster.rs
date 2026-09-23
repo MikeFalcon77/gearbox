@@ -73,6 +73,16 @@ pub enum ClusterProjectionError {
         reason: String,
     },
 
+    /// `provider_registry()` exists and its body is a shape this cannot read.
+    ///
+    /// Distinct from an empty `Ok`, which means the method is not there at all.
+    /// Collapsing the two is what let a readable registry be reported as an
+    /// empty one: the engine's help told the reader to check for a builder
+    /// chain that was present the whole time, three statements away from where
+    /// the projector stopped looking.
+    #[error("`provider_registry()` cannot be read: {reason}")]
+    RegistryUnreadable { reason: String },
+
     /// Several impls carry a `provider_registry` method.
     ///
     /// Refused for the reason [`Self::BackendAmbiguous`] is: the cluster crate
@@ -98,6 +108,28 @@ pub enum ClusterProjectionError {
     Id(#[from] IdError),
 }
 
+/// Whether a registration is in every build, or only in some.
+///
+/// **Three states, because two would have to lie about one of them.** A
+/// registration inside `#[cfg(feature = "k8s")]` exists only where that feature
+/// is enabled -- the cluster crate's own comment says "a profile binding
+/// `provider: k8s` requires a build with this feature" -- and a catalogue that
+/// recorded it as unconditional would let a product bind a backend its build
+/// will not contain. The third state is for a predicate this cannot reduce to
+/// one feature: it must not collapse into `Always`, which would make "we could
+/// not read it" indistinguishable from "there was nothing to read".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FeatureGate {
+    /// Registered in every build.
+    Always,
+    /// Registered only where this cargo feature is enabled.
+    Feature(String),
+    /// Gated by a predicate this projector cannot reduce to a single feature.
+    ///
+    /// Carries the `cfg(...)` as written, so a diagnostic can quote it.
+    Unreadable(String),
+}
+
 /// One `with_*_provider(...)` registration, as `provider_registry()` writes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectedClusterProvider {
@@ -108,6 +140,8 @@ pub struct ProjectedClusterProvider {
     pub plugin_lib: String,
     /// The provider type's own name, e.g. `StandaloneCacheProvider`.
     pub provider_type: String,
+    /// The build condition this registration sits under.
+    pub gated_by: FeatureGate,
 }
 
 /// How an SDK-default backend arrives at its capability.
@@ -212,12 +246,13 @@ fn wrapped_path(expr: &syn::Expr) -> Option<&syn::Path> {
 /// unreadable yields two, which looks exactly like a chain of two.
 fn walk_chain(
     expr: &syn::Expr,
+    gate: &FeatureGate,
     out: &mut Vec<ProjectedClusterProvider>,
 ) -> Result<(), ClusterProjectionError> {
     let syn::Expr::MethodCall(call) = expr else {
         return Ok(());
     };
-    walk_chain(&call.receiver, out)?;
+    walk_chain(&call.receiver, gate, out)?;
 
     let setter = call.method.to_string();
     let Some(primitive) = primitive_for_setter(&setter) else {
@@ -246,6 +281,7 @@ fn walk_chain(
         primitive,
         plugin_lib,
         provider_type,
+        gated_by: gate.clone(),
     });
     Ok(())
 }
@@ -290,13 +326,145 @@ pub fn project_provider_registry(
         }
     };
 
+    let Some(func) = method(imp, "provider_registry") else {
+        return Ok(Vec::new());
+    };
+    read_registry_body(&func.block)
+}
+
+/// Read every registration a `provider_registry()` body makes.
+///
+/// **Two shapes, because the corpus writes two.** The original is a function
+/// whose whole body is one builder chain. The second arrived with the native
+/// Kubernetes plugin: a chain bound to a local, a `#[cfg(feature = "k8s")]`
+/// block that reassigns the local with three more registrations, and the local
+/// returned. Reading only the tail expression saw a bare identifier, found no
+/// chain, and answered "no registrations" -- which the engine reports as
+/// `GBX0509` against a corpus that is perfectly correct, and which took every
+/// cluster provider out of the catalogue, not just the gated ones. Both shipped
+/// products stopped resolving.
+///
+/// **An unreadable body is an error, not an empty list.** That was the other
+/// half of the failure: "the body is a shape I cannot read" and "this registry
+/// is empty" arrived as the same value, so the diagnostic told the reader to
+/// check a chain that was there all along.
+fn read_registry_body(
+    block: &syn::Block,
+) -> Result<Vec<ProjectedClusterProvider>, ClusterProjectionError> {
     let mut out = Vec::new();
-    if let Some(func) = method(imp, "provider_registry")
-        && let Some(expr) = tail_expr(&func.block)
-    {
-        walk_chain(expr, &mut out)?;
+    let Some(tail) = tail_expr(block) else {
+        return Err(ClusterProjectionError::RegistryUnreadable {
+            reason: "its body has no trailing expression, so nothing says what it returns"
+                .to_owned(),
+        });
+    };
+
+    // The original shape: the body *is* the chain.
+    if matches!(tail, syn::Expr::MethodCall(_)) {
+        walk_chain(tail, &FeatureGate::Always, &mut out)?;
+        return Ok(out);
+    }
+
+    // The bound shape: the body returns a local that statements above built up.
+    let Some(local) = bare_ident(tail) else {
+        return Err(ClusterProjectionError::RegistryUnreadable {
+            reason: "its trailing expression is neither a builder chain nor a local it built"
+                .to_owned(),
+        });
+    };
+
+    for stmt in &block.stmts {
+        match stmt {
+            // `let mut registry = ProviderRegistry::new().with_*(..);`
+            syn::Stmt::Local(decl) if binds(&decl.pat, &local) => {
+                if let Some(init) = &decl.init {
+                    walk_chain(&init.expr, &FeatureGate::Always, &mut out)?;
+                }
+            }
+            // A block, which is how a `#[cfg(...)]` guard is written around
+            // statements. The attribute sits on the block expression.
+            syn::Stmt::Expr(syn::Expr::Block(guarded), _) => {
+                let gate = gate_of(&guarded.attrs);
+                for inner in &guarded.block.stmts {
+                    if let syn::Stmt::Expr(syn::Expr::Assign(assign), _) = inner
+                        && bare_ident(&assign.left).as_deref() == Some(local.as_str())
+                    {
+                        walk_chain(&assign.right, &gate, &mut out)?;
+                    }
+                }
+            }
+            // `registry = registry.with_*(..);` at the top level.
+            syn::Stmt::Expr(syn::Expr::Assign(assign), _)
+                if bare_ident(&assign.left).as_deref() == Some(local.as_str()) =>
+            {
+                walk_chain(&assign.right, &gate_of(&assign.attrs), &mut out)?;
+            }
+            _ => {}
+        }
+    }
+
+    if out.is_empty() {
+        return Err(ClusterProjectionError::RegistryUnreadable {
+            reason: format!(
+                "it returns `{local}`, and nothing this can read registers a provider into it"
+            ),
+        });
     }
     Ok(out)
+}
+
+/// A one-segment path expression, which is how a local is named.
+fn bare_ident(expr: &syn::Expr) -> Option<String> {
+    let syn::Expr::Path(path) = expr else {
+        return None;
+    };
+    if path.qself.is_some() || path.path.segments.len() != 1 {
+        return None;
+    }
+    Some(last_segment(&path.path))
+}
+
+/// Whether a `let` pattern binds `name`, with or without `mut`.
+fn binds(pat: &syn::Pat, name: &str) -> bool {
+    match pat {
+        syn::Pat::Ident(ident) => ident.ident == name,
+        // `let registry: ProviderRegistry = ...`
+        syn::Pat::Type(typed) => binds(&typed.pat, name),
+        _ => false,
+    }
+}
+
+/// The build condition a `#[cfg(...)]` attribute states.
+///
+/// Only `cfg(feature = "...")` reduces to a feature. Everything else -- `not`,
+/// `all`, `target_os`, a bare `cfg_attr` -- is recorded as unreadable rather
+/// than ignored: a registration nobody can place in a build must not be
+/// indistinguishable from one that is always there.
+fn gate_of(attrs: &[syn::Attribute]) -> FeatureGate {
+    let Some(cfg) = attrs.iter().find(|a| a.path().is_ident("cfg")) else {
+        return FeatureGate::Always;
+    };
+    let mut feature = None;
+    let parsed = cfg.parse_nested_meta(|meta| {
+        if meta.path.is_ident("feature")
+            && let Ok(value) = meta.value()
+            && let Ok(name) = value.parse::<syn::LitStr>()
+        {
+            feature = Some(name.value());
+            return Ok(());
+        }
+        // Anything else in the predicate makes it more than one feature.
+        feature = None;
+        Err(meta.error("not a single-feature cfg"))
+    });
+    match (parsed, feature) {
+        (Ok(()), Some(name)) => FeatureGate::Feature(name),
+        _ => FeatureGate::Unreadable(
+            cfg.meta
+                .require_list()
+                .map_or_else(|_| "cfg".to_owned(), |list| list.tokens.to_string()),
+        ),
+    }
 }
 
 /// Resolve a `const NAME: &str = "..."` anywhere in `files`.

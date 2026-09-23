@@ -34,8 +34,9 @@ mod test_corpus;
 
 pub use attribute::{AttributeSite, LocateError, gear_attribute_sites, locate_gear_attribute};
 pub use cluster::{
-    ClusterProjectionError, ProjectedClusterProvider, SdkDefaultRule, project_backend_capabilities,
-    project_provider_name, project_provider_registry, project_sdk_defaults,
+    ClusterProjectionError, FeatureGate, ProjectedClusterProvider, SdkDefaultRule,
+    project_backend_capabilities, project_provider_name, project_provider_registry,
+    project_sdk_defaults,
 };
 pub use config::{
     ConfigField, ConfigFieldsError, ConfigRootError, project_config_fields, project_config_root,

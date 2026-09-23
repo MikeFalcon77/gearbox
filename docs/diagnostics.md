@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **96**.
+Codes: **97**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -903,6 +903,7 @@ is one string in one attribute.
 | [GBX0522](#gbx0522) | error | provider option is not one the backend reads |
 | [GBX0523](#gbx0523) | error | provider option value does not match the field's type |
 | [GBX0524](#gbx0524) | error | a required provider option was not supplied |
+| [GBX0525](#gbx0525) | error | a cluster provider is not in this build |
 
 ### GBX0501
 
@@ -1174,6 +1175,27 @@ this projection cannot *read* -- `Duration::from_secs(5)`, a `const` --
 is still a default, and a field carrying one is never reported here. That
 distinction is the whole reason `required` and `default` are two fields
 rather than one nullable one.
+
+### GBX0525
+
+**a cluster provider is not in this build**
+
+A `provider(...)` names a backend this build will not contain.
+
+A registration inside a `#[cfg(feature = "...")]` exists only where that
+feature is enabled. The cluster crate says so of its Kubernetes
+providers in its own words -- "a profile binding `provider: k8s`
+requires a build with this feature" -- and until the catalogue could
+carry the condition, the only thing standing between a product and a
+binding its binary cannot honour was that no such provider existed. One
+does now, and it is the tree's first native leader election, so the
+failure it would cause is the silent one: a scope that looks bound and
+elects a leader per replica.
+
+Reported against the description rather than at startup, which is the
+whole point: the feature is selected two lines away, in the same file.
+
+*Asserts a limitation of the runtime, so every occurrence cites the source that proves it.*
 
 ## `GBX06xx` — Capabilities the runtime does not implement
 

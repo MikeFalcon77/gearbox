@@ -246,6 +246,22 @@ impl Requirement {
 
 /// A cluster provider, projected from the cluster gear's Rust.
 ///
+/// A build condition a provider registration sits under.
+///
+/// Two variants rather than three: "always" is the absence of an entry, so it
+/// costs nothing on the wire and cannot be confused with a predicate that was
+/// read and found empty. `Unreadable` is kept apart from absence deliberately
+/// -- a registration nobody can place in a build must not look like one that is
+/// in every build.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum FeatureGate {
+    /// Registered only where this cargo feature is enabled.
+    Feature(String),
+    /// Gated by a predicate the projector could not reduce to one feature.
+    Unreadable(String),
+}
+
 /// Assembled from three places, because no single one of them has the whole
 /// answer: `ClusterGear::provider_registry()` says which provider types are
 /// registered and for which primitive, the provider's own `fn provider()` says
@@ -319,6 +335,19 @@ pub struct ClusterProviderDecl {
     /// the backend starts.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub options: BTreeMap<ClusterPrimitive, ConfigSchema>,
+
+    /// Which primitives this backend registers only under a cargo feature.
+    ///
+    /// **Absence means "in every build", which is every provider but one.** The
+    /// Kubernetes plugin registers its three behind `#[cfg(feature = "k8s")]`,
+    /// and the cluster crate's own comment states the consequence: "a profile
+    /// binding `provider: k8s` requires a build with this feature". A catalogue
+    /// that recorded those registrations as unconditional would let a product
+    /// bind a backend its build does not link -- which is exactly the failure
+    /// `no_provider_registers_leader_election` was written to keep impossible
+    /// while no native leader election existed.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub gated_by: BTreeMap<ClusterPrimitive, FeatureGate>,
 
     /// Which option carries the credential, when this backend needs one.
     ///

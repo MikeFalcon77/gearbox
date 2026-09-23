@@ -44,7 +44,8 @@ pub use intent::{
     ProviderBinding, SourceDecl,
 };
 pub use requirement::{
-    Capability, ClusterPrimitive, ClusterProviderDecl, Requirement, RequirementKind, capabilities,
+    Capability, ClusterPrimitive, ClusterProviderDecl, FeatureGate, Requirement, RequirementKind,
+    capabilities,
 };
 pub use resolved::{
     ApplicationKind, ApplicationRole, BindingMechanism, BindingRequest, Choice, ClusterResolution,

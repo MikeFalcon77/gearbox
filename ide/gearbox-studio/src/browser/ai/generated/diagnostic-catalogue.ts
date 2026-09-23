@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 96, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 97, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -693,6 +693,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     domain: "cluster",
     docs: "A `provider(...)` that omits an option the backend cannot supply itself.\n\nRequired means serde would fail: no `#[serde(default)]` on the field or\nits container, no `default = \"fn\"`, and not an `Option<T>`. A default\nthis projection cannot *read* -- `Duration::from_secs(5)`, a `const` --\nis still a default, and a field carrying one is never reported here. That\ndistinction is the whole reason `required` and `default` are two fields\nrather than one nullable one.",
     requiresEvidence: false,
+  },
+  GBX0525: {
+    code: "GBX0525",
+    title: "a cluster provider is not in this build",
+    severity: "error",
+    domain: "cluster",
+    docs: "A `provider(...)` names a backend this build will not contain.\n\nA registration inside a `#[cfg(feature = \"...\")]` exists only where that\nfeature is enabled. The cluster crate says so of its Kubernetes\nproviders in its own words -- \"a profile binding `provider: k8s`\nrequires a build with this feature\" -- and until the catalogue could\ncarry the condition, the only thing standing between a product and a\nbinding its binary cannot honour was that no such provider existed. One\ndoes now, and it is the tree's first native leader election, so the\nfailure it would cause is the silent one: a scope that looks bound and\nelects a leader per replica.\n\nReported against the description rather than at startup, which is the\nwhole point: the feature is selected two lines away, in the same file.",
+    requiresEvidence: true,
   },
   GBX0602: {
     code: "GBX0602",

@@ -1130,6 +1130,22 @@ diagnostic_codes! {
     /// rather than one nullable one.
     ClusterProviderOptionMissing = "GBX0524", Cluster, Error, false, "a required provider option was not supplied";
 
+    /// A `provider(...)` names a backend this build will not contain.
+    ///
+    /// A registration inside a `#[cfg(feature = "...")]` exists only where that
+    /// feature is enabled. The cluster crate says so of its Kubernetes
+    /// providers in its own words -- "a profile binding `provider: k8s`
+    /// requires a build with this feature" -- and until the catalogue could
+    /// carry the condition, the only thing standing between a product and a
+    /// binding its binary cannot honour was that no such provider existed. One
+    /// does now, and it is the tree's first native leader election, so the
+    /// failure it would cause is the silent one: a scope that looks bound and
+    /// elects a leader per replica.
+    ///
+    /// Reported against the description rather than at startup, which is the
+    /// whole point: the feature is selected two lines away, in the same file.
+    ClusterProviderNeedsFeature = "GBX0525", Cluster, Error, true, "a cluster provider is not in this build";
+
     // ---------------------------------------------------------------- GBX06xx
     // GBX0601 is deliberately absent. It said roles were "not supported by the
     // runtime" and cited `OopRunOptions.gear_name` for it. Both halves were

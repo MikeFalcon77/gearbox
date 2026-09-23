@@ -151,13 +151,21 @@ fn lifecycle_is_projected_including_its_absences() {
     assert_eq!(lc.stop_timeout, None, "absent, not defaulted");
     assert!(lc.await_ready);
 
-    // types-registry declares no lifecycle at all.
+    // **A gear that declares no lifecycle at all**, which is the "absences"
+    // half of this claim's name: `None` here must mean the attribute said
+    // nothing, not that the projector gave up.
+    //
+    // This used to name `types-registry`, which gained a lifecycle on
+    // 2026-09-21. The claim is about the projection, not about that gear, so it
+    // moves to one that still has none -- `authn-resolver`, whose attribute
+    // carries `name`, `deps` and `capabilities` and stops there.
     assert!(
         catalogue
-            .gear(&gid("types-registry"))
+            .gear(&gid("authn-resolver"))
             .unwrap()
             .lifecycle
-            .is_none()
+            .is_none(),
+        "a gear whose attribute declares no lifecycle must project none"
     );
 }
 

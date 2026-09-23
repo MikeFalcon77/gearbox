@@ -306,9 +306,30 @@ fn providers(
                 needs_credentials: plugin.needs_credentials,
                 runtime_determined: std::collections::BTreeSet::new(),
                 options: BTreeMap::new(),
+                gated_by: BTreeMap::new(),
                 credential_option: plugin.credential_option.clone(),
             });
         entry.primitives.insert(reg.primitive);
+        // Recorded per primitive, because one provider can register some
+        // unconditionally and others behind a feature -- which is not
+        // hypothetical: if the k8s plugin ever registered a cache in every
+        // build and its leader election only under the feature, a
+        // provider-level flag would have to lie about one of them.
+        match &reg.gated_by {
+            gearbox_project::FeatureGate::Always => {}
+            gearbox_project::FeatureGate::Feature(name) => {
+                entry.gated_by.insert(
+                    reg.primitive,
+                    gearbox_ir::FeatureGate::Feature(name.clone()),
+                );
+            }
+            gearbox_project::FeatureGate::Unreadable(cfg) => {
+                entry.gated_by.insert(
+                    reg.primitive,
+                    gearbox_ir::FeatureGate::Unreadable(cfg.clone()),
+                );
+            }
+        }
         entry.capabilities.insert(reg.primitive, capabilities);
         if let Some(schema) = options {
             entry.options.insert(reg.primitive, schema);

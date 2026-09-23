@@ -39,6 +39,7 @@ fn postgres() -> ClusterProviderDecl {
         process_local: false,
         needs_credentials: true,
         runtime_determined: BTreeSet::new(),
+        gated_by: BTreeMap::new(),
         options: [(ClusterPrimitive::Cache, schema)].into_iter().collect(),
         credential_option: Some("connection_string".to_owned()),
     }

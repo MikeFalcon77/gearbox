@@ -51,7 +51,10 @@ pub fn resolve(
     closure: &Closure,
     partition: &Partition,
     scoped: &ProfileScoped<'_>,
-    preferences: &[Preference],
+    // The preferences used to arrive separately, and then `intent` arrived too
+    // -- two ways to reach one list, which is one more than a caller should
+    // have to keep in step.
+    intent: &gearbox_ir::ProductIntent,
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) -> Vec<ResolvedClusterBinding> {
@@ -60,9 +63,11 @@ pub fn resolve(
         return Vec::new();
     }
 
-    let providers = provider_table(catalogue, closure);
+    let providers = provider_table(catalogue, closure, intent);
     let spread = is_spread(partition);
-    let prefer_existing = preferences.contains(&Preference::ExistingInfrastructure);
+    let prefer_existing = intent
+        .preferences
+        .contains(&Preference::ExistingInfrastructure);
 
     let mut out: Vec<ResolvedClusterBinding> = Vec::new();
     for ((scope, primitive), need) in needs {
@@ -190,16 +195,67 @@ fn collect_needs(
 }
 
 /// The providers registered by gears in the product.
-fn provider_table(catalogue: &Catalogue, closure: &Closure) -> Vec<ClusterProviderDecl> {
+///
+/// **A registration this build will not contain is dropped here**, before
+/// anything can choose it. Refusing an explicit binding is not enough: the
+/// resolver picks a provider on its own when a scope leaves a primitive
+/// unbound, and the tree's first native leader election sits behind a cargo
+/// feature -- so a build without that feature would have had one chosen for it,
+/// resolved cleanly, written to the lock, and elected one leader per replica at
+/// run time. Silent, which is the failure `GBX0503` exists to prevent one level
+/// up.
+///
+/// The gated *primitive* is removed rather than the whole provider: a plugin
+/// registers several, and one gated primitive says nothing about the others.
+fn provider_table(
+    catalogue: &Catalogue,
+    closure: &Closure,
+    intent: &gearbox_ir::ProductIntent,
+) -> Vec<ClusterProviderDecl> {
     let mut table: Vec<ClusterProviderDecl> = closure
         .members
         .keys()
-        .filter_map(|g| catalogue.gears.get(g))
-        .flat_map(|g| g.cluster_providers.iter().cloned())
+        .filter_map(|g| catalogue.gears.get(g).map(|gear| (g, gear)))
+        .flat_map(|(id, gear)| {
+            gear.cluster_providers
+                .iter()
+                .map(move |provider| in_this_build(provider, id, intent))
+        })
         .collect();
     table.sort_by(|a, b| a.name.cmp(&b.name));
     table.dedup_by(|a, b| a.name == b.name);
     table
+}
+
+/// A provider with the primitives this build does not link removed.
+fn in_this_build(
+    provider: &ClusterProviderDecl,
+    owner: &gearbox_ir::GearId,
+    intent: &gearbox_ir::ProductIntent,
+) -> ClusterProviderDecl {
+    if provider.gated_by.is_empty() {
+        return provider.clone();
+    }
+    let selected = |feature: &str| {
+        intent
+            .selected_gears
+            .iter()
+            .filter(|s| &s.gear == owner)
+            .any(|s| s.features.iter().any(|f| f == feature))
+    };
+    let mut out = provider.clone();
+    out.primitives
+        .retain(|primitive| match provider.gated_by.get(primitive) {
+            None => true,
+            Some(gearbox_ir::FeatureGate::Feature(feature)) => selected(feature),
+            // Unreadable: not linked as far as anything here can tell, and
+            // `GBX0525` says so where a binding names it. Choosing it *for*
+            // somebody, on a condition nobody could read, would be worse.
+            Some(gearbox_ir::FeatureGate::Unreadable(_)) => false,
+        });
+    out.capabilities
+        .retain(|primitive, _| out.primitives.contains(primitive));
+    out
 }
 
 /// Whether the topology can put two things in different memory.

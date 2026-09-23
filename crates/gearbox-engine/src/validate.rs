@@ -113,6 +113,7 @@ pub fn validate_at(
             // them, so one that suits none is wrong wherever it is read.
             let profiles: Vec<&gearbox_ir::ProfileId> = intent.profiles.keys().collect();
             crate::feature_check::check(&scan.catalogue, intent, &profiles, &uri, &mut diagnostics);
+            crate::provider_feature_check::check(&scan.catalogue, intent, &uri, &mut diagnostics);
             // An unfilled extension point is a product that builds and then
             // finds nothing at runtime. It needs the catalogue and the product
             // and no resolution at all, so validate is where it belongs.

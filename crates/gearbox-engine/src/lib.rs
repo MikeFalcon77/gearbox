@@ -24,6 +24,7 @@ pub mod merge;
 pub mod plugin;
 pub mod plugin_select;
 pub mod product;
+pub mod provider_feature_check;
 pub mod registry;
 pub mod resolve;
 pub mod scans;

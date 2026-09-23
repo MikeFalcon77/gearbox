@@ -471,6 +471,7 @@ pub fn postgres() -> ClusterProviderDecl {
         needs_credentials: true,
         runtime_determined: BTreeSet::new(),
         options: BTreeMap::new(),
+        gated_by: BTreeMap::new(),
         credential_option: None,
     }
 }
@@ -495,6 +496,7 @@ pub fn standalone() -> ClusterProviderDecl {
         needs_credentials: false,
         runtime_determined: BTreeSet::new(),
         options: BTreeMap::new(),
+        gated_by: BTreeMap::new(),
         credential_option: None,
     }
 }
@@ -517,6 +519,7 @@ pub fn runtime_determined_provider() -> ClusterProviderDecl {
             .into_iter()
             .collect(),
         options: BTreeMap::new(),
+        gated_by: BTreeMap::new(),
         credential_option: None,
     }
 }
