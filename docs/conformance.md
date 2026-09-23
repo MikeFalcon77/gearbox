@@ -33,7 +33,7 @@ Rust, and the ADRs' own Confirmation sections say which.
 | Studio offers a command to scaffold a new gear | `ADR-0010 tier 0` | ✅ built |  |
 | a scaffold shows its file plan before writing anything | `ADR-0010 §Consequences: a preview is not optional` | ✅ built |  |
 | a scaffold has three shapes, and each offers what its kind needs | `ADR-0010 tier 0` | ✅ built |  |
-| choosing a host writes the plugin's locator instead of commenting it | `ADR-0010 tier 0` | ✅ built |  |
+| choosing a host writes the plugin's declaration instead of commenting it | `ADR-0010 tier 0` | ✅ built |  |
 | a generated composition crate carries a header naming its generator | `ADR-0010 tier 2` | ✅ built |  |
 | a description edit shows the line before writing it | `ADR-0010 §Consequences: a preview is not optional` | ✅ built |  |
 | adding a gear inserts one line, and removing it restores the file exactly | `ADR-0010 tier 3` | ✅ built |  |
