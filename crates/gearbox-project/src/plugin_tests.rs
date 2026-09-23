@@ -162,6 +162,133 @@ fn the_host_itself_does_not_fill_its_own_point() {
     assert_eq!(project_plugin_impl(&host, &points).unwrap(), None);
 }
 
+fn at(relative: &str, src: &str) -> RustFile {
+    RustFile {
+        path: PathBuf::from(relative),
+        relative: PathBuf::from(relative),
+        ast: syn::parse_file(src).expect("fixture parses"),
+    }
+}
+
+#[test]
+fn a_mock_in_test_support_does_not_make_the_host_a_plugin() {
+    // The usage-collector shape: the host's own tests implement its plugin
+    // trait, in a file that `domain/mod.rs` pulls in under `cfg(test)`.
+    let points = points_of(&["UsageCollectorPluginV1"]);
+    let crate_files = [
+        at("lib.rs", "pub mod domain;"),
+        at(
+            "domain/mod.rs",
+            "pub mod service;\n#[cfg(test)]\npub mod test_support;",
+        ),
+        at("domain/service.rs", "pub struct Service;"),
+        at(
+            "domain/test_support.rs",
+            "pub struct MockPlugin; impl UsageCollectorPluginV1 for MockPlugin {}",
+        ),
+    ];
+    assert_eq!(project_plugin_impl(&crate_files, &points).unwrap(), None);
+}
+
+#[test]
+fn a_test_module_named_by_path_and_its_children_are_test_code() {
+    // `#[path = "service_tests.rs"] mod service_tests;` beside `service.rs`,
+    // which is how most of the corpus spells it, and a submodule of a test
+    // module, which is test code by inheritance rather than by its own gate.
+    let files = [
+        at(
+            "lib.rs",
+            "pub mod domain; #[cfg(all(test, feature = \"x\"))] mod probe;",
+        ),
+        at(
+            "domain/mod.rs",
+            "pub mod service; #[cfg(test)] pub(crate) mod test_support;",
+        ),
+        at(
+            "domain/service.rs",
+            "#[cfg(test)]\n#[path = \"service_tests.rs\"]\nmod service_tests;",
+        ),
+        at("domain/service_tests.rs", ""),
+        at("domain/test_support/mod.rs", "pub mod idp;"),
+        at("domain/test_support/idp.rs", ""),
+        at("probe.rs", ""),
+    ];
+    let test_only: Vec<String> = crate::scan::test_only_files(&files)
+        .into_iter()
+        .map(|p| p.display().to_string())
+        .filter(|p| files.iter().any(|f| f.relative.display().to_string() == *p))
+        .collect();
+    assert_eq!(
+        test_only,
+        [
+            "domain/service_tests.rs",
+            "domain/test_support/idp.rs",
+            "domain/test_support/mod.rs",
+            "probe.rs",
+        ]
+    );
+}
+
+#[test]
+fn a_gate_that_also_admits_ordinary_builds_is_not_test_code() {
+    // `any(test, ...)` compiles the impl outside tests too, so it still counts.
+    let points = points_of(&["P"]);
+    let files = [at(
+        "lib.rs",
+        "pub struct X; #[cfg(any(test, feature = \"mock\"))] impl P for X {}",
+    )];
+    assert_eq!(
+        project_plugin_impl(&files, &points).unwrap(),
+        Some("P".to_owned())
+    );
+    let gated = [at("lib.rs", "pub struct X; #[cfg(test)] impl P for X {}")];
+    assert_eq!(project_plugin_impl(&gated, &points).unwrap(), None);
+}
+
+#[test]
+fn real_hosts_with_mock_plugins_are_hosts() {
+    // Each of these implements its own plugin trait in test support, and each
+    // was projected as its own plugin until test code stopped counting.
+    for (sdk, host) in [
+        (
+            "gears/system/usage-collector/usage-collector-sdk",
+            "gears/system/usage-collector/usage-collector",
+        ),
+        (
+            "gears/system/license-resolver/license-resolver-sdk",
+            "gears/system/license-resolver/license-resolver",
+        ),
+        ("gears/credstore/credstore-sdk", "gears/credstore/credstore"),
+    ] {
+        let points = project_extension_points(&require!(tree(sdk)));
+        assert!(!points.is_empty(), "{sdk} declares a plugin trait");
+        let files = require!(tree(host));
+        assert_eq!(
+            project_plugin_impl(&files, &points).unwrap(),
+            None,
+            "{host} is a host, not its own plugin"
+        );
+    }
+}
+
+#[test]
+fn account_management_still_reads_as_filling_its_own_point() {
+    // **Recorded, not endorsed.** account-management implements
+    // `IdpPluginClient` outside tests, twice: `NoopIdpProvider` and the
+    // `LazyIdpProvider` proxy that forwards to whichever plugin the hub holds.
+    // "Implements the trait" cannot tell a forwarding proxy from a plugin, and
+    // neither can the hub, which it both registers into and looks up from.
+    // This pins today's answer so the day it changes is a decision, not drift.
+    let points = project_extension_points(&require!(tree(
+        "gears/system/account-management/account-management-sdk"
+    )));
+    let files = require!(tree("gears/system/account-management/account-management"));
+    assert_eq!(
+        project_plugin_impl(&files, &points).unwrap(),
+        Some("IdpPluginClient".to_owned())
+    );
+}
+
 // ---------------------------------------------------------------- defaults
 
 #[test]

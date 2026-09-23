@@ -2,8 +2,7 @@
 //! failure modes apart.
 //!
 //! The distinction under test is the whole reason GBX0208 exists as its own
-//! code. The tree holds 44 `#[toolkit::gear]` attributes and 14 descriptions, so
-//! a selected gear missing from the catalogue is usually one nobody has
+//! code. A selected gear missing from the catalogue may be one nobody has
 //! described yet -- and that wants "here is the `gear.gdl` to write", not "check
 //! your spelling".
 
@@ -151,13 +150,42 @@ fn the_real_product_selects_only_described_gears() {
     assert_eq!(report.error_count(), 0, "{:#?}", report.diagnostics);
 }
 
+/// A source root holding one undescribed crate, `widgets/widget`.
+///
+/// The corpus used to supply this case for free -- `bss-ledger` had an attribute
+/// and no description -- and stopped the day every implemented gear was
+/// described. A fixture keeps the claim without waiting for somebody to leave a
+/// crate undescribed, and it keeps the part that mattered: the package and the
+/// library identifier differ from the directory, so a help text that derived
+/// them from the path would be caught.
+fn undescribed_root() -> (tempdir::Dir, SourceRoot) {
+    let dir = tempdir::Dir::new("gbx-undescribed");
+    let krate = dir.path().join("widgets/widget");
+    std::fs::create_dir_all(krate.join("src")).unwrap();
+    std::fs::write(
+        krate.join("Cargo.toml"),
+        "[package]\nname = \"cf-acme-widget\"\nversion = \"0.1.0\"\n\n[lib]\nname = \"acme_widget\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        krate.join("src/gear.rs"),
+        "#[toolkit::gear(name = \"widget\", capabilities = [rest])]\npub struct Widget;\n",
+    )
+    .unwrap();
+    let root = SourceRoot::open(
+        SourceId::new("fixture").unwrap(),
+        dir.path().canonicalize().unwrap(),
+    )
+    .unwrap();
+    (dir, root)
+}
+
 #[test]
 fn a_gear_that_exists_in_rust_but_has_no_description_is_gbx0208() {
     require_tree!(roots);
-    // `bss-ledger` is real: `gears/bss/ledger/ledger` carries
-    // `#[toolkit::gear(name = "bss-ledger", ...)]` and no `gear.gdl`.
-    let Some((_dir, intent)) =
-        product_with(&["use_gear(\"bss-ledger\", source = \"gears-rust\"),"])
+    let (_fixture, extra) = undescribed_root();
+    let roots: Vec<SourceRoot> = roots.into_iter().chain([extra]).collect();
+    let Some((_dir, intent)) = product_with(&["use_gear(\"widget\", source = \"gears-rust\"),"])
     else {
         eprintln!("skipping: product.gdl not found");
         return;
@@ -170,17 +198,16 @@ fn a_gear_that_exists_in_rust_but_has_no_description_is_gbx0208() {
         .find(|d| d.code == DiagnosticCode::ValidateMissingDescription)
         .expect("GBX0208");
     assert!(
-        found.message.contains("gears/bss/ledger/ledger"),
+        found.message.contains("widgets/widget"),
         "the crate has to be named, or the operator cannot act: {}",
         found.message
     );
 
     let help = found.help.as_deref().expect("GBX0208 carries help");
-    // The two fields that cannot be guessed, read from the manifest. `bss_ledger`
-    // comes from an explicit `[lib] name`, and the package is
-    // `cf-gears-bss-ledger` -- neither is derivable from the directory.
-    assert!(help.contains("cf-gears-bss-ledger"), "got: {help}");
-    assert!(help.contains("bss_ledger"), "got: {help}");
+    // The two fields that cannot be guessed, read from the manifest: neither
+    // `cf-acme-widget` nor `acme_widget` is derivable from `widgets/widget`.
+    assert!(help.contains("cf-acme-widget"), "got: {help}");
+    assert!(help.contains("acme_widget"), "got: {help}");
     assert!(
         help.contains("do not restate"),
         "the skeleton must not invite restating projected facts: {help}"

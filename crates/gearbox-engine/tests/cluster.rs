@@ -176,13 +176,18 @@ fn the_slice_projects_cleanly() {
     let catalogue = require_tree!();
     // 8 original + tenant-resolver + 5 plugin gears, and then the four
     // `platform-host` members that had no description until now:
-    // account-management, authz-resolver, resource-group, credstore.
+    // account-management, authz-resolver, resource-group, credstore -- and then
+    // the rest of the corpus's implemented gears: five plugins of hosts already
+    // described (credstore, account-management x2, authz-resolver x2), and the
+    // license-resolver and usage-collector families whole, and eight plain
+    // services (bss-ledger, bss-pricing, file-parser, file-storage,
+    // github-mirror, simple-user-settings, nodes-registry, oagw).
     //
     // The count is pinned on purpose. It is not what this test is about -- the
     // error list below is -- but a corpus that grows or shrinks under the suite
     // changes what every other corpus test means, and finding that out here is
     // cheaper than reading it as a failure somewhere else.
-    assert_eq!(catalogue.gears.len(), 19);
+    assert_eq!(catalogue.gears.len(), 37);
     let errors: Vec<String> = catalogue
         .diagnostics
         .iter()

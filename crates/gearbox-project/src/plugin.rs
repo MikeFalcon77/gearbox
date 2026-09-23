@@ -159,6 +159,12 @@ pub fn project_extension_points(sdk_files: &[RustFile]) -> Vec<ExtensionPoint> {
 /// when the gear implements none of them, which is the ordinary case: most gears
 /// are not plugins.
 ///
+/// **Test code does not count.** A host's own tests implement its plugin trait
+/// with mocks -- usage-collector, license-resolver and credstore all do, in
+/// `test_support.rs` -- and reading those as the crate's role made each host its
+/// own plugin, with no extension point left for the real plugins to fill. A
+/// file compiled only under `cfg(test)`, or an impl gated that way, is skipped.
+///
 /// # Errors
 /// Returns [`PluginImplError::Ambiguous`] when a crate implements more than one
 /// point, because then "which plugin is this" has no single answer and guessing
@@ -167,13 +173,18 @@ pub fn project_plugin_impl(
     files: &[RustFile],
     points: &[ExtensionPoint],
 ) -> Result<Option<String>, PluginImplError> {
+    let test_only = crate::scan::test_only_files(files);
     let mut found: Vec<String> = files
         .iter()
+        .filter(|file| !test_only.contains(&file.relative))
         .flat_map(|file| file.ast.items.iter())
         .filter_map(|item| {
             let syn::Item::Impl(imp) = item else {
                 return None;
             };
+            if crate::scan::is_test_only(&imp.attrs) {
+                return None;
+            }
             let (_, path, _) = imp.trait_.as_ref()?;
             let ident = last_segment(path);
             points

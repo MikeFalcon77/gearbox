@@ -1,5 +1,6 @@
 //! Reading a crate's `src/` tree.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// Why a crate's source could not be read.
@@ -202,6 +203,158 @@ fn push_items<'a>(items: &'a [syn::Item], out: &mut Vec<&'a syn::Item>) {
         {
             push_items(inner, out);
         }
+    }
+}
+
+/// The files of a scanned crate that are compiled only under `cfg(test)`, by
+/// [`RustFile::relative`].
+///
+/// The directory walk reads every `.rs` file, so a mock that implements a
+/// crate's own plugin trait in `test_support.rs` is as visible as the real
+/// thing -- and "implements the trait" is how a plugin is told from its host.
+/// Which files are test code is read from the crate itself, from the
+/// `#[cfg(test)] mod x;` declarations that pull them in, never from a file name.
+///
+/// A file declared by a test-only file is test-only too, so a test module's
+/// own submodules follow it. A file no declaration reaches is not test code:
+/// nothing here knows what it is, and "not test" is the answer that leaves it
+/// visible.
+#[must_use]
+pub fn test_only_files(files: &[RustFile]) -> BTreeSet<PathBuf> {
+    // Every `mod x;` in the crate, as (declaring file, declared file, gated).
+    let mut edges: Vec<(PathBuf, PathBuf, bool)> = Vec::new();
+    for file in files {
+        let dir = file
+            .relative
+            .parent()
+            .unwrap_or(Path::new(""))
+            .to_path_buf();
+        let is_mod_root = file
+            .relative
+            .file_name()
+            .is_some_and(|n| n == "lib.rs" || n == "main.rs" || n == "mod.rs");
+        let base = if is_mod_root {
+            dir.clone()
+        } else {
+            dir.join(file.relative.file_stem().unwrap_or_default())
+        };
+        declarations(
+            &file.ast.items,
+            &dir,
+            &base,
+            false,
+            &file.relative,
+            &mut edges,
+        );
+    }
+
+    let mut out: BTreeSet<PathBuf> = BTreeSet::new();
+    loop {
+        let before = out.len();
+        for (from, to, gated) in &edges {
+            if *gated || out.contains(from) {
+                out.insert(to.clone());
+            }
+        }
+        if out.len() == before {
+            return out;
+        }
+    }
+}
+
+/// Collect the `mod x;` declarations under `items`, descending inline modules.
+///
+/// `dir` is where a `#[path]` resolves from; `base` is the module directory a
+/// plain `mod x;` looks in. Both move into an inline module's name, which is
+/// the rule rustc applies to declarations nested in `mod m { ... }`.
+fn declarations(
+    items: &[syn::Item],
+    dir: &Path,
+    base: &Path,
+    gated: bool,
+    from: &Path,
+    out: &mut Vec<(PathBuf, PathBuf, bool)>,
+) {
+    for item in items {
+        let syn::Item::Mod(module) = item else {
+            continue;
+        };
+        let gated = gated || is_test_only(&module.attrs);
+        let name = module.ident.to_string();
+        let path_attr = module.attrs.iter().find_map(|a| {
+            let syn::Meta::NameValue(nv) = &a.meta else {
+                return None;
+            };
+            if !nv.path.is_ident("path") {
+                return None;
+            }
+            let syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(s),
+                ..
+            }) = &nv.value
+            else {
+                return None;
+            };
+            Some(s.value())
+        });
+        if let Some((_, inner)) = &module.content {
+            let nested = base.join(&name);
+            let nested_dir = path_attr
+                .as_ref()
+                .map_or_else(|| nested.clone(), |p| dir.join(p));
+            declarations(inner, &nested_dir, &nested_dir, gated, from, out);
+        } else {
+            let targets = path_attr.map_or_else(
+                || {
+                    vec![
+                        base.join(format!("{name}.rs")),
+                        base.join(&name).join("mod.rs"),
+                    ]
+                },
+                |p| vec![dir.join(p)],
+            );
+            for to in targets {
+                out.push((from.to_path_buf(), normalise(&to), gated));
+            }
+        }
+    }
+}
+
+/// Fold `a/./b` and `a/x/../b`, so a `#[path]` meets the walk's own spelling.
+fn normalise(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Whether these attributes compile the item only in a test build.
+///
+/// `cfg(test)`, or an `all(...)` with `test` among its terms. `any(test, ...)`
+/// and `not(...)` are not: the item exists in some ordinary build too.
+#[must_use]
+pub fn is_test_only(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|a| {
+        a.path().is_ident("cfg") && a.parse_args::<syn::Meta>().is_ok_and(|m| meta_is_test(&m))
+    })
+}
+
+fn meta_is_test(meta: &syn::Meta) -> bool {
+    match meta {
+        syn::Meta::Path(p) => p.is_ident("test"),
+        syn::Meta::List(list) if list.path.is_ident("all") => list
+            .parse_args_with(
+                syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+            )
+            .is_ok_and(|terms| terms.iter().any(meta_is_test)),
+        _ => false,
     }
 }
 
