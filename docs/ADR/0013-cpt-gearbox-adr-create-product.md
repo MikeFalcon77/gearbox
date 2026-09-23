@@ -941,3 +941,21 @@ identically either way. Observing it would need a product in the corpus that
 declares the directory products live in. The engine half is pinned above; the
 client half is one object literal built from the same two expressions the
 catalogue-only case already uses.
+
+## Amendment 2026-09-24: a plugin scaffold writes `fills`, not `sdk` and `plugin_interface`
+
+Plugin roles are declared now, keyed by GTS spec (ADR-0002, Amendment 2026-09-24), so the plugin
+shape changes with them. The declaration that makes a gear a plugin is `fills = "<spec>"`;
+`plugin_interface` no longer exists and a plugin declares no `sdk`.
+
+* **With a host chosen**, `fills` is written live from the point the catalogue reported, and the
+  trait and the crate it lives in are named in a comment beside it -- that crate is a Cargo
+  dependency the plugin needs, not a description field.
+* **Without one**, `fills` stays commented, for the reason the shapes always gave: a spec no
+  described gear declares is refused (GBX0519).
+* The comment carries values that arrived over the wire, so line breaks in them are flattened --
+  inside a `#` comment escaping is not the hazard, a newline is.
+
+Asserted in `crates/gearbox-rpc/src/write_gate_tests.rs` and, in the browser, by
+`adr-0010-ownership-tiers.spec.ts` ("choosing a host writes the plugin's declaration instead of
+commenting it").

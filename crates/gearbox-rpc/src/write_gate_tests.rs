@@ -614,9 +614,11 @@ fn the_clients_scaffold_request_carries_its_plugin() {
         "version": "0.1.0",
         "kind": "plugin",
         "plugin": {
-            "crate_name": "cf-gears-authn-resolver",
+            "spec": "cf.core.authn_resolver.plugin.v1~",
+            "trait_ident": "AuthNResolverPluginClient",
+            "crate_name": "cf-gears-authn-resolver-sdk",
             "lib_ident": "authn_resolver_sdk",
-            "path": "../../authn-resolver"
+            "path": "../../authn-resolver-sdk"
         },
         "destination_dir": "/tmp/gears",
         "dry_run": true
@@ -625,134 +627,115 @@ fn the_clients_scaffold_request_carries_its_plugin() {
     assert_eq!(params.kind, crate::protocol::GearKind::Plugin);
     let plugin = params.plugin.expect("`plugin` survived the wire");
     assert_eq!(plugin.lib_ident, "authn_resolver_sdk");
-    assert_eq!(plugin.plugin_interface, None, "absent means read the impl");
+    assert_eq!(plugin.spec, "cf.core.authn_resolver.plugin.v1~");
 }
 
-/// A plugin scaffold given a host writes the locator live, and it still evaluates.
+/// A plugin scaffold given a host writes `fills` live, and it still evaluates.
 ///
-/// The commented shape exists because an `sdk` pointing nowhere makes the gear
-/// fail to load. A host picked out of a loaded catalogue is not nowhere -- but
-/// writing the locator live means writing GDL from strings that came off the
-/// wire, and this is the gate that says the result still parses as a gear.
-///
-/// Quoting is the part that would fail silently: a path with a backslash or a
-/// quote in it, escaped Rust-debug style rather than Starlark style, produces a
-/// file that reads fine and does not evaluate.
+/// The commented shape exists because a spec no described gear declares is
+/// GBX0519. A host picked out of a loaded catalogue is not that -- but writing
+/// the declaration live means writing GDL from strings that came off the wire,
+/// and this is the gate that says the result still parses as a gear.
 #[test]
-fn a_plugin_scaffold_with_a_host_writes_a_live_locator() {
-    use crate::protocol::{GearKind, PluginScaffold};
+fn a_plugin_scaffold_with_a_host_writes_a_live_fills() {
+    use crate::protocol::GearKind;
 
     let files = super::scaffold_gear_files(&ScaffoldGearParams {
         id: "ldap-authn-plugin".to_owned(),
         name: "LDAP AuthN".to_owned(),
         version: "0.1.0".to_owned(),
         kind: GearKind::Plugin,
-        plugin: Some(PluginScaffold {
-            crate_name: "cf-gears-authn-resolver-sdk".to_owned(),
-            lib_ident: "authn_resolver_sdk".to_owned(),
-            path: "../../authn-resolver-sdk".to_owned(),
-            plugin_interface: Some("AuthNResolverPluginClient".to_owned()),
-        }),
+        plugin: Some(authn_point("../../authn-resolver-sdk")),
         destination_dir: "/tmp".to_owned(),
         dry_run: true,
     })
     .expect("the shape renders");
-
-    let gdl = &files
-        .iter()
-        .find(|(rel, _, _)| rel.as_str() == "gear.gdl")
-        .expect("a gear.gdl")
-        .1;
+    let gdl = gear_gdl(&files);
 
     // **Live, not commented, and checked over lines rather than by `contains`.**
-    // The commented shape's line is `# sdk = cargo(`, which contains
-    // `sdk = cargo(` -- so the substring assertions this replaces were all true
-    // of the very thing they claimed to rule out, and commenting the whole block
-    // out inside `plugin_shape` kept the test green.
+    // The commented shape's line is `# fills = ...`, which contains `fills =`.
     let live = |needle: &str| {
         gdl.lines()
             .any(|line| line.trim_start().starts_with(needle))
     };
     assert!(
-        live("sdk = cargo("),
-        "the locator is still commented: {gdl}"
+        live(r#"fills = "cf.core.authn_resolver.plugin.v1~""#),
+        "the declaration is still commented: {gdl}"
     );
+    assert!(!live("sdk = cargo("), "a plugin declares no sdk: {gdl}");
     assert!(
-        live(r#"crate_name = "cf-gears-authn-resolver-sdk""#),
-        "{gdl}"
+        gdl.contains("AuthNResolverPluginClient") && gdl.contains("cf-gears-authn-resolver-sdk"),
+        "the trait and its crate are named for the author: {gdl}"
     );
-    assert!(live(r#"lib = "authn_resolver_sdk""#), "{gdl}");
-    assert!(live(r#"path = "../../authn-resolver-sdk""#), "{gdl}");
-    assert!(
-        live(r#"plugin_interface = "AuthNResolverPluginClient""#),
-        "{gdl}"
-    );
+    assert!(evaluates(gdl), "a live fills must still evaluate: {gdl}");
+}
 
-    // And it evaluates as a gear description, which is the scaffold's own gate.
+fn authn_point(path: &str) -> crate::protocol::PluginScaffold {
+    crate::protocol::PluginScaffold {
+        spec: "cf.core.authn_resolver.plugin.v1~".to_owned(),
+        trait_ident: "AuthNResolverPluginClient".to_owned(),
+        crate_name: "cf-gears-authn-resolver-sdk".to_owned(),
+        lib_ident: "authn_resolver_sdk".to_owned(),
+        path: path.to_owned(),
+    }
+}
+
+fn gear_gdl(files: &[super::ScaffoldFile]) -> &str {
+    &files
+        .iter()
+        .find(|(rel, _, _)| rel.as_str() == "gear.gdl")
+        .expect("a gear.gdl")
+        .1
+}
+
+fn evaluates(gdl: &str) -> bool {
     let identity = gearbox_gdl::FileIdentity {
         uri: "file:///tmp/ldap-authn-plugin/gear.gdl".to_owned(),
         source: gearbox_ir::SourceId::new("scaffold").expect("kebab"),
         gdl_path: gearbox_ir::RelPath::new("gear.gdl").expect("valid"),
         load_paths: None,
     };
-    let outcome = gearbox_gdl::GdlEngine::new().eval_gear(&identity, gdl);
-    assert!(
-        outcome.value.is_some(),
-        "a live locator must still evaluate: {:?}",
-        outcome.diagnostics
-    );
+    gearbox_gdl::GdlEngine::new()
+        .eval_gear(&identity, gdl)
+        .value
+        .is_some()
 }
 
-/// A host path with characters escaping would change still evaluates.
+/// Wire values shown in comments cannot break out of them.
 ///
-/// **The hazard the test above documents and never exercised**:
-/// `../../authn-resolver-sdk` carries no backslash and no quote, so
-/// `quote_string` was handed nothing Rust-debug escaping would render
-/// differently, and rendering the locator with `{:?}` instead would have passed.
-/// A Windows-spelled sibling and a quote in the crate name are the two shapes
-/// where the two escapings part company, and the assertion that matters is the
-/// last one: the file still parses as a gear.
+/// The crate name, path and trait are written into `#` comments, where escaping
+/// is not the hazard -- a line break is. A path carrying one would end the
+/// comment and put the rest on its own line, evaluated as GDL; this one would
+/// declare a second `fills` and a `category` nobody chose.
 #[test]
-fn a_plugin_locator_with_escapable_characters_still_evaluates() {
-    use crate::protocol::{GearKind, PluginScaffold};
+fn a_plugin_scaffold_keeps_wire_values_inside_their_comments() {
+    use crate::protocol::GearKind;
 
-    for (path, lib) in [
-        (r"..\shared\authn-resolver-sdk", "authn_resolver_sdk"),
-        (r#"../"quoted"/sdk"#, "authn_resolver_sdk"),
+    for path in [
+        r"..\shared\authn-resolver-sdk",
+        "../sdk\nfills = \"x.injected.plugin.v1~\",\ncategory = \"oss\",",
     ] {
         let files = super::scaffold_gear_files(&ScaffoldGearParams {
             id: "ldap-authn-plugin".to_owned(),
             name: "LDAP AuthN".to_owned(),
             version: "0.1.0".to_owned(),
             kind: GearKind::Plugin,
-            plugin: Some(PluginScaffold {
-                crate_name: "cf-gears-authn-resolver-sdk".to_owned(),
-                lib_ident: lib.to_owned(),
-                path: path.to_owned(),
-                plugin_interface: None,
-            }),
+            plugin: Some(authn_point(path)),
             destination_dir: "/tmp".to_owned(),
             dry_run: true,
         })
         .expect("the shape renders");
-
-        let gdl = &files
-            .iter()
-            .find(|(rel, _, _)| rel.as_str() == "gear.gdl")
-            .expect("a gear.gdl")
-            .1;
-
-        let identity = gearbox_gdl::FileIdentity {
-            uri: "file:///tmp/ldap-authn-plugin/gear.gdl".to_owned(),
-            source: gearbox_ir::SourceId::new("scaffold").expect("kebab"),
-            gdl_path: gearbox_ir::RelPath::new("gear.gdl").expect("valid"),
-            load_paths: None,
-        };
-        let outcome = gearbox_gdl::GdlEngine::new().eval_gear(&identity, gdl);
+        let gdl = gear_gdl(&files);
+        assert!(evaluates(gdl), "`{path}` must stay a comment: {gdl}");
         assert!(
-            outcome.value.is_some(),
-            "`{path}` must survive quoting: {:?}\n{gdl}",
-            outcome.diagnostics
+            !gdl.lines()
+                .any(|l| l.trim_start().starts_with("fills = \"x.injected")),
+            "nothing escaped its comment: {gdl}"
+        );
+        assert!(
+            !gdl.lines()
+                .any(|l| l.trim_start().starts_with("category =")),
+            "nothing escaped its comment: {gdl}"
         );
     }
 }
@@ -781,11 +764,11 @@ fn a_plugin_scaffold_without_a_host_keeps_the_commented_locator() {
         .find(|(rel, _, _)| rel.as_str() == "gear.gdl")
         .expect("a gear.gdl")
         .1;
-    assert!(gdl.contains("# sdk = cargo("), "{gdl}");
+    assert!(gdl.contains("# fills = "), "{gdl}");
     for line in gdl.lines() {
         assert!(
-            !line.trim_start().starts_with("sdk = cargo("),
-            "an uncommented locator with no host to point at: {gdl}"
+            !line.trim_start().starts_with("fills ="),
+            "an uncommented fills with no host to point at: {gdl}"
         );
     }
 }
@@ -842,8 +825,9 @@ fn every_scaffold_shape_evaluates_and_carries_its_own_hints() {
         assert!(gdl.contains("config_schema = config(exposes"), "{kind:?}");
 
         // Shapes are comments until there is something true to write. Live
-        // placeholders fail load (sdk) or diagnostics (plugin_interface /
-        // invented category), so every hint must stay behind `#`.
+        // placeholders fail load (sdk) or diagnostics (fills naming no
+        // declared point / invented category), so every hint must stay behind
+        // `#`.
         for line in gdl.lines() {
             let trimmed = line.trim_start();
             if trimmed.starts_with('#') || trimmed.is_empty() {
@@ -852,7 +836,7 @@ fn every_scaffold_shape_evaluates_and_carries_its_own_hints() {
             assert!(
                 !trimmed.starts_with("config_schema =")
                     && !trimmed.starts_with("sdk = ")
-                    && !trimmed.starts_with("plugin_interface")
+                    && !trimmed.starts_with("fills")
                     && !trimmed.starts_with("provides =")
                     && !trimmed.starts_with("consumes =")
                     && !trimmed.starts_with("description =")
@@ -873,7 +857,7 @@ fn every_scaffold_shape_evaluates_and_carries_its_own_hints() {
             GearKind::Service => {
                 assert!(gdl.contains("provides = [provide("), "{kind:?}");
                 assert!(gdl.contains("consumes = [consume("), "{kind:?}");
-                assert!(!gdl.contains("plugin_interface"), "{kind:?}");
+                assert!(!gdl.contains("fills ="), "{kind:?}");
                 // Doc in the stub, not code -- the toolkit path is unknown here.
                 assert!(lib.contains("impl Gear"), "{kind:?}");
                 assert!(
@@ -885,10 +869,9 @@ fn every_scaffold_shape_evaluates_and_carries_its_own_hints() {
                 );
             }
             GearKind::Plugin => {
-                // The locator that decides which point it fills, and the escape
-                // hatch for the case reading the `impl` cannot decide.
-                assert!(gdl.contains("sdk = cargo("), "{kind:?}");
-                assert!(gdl.contains("plugin_interface"), "{kind:?}");
+                // The declaration that makes it a plugin, commented until a
+                // host is chosen.
+                assert!(gdl.contains("# fills = "), "{kind:?}");
                 assert!(lib.contains("GBX0518"), "{kind:?}");
             }
         }

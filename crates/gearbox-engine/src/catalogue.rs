@@ -134,6 +134,10 @@ pub fn load_catalogue_staged(
     let gdl = GdlEngine::new();
     let mut catalogue = Catalogue::default();
     let mut contracts = ContractMerge::default();
+    // What each gear's crate implements, kept aside for the plugin join below:
+    // evidence a declared `fills` is checked against, not part of the descriptor.
+    let mut implemented: BTreeMap<gearbox_ir::GearId, std::collections::BTreeSet<String>> =
+        BTreeMap::new();
     let mut diagnostics = Diagnostics::new();
     // One cache per load: a crate named by several gears is parsed once.
     let mut scans = crate::scans::CrateScans::new();
@@ -278,6 +282,9 @@ pub fn load_catalogue_staged(
             let Some(merged) = merged else { continue };
 
             let id = merged.gear.id.clone();
+            implemented
+                .entry(id.clone())
+                .or_insert_with(|| merged.implemented_traits.clone());
             // **The first declaration wins, and the second is an error.**
             //
             // This used to `insert` unconditionally, so the diagnostic below said
@@ -327,6 +334,8 @@ pub fn load_catalogue_staged(
     // so an owner described later than the description that pulls its contract
     // in would look absent.
     report_unknown_contract_owners(&catalogue, roots, &mut diagnostics);
+    // Same reason: a plugin's host may be described later in discovery order.
+    join_plugin_points(&mut catalogue, &implemented, roots, &mut diagnostics);
 
     diagnostics.finish();
     catalogue.diagnostics = diagnostics;
@@ -527,47 +536,33 @@ fn project_and_merge(
         .map(|manifest| manifest.features.clone())
         .unwrap_or_default();
 
-    let plugin = crate::plugin::project(identity, decl, &files, &sdk_files, diagnostics);
-    let config = crate::config::project(identity, decl, &files, diagnostics);
+    // A crate may declare several gears -- mini-chat declares a host and two
+    // plugins -- and each reads only the files it owns, or the host finds three
+    // config structs and every plugin sees the others' impls.
+    let owned = gearbox_project::files_owned_by(&files, &site.relative);
+    let own_files: &[gearbox_project::RustFile] = owned.as_deref().unwrap_or(&files);
 
-    // GTS types a gear *exposes* are the ones declared in its SDK; a type in the
-    // main crate is internal and a `gts_id!` reference is not a declaration.
-    //
-    // A plugin points at its *host's* SDK, so the types declared there belong to
-    // the host, not to each of its implementations. Without this, one plugin-spec
-    // type declared once in `authn-resolver-sdk` would be reported by the host
-    // and by all of its plugins alike.
-    let sdk_is_the_hosts = plugin.fills.as_ref().is_some_and(|f| {
-        decl.sdk
-            .as_ref()
-            .is_some_and(|sdk| f.point.sdk_lib == sdk.lib_ident)
-    });
+    let gts_types = sdk_gts_types(&sdk_files, identity, diagnostics);
 
-    let gts_types = if sdk_is_the_hosts {
-        Vec::new()
-    } else {
-        match gearbox_project::project_gts_types(&sdk_files) {
-            Ok(types) => types
-                .into_iter()
-                .map(|t| gearbox_ir::GtsTypeDecl {
-                    type_id: t.type_id,
-                    description: t.description,
-                    relative: t.relative,
-                })
-                .collect(),
-            Err(e) => {
-                diagnostics.push(
-                    Diagnostic::error(
-                        DiagnosticCode::GdlEval,
-                        format!("cannot project GTS types: {e}"),
-                        "the declaration shape is not modelled; see gearbox-project's gts module",
-                    )
-                    .at(Location::file(identity.uri.clone())),
-                );
-                Vec::new()
-            }
-        }
-    };
+    let point_sdks = point_sdks(root, identity, decl, &sdk_files, scans, diagnostics);
+    let trait_sdks: Vec<Option<crate::plugin::TraitSdk<'_>>> = point_sdks
+        .iter()
+        .map(|entry| {
+            entry
+                .as_ref()
+                .map(|(record, files)| crate::plugin::TraitSdk { record, files })
+        })
+        .collect();
+
+    let plugin = crate::plugin::project(
+        identity,
+        decl,
+        own_files,
+        &gts_types,
+        &trait_sdks,
+        diagnostics,
+    );
+    let config = crate::config::project(identity, decl, own_files, diagnostics);
 
     // Documents: pure filesystem lookup, no parsing, so it costs a few stats.
     // `.` cannot fail to resolve, so the description's own directory is the one
@@ -642,6 +637,199 @@ fn report_unknown_contract_owners(
             diagnostic = diagnostic.at(Location::file(uri));
         }
         diagnostics.push(diagnostic);
+    }
+}
+
+/// The GTS types a gear exposes: the ones its own SDK declares.
+///
+/// A type in the main crate is internal, and a `gts_id!` reference is not a
+/// declaration. A plugin declares no `sdk` -- its host's SDK is the host's --
+/// so a spec type is attributed once, to the gear that owns it.
+fn sdk_gts_types(
+    sdk_files: &[gearbox_project::RustFile],
+    identity: &FileIdentity,
+    diagnostics: &mut Diagnostics,
+) -> Vec<gearbox_ir::GtsTypeDecl> {
+    match gearbox_project::project_gts_types(sdk_files) {
+        Ok(types) => types
+            .into_iter()
+            .map(|t| gearbox_ir::GtsTypeDecl {
+                type_id: t.type_id,
+                description: t.description,
+                relative: t.relative,
+            })
+            .collect(),
+        Err(e) => {
+            diagnostics.push(
+                Diagnostic::error(
+                    DiagnosticCode::GdlEval,
+                    format!("cannot project GTS types: {e}"),
+                    "the declaration shape is not modelled; see gearbox-project's gts module",
+                )
+                .at(Location::file(identity.uri.clone())),
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// One extension point's trait crate: its locator and its scanned files.
+type PointSdk<'d> = Option<(
+    &'d gearbox_gdl::records::CargoRecord,
+    std::sync::Arc<[gearbox_project::RustFile]>,
+)>;
+
+/// Where each of a gear's extension points finds its trait: the point's own
+/// `sdk` when it names one (bss-rate-provider's sources implement a trait from
+/// the ledger's SDK), the gear's otherwise. Scanned through the same cache as
+/// every other crate, and aligned by index with `decl.extension_points`; `None`
+/// where the crate could not be read, which is reported here.
+fn point_sdks<'d>(
+    root: &SourceRoot,
+    identity: &FileIdentity,
+    decl: &'d gearbox_gdl::GearDecl,
+    sdk_files: &std::sync::Arc<[gearbox_project::RustFile]>,
+    scans: &mut crate::scans::CrateScans,
+    diagnostics: &mut Diagnostics,
+) -> Vec<PointSdk<'d>> {
+    decl.extension_points
+        .iter()
+        .map(|point| match point.sdk.as_ref() {
+            None => decl.sdk.as_ref().map(|sdk| (sdk, sdk_files.clone())),
+            Some(sdk) => {
+                match crate::merge::crate_dir(root, &identity.gdl_path, &sdk.path, &sdk.crate_name)
+                {
+                    Err(e) => {
+                        diagnostics.push(crate::merge::bad_crate_path(
+                            &identity.uri,
+                            "extension_point.sdk",
+                            &sdk.path,
+                            &e,
+                            sdk.declared_at.as_ref(),
+                        ));
+                        None
+                    }
+                    Ok(dir) => match scans.get(&dir) {
+                        Ok(files) => Some((sdk, files)),
+                        Err(e) => {
+                            diagnostics.push(
+                                Diagnostic::error(
+                                    DiagnosticCode::GdlEval,
+                                    format!(
+                                        "cannot read the extension point's sdk crate `{}`: {e}",
+                                        dir.display()
+                                    ),
+                                    "check `extension_point(..., sdk = cargo(..., path = \"...\"))`",
+                                )
+                                .at(Location::or_file(
+                                    point.declared_at.as_ref(),
+                                    &identity.uri,
+                                )),
+                            );
+                            None
+                        }
+                    },
+                }
+            }
+        })
+        .collect()
+}
+
+/// Join every plugin's declared `fills` to the host that declares its spec.
+///
+/// Run once the whole gear set is known, because discovery order says nothing
+/// about hosts coming first. A plugin names only the spec; the trait and SDK are
+/// the host's to state, so `fills.point` is copied from the host's declaration.
+///
+/// - no described gear declares the spec: GBX0519;
+/// - two gears declare it: which one a plugin fills has no answer, so the
+///   second is refused (`GdlCardinality`) and the first is used;
+/// - the plugin's crate implements none of the point's trait: GBX0526, a
+///   warning -- the impl is evidence, and it can hide behind a wrapper this
+///   reader does not follow.
+fn join_plugin_points(
+    catalogue: &mut Catalogue,
+    implemented: &BTreeMap<gearbox_ir::GearId, std::collections::BTreeSet<String>>,
+    roots: &[SourceRoot],
+    diagnostics: &mut Diagnostics,
+) {
+    let mut declared: BTreeMap<String, (gearbox_ir::GearId, gearbox_ir::ExtensionPointDecl)> =
+        BTreeMap::new();
+    for (id, gear) in &catalogue.gears {
+        for point in &gear.extension_points {
+            if let Some((first, _)) = declared.get(&point.spec) {
+                let mut diagnostic = Diagnostic::error(
+                    DiagnosticCode::GdlCardinality,
+                    format!(
+                        "extension point `{}` is declared by both `{first}` and `{id}`; a plugin \
+                         that fills it would have two hosts",
+                        point.spec
+                    ),
+                    "one host declares a spec; remove the other `extension_point(...)`",
+                );
+                if let Some(uri) = description_uri(roots, gear) {
+                    diagnostic = diagnostic.at(Location::or_file(gear.declared_at.as_ref(), &uri));
+                }
+                diagnostics.push(diagnostic);
+                continue;
+            }
+            declared.insert(point.spec.clone(), (id.clone(), point.clone()));
+        }
+    }
+
+    for (id, gear) in &mut catalogue.gears {
+        let Some(fill) = gear.fills.as_mut() else {
+            continue;
+        };
+        let at = |gear: &GearDescriptor| {
+            description_uri(roots, gear)
+                .map(|uri| Location::or_file(gear.declared_at.as_ref(), &uri))
+        };
+        match declared.get(&fill.spec) {
+            None => {
+                let own = fill
+                    .spec
+                    .strip_prefix(crate::plugin::PLUGIN_BASE)
+                    .unwrap_or(&fill.spec)
+                    .to_owned();
+                let mut diagnostic = Diagnostic::error(
+                    DiagnosticCode::PluginSpecUndeclared,
+                    format!(
+                        "`{id}` fills `{own}`, which no described gear declares as an extension \
+                         point"
+                    ),
+                    "the host declares `extension_points = [extension_point(\"...\", trait = \
+                     \"...\")]`; describe it, or fix the spec in `fills`",
+                );
+                if let Some(location) = at(gear) {
+                    diagnostic = diagnostic.at(location);
+                }
+                diagnostics.push(diagnostic);
+            }
+            Some((host, point)) => {
+                fill.point = Some(point.clone());
+                let implements = implemented
+                    .get(id)
+                    .is_some_and(|traits| traits.contains(&point.trait_ident));
+                if !implements {
+                    let mut diagnostic = Diagnostic::new(
+                        DiagnosticCode::PluginImplMissing,
+                        format!(
+                            "`{id}` fills `{host}`'s point, and its crate implements no `{}`",
+                            point.qualified()
+                        ),
+                    )
+                    .with_help(
+                        "check the spec in `fills`; if the impl is behind a wrapper this is \
+                         only a note",
+                    );
+                    if let Some(location) = at(gear) {
+                        diagnostic = diagnostic.at(location);
+                    }
+                    diagnostics.push(diagnostic);
+                }
+            }
+        }
     }
 }
 

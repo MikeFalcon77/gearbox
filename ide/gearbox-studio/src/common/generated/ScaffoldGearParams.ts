@@ -20,14 +20,12 @@ kind: GearKind,
  * What this plugin fills, when the kind is [`GearKind::Plugin`].
  *
  * **Absent keeps the commented shape, and that shape exists for a reason.**
- * An `sdk` locator pointing at a directory that does not exist makes the
- * gear fail to load, and `plugin_interface` naming a trait no `pub trait`
- * backs is refused (GBX0516) -- so with nothing to point at, a scaffold
- * writes the declarations as comments rather than produce a description
- * that is already wrong.
+ * A `fills` naming a spec no described gear declares is refused (GBX0519),
+ * so with no host chosen a scaffold writes the declaration as a comment
+ * rather than produce a description that is already wrong.
  *
  * Present means the client picked a host out of a loaded catalogue, so the
- * locator is a fact rather than a guess and can be written live. That is
+ * spec is a fact rather than a guess and can be written live. That is
  * also what makes the kind visible in the preview: it is the same three
  * files either way, and only the text differs.
  */

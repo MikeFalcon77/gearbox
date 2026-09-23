@@ -21,7 +21,7 @@ use std::process::ExitCode;
 use anyhow::Context as _;
 use clap::{Parser, Subcommand, ValueEnum};
 use gearbox_engine::{SourceRoot, check_plugins, load_catalogue, load_product};
-use gearbox_ir::{Diagnostic, ExtensionPointDecl, GearDescriptor, Severity, SourceId};
+use gearbox_ir::{Diagnostic, GearDescriptor, Severity, SourceId};
 
 #[derive(Parser)]
 #[command(
@@ -315,11 +315,11 @@ fn plugins(
 /// quadratic in catalogue size for a command whose answer is a single join.
 fn implementations_by_point(
     catalogue: &gearbox_ir::Catalogue,
-) -> BTreeMap<&ExtensionPointDecl, Vec<&GearDescriptor>> {
-    let mut by_point: BTreeMap<&ExtensionPointDecl, Vec<&GearDescriptor>> = BTreeMap::new();
+) -> BTreeMap<&str, Vec<&GearDescriptor>> {
+    let mut by_point: BTreeMap<&str, Vec<&GearDescriptor>> = BTreeMap::new();
     for gear in catalogue.gears.values() {
         if let Some(fill) = gear.fills.as_ref() {
-            by_point.entry(&fill.point).or_default().push(gear);
+            by_point.entry(fill.spec.as_str()).or_default().push(gear);
         }
     }
     by_point
@@ -343,7 +343,7 @@ fn list_plugins(catalogue: &gearbox_ir::Catalogue, only: Option<&str>) -> bool {
 
         for point in &host.extension_points {
             println!("\n  extension point  {}", point.qualified());
-            let Some(impls) = by_point.get(point) else {
+            let Some(impls) = by_point.get(point.spec.as_str()) else {
                 println!("    (no implementation in the catalogue)");
                 continue;
             };
@@ -1100,6 +1100,7 @@ mod tests {
 
     fn point() -> ExtensionPointDecl {
         ExtensionPointDecl {
+            spec: "cf.toolkit.plugins.plugin.v1~cf.core.authn_resolver.plugin.v1~".to_owned(),
             trait_ident: "AuthNResolverPluginClient".to_owned(),
             sdk_lib: "authn_resolver_sdk".to_owned(),
             sdk: CargoRef::new(
@@ -1122,7 +1123,8 @@ mod tests {
 
         let mut plugin = gear("static-authn-plugin");
         plugin.fills = Some(PluginFill {
-            point: point(),
+            spec: point().spec,
+            point: Some(point()),
             default_vendor: Some("constructorfabric".to_owned()),
             default_priority: Some(10),
         });

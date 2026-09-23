@@ -32,7 +32,9 @@ pub mod scan;
 #[cfg(test)]
 mod test_corpus;
 
-pub use attribute::{AttributeSite, LocateError, gear_attribute_sites, locate_gear_attribute};
+pub use attribute::{
+    AttributeSite, LocateError, files_owned_by, gear_attribute_sites, locate_gear_attribute,
+};
 pub use cluster::{
     ClusterProjectionError, FeatureGate, ProjectedClusterProvider, SdkDefaultRule,
     project_backend_capabilities, project_provider_name, project_provider_registry,
@@ -49,9 +51,6 @@ pub use error_enum::{ProjectedErrorEnum, ProjectedErrorVariant, project_error_en
 pub use gear::{ProjectedGear, ProjectedLifecycle, project_gear};
 pub use gts::{GtsError, GtsType, gts_type_from_schema, project_gts_types};
 pub use manifest::{CrateManifest, ManifestError, project_manifest};
-pub use plugin::{
-    ExtensionPoint, PluginImplError, VendorDefault, project_extension_points, project_plugin_impl,
-    project_vendor_default,
-};
+pub use plugin::{VendorDefault, implemented_traits, project_vendor_default, public_traits};
 pub use profile::{ProfileProjectionError, ProjectedProfile, project_cluster_profiles};
 pub use scan::{MAX_FILE_BYTES, MAX_FILES, RustFile, ScanError, items, scan_crate};

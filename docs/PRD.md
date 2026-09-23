@@ -436,18 +436,24 @@ contract has no projection for, and **MUST NOT** accept a declared transport lis
 
 - [ ] `p1` - **ID**: `cpt-gearbox-fr-plugin-extension-points`
 
-The system **MUST** read a gear's plugin extension points from the `pub trait *Plugin*` declarations
-in its declared `sdk` crate, **MUST** read which point a gear fills from the unique `impl <point>`
-in its own crate, **MUST** read each side's `vendor` and `priority` defaults from both the
-`impl Default` and the `#[serde(default = "…")]` spellings, and **MUST** report rather than guess
-when a crate implements more than one point.
+The system **MUST** take a gear's plugin extension points and the point it fills from its
+description, keyed by GTS plugin spec (`extension_point(...)`, `fills`), **MUST** verify each
+declared point against the SDK -- the spec a `PluginV1`-derived type it declares, the trait a
+`pub trait` in the crate the point names -- **MUST** report a fill no described gear declares,
+**MUST** read each side's `vendor` and `priority` defaults from both the `impl Default` and the
+`#[serde(default = "…")]` spellings, and **MUST NOT** infer a role from which traits a crate
+implements.
 
-- **Rationale**: Both spellings occur in `gears-rust` — `oidc-authn-plugin` and
-  `keycloak-idp-plugin` use only the second — and a missing default is what the vendor-match check
-  keys on, so reading one spelling would produce a wrong answer rather than a gap.
-- **Verification Method**: Against the real tree, `authn-resolver` yields one extension point and
-  both of its plugins fill it; renaming the trait in the SDK detaches both; removing an `impl`
-  removes that gear from the implementations.
+- **Rationale**: Inferring the role was wrong five ways on the real tree -- proxies and built-ins
+  implementing their host's own trait, a trait without `Plugin` in its name, one crate with three
+  gears, two points over one trait, mocks in test support (ADR-0002, Amendment 2026-09-24). Both
+  default spellings occur in `gears-rust` — `oidc-authn-plugin` and `keycloak-idp-plugin` use only
+  the second — and a missing default is what the vendor-match check keys on, so reading one
+  spelling would produce a wrong answer rather than a gap.
+- **Verification Method**: Against the real tree, `authn-resolver` declares one extension point
+  and both of its plugins fill it; bss-rate-provider's sources join bss-rate-provider and not the
+  ledger, though all three name one trait; a declared spec the SDK lacks is refused; a host whose
+  crate implements its own trait stays a host.
 
 - [ ] `p1` - **ID**: `cpt-gearbox-fr-plugin-selection`
 

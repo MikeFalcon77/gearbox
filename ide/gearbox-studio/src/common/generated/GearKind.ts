@@ -12,9 +12,8 @@
  * What differs is **which declarations the file offers**, not generated code. A
  * scaffold has no compiler and does not know where the toolkit or an SDK lives,
  * so the difference is the next declaration each shape needs, written where it
- * goes -- and for a plugin, written as a *comment*, because `plugin_interface`
- * naming a trait no `pub trait` backs is refused (GBX0516) and an `sdk` locator
- * pointing at a directory that does not exist makes the gear fail to load. A
- * scaffold must not produce a description that is already wrong.
+ * goes -- and for a plugin with no host chosen, written as a *comment*,
+ * because a `fills` naming a spec no described gear declares is refused
+ * (GBX0519). A scaffold must not produce a description that is already wrong.
  */
 export type GearKind = "minimal" | "service" | "plugin";

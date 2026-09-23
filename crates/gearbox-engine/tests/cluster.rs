@@ -181,13 +181,15 @@ fn the_slice_projects_cleanly() {
     // described (credstore, account-management x2, authz-resolver x2), and the
     // license-resolver and usage-collector families whole, and eight plain
     // services (bss-ledger, bss-pricing, file-parser, file-storage,
-    // github-mirror, simple-user-settings, nodes-registry, oagw).
+    // github-mirror, simple-user-settings, nodes-registry, oagw), and the
+    // awkward seven: bss-rate-provider and its two sources, chat-engine, and
+    // mini-chat's host and two co-located plugins.
     //
     // The count is pinned on purpose. It is not what this test is about -- the
     // error list below is -- but a corpus that grows or shrinks under the suite
     // changes what every other corpus test means, and finding that out here is
     // cheaper than reading it as a failure somewhere else.
-    assert_eq!(catalogue.gears.len(), 37);
+    assert_eq!(catalogue.gears.len(), 44);
     let errors: Vec<String> = catalogue
         .diagnostics
         .iter()

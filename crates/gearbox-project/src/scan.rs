@@ -55,6 +55,7 @@ pub const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_FILES: usize = 20_000;
 
 /// One parsed Rust file, with the path to blame in a diagnostic.
+#[derive(Clone)]
 pub struct RustFile {
     /// Absolute path on disk.
     pub path: PathBuf,

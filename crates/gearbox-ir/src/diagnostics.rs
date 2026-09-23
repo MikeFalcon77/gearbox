@@ -1047,7 +1047,12 @@ diagnostic_codes! {
     /// the host's public API, which is what keeps implementations swappable.
     PluginIsolationViolated = "GBX0515", Cluster, Error, true, "plugin consumed directly instead of through its host";
 
-    /// Which extension point a crate fills could not be determined.
+    /// A declared extension point does not check out against its SDK.
+    ///
+    /// Points are declared, and a declaration is checked rather than trusted:
+    /// the spec must be a `PluginV1`-derived GTS type the gear's SDK declares,
+    /// and the trait a `pub trait` in the SDK it names. Either missing is a
+    /// point that exists only in the description.
     PluginPointUndetermined = "GBX0516", Cluster, Error, false, "plugin extension point could not be determined";
 
     /// Several selected plugins share a vendor for one extension point.
@@ -1072,6 +1077,13 @@ diagnostic_codes! {
     /// the Add Gear panel offered the choice because nothing refused it, and a
     /// client is not a boundary (`cpt-gearbox-fr-rpc-writes-opt-in`).
     PluginPointNotDeclared = "GBX0518", Cluster, Error, false, "plugin fills a point its host does not declare";
+
+    /// A plugin fills a spec no described gear declares as an extension point.
+    ///
+    /// The plugin names only the spec; which trait and which SDK are the host's
+    /// to say. With no host describing it, the fill has nothing to join to, so
+    /// it is reported rather than left to look connected.
+    PluginSpecUndeclared = "GBX0519", Cluster, Error, false, "plugin fills a point no described gear declares";
 
     /// A cluster backend decides a capability at run time, so none is claimed
     /// for it at composition time.
@@ -1145,6 +1157,15 @@ diagnostic_codes! {
     /// Reported against the description rather than at startup, which is the
     /// whole point: the feature is selected two lines away, in the same file.
     ClusterProviderNeedsFeature = "GBX0525", Cluster, Error, true, "a cluster provider is not in this build";
+
+    /// A gear declares it fills a point, and its crate implements none of that
+    /// point's trait.
+    ///
+    /// A warning, because the implementation is evidence and not the source of
+    /// the role: an impl can sit in a generic wrapper or a macro this reader
+    /// cannot see. But the ordinary cause is a `fills` naming the wrong spec,
+    /// and that one is worth a line.
+    PluginImplMissing = "GBX0526", Cluster, Warning, false, "a plugin implements none of its point's trait";
 
     // ---------------------------------------------------------------- GBX06xx
     // GBX0601 is deliberately absent. It said roles were "not supported by the

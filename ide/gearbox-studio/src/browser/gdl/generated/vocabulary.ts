@@ -14,6 +14,7 @@ export const GEAR_FUNCTIONS: readonly string[] = [
   "consume",
   "docs",
   "endpoint",
+  "extension_point",
   "fail",
   "feature",
   "gear",

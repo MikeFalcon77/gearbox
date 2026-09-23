@@ -37,8 +37,8 @@ use starlark::values::none::NoneType;
 use crate::edit::PROFILE_KINDS;
 use crate::records::{
     CargoRecord, ClusterPluginRecord, ClusterRequireRecord, ConfigRecord, ConsumeRecord,
-    DocsRecord, EndpointRecord, FeatureRecord, GrpcRecord, LifecycleRecord, ProvideRecord,
-    RestRecord, RoleRecord,
+    DocsRecord, EndpointRecord, ExtensionPointRecord, FeatureRecord, GrpcRecord, LifecycleRecord,
+    ProvideRecord, RestRecord, RoleRecord,
 };
 use crate::sink::{GdlSink, GearDecl};
 use crate::values::GdlEnum;
@@ -53,6 +53,31 @@ fn sink<'a>(eval: &'a Evaluator<'_, '_, '_>) -> anyhow::Result<&'a GdlSink> {
     eval.extra
         .and_then(|e| e.downcast_ref::<GdlSink>())
         .ok_or_else(|| anyhow::anyhow!("internal error: no GdlSink installed on the evaluator"))
+}
+
+/// A plugin spec as a description writes it: the family's own GTS segment.
+///
+/// One segment, ending in `~`, and without the `PluginV1` base -- every plugin
+/// spec derives from `cf.toolkit.plugins.plugin.v1~`, so writing it would be the
+/// same prefix on every line, and a full chain written here would be matched
+/// against nothing. Only the shape is checked here; whether the SDK declares it
+/// is the engine's question.
+fn check_plugin_spec(field: &str, spec: &str) -> anyhow::Result<()> {
+    const BASE: &str = "cf.toolkit.plugins.plugin.v1~";
+    if let Some(own) = spec.strip_prefix(BASE) {
+        return Err(anyhow::anyhow!(
+            "{field}: write the spec's own segment `{own}`, without the `{BASE}` base every \
+             plugin spec shares"
+        ));
+    }
+    let segments = spec.matches('~').count();
+    if spec.starts_with("gts.") || segments != 1 || !spec.ends_with('~') || spec.len() < 2 {
+        return Err(anyhow::anyhow!(
+            "{field}: `{spec}` is not a plugin spec segment; write one GTS segment ending in `~`, \
+             e.g. \"cf.core.authn_resolver.plugin.v1~\""
+        ));
+    }
+    Ok(())
 }
 
 /// Refuse a field the Rust attributes own.
@@ -128,6 +153,33 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         Ok(ConfigRecord {
             rust: rust.map(str::to_owned),
             exposes: exposes.map(|l| l.items).unwrap_or_default(),
+            declared_at: crate::declarative::call_location(eval),
+        })
+    }
+
+    /// `extension_point("spec", trait = "...", sdk = cargo(...))` -- one point a
+    /// host lets plugins fill.
+    ///
+    /// The spec is positional because it is the identity: it is what instances
+    /// register under and what the host selects by. `trait` and `sdk` are what
+    /// a person needs to write a plugin for it.
+    fn extension_point<'v>(
+        #[starlark(require = pos)] spec: &str,
+        #[starlark(require = named)] r#trait: &str,
+        #[starlark(require = named)] sdk: Option<&'v CargoRecord>,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<ExtensionPointRecord> {
+        check_plugin_spec("extension_point", spec)?;
+        if r#trait.trim().is_empty() {
+            return Err(anyhow::anyhow!(
+                "extension_point(\"{spec}\", trait = \"\") names no trait; write the \
+                 ClientHub interface plugins register under, e.g. `trait = \"AuthNResolverPluginClient\"`"
+            ));
+        }
+        Ok(ExtensionPointRecord {
+            spec: spec.to_owned(),
+            trait_ident: r#trait.to_owned(),
+            sdk: sdk.cloned(),
             declared_at: crate::declarative::call_location(eval),
         })
     }
@@ -379,14 +431,13 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] visibility: Option<&str>,
         #[starlark(require = named)] package: &'v CargoRecord,
         // A locator, like `cluster_plugins`: nothing in a gear's own crate says
-        // where its SDK lives, and the SDK is what declares the plugin-API
-        // traits this gear expects or fills.
+        // where its SDK lives, and the SDK is what declares the GTS types this
+        // gear exposes and the traits its extension points name.
         #[starlark(require = named)] sdk: Option<&'v CargoRecord>,
-        // Escape hatch, not the primary mechanism: only for a crate whose
-        // extension point cannot be read (the bss-rate-provider plugins
-        // implement no trait with `Plugin` in the name). Same shape as `attr`
-        // on `cargo(...)` and `backend` on `cluster_plugin(...)`.
-        #[starlark(require = named)] plugin_interface: Option<&str>,
+        // The plugin role, declared on both sides and keyed by GTS spec. See
+        // `ExtensionPointRecord` for why this is no longer read from the code.
+        #[starlark(require = named)] extension_points: Option<UnpackList<&'v ExtensionPointRecord>>,
+        #[starlark(require = named)] fills: Option<&str>,
         #[starlark(require = named)] docs: Option<&'v DocsRecord>,
         #[starlark(require = named)] provides: Option<UnpackList<&'v ProvideRecord>>,
         #[starlark(require = named)] consumes: Option<UnpackList<&'v ConsumeRecord>>,
@@ -437,6 +488,10 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             }
         }
 
+        if let Some(spec) = fills {
+            check_plugin_spec("fills", spec)?;
+        }
+
         sink(eval)?.set_gear(GearDecl {
             name: name.map(str::to_owned),
             description: description.map(str::to_owned),
@@ -444,7 +499,10 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             visibility: visibility.map(str::to_owned),
             package: Some(package.clone()),
             sdk: sdk.cloned(),
-            plugin_interface: plugin_interface.map(str::to_owned),
+            extension_points: extension_points
+                .map(|l| l.items.into_iter().cloned().collect())
+                .unwrap_or_default(),
+            fills: fills.map(str::to_owned),
             docs: docs.cloned(),
             provides: provides
                 .map(|l| l.items.into_iter().cloned().collect())

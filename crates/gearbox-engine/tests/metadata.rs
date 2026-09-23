@@ -230,7 +230,10 @@ fn an_openapi_spec_is_claimed_only_by_the_gears_that_have_one() {
     // slice, and they do have one: `gears/credstore/docs/api/openapi.yaml` and
     // `gears/system/resource-group/docs/openapi.yaml`. So the check now proves
     // both halves at once -- the convention finds a real spec, and invents one
-    // for none of the other sixteen.
+    // for none of the others. Describing the rest of the corpus added two more
+    // that are real: `gears/chat-engine/docs/openapi.json` and
+    // `gears/mini-chat/docs/openapi.json` -- and none for the other thirty-nine
+    // gears, mini-chat's two co-located plugins included.
     let c = require!();
     let claimed: Vec<&str> = c
         .gears
@@ -240,7 +243,13 @@ fn an_openapi_spec_is_claimed_only_by_the_gears_that_have_one() {
         .collect();
     assert_eq!(
         claimed,
-        ["credstore", "event-broker", "resource-group"],
+        [
+            "chat-engine",
+            "credstore",
+            "event-broker",
+            "mini-chat",
+            "resource-group"
+        ],
         "openapi claims moved"
     );
 }

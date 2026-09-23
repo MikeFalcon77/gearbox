@@ -21,6 +21,7 @@
 // the resolver wrote when it created the edge, while it still knew the specifics
 // (`cpt-gearbox-fr-explain`). This walks and prints.
 
+import { fillLabel, pointKey, pointLabel, specSegment } from "../../common/extension-points";
 import { codicon, ReactWidget } from "@theia/core/lib/browser";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import { CommandRegistry } from "@theia/core";
@@ -305,10 +306,9 @@ export class InspectorWidget extends ReactWidget {
             <span>extension points</span>
             <span>
               {(gear.extension_points ?? []).map((point) => (
-                <div key={`${point.sdk_lib}::${point.trait_ident}`}>
-                  <code>
-                    {point.sdk_lib}::{point.trait_ident}
-                  </code>
+                <div key={pointKey(point)} data-extension-point={specSegment(point.spec)}>
+                  <code>{pointLabel(point)}</code>{" "}
+                  <span className="gbx-muted">spec {specSegment(point.spec)}</span>
                   {gear.vendor_selector !== null && gear.vendor_selector !== undefined && (
                     <>
                       {" "}
@@ -325,7 +325,13 @@ export class InspectorWidget extends ReactWidget {
           <div className="gbx-kv">
             <span>fills</span>
             <span>
-              <code>{gear.fills.point.trait_ident}</code>
+              <code>{fillLabel(gear.fills)}</code>
+              {!gear.fills.point && (
+                <span className="gbx-muted" data-fills-unjoined="true">
+                  {" "}
+                  -- no described host declares it
+                </span>
+              )}
               {gear.fills.default_vendor !== null && gear.fills.default_vendor !== undefined && (
                 <>
                   {" "}

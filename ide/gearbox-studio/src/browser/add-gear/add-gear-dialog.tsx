@@ -9,7 +9,7 @@ import type { ProductStore } from "../product-store";
 import type { ProductEditService } from "../product-edit-service";
 import type { SelectionService } from "../shell/selection-service";
 import { SHOW_PRODUCT } from "../shell/session-command-ids";
-import { fillsPointOf, pointKey, pointsOf } from "../../common/extension-points";
+import { fillLabel, fillsPointOf, pointsOf } from "../../common/extension-points";
 import { productIdentity } from "../shell/screens";
 import { impactOf, type Impact } from "./impact";
 import { DiagnosticsList } from "../diagnostics/diagnostics-list";
@@ -154,7 +154,7 @@ export class AddGearDialog extends ReactDialog<boolean> {
     if (gear.fills) {
       const hosts = this.hosts(gear);
       if (!hosts.length) {
-        return `Nothing in this product declares ${gear.fills.point.trait_ident}, ` +
+        return `Nothing in this product declares ${fillLabel(gear.fills)}, ` +
           "so there is no gear for this plugin to fill a point on.";
       }
       if (!this.host) return "Choose the gear that will host this plugin.";
@@ -291,7 +291,7 @@ export class AddGearDialog extends ReactDialog<boolean> {
 
   protected render(): React.ReactNode {
     const chosen = this.chosen(), all = this.descriptors();
-    const filtered = all.filter(d => (!this.initial.point || (d.fills && pointKey(d.fills.point) === this.initial.point)) &&
+    const filtered = all.filter(d => (!this.initial.point || (d.fills && d.fills.spec === this.initial.point)) &&
       (!this.initial.host || !!d.fills) && (!this.category || d.category === this.category) &&
       `${d.id} ${d.display_name} ${d.description}`.toLowerCase().includes(this.search.toLowerCase()));
     const introduced = this.impact?.newDiagnostics.length ?? 0;

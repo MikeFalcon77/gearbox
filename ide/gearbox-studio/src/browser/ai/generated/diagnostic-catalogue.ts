@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 97, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 99, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -634,7 +634,7 @@ export const DIAGNOSTIC_CATALOGUE: {
     title: "plugin extension point could not be determined",
     severity: "error",
     domain: "cluster",
-    docs: "Which extension point a crate fills could not be determined.",
+    docs: "A declared extension point does not check out against its SDK.\n\nPoints are declared, and a declaration is checked rather than trusted:\nthe spec must be a `PluginV1`-derived GTS type the gear's SDK declares,\nand the trait a `pub trait` in the SDK it names. Either missing is a\npoint that exists only in the description.",
     requiresEvidence: false,
   },
   GBX0517: {
@@ -651,6 +651,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "error",
     domain: "cluster",
     docs: "A gear lists a plugin under a host that does not declare that point.\n\nThe gap [`PluginHostNotSelected`] leaves. That code asks whether *some*\nselected gear expects the plugin's point, which is the right question for\na plugin selected as an ordinary gear -- and it says nothing about the\n`plugins = [...]` list a plugin was actually written into. So a product\ncould list an authentication plugin under `types-registry`, whose\nprojected `extension_points` is empty, and be told nothing: the host\nlooks for no implementation, the plugin registers for a trait nobody\nqueries, and the link is inert.\n\nFound by a UX pass rather than by a resolution, which is the useful part:\nthe Add Gear panel offered the choice because nothing refused it, and a\nclient is not a boundary (`cpt-gearbox-fr-rpc-writes-opt-in`).",
+    requiresEvidence: false,
+  },
+  GBX0519: {
+    code: "GBX0519",
+    title: "plugin fills a point no described gear declares",
+    severity: "error",
+    domain: "cluster",
+    docs: "A plugin fills a spec no described gear declares as an extension point.\n\nThe plugin names only the spec; which trait and which SDK are the host's\nto say. With no host describing it, the fill has nothing to join to, so\nit is reported rather than left to look connected.",
     requiresEvidence: false,
   },
   GBX0520: {
@@ -701,6 +709,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     domain: "cluster",
     docs: "A `provider(...)` names a backend this build will not contain.\n\nA registration inside a `#[cfg(feature = \"...\")]` exists only where that\nfeature is enabled. The cluster crate says so of its Kubernetes\nproviders in its own words -- \"a profile binding `provider: k8s`\nrequires a build with this feature\" -- and until the catalogue could\ncarry the condition, the only thing standing between a product and a\nbinding its binary cannot honour was that no such provider existed. One\ndoes now, and it is the tree's first native leader election, so the\nfailure it would cause is the silent one: a scope that looks bound and\nelects a leader per replica.\n\nReported against the description rather than at startup, which is the\nwhole point: the feature is selected two lines away, in the same file.",
     requiresEvidence: true,
+  },
+  GBX0526: {
+    code: "GBX0526",
+    title: "a plugin implements none of its point's trait",
+    severity: "warning",
+    domain: "cluster",
+    docs: "A gear declares it fills a point, and its crate implements none of that\npoint's trait.\n\nA warning, because the implementation is evidence and not the source of\nthe role: an impl can sit in a generic wrapper or a macro this reader\ncannot see. But the ordinary cause is a `fills` naming the wrong spec,\nand that one is worth a line.",
+    requiresEvidence: false,
   },
   GBX0602: {
     code: "GBX0602",

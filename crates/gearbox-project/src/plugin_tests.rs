@@ -9,9 +9,10 @@
     reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
 )]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::*;
+use crate::attribute::files_owned_by;
 use crate::scan::scan_crate;
 use crate::test_corpus::require;
 
@@ -28,140 +29,6 @@ fn tree(rel: &str) -> Option<Vec<RustFile>> {
     Some(scan_crate(&dir).unwrap_or_else(|e| panic!("scan {rel}: {e}")))
 }
 
-fn idents(points: &[ExtensionPoint]) -> Vec<&str> {
-    points.iter().map(|p| p.trait_ident.as_str()).collect()
-}
-
-// ---------------------------------------------------------------- points
-
-#[test]
-fn a_public_plugin_trait_is_an_extension_point() {
-    let src = r"
-        pub trait AuthNResolverPluginClient: Send + Sync {}
-        pub trait AuthNResolverClient: Send + Sync {}   // public API, not a point
-        trait PrivatePluginThing {}                      // not public
-    ";
-    assert_eq!(
-        idents(&project_extension_points(&[file(src)])),
-        vec!["AuthNResolverPluginClient"],
-        "only public traits with `Plugin` in the ident; the public API trait is \
-         what consumers use and is not an extension point"
-    );
-}
-
-#[test]
-fn a_crate_may_declare_several_points() {
-    // mini-chat-sdk is the real instance of this.
-    let src = r"
-        pub trait MiniChatAuditPluginClientV1 {}
-        pub trait MiniChatModelPolicyPluginClientV1 {}
-    ";
-    assert_eq!(
-        idents(&project_extension_points(&[file(src)])),
-        vec![
-            "MiniChatAuditPluginClientV1",
-            "MiniChatModelPolicyPluginClientV1"
-        ]
-    );
-}
-
-#[test]
-fn points_come_from_the_real_sdks() {
-    let authn = require!(tree("gears/system/authn-resolver/authn-resolver-sdk"));
-    assert_eq!(
-        idents(&project_extension_points(&authn)),
-        vec!["AuthNResolverPluginClient"]
-    );
-
-    let mini = require!(tree("gears/mini-chat/mini-chat-sdk"));
-    let points = project_extension_points(&mini);
-    assert!(
-        points.len() >= 2,
-        "mini-chat declares two extension points, got {:?}",
-        idents(&points)
-    );
-}
-
-// ---------------------------------------------------------------- impls
-
-fn points_of(idents: &[&str]) -> Vec<ExtensionPoint> {
-    idents
-        .iter()
-        .map(|i| ExtensionPoint {
-            trait_ident: (*i).to_owned(),
-            relative: PathBuf::new(),
-            line: 1,
-        })
-        .collect()
-}
-
-#[test]
-fn a_plugin_fills_the_point_it_implements() {
-    let src = r"
-        #[async_trait]
-        impl AuthNResolverPluginClient for Service {}
-    ";
-    let points = points_of(&["AuthNResolverPluginClient"]);
-    assert_eq!(
-        project_plugin_impl(&[file(src)], &points).unwrap(),
-        Some("AuthNResolverPluginClient".to_owned())
-    );
-}
-
-#[test]
-fn a_gear_that_implements_no_point_is_not_a_plugin() {
-    let src = "impl Gear for SomeGear {}";
-    let points = points_of(&["AuthNResolverPluginClient"]);
-    assert_eq!(project_plugin_impl(&[file(src)], &points).unwrap(), None);
-}
-
-#[test]
-fn implementing_two_points_is_ambiguous_not_guessed() {
-    let src = r"
-        impl AuditPluginClientV1 for A {}
-        impl PolicyPluginClientV1 for B {}
-    ";
-    let points = points_of(&["AuditPluginClientV1", "PolicyPluginClientV1"]);
-    let err = project_plugin_impl(&[file(src)], &points).unwrap_err();
-    assert_eq!(
-        err,
-        PluginImplError::Ambiguous {
-            points: vec![
-                "AuditPluginClientV1".to_owned(),
-                "PolicyPluginClientV1".to_owned()
-            ]
-        },
-        "which plugin this gear *is* has no single answer, so it must be reported"
-    );
-}
-
-#[test]
-fn real_plugins_fill_their_real_points() {
-    let sdk = require!(tree("gears/system/authn-resolver/authn-resolver-sdk"));
-    let points = project_extension_points(&sdk);
-
-    for plugin in ["static-authn-plugin", "oidc-authn-plugin"] {
-        let files = require!(tree(&format!(
-            "gears/system/authn-resolver/plugins/{plugin}"
-        )));
-        assert_eq!(
-            project_plugin_impl(&files, &points).unwrap(),
-            Some("AuthNResolverPluginClient".to_owned()),
-            "{plugin} must fill the point its SDK declares"
-        );
-    }
-}
-
-#[test]
-fn the_host_itself_does_not_fill_its_own_point() {
-    // A host consumes the point; it does not implement it. Getting this wrong
-    // would make every host look like its own plugin.
-    let sdk = require!(tree("gears/system/authn-resolver/authn-resolver-sdk"));
-    let points = project_extension_points(&sdk);
-    let host = require!(tree("gears/system/authn-resolver/authn-resolver"));
-    assert_eq!(project_plugin_impl(&host, &points).unwrap(), None);
-}
-
 fn at(relative: &str, src: &str) -> RustFile {
     RustFile {
         path: PathBuf::from(relative),
@@ -170,11 +37,54 @@ fn at(relative: &str, src: &str) -> RustFile {
     }
 }
 
+fn names(set: &std::collections::BTreeSet<String>) -> Vec<&str> {
+    set.iter().map(String::as_str).collect()
+}
+
+// ---------------------------------------------------------------- traits
+
 #[test]
-fn a_mock_in_test_support_does_not_make_the_host_a_plugin() {
+fn every_public_trait_is_listed_whatever_its_name() {
+    // The point is declared now, so the reader does not filter on `Plugin`:
+    // `RateProviderV1` is as valid a trait to name as any.
+    let sdk = file(
+        "pub trait AuthNResolverPluginClient {}
+         pub trait RateProviderV1 {}
+         trait Private {}
+         pub(crate) trait CrateOnly {}",
+    );
+    assert_eq!(
+        names(&public_traits(&[sdk])),
+        ["AuthNResolverPluginClient", "RateProviderV1"]
+    );
+}
+
+#[test]
+fn the_real_ledger_sdk_declares_the_rate_provider_trait() {
+    // The trait bss-rate-provider's sources implement lives in *another* gear's
+    // SDK, and has no `Plugin` in its name -- the case the heuristic missed.
+    let sdk = require!(tree("gears/bss/ledger/ledger-sdk"));
+    assert!(public_traits(&sdk).contains("RateProviderV1"));
+}
+
+// ---------------------------------------------------------------- impls
+
+#[test]
+fn implemented_traits_are_read_by_last_segment() {
+    let files = [file(
+        "pub struct A; impl sdk::AuthNResolverPluginClient for A {}
+         impl Default for A { fn default() -> Self { A } }",
+    )];
+    assert_eq!(
+        names(&implemented_traits(&files)),
+        ["AuthNResolverPluginClient", "Default"]
+    );
+}
+
+#[test]
+fn a_mock_in_test_support_is_not_evidence() {
     // The usage-collector shape: the host's own tests implement its plugin
     // trait, in a file that `domain/mod.rs` pulls in under `cfg(test)`.
-    let points = points_of(&["UsageCollectorPluginV1"]);
     let crate_files = [
         at("lib.rs", "pub mod domain;"),
         at(
@@ -187,7 +97,7 @@ fn a_mock_in_test_support_does_not_make_the_host_a_plugin() {
             "pub struct MockPlugin; impl UsageCollectorPluginV1 for MockPlugin {}",
         ),
     ];
-    assert_eq!(project_plugin_impl(&crate_files, &points).unwrap(), None);
+    assert!(!implemented_traits(&crate_files).contains("UsageCollectorPluginV1"));
 }
 
 #[test]
@@ -230,63 +140,93 @@ fn a_test_module_named_by_path_and_its_children_are_test_code() {
 }
 
 #[test]
-fn a_gate_that_also_admits_ordinary_builds_is_not_test_code() {
+fn a_gate_that_also_admits_ordinary_builds_is_evidence() {
     // `any(test, ...)` compiles the impl outside tests too, so it still counts.
-    let points = points_of(&["P"]);
     let files = [at(
         "lib.rs",
         "pub struct X; #[cfg(any(test, feature = \"mock\"))] impl P for X {}",
     )];
-    assert_eq!(
-        project_plugin_impl(&files, &points).unwrap(),
-        Some("P".to_owned())
-    );
+    assert!(implemented_traits(&files).contains("P"));
     let gated = [at("lib.rs", "pub struct X; #[cfg(test)] impl P for X {}")];
-    assert_eq!(project_plugin_impl(&gated, &points).unwrap(), None);
+    assert!(!implemented_traits(&gated).contains("P"));
 }
 
 #[test]
-fn real_hosts_with_mock_plugins_are_hosts() {
-    // Each of these implements its own plugin trait in test support, and each
-    // was projected as its own plugin until test code stopped counting.
-    for (sdk, host) in [
+fn real_hosts_with_mock_plugins_implement_nothing_of_their_own_point() {
+    // Each of these implements its own plugin trait in test support only.
+    for (host, point) in [
         (
-            "gears/system/usage-collector/usage-collector-sdk",
             "gears/system/usage-collector/usage-collector",
+            "UsageCollectorPluginV1",
         ),
         (
-            "gears/system/license-resolver/license-resolver-sdk",
             "gears/system/license-resolver/license-resolver",
+            "LicenseResolverPluginClient",
         ),
-        ("gears/credstore/credstore-sdk", "gears/credstore/credstore"),
+        ("gears/credstore/credstore", "CredStorePluginClientV1"),
     ] {
-        let points = project_extension_points(&require!(tree(sdk)));
-        assert!(!points.is_empty(), "{sdk} declares a plugin trait");
         let files = require!(tree(host));
-        assert_eq!(
-            project_plugin_impl(&files, &points).unwrap(),
-            None,
-            "{host} is a host, not its own plugin"
+        assert!(
+            !implemented_traits(&files).contains(point),
+            "{host}: a test mock is not evidence"
         );
     }
 }
 
+// ---------------------------------------------------------------- ownership
+
 #[test]
-fn account_management_still_reads_as_filling_its_own_point() {
-    // **Recorded, not endorsed.** account-management implements
-    // `IdpPluginClient` outside tests, twice: `NoopIdpProvider` and the
-    // `LazyIdpProvider` proxy that forwards to whichever plugin the hub holds.
-    // "Implements the trait" cannot tell a forwarding proxy from a plugin, and
-    // neither can the hub, which it both registers into and looks up from.
-    // This pins today's answer so the day it changes is a decision, not drift.
-    let points = project_extension_points(&require!(tree(
-        "gears/system/account-management/account-management-sdk"
-    )));
-    let files = require!(tree("gears/system/account-management/account-management"));
+fn a_crate_with_several_gears_splits_its_files_by_the_deepest_attribute() {
+    // The mini-chat shape: the host's attribute at the top, each plugin's in
+    // its own directory, and a file under a plugin's directory is that
+    // plugin's alone.
+    let gear = |name: &str| format!("#[toolkit::gear(name = \"{name}\")] pub struct G;");
+    let files = [
+        at("gear.rs", &gear("host")),
+        at("lib.rs", "pub mod gear; pub mod plugins;"),
+        at("plugins/audit/gear.rs", &gear("audit")),
+        at("plugins/audit/service.rs", "impl AuditPlugin for S {}"),
+        at("plugins/policy/gear.rs", &gear("policy")),
+        at("plugins/policy/service.rs", "impl PolicyPlugin for S {}"),
+    ];
+    let rel = |f: &RustFile| f.relative.display().to_string();
+
+    let host = files_owned_by(&files, Path::new("gear.rs")).expect("narrowed");
     assert_eq!(
-        project_plugin_impl(&files, &points).unwrap(),
-        Some("IdpPluginClient".to_owned())
+        host.iter().map(rel).collect::<Vec<_>>(),
+        ["gear.rs", "lib.rs"]
     );
+
+    let audit = files_owned_by(&files, Path::new("plugins/audit/gear.rs")).expect("narrowed");
+    assert_eq!(
+        audit.iter().map(rel).collect::<Vec<_>>(),
+        ["plugins/audit/gear.rs", "plugins/audit/service.rs"]
+    );
+    assert!(!implemented_traits(&audit).contains("PolicyPlugin"));
+}
+
+#[test]
+fn a_single_gear_crate_is_not_copied() {
+    let files = [
+        at("gear.rs", "#[toolkit::gear(name = \"only\")] pub struct G;"),
+        at("lib.rs", ""),
+    ];
+    assert!(files_owned_by(&files, Path::new("gear.rs")).is_none());
+}
+
+#[test]
+fn real_mini_chat_plugins_each_implement_only_their_own_trait() {
+    let files = require!(tree("gears/mini-chat/mini-chat"));
+    let audit = files_owned_by(&files, Path::new("infra/plugins/static_audit/gear.rs"))
+        .expect("mini-chat declares several gears");
+    let traits = implemented_traits(&audit);
+    assert!(traits.contains("MiniChatAuditPluginClientV1"));
+    assert!(!traits.contains("MiniChatModelPolicyPluginClientV1"));
+
+    let host = files_owned_by(&files, Path::new("gear.rs")).expect("narrowed");
+    let traits = implemented_traits(&host);
+    assert!(!traits.contains("MiniChatAuditPluginClientV1"));
+    assert!(!traits.contains("MiniChatModelPolicyPluginClientV1"));
 }
 
 // ---------------------------------------------------------------- defaults
@@ -437,40 +377,32 @@ fn real_vendor_defaults_are_read_in_both_shapes() {
 }
 
 #[test]
-fn the_account_management_defaults_really_do_disagree() {
-    // The motivating case. account-management's selector defaults to
-    // "constructorfabric" while neither IDP plugin does -- so on defaults alone
-    // that host resolves nothing. This asserts the projection sees it.
+fn account_managements_selector_is_misread_from_its_other_role() {
+    // **Recorded, not endorsed.** This test used to be called "the defaults
+    // really do disagree" and to call the disagreement the motivating case for
+    // GBX0512. It was a misreading: account-management selects its IdP plugin by
+    // `idp.vendor`, whose default is "cf" -- the same as static-idp-plugin's --
+    // and the "constructorfabric" read here is `tr_plugin.vendor`, the vendor of
+    // its *other* role, as a tenant-resolver plugin. `project_vendor_default`
+    // takes the first `*Config` with a `vendor` default, and this crate has two.
+    //
+    // It mattered little while account-management was mis-classified as a
+    // plugin. As a declared host it would make a product listing static-idp-plugin
+    // under it fail GBX0512 for no reason. The fix is for the point to name its
+    // selector field; until then this pins the wrong answer so the day it
+    // changes is a decision.
     let host = require!(tree("gears/system/account-management/account-management"));
     let static_idp = require!(tree(
         "gears/system/account-management/plugins/static-idp-plugin"
     ));
-    let keycloak = require!(tree(
-        "gears/system/account-management/plugins/keycloak-idp-plugin"
-    ));
-
-    let host_vendor = project_vendor_default(&host).vendor;
-    let plugin_vendors: Vec<Option<String>> = [&static_idp, &keycloak]
-        .into_iter()
-        .map(|files| project_vendor_default(files).vendor)
-        .collect();
-
-    // What the mismatch detection keys on: every plugin default, compared
-    // against the host's selector. Spelling the three values out and then
-    // comparing the literals with each other was an assertion that could only
-    // fail if someone edited the assertion.
-    assert!(
-        host_vendor.is_some(),
-        "the host compiles in a selector default, or there is nothing to mismatch"
+    assert_eq!(
+        project_vendor_default(&host).vendor.as_deref(),
+        Some("constructorfabric"),
+        "still read from `TrPluginConfig`"
     );
-    assert!(
-        plugin_vendors.iter().all(Option::is_some),
-        "both plugins compile in a vendor: {plugin_vendors:?}"
-    );
-    assert!(
-        plugin_vendors.iter().all(|v| *v != host_vendor),
-        "no plugin default matches the host selector {host_vendor:?}, so on defaults \
-         alone this host resolves nothing -- the silent misconfiguration GBX0512 \
-         exists to catch. Got {plugin_vendors:?}"
+    assert_eq!(
+        project_vendor_default(&static_idp).vendor.as_deref(),
+        Some("cf"),
+        "which the real selector, `idp.vendor`, matches by default"
     );
 }

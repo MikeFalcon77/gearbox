@@ -2,27 +2,31 @@
 import type { CargoRef } from "./CargoRef";
 
 /**
- * A plugin-API trait a gear expects an implementation of.
+ * A point a host lets plugins fill.
  *
- * The identity is the trait ident **as written**, never a derived short name.
- * `to_kebab_case("AuthNResolverPluginClient")` gives
- * `auth-n-resolver-plugin-client` -- the same `AuthN` -> `auth-n` split GBX0206
- * exists to catch, and the lesson `ClusterProfile` already taught.
+ * **The identity is the GTS spec**, not the trait. Every plugin family in the
+ * corpus registers instances under a spec derived from `PluginV1`, and the host
+ * selects by it -- and two points can share one trait: the ledger's rate
+ * provider and bss-rate-provider's sources both implement
+ * `bss_ledger_sdk::RateProviderV1`, and only their specs tell them apart.
  */
 export type ExtensionPointDecl = { 
 /**
- * e.g. `AuthNResolverPluginClient`.
+ * The full GTS type id of the plugin spec, e.g.
+ * `cf.toolkit.plugins.plugin.v1~cf.core.authn_resolver.plugin.v1~`. The
+ * join key: a plugin's [`PluginFill::spec`] matches this.
+ */
+spec: string, 
+/**
+ * The interface plugins register under, as written, e.g.
+ * `AuthNResolverPluginClient`. Never a derived short name:
+ * `to_kebab_case("AuthNResolverPluginClient")` gives
+ * `auth-n-resolver-plugin-client`, the split GBX0206 exists to catch.
  */
 trait_ident: string, 
 /**
- * The SDK crate's library identifier, e.g. `authn_resolver_sdk`. Together
- * with `trait_ident` this is the join key an implementation matches on.
- *
- * Kept alongside [`Self::sdk`], which carries the same value in
- * `lib_ident`, because *this* is the join key: `qualified()` spells it, the
- * plugin selector matches on it, and the Studio's `pointKey` mirrors it.
- * One field for one job beats a client reaching into a locator to rebuild a
- * key.
+ * The library identifier of the crate `trait_ident` lives in, e.g.
+ * `authn_resolver_sdk`. What `qualified()` spells.
  */
 sdk_lib: string, 
 /**

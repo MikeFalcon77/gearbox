@@ -19,7 +19,7 @@
 import type { GearDescriptor } from "../../common/generated/GearDescriptor";
 import type { ExtensionPointDecl } from "../../common/generated/ExtensionPointDecl";
 import type { PluginScaffold } from "../../common/generated/PluginScaffold";
-import { pointsOf } from "../../common/extension-points";
+import { specSegment } from "../../common/extension-points";
 import { relativePath, volumeOf } from "./paths";
 
 /**
@@ -153,19 +153,20 @@ export function pluginLocatorFor(request: LocatorRequest): LocatorOutcome {
       reason:
         `The destination is on ${here.root} and ${chosen.host.id}'s SDK is on ` +
         `${there?.root ?? "another volume"}, so no portable path can be written between them. ` +
-        `The sdk locator will be left as a comment.`,
+        `The plugin declaration will be left as a comment.`,
     };
   }
 
   return {
     kind: "ready",
     scaffold: {
+      // The declaration that makes the new gear a plugin: the spec the host
+      // declares, as `fills` writes it.
+      spec: specSegment(chosen.point.spec),
+      trait_ident: chosen.point.trait_ident,
       crate_name: sdk.crate_name,
       lib_ident: sdk.lib_ident,
       path,
-      // Left to the `impl` unless the host declares more than one point: which
-      // trait a crate implements is read, and declaring it is an escape hatch.
-      ...(pointsOf(chosen.host).length > 1 ? { plugin_interface: chosen.point.trait_ident } : {}),
     },
   };
 }

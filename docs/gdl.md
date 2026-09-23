@@ -203,6 +203,31 @@ role(name, directory_name?, labels = [])
 
 Parsed and stored. The runtime takes whatever directory name it is given; what cannot express a second role is the model here, one application per anchor gear, so a role nothing anchors has nowhere to go. That is **GBX0318** at resolution. Sharding and per-instance addressing are a separate gap, **GBX0602**. Both are warnings: the description is not wrong, it describes a shape this tool does not build yet.
 
+### `extension_point(spec, trait = ..., sdk = ...)`
+
+One point a host lets plugins fill. `spec` is positional and is the identity: the GTS spec's own
+segment, without the `cf.toolkit.plugins.plugin.v1~` base every plugin spec shares. `trait` is the
+interface plugins register under. `sdk` is written only when that trait lives outside the gear's
+own `sdk`.
+
+```python
+extension_points = [
+    extension_point("cf.core.authn_resolver.plugin.v1~", trait = "AuthNResolverPluginClient"),
+],
+```
+
+A plugin names the same segment: `fills = "cf.core.authn_resolver.plugin.v1~"`, and declares no
+`sdk` -- the host's SDK is the host's.
+
+Both are checked, not trusted:
+
+- the spec must be a `PluginV1`-derived GTS type the gear's `sdk` declares, and the trait a
+  `pub trait` in the crate the point names (GBX0516);
+- a `fills` no described gear declares is GBX0519;
+- a plugin whose crate implements none of the point's trait gets a warning (GBX0526).
+
+Why declared: see ADR-0002, Amendment 2026-09-24.
+
 ### `fail(message)`
 
 Positional. States that this description is invalid. Not a branch.
@@ -213,8 +238,9 @@ Positional. States that this description is invalid. Not a branch.
 gear(
   package,                          # cargo, required
   name?, description?, category?, visibility?,
-  sdk?,                             # cargo, where the SDK crate lives
-  plugin_interface?,                # rare: trait the projector cannot find
+  sdk?,                             # cargo, where this gear's own SDK crate lives
+  extension_points = [],            # extension_point(...), points plugins fill
+  fills?,                           # spec segment of the point this plugin fills
   docs?,                            # docs(...)
   provides = [],                    # provide(...)
   consumes = [],                    # consume(...)

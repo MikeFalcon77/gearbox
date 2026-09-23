@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **97**.
+Codes: **99**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -898,12 +898,14 @@ is one string in one attribute.
 | [GBX0516](#gbx0516) | error | plugin extension point could not be determined |
 | [GBX0517](#gbx0517) | info | several plugins share a vendor for one extension point |
 | [GBX0518](#gbx0518) | error | plugin fills a point its host does not declare |
+| [GBX0519](#gbx0519) | error | plugin fills a point no described gear declares |
 | [GBX0520](#gbx0520) | info | cluster backend decides a capability at run time |
 | [GBX0521](#gbx0521) | error | a declared provider options struct cannot be read |
 | [GBX0522](#gbx0522) | error | provider option is not one the backend reads |
 | [GBX0523](#gbx0523) | error | provider option value does not match the field's type |
 | [GBX0524](#gbx0524) | error | a required provider option was not supplied |
 | [GBX0525](#gbx0525) | error | a cluster provider is not in this build |
+| [GBX0526](#gbx0526) | warning | a plugin implements none of its point's trait |
 
 ### GBX0501
 
@@ -1070,7 +1072,12 @@ the host's public API, which is what keeps implementations swappable.
 
 **plugin extension point could not be determined**
 
-Which extension point a crate fills could not be determined.
+A declared extension point does not check out against its SDK.
+
+Points are declared, and a declaration is checked rather than trusted:
+the spec must be a `PluginV1`-derived GTS type the gear's SDK declares,
+and the trait a `pub trait` in the SDK it names. Either missing is a
+point that exists only in the description.
 
 ### GBX0517
 
@@ -1100,6 +1107,16 @@ queries, and the link is inert.
 Found by a UX pass rather than by a resolution, which is the useful part:
 the Add Gear panel offered the choice because nothing refused it, and a
 client is not a boundary (`cpt-gearbox-fr-rpc-writes-opt-in`).
+
+### GBX0519
+
+**plugin fills a point no described gear declares**
+
+A plugin fills a spec no described gear declares as an extension point.
+
+The plugin names only the spec; which trait and which SDK are the host's
+to say. With no host describing it, the fill has nothing to join to, so
+it is reported rather than left to look connected.
 
 ### GBX0520
 
@@ -1196,6 +1213,18 @@ Reported against the description rather than at startup, which is the
 whole point: the feature is selected two lines away, in the same file.
 
 *Asserts a limitation of the runtime, so every occurrence cites the source that proves it.*
+
+### GBX0526
+
+**a plugin implements none of its point's trait**
+
+A gear declares it fills a point, and its crate implements none of that
+point's trait.
+
+A warning, because the implementation is evidence and not the source of
+the role: an impl can sit in a generic wrapper or a macro this reader
+cannot see. But the ordinary cause is a `fills` naming the wrong spec,
+and that one is worth a line.
 
 ## `GBX06xx` — Capabilities the runtime does not implement
 

@@ -116,11 +116,11 @@ test.describe("what the tool may write", () => {
       //
       // What differs is which declarations the file *offers*, not generated
       // code: a scaffold has no compiler and does not know where the toolkit or
-      // an SDK lives. And for a plugin the two fields that matter are offered
-      // **commented**, because `plugin_interface` naming no `pub trait` is
-      // refused (GBX0516) and an `sdk` locator pointing nowhere makes the gear
-      // fail to load -- so a placeholder would hand its author a description to
-      // repair rather than one to fill in.
+      // an SDK lives. And for a plugin the field that matters -- `fills`, the
+      // declaration that makes it one -- is offered **commented**, because a
+      // spec no described gear declares is refused (GBX0519), so a placeholder
+      // would hand its author a description to repair rather than one to fill
+      // in.
       const { page } = freshStudio;
       await settled(page);
       await expect(page.locator('[data-start-action="new-gear"]:not([disabled])')).toBeVisible({
@@ -175,17 +175,16 @@ test.describe("what the tool may write", () => {
   );
 
   test(
-    "choosing a host writes the plugin's locator instead of commenting it [ADR-0010 tier 0]",
+    "choosing a host writes the plugin's declaration instead of commenting it [ADR-0010 tier 0]",
     async ({ freshStudio }) => {
       // **The claim the `Kind` control needed to earn.** `Plugin` chose a
       // different `gear.gdl` all along, but every declaration in it was a
-      // comment -- an `sdk` pointing at a directory that does not exist makes the
-      // gear fail to load -- so a UX pass reported the choice as doing nothing,
-      // and it was right about what a person could see.
+      // comment, so a UX pass reported the choice as doing nothing, and it was
+      // right about what a person could see.
       //
-      // A host picked out of the loaded catalogue is a locator the engine itself
-      // projected, so there is nothing left to protect against and it is written
-      // live. The preview shows the description's own text now, because the three
+      // A host picked out of the loaded catalogue declares a spec the engine
+      // itself reported, so there is nothing left to protect against and
+      // `fills` is written live. The preview shows the description's own text now, because the three
       // file *paths* are identical for all three shapes.
       const { page } = freshStudio;
       await settled(page);
@@ -199,12 +198,12 @@ test.describe("what the tool may write", () => {
       const gdl = page.locator("[data-create-gear-gdl]");
       await expect(gdl).toBeVisible({ timeout: 30_000 });
 
-      // With no host the locator is a comment -- and the panel says why rather
+      // With no host the declaration is a comment -- and the panel says why rather
       // than disabling Create over it, because "I know it is a plugin but not yet
       // whose" is a real state to be in.
       await expect
         .poll(async () => (await gdl.textContent()) ?? "", { timeout: 30_000 })
-        .toContain("# sdk = cargo(");
+        .toContain("# fills = ");
       // **Asserted, not only asserted about.** The sentence above was the whole
       // claim for this state, and it checked the `gear.gdl` alone -- so the
       // difference between "the commented locator is the right answer" and "the
@@ -214,9 +213,9 @@ test.describe("what the tool may write", () => {
       await expect(page.locator("[data-create-gear-locator]")).toHaveCount(0);
       await expect(page.locator("[data-create-gear-submit]")).toBeEnabled({ timeout: 30_000 });
 
-      // The picker is grouped by host and labelled by the trait, because the
-      // trait is the identity: the key is `sdk_lib::TraitIdent` and never a
-      // derived short name, which is the mistake GBX0206 exists to catch.
+      // The picker is grouped by host and labelled by the trait: the option is
+      // `hostId::TraitIdent`, never a derived short name, which is the mistake
+      // GBX0206 exists to catch.
       const picker = page.locator("[data-create-gear-point]");
       const hosts = await picker
         .locator("optgroup")
@@ -233,14 +232,15 @@ test.describe("what the tool may write", () => {
       // which the answer for `service` could arrive last and win.
       await expect
         .poll(async () => (await gdl.textContent()) ?? "", { timeout: 30_000 })
-        .toMatch(/^\s{4}sdk = cargo\(/m);
-      expect((await gdl.textContent()) ?? "", "a link line needs the library identifier").toMatch(
-        /lib = "[a-z0-9_]+"/,
-      );
+        .toMatch(/^\s{4}fills = "[a-z0-9_.]+~"/m);
+      expect(
+        (await gdl.textContent()) ?? "",
+        "the author is told which crate the trait comes from, by library identifier",
+      ).toMatch(/lib = "[a-z0-9_]+"/);
       await expect(page.locator("[data-create-gear-locator]")).toHaveCount(0);
 
       // **And the refusal is named beside the picker that promised the
-      // locator.** Be exact about what is new: Create was already disabled for a
+      // declaration.** Be exact about what is new: Create was already disabled for a
       // relative destination, because the engine refuses one -- so the preview
       // pane went blank and nothing said which control was at fault. The reason
       // here is computed from the panel's own state, which is why it does not

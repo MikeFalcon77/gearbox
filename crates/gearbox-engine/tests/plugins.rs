@@ -425,101 +425,324 @@ fn a_plugin_under_its_own_host_is_clean() {
 }
 
 // --------------------------------------------------------------------------
-// `plugin_interface`, checked against the SDK at catalogue-load time -- a
-// different phase than the two sections above, which join a loaded catalogue
-// against a product. This builds its own two-crate source root rather than
-// using `check`/`product`, because the diagnostic under test
-// (`PluginPointUndetermined`) fires while the catalogue itself is built.
+// Declared roles, checked at catalogue-load time -- a different phase than the
+// sections above, which join a loaded catalogue against a product. Each test
+// builds its own source root, because the diagnostics under test fire while
+// the catalogue itself is built.
 
-const INTERFACE_SDK_MANIFEST: &str = "[package]\nname = \"thing-sdk\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
-     [lib]\nname = \"thing_sdk\"\npath = \"src/lib.rs\"\n";
+/// A throwaway source root, written from `(path, contents)` pairs.
+struct Root(PathBuf);
 
-const INTERFACE_SDK_RS: &str = r"
-pub trait ThingPluginClient: Send + Sync {}
-";
+impl Root {
+    fn new(label: &str, files: &[(&str, String)]) -> Self {
+        static NTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "gbx-plugins-{label}-{}-{}",
+            std::process::id(),
+            NTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        drop(std::fs::remove_dir_all(&dir));
+        for (path, contents) in files {
+            let at = dir.join(path);
+            std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+            std::fs::write(at, contents).unwrap();
+        }
+        Self(dir)
+    }
 
-const INTERFACE_GEAR_MANIFEST: &str = "[package]\nname = \"plugin-gear\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
-     [lib]\nname = \"plugin_gear\"\npath = \"src/lib.rs\"\n";
-
-const INTERFACE_GEAR_RS: &str = r#"
-#[toolkit::gear(name = "plugin-gear", capabilities = [system])]
-pub struct PluginGear;
-"#;
-
-/// A `plugin_interface` naming no trait the sdk declares.
-const INTERFACE_GEAR_GDL: &str = r#"
-gear(
-    name = "Plugin Gear",
-    description = "d",
-    category = "core-functionality",
-    visibility = "internal",
-    package = cargo(crate_name = "plugin-gear", lib = "plugin_gear", path = "."),
-    sdk = cargo(crate_name = "thing-sdk", lib = "thing_sdk", path = "../thing-sdk"),
-    plugin_interface = "NoSuchInterface",
-)
-"#;
-
-fn line_of(text: &str, needle: &str) -> u32 {
-    let found: Vec<u32> = text
-        .lines()
-        .enumerate()
-        .filter(|(_, line)| line.contains(needle))
-        .map(|(i, _)| u32::try_from(i).expect("fixtures are short"))
-        .collect();
-    assert_eq!(
-        found.len(),
-        1,
-        "`{needle}` must appear on exactly one line of the fixture, found {found:?}"
-    );
-    found[0]
+    fn load(&self) -> Catalogue {
+        let source = SourceRoot::open(SourceId::new("demo").unwrap(), &self.0).unwrap();
+        load_catalogue(&[source]).catalogue
+    }
 }
 
-/// `plugin_interface` is an argument of `gear(...)`, not a call of its own, so
-/// an unresolvable name has to fall back to the `gear(...)` span -- the finest
-/// anchor that exists for it.
+impl Drop for Root {
+    fn drop(&mut self) {
+        drop(std::fs::remove_dir_all(&self.0));
+    }
+}
+
+fn manifest(name: &str, lib: &str) -> String {
+    format!(
+        "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\nname = \"{lib}\"\npath = \"src/lib.rs\"\n"
+    )
+}
+
+/// A plugin spec as the corpus declares one.
+fn spec(ident: &str, segment: &str) -> String {
+    format!(
+        "#[gts_type_schema(base = PluginV1, type_id = gts_id!(\"cf.toolkit.plugins.plugin.v1~{segment}\"), description = \"d\", properties = \"\")]\npub struct {ident};\n"
+    )
+}
+
+fn gear_rs(id: &str, extra: &str) -> String {
+    format!("#[toolkit::gear(name = \"{id}\", capabilities = [system])]\npub struct G;\n{extra}")
+}
+
+fn gear_gdl(crate_name: &str, lib: &str, body: &str) -> String {
+    format!(
+        "gear(\n    name = \"{crate_name}\",\n    description = \"d\",\n    category = \"core-functionality\",\n    visibility = \"internal\",\n    package = cargo(crate_name = \"{crate_name}\", lib = \"{lib}\", path = \".\"),\n{body}\n)\n"
+    )
+}
+
+const THING_SDK: &str =
+    "sdk = cargo(crate_name = \"thing-sdk\", lib = \"thing_sdk\", path = \"../thing-sdk\"),";
+
+/// The thing SDK, a host declaring its point, and whatever plugins a test adds.
+fn family(plugins: &[(&str, &str, &str)]) -> Vec<(&'static str, String)> {
+    let mut files: Vec<(&'static str, String)> = vec![
+        ("thing-sdk/Cargo.toml", manifest("thing-sdk", "thing_sdk")),
+        (
+            "thing-sdk/src/lib.rs",
+            format!(
+                "pub trait ThingPluginClient: Send + Sync {{}}\n{}",
+                spec("ThingSpecV1", "x.thing.plugin.v1~")
+            ),
+        ),
+        ("host/Cargo.toml", manifest("host", "host")),
+        ("host/src/lib.rs", gear_rs("host", "")),
+        (
+            "host/gear.gdl",
+            gear_gdl(
+                "host",
+                "host",
+                &format!(
+                    "    {THING_SDK}\n    extension_points = [extension_point(\"x.thing.plugin.v1~\", trait = \"ThingPluginClient\")],"
+                ),
+            ),
+        ),
+    ];
+    for (dir, fills, body) in plugins {
+        let leaked: &'static str = Box::leak(format!("{dir}/Cargo.toml").into_boxed_str());
+        files.push((leaked, manifest(dir, &dir.replace('-', "_"))));
+        let leaked: &'static str = Box::leak(format!("{dir}/src/lib.rs").into_boxed_str());
+        files.push((leaked, gear_rs(dir, body)));
+        let leaked: &'static str = Box::leak(format!("{dir}/gear.gdl").into_boxed_str());
+        files.push((
+            leaked,
+            gear_gdl(
+                dir,
+                &dir.replace('-', "_"),
+                &format!("    fills = \"{fills}\","),
+            ),
+        ));
+    }
+    files
+}
+
+fn codes(catalogue: &Catalogue) -> Vec<DiagnosticCode> {
+    catalogue.diagnostics.iter().map(|d| d.code).collect()
+}
+
 #[test]
-fn an_unresolvable_plugin_interface_is_anchored_on_its_gear_call() {
-    let root = std::env::temp_dir().join(format!("gbx-plugin-interface-{}", std::process::id()));
-    drop(std::fs::remove_dir_all(&root));
+fn a_declared_plugin_joins_its_host() {
+    let root = Root::new(
+        "join",
+        &family(&[(
+            "plug",
+            "x.thing.plugin.v1~",
+            "pub struct P; impl thing_sdk::ThingPluginClient for P {}",
+        )]),
+    );
+    let catalogue = root.load();
+    assert!(codes(&catalogue).is_empty(), "{:#?}", catalogue.diagnostics);
 
-    let sdk = root.join("thing-sdk");
-    std::fs::create_dir_all(sdk.join("src")).unwrap();
-    std::fs::write(sdk.join("Cargo.toml"), INTERFACE_SDK_MANIFEST).unwrap();
-    std::fs::write(sdk.join("src/lib.rs"), INTERFACE_SDK_RS).unwrap();
+    let host = &catalogue.gears[&gearbox_ir::GearId::new("host").unwrap()];
+    assert_eq!(host.extension_points.len(), 1);
+    assert_eq!(
+        host.extension_points[0].spec,
+        "cf.toolkit.plugins.plugin.v1~x.thing.plugin.v1~"
+    );
+    assert_eq!(host.extension_points[0].trait_ident, "ThingPluginClient");
 
-    let gear = root.join("plugin-gear");
-    std::fs::create_dir_all(gear.join("src")).unwrap();
-    std::fs::write(gear.join("Cargo.toml"), INTERFACE_GEAR_MANIFEST).unwrap();
-    std::fs::write(gear.join("src/lib.rs"), INTERFACE_GEAR_RS).unwrap();
-    std::fs::write(gear.join("gear.gdl"), INTERFACE_GEAR_GDL).unwrap();
+    let plug = &catalogue.gears[&gearbox_ir::GearId::new("plug").unwrap()];
+    let fill = plug.fills.as_ref().expect("a plugin");
+    assert_eq!(fill.point.as_ref(), Some(&host.extension_points[0]));
+    assert!(plug.extension_points.is_empty());
+    assert!(
+        plug.gts_types.is_empty(),
+        "a plugin declares no sdk, so the host's spec is attributed once"
+    );
+}
 
-    let source = SourceRoot::open(SourceId::new("demo").unwrap(), &root).unwrap();
-    let catalogue = load_catalogue(&[source]).catalogue;
-    drop(std::fs::remove_dir_all(&root));
+#[test]
+fn a_host_that_implements_its_own_trait_is_still_a_host() {
+    // The account-management shape: a forwarding proxy implements the host's
+    // own plugin trait outside tests. Declared, it stays a host.
+    let mut files = family(&[]);
+    files.retain(|(path, _)| *path != "host/src/lib.rs");
+    files.push((
+        "host/src/lib.rs",
+        gear_rs(
+            "host",
+            "pub struct Proxy; impl thing_sdk::ThingPluginClient for Proxy {}",
+        ),
+    ));
+    let catalogue = Root::new("proxy", &files).load();
+    let host = &catalogue.gears[&gearbox_ir::GearId::new("host").unwrap()];
+    assert!(host.fills.is_none());
+    assert_eq!(host.extension_points.len(), 1);
+    assert_eq!(host.gts_types.len(), 1, "and its spec is its own");
+}
 
-    let diagnostic = catalogue
+#[test]
+fn a_spec_the_sdk_does_not_declare_is_gbx0516() {
+    let mut files = family(&[]);
+    files.retain(|(path, _)| *path != "host/gear.gdl");
+    files.push((
+        "host/gear.gdl",
+        gear_gdl(
+            "host",
+            "host",
+            &format!(
+                "    {THING_SDK}\n    extension_points = [extension_point(\"x.missing.plugin.v1~\", trait = \"ThingPluginClient\")],"
+            ),
+        ),
+    ));
+    let catalogue = Root::new("nospec", &files).load();
+    let found = catalogue
         .diagnostics
         .iter()
         .find(|d| d.code == DiagnosticCode::PluginPointUndetermined)
-        .expect("GBX0xxx (PluginPointUndetermined)");
+        .expect("GBX0516");
     assert!(
-        diagnostic.message.contains("NoSuchInterface"),
-        "{}",
-        diagnostic.message
+        found.message.contains("x.missing.plugin.v1~")
+            && found.message.contains("x.thing.plugin.v1~"),
+        "names the spec and what the sdk does declare: {}",
+        found.message
     );
+    let host = &catalogue.gears[&gearbox_ir::GearId::new("host").unwrap()];
+    assert!(
+        host.extension_points.is_empty(),
+        "an unchecked point is not recorded"
+    );
+}
 
-    let location = diagnostic
-        .location
+#[test]
+fn a_trait_the_sdk_does_not_declare_is_gbx0516() {
+    let mut files = family(&[]);
+    files.retain(|(path, _)| *path != "host/gear.gdl");
+    files.push((
+        "host/gear.gdl",
+        gear_gdl(
+            "host",
+            "host",
+            &format!(
+                "    {THING_SDK}\n    extension_points = [extension_point(\"x.thing.plugin.v1~\", trait = \"NoSuchClient\")],"
+            ),
+        ),
+    ));
+    let catalogue = Root::new("notrait", &files).load();
+    let found = catalogue
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::PluginPointUndetermined)
+        .expect("GBX0516");
+    assert!(found.message.contains("NoSuchClient"), "{}", found.message);
+}
+
+#[test]
+fn a_plugin_filling_a_spec_nobody_declares_is_gbx0519() {
+    let catalogue = Root::new(
+        "stray",
+        &family(&[(
+            "stray",
+            "x.nobody.plugin.v1~",
+            "pub struct P; impl thing_sdk::ThingPluginClient for P {}",
+        )]),
+    )
+    .load();
+    assert!(
+        codes(&catalogue).contains(&DiagnosticCode::PluginSpecUndeclared),
+        "{:#?}",
+        catalogue.diagnostics
+    );
+    let stray = &catalogue.gears[&gearbox_ir::GearId::new("stray").unwrap()];
+    assert_eq!(stray.fills.as_ref().and_then(|f| f.point.as_ref()), None);
+}
+
+#[test]
+fn a_plugin_implementing_nothing_of_its_point_warns_and_still_fills() {
+    let catalogue = Root::new("lazy", &family(&[("lazy", "x.thing.plugin.v1~", "")])).load();
+    let found = catalogue
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::PluginImplMissing)
+        .expect("GBX0526");
+    assert_eq!(found.severity, gearbox_ir::Severity::Warning);
+    let lazy = &catalogue.gears[&gearbox_ir::GearId::new("lazy").unwrap()];
+    assert!(
+        lazy.fills.as_ref().and_then(|f| f.point.as_ref()).is_some(),
+        "the declaration is the role; the impl is only evidence"
+    );
+}
+
+#[test]
+fn two_points_over_one_trait_stay_distinct() {
+    // The bss shape: the ledger's rate provider and bss-rate-provider's sources
+    // both implement one trait from the ledger's SDK, and only their specs
+    // differ. A plugin of the second must not land on the first.
+    let mut files = family(&[(
+        "source",
+        "x.source.plugin.v1~",
+        "pub struct P; impl thing_sdk::ThingPluginClient for P {}",
+    )]);
+    files.extend([
+        ("relay-sdk/Cargo.toml", manifest("relay-sdk", "relay_sdk")),
+        ("relay-sdk/src/lib.rs", spec("SourceSpecV1", "x.source.plugin.v1~")),
+        ("relay/Cargo.toml", manifest("relay", "relay")),
+        ("relay/src/lib.rs", gear_rs("relay", "")),
+        (
+            "relay/gear.gdl",
+            gear_gdl(
+                "relay",
+                "relay",
+                "    sdk = cargo(crate_name = \"relay-sdk\", lib = \"relay_sdk\", path = \"../relay-sdk\"),\n    extension_points = [extension_point(\"x.source.plugin.v1~\", trait = \"ThingPluginClient\", sdk = cargo(crate_name = \"thing-sdk\", lib = \"thing_sdk\", path = \"../thing-sdk\"))],",
+            ),
+        ),
+    ]);
+    let catalogue = Root::new("twopoints", &files).load();
+    assert!(codes(&catalogue).is_empty(), "{:#?}", catalogue.diagnostics);
+
+    let source = &catalogue.gears[&gearbox_ir::GearId::new("source").unwrap()];
+    let point = source
+        .fills
         .as_ref()
-        .expect("the diagnostic carries a location");
-    assert_ne!(
-        location.range,
-        gearbox_ir::Range::whole_file(),
-        "must anchor on the gear(...) call, not the file: {diagnostic:#?}"
+        .and_then(|f| f.point.as_ref())
+        .expect("joined");
+    assert_eq!(
+        point.spec,
+        "cf.toolkit.plugins.plugin.v1~x.source.plugin.v1~"
     );
     assert_eq!(
-        location.range.start.line,
-        line_of(INTERFACE_GEAR_GDL, "gear("),
-        "must be anchored on the gear(...) line"
+        point.sdk_lib, "thing_sdk",
+        "the trait's crate, not the relay's own sdk"
+    );
+    let host = &catalogue.gears[&gearbox_ir::GearId::new("host").unwrap()];
+    assert_eq!(
+        catalogue
+            .implementations_of(&host.extension_points[0])
+            .len(),
+        0
+    );
+}
+
+#[test]
+fn plugin_interface_is_gone() {
+    let mut files = family(&[]);
+    files.retain(|(path, _)| *path != "host/gear.gdl");
+    files.push((
+        "host/gear.gdl",
+        gear_gdl(
+            "host",
+            "host",
+            &format!("    {THING_SDK}\n    plugin_interface = \"ThingPluginClient\","),
+        ),
+    ));
+    let catalogue = Root::new("iface", &files).load();
+    assert!(
+        codes(&catalogue).contains(&DiagnosticCode::GdlUnknownArgument),
+        "{:#?}",
+        catalogue.diagnostics
     );
 }

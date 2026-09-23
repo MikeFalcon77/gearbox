@@ -705,7 +705,7 @@ descriptor reads it instead of restating it.
 | `identity` | `#[toolkit::gear(name = ...)]`. `gear(id = ...)` is accepted only to be refused, naming the attribute that owns it. |
 | `hard dependencies` | `#[toolkit::gear(deps = [...])]` -- the attribute that *emits the re-exports*, so a description evaluated before `rustc` could not replace it (§17). |
 | `capability requirements` | `#[toolkit::gear(capabilities = [...])]`, which drives compile-time assertions. |
-| `kind` / `plugin/extensibility model` | Read from the SDK crate's `pub trait *Plugin*` declarations. `has_extension_point` as a declared field was one of three facts found to be quietly wrong. |
+| `kind` / `plugin/extensibility model` | Declared by GTS plugin spec (`extension_point(...)`, `fills`) and checked against the SDK. First read from `pub trait *Plugin*` declarations, which the corpus falsified five ways (ADR-0002, Amendment 2026-09-24); `has_extension_point` as an unchecked boolean was one of three facts found to be quietly wrong. |
 | contract `identity` and `version` | `#[toolkit::contract(gear = ..., version = ...)]` on the trait. `provide`/`consume` name the trait as a *join key* and add only what the attribute does not carry. |
 | available transports | Projected from which `<Base>Rest` / `<Base>Grpc` projection traits exist beside the base. A contract with no projection is provably local, and no description can say otherwise. |
 

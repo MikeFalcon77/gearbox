@@ -390,13 +390,16 @@ pub struct GearDescriptor {
 
     /// Plugin extension points this gear expects an implementation for.
     ///
-    /// Projected from the plugin-API traits its SDK crate declares. A gear may
-    /// have several: `mini-chat` declares an audit point and a model-policy
-    /// point, each filled independently.
+    /// Declared in the description by GTS spec and verified against the SDK. A
+    /// gear may have several: `mini-chat` declares an audit point and a
+    /// model-policy point, each filled independently.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extension_points: Vec<ExtensionPointDecl>,
 
     /// The extension point this gear *fills*, if it is a plugin.
+    ///
+    /// Declared, like the host's side. A gear may be both: bss-rate-provider
+    /// fills the ledger's point and declares one of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fills: Option<PluginFill>,
 
@@ -613,25 +616,28 @@ pub struct GtsTypeDecl {
     pub relative: String,
 }
 
-/// A plugin-API trait a gear expects an implementation of.
+/// A point a host lets plugins fill.
 ///
-/// The identity is the trait ident **as written**, never a derived short name.
-/// `to_kebab_case("AuthNResolverPluginClient")` gives
-/// `auth-n-resolver-plugin-client` -- the same `AuthN` -> `auth-n` split GBX0206
-/// exists to catch, and the lesson `ClusterProfile` already taught.
+/// **The identity is the GTS spec**, not the trait. Every plugin family in the
+/// corpus registers instances under a spec derived from `PluginV1`, and the host
+/// selects by it -- and two points can share one trait: the ledger's rate
+/// provider and bss-rate-provider's sources both implement
+/// `bss_ledger_sdk::RateProviderV1`, and only their specs tell them apart.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
 pub struct ExtensionPointDecl {
-    /// e.g. `AuthNResolverPluginClient`.
+    /// The full GTS type id of the plugin spec, e.g.
+    /// `cf.toolkit.plugins.plugin.v1~cf.core.authn_resolver.plugin.v1~`. The
+    /// join key: a plugin's [`PluginFill::spec`] matches this.
+    pub spec: String,
+
+    /// The interface plugins register under, as written, e.g.
+    /// `AuthNResolverPluginClient`. Never a derived short name:
+    /// `to_kebab_case("AuthNResolverPluginClient")` gives
+    /// `auth-n-resolver-plugin-client`, the split GBX0206 exists to catch.
     pub trait_ident: String,
 
-    /// The SDK crate's library identifier, e.g. `authn_resolver_sdk`. Together
-    /// with `trait_ident` this is the join key an implementation matches on.
-    ///
-    /// Kept alongside [`Self::sdk`], which carries the same value in
-    /// `lib_ident`, because *this* is the join key: `qualified()` spells it, the
-    /// plugin selector matches on it, and the Studio's `pointKey` mirrors it.
-    /// One field for one job beats a client reaching into a locator to rebuild a
-    /// key.
+    /// The library identifier of the crate `trait_ident` lives in, e.g.
+    /// `authn_resolver_sdk`. What `qualified()` spells.
     pub sdk_lib: String,
 
     /// The SDK crate itself, so a client can write a locator that points at it.
@@ -661,8 +667,17 @@ impl ExtensionPointDecl {
 /// The extension point a plugin gear fills.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct PluginFill {
-    /// Which point, matching an [`ExtensionPointDecl`] on the host.
-    pub point: ExtensionPointDecl,
+    /// The full GTS type id of the spec this plugin fills; matches
+    /// [`ExtensionPointDecl::spec`] on its host.
+    pub spec: String,
+
+    /// The host's declaration of that point, once the catalogue has found it.
+    ///
+    /// `None` when no described gear declares the spec, which is reported
+    /// (GBX0519) rather than guessed at: a plugin names only the spec, and the
+    /// trait and SDK are the host's to state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub point: Option<ExtensionPointDecl>,
 
     /// The vendor this plugin registers itself under, compiled in as a default.
     ///
@@ -676,7 +691,24 @@ pub struct PluginFill {
     pub default_priority: Option<i64>,
 }
 
+impl PluginFill {
+    /// How the filled point is spelled in diagnostics: the host's trait when the
+    /// catalogue has joined it, the spec when no described gear declares it.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        self.point
+            .as_ref()
+            .map_or_else(|| self.spec.clone(), ExtensionPointDecl::qualified)
+    }
+}
+
 impl GearDescriptor {
+    /// Whether this gear declares the extension point keyed by `spec`.
+    #[must_use]
+    pub fn declares_point(&self, spec: &str) -> bool {
+        self.extension_points.iter().any(|p| p.spec == spec)
+    }
+
     #[must_use]
     pub fn has_cap(&self, cap: RuntimeCap) -> bool {
         self.runtime_caps.contains(&cap)
@@ -766,7 +798,7 @@ impl Catalogue {
     pub fn implementations_of(&self, point: &ExtensionPointDecl) -> Vec<&GearDescriptor> {
         self.gears
             .values()
-            .filter(|g| g.fills.as_ref().is_some_and(|f| f.point == *point))
+            .filter(|g| g.fills.as_ref().is_some_and(|f| f.spec == point.spec))
             .collect()
     }
 

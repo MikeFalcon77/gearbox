@@ -528,3 +528,77 @@ and the index would address the entry after the one on screen.
   refuses to render, and the credential's path into the description.
 * `ide/tests/wedge/draft-bookkeeping.spec.ts` — an option edited again while its own write is in
   flight.
+
+## Amendment 2026-09-24: a plugin role is declared, keyed by its GTS spec
+
+The Decision Outcome says "a plugin extension point is a Rust trait, so Gearbox adds no parallel
+mechanism for it", and moves `extension_points[]` and `fills` into the projected column: a point is
+a `pub trait *Plugin*` in the gear's `sdk`, a plugin is the crate that implements one. **Describing
+the rest of the corpus falsified that rule five ways**, each measured on the tree rather than
+argued:
+
+| Gear | What the rule read |
+|---|---|
+| `account-management` | a plugin of its own point -- `LazyIdpProvider`, a forwarding proxy, implements `IdpPluginClient` outside tests. Its GTS types were dropped as a knock-on |
+| `chat-engine` | the same -- built-in backends implement its own `ChatEngineBackendPlugin` |
+| `bss-rate-provider` | nothing -- its trait, `bss_ledger_sdk::RateProviderV1`, has no `Plugin` in the name. And it is both the ledger's plugin and the host of its own sources, **over that one trait** |
+| `mini-chat` | an ambiguity -- one crate declares a host and two plugins |
+| `usage-collector`, `license-resolver`, `credstore` | plugins of their own points -- test mocks in `test_support.rs` |
+
+Nothing in Rust marks a trait as a plugin API or a gear as a plugin, so no better reading exists
+to move to. What every real family *does* have is a GTS spec derived from
+`toolkit_gts::PluginV1`: instances register under it, the host selects by it, and it is already in
+the projected `gts_types[]`. So the role is declared, and the spec is its key:
+
+```python
+# host
+extension_points = [extension_point("cf.core.authn_resolver.plugin.v1~", trait = "AuthNResolverPluginClient")],
+# plugin
+fills = "cf.core.authn_resolver.plugin.v1~",
+```
+
+### Declared, and still checked
+
+The declaration is not trusted; it is a claim the code must back.
+
+* A point's spec must be a `PluginV1`-derived type the gear's `sdk` declares, and its trait a
+  `pub trait` in the crate the point names -- the gear's `sdk`, or `extension_point(sdk = ...)`
+  when the trait lives elsewhere, as bss-rate-provider's does. Otherwise GBX0516.
+* A plugin's `fills` is joined to its host after every gear is loaded. A spec no described gear
+  declares is GBX0519; two gears declaring one spec is a cardinality error.
+* A plugin whose crate implements none of its point's trait is GBX0526 -- a **warning**. The impl
+  is evidence, read outside `cfg(test)` code, and never the source of the role.
+
+### Why the spec and not the trait
+
+The ledger's rate-provider point and bss-rate-provider's source point share
+`bss_ledger_sdk::RateProviderV1`. Keyed by trait they were one point, and the ECB source would have
+been offered to the ledger. Keyed by spec -- `cf.bss.rate_provider.plugin.v1~` and
+`cf.bss.rate_provider_source.plugin.v1~` -- they are two, which is what the runtime already says.
+
+### What stays projected
+
+The `vendor`/`priority` defaults on both sides -- that half of the original decision was never
+wrong. With one gap, recorded rather than guessed around: the host's selector is read from the
+first config type with a `vendor` default, and a host whose selector is another field reads wrong
+or not at all. account-management reads `tr_plugin.vendor` for its IdP point (its selector is
+`idp.vendor`); bss-rate-provider and bss-ledger read none. The fix is for `extension_point` to
+name its selector field, and it is not in this change.
+
+### What this retires
+
+`plugin_interface`, the escape hatch for the case the trait rule could not decide, and `sdk` on a
+plugin -- which was there only to find its host's traits, and which attributed the host's GTS types
+to every plugin until a special case removed them again. The expectation that this branch would
+"collapse into the existing contract model" did not come true: the gears still use the
+vendor/GTS pattern, and the spec is its key.
+
+### Traceability
+
+* `crates/gearbox-engine/src/plugin.rs` -- the checks; `catalogue.rs::join_plugin_points` -- the
+  join.
+* `crates/gearbox-engine/tests/plugins.rs` -- a proxy host stays a host, an undeclared spec, an
+  unknown trait, an unjoined fill, a fill with no impl, two points over one trait, and
+  `plugin_interface` refused.
+* `crates/gearbox-project/src/plugin_tests.rs` -- the readers: public traits whatever their name,
+  test code excluded, and a crate with several gears split by its attributes' directories.

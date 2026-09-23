@@ -40,12 +40,15 @@ pub struct GearDecl {
     pub package: Option<crate::records::CargoRecord>,
     /// Where this gear's SDK crate is, when it has one.
     ///
-    /// A locator, not a restatement: the SDK declares the plugin-API traits
-    /// this gear expects (if it is a host) or fills (if it is a plugin), and
-    /// nothing in the gear's own crate says where that SDK is.
+    /// A locator, not a restatement: the SDK declares the GTS types this gear
+    /// exposes and the traits its extension points name, and nothing in the
+    /// gear's own crate says where that SDK is. A plugin does not write one:
+    /// the host's SDK is the host's.
     pub sdk: Option<crate::records::CargoRecord>,
-    /// Narrows the extension point when it cannot be read from an `impl`.
-    pub plugin_interface: Option<String>,
+    /// The points this gear lets plugins fill, keyed by GTS spec segment.
+    pub extension_points: Vec<crate::records::ExtensionPointRecord>,
+    /// The spec segment of the point this gear fills, when it is a plugin.
+    pub fills: Option<String>,
     /// Overrides the convention-based search for this gear's documents.
     pub docs: Option<crate::records::DocsRecord>,
     pub provides: Vec<ProvideRecord>,

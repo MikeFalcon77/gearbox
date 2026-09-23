@@ -1,25 +1,44 @@
 // Which plugin fills which point, in one place.
 //
-// A host declares `extension_points` and a plugin declares the one it `fills`;
-// both are projected from the plugin-API trait an SDK crate declares, and the
-// join key is the pair `(sdk_lib, trait_ident)` -- never a derived short name,
-// because `to_kebab_case("AuthNResolverPluginClient")` splits `AuthN` wrongly
-// and GBX0206 exists to catch exactly that.
+// A host declares `extension_points` and a plugin declares the one it `fills`,
+// both in the description, and **the join key is the GTS spec** -- the id plugin
+// instances register under and the host selects by. Not the trait: two points
+// can share one (the ledger's rate provider and bss-rate-provider's sources both
+// implement `bss_ledger_sdk::RateProviderV1`), and only their specs differ.
 //
 // **One key function, for the reason `gearbox_ir::binding_key` exists.** The
 // graph builder used to format a binding's node key inline and a diagnostic
 // naming the same node would have formatted it again; two format strings for one
 // convention is how a client ends up asking about something that is not there,
-// silently. The spelling here matches `ExtensionPointDecl::qualified()`
-// (`crates/gearbox-ir/src/catalogue.rs`), so a UI label and a diagnostic name the
-// same point the same way.
+// silently. What a person reads is the trait, which `pointLabel` spells the way
+// `ExtensionPointDecl::qualified()` does.
 
 import type { ExtensionPointDecl } from "./generated/ExtensionPointDecl";
 import type { GearDescriptor } from "./generated/GearDescriptor";
+import type { PluginFill } from "./generated/PluginFill";
 
-/** How a point is spelled: `authn_resolver_sdk::AuthNResolverPluginClient`. */
+/** A point's identity: its full GTS spec id. */
 export function pointKey(point: ExtensionPointDecl): string {
+  return point.spec;
+}
+
+/** How a point reads: `authn_resolver_sdk::AuthNResolverPluginClient`. */
+export function pointLabel(point: ExtensionPointDecl): string {
   return `${point.sdk_lib}::${point.trait_ident}`;
+}
+
+/** The spec's own segment, without the `PluginV1` base every spec shares -- what `fills` writes. */
+export function specSegment(spec: string): string {
+  const base = "cf.toolkit.plugins.plugin.v1~";
+  return spec.startsWith(base) ? spec.slice(base.length) : spec;
+}
+
+/**
+ * How the point a plugin fills reads: its host's trait once the catalogue has
+ * joined it, the spec segment when no described gear declares it.
+ */
+export function fillLabel(fill: PluginFill): string {
+  return fill.point ? fill.point.trait_ident : specSegment(fill.spec);
 }
 
 /** The points a gear expects an implementation for. */
@@ -41,8 +60,7 @@ export function pointsOf(host: GearDescriptor): readonly ExtensionPointDecl[] {
 export function fillsPointOf(plugin: GearDescriptor, host: GearDescriptor): boolean {
   const fills = plugin.fills ?? undefined;
   if (fills === undefined) return false;
-  const wanted = pointKey(fills.point);
-  return pointsOf(host).some((point) => pointKey(point) === wanted);
+  return pointsOf(host).some((point) => pointKey(point) === fills.spec);
 }
 
 /** The plugins in `rows` that are applicable to `host`, by point, id-sorted. */
@@ -55,7 +73,7 @@ export function pluginsByPoint(
     plugins: rows
       .filter((row) => {
         const fills = row.fills ?? undefined;
-        return fills !== undefined && pointKey(fills.point) === pointKey(point);
+        return fills !== undefined && fills.spec === pointKey(point);
       })
       .sort((a, b) => a.id.localeCompare(b.id)),
   }));

@@ -168,6 +168,32 @@ gdl_record! {
 }
 
 gdl_record! {
+    /// `extension_point("cf.core.authn_resolver.plugin.v1~", trait = "...")` --
+    /// one point a host lets plugins fill.
+    ///
+    /// **Declared, because reading it out of the code was a guess.** A point
+    /// used to be any `pub trait` with `Plugin` in its name, and a plugin any
+    /// crate that implemented one. The corpus broke that five ways: hosts that
+    /// implement their own trait as a proxy or a built-in, a trait with no
+    /// `Plugin` in it, one crate declaring three gears, two points over one
+    /// trait. What every real family does have is a GTS spec derived from
+    /// `PluginV1` that instances register under and the host selects by -- so
+    /// that is the key, and it is checked against the SDK rather than trusted.
+    ///
+    /// `spec` is the spec's own segment, without the `PluginV1` base. `sdk` is
+    /// where `trait` lives, and is written only when that is not the gear's own
+    /// SDK -- bss-rate-provider's sources implement a trait from the ledger's.
+    ExtensionPointRecord as "gdl_extension_point" {
+        pub spec: String,
+        pub trait_ident: String,
+        pub sdk: Option<CargoRecord>,
+        /// Where `extension_point(...)` was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
+    }
+}
+
+gdl_record! {
     /// `lifecycle(entry = ..., stop_timeout = ..., await_ready = ...)`
     LifecycleRecord as "gdl_lifecycle" {
         pub entry: Option<String>,

@@ -11,7 +11,7 @@
 //! several matches are both errors rather than guesses
 //! (`cpt-gearbox-fr-attribute-location`).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::scan::RustFile;
 
@@ -143,6 +143,41 @@ fn item_ident(item: &syn::Item) -> Option<String> {
 #[must_use]
 pub fn gear_attribute_sites(files: &[RustFile]) -> Vec<AttributeSite<'_>> {
     all_sites(files)
+}
+
+/// The files of a crate that belong to the gear whose attribute is at `site`.
+///
+/// One crate can declare several gears: `cf-gears-mini-chat` declares its host
+/// and two plugins, each attribute in its own directory under
+/// `src/infra/plugins/`. Read whole for each of them, the host finds three
+/// config structs (GBX0112) and each plugin sees the other's trait impl.
+///
+/// A file belongs to the gear whose attribute sits in the deepest directory
+/// enclosing it; a file no attribute directory encloses is visible to every
+/// gear, which is what reading the whole crate already did. `None` means
+/// nothing narrows -- one attribute directory, or this gear already owns every
+/// file -- so the ordinary single-gear crate costs no copy.
+#[must_use]
+pub fn files_owned_by(files: &[RustFile], site: &Path) -> Option<Vec<RustFile>> {
+    let dirs: std::collections::BTreeSet<PathBuf> = gear_attribute_sites(files)
+        .iter()
+        .map(|s| s.relative.parent().unwrap_or(Path::new("")).to_path_buf())
+        .collect();
+    if dirs.len() < 2 {
+        return None;
+    }
+    let mine = site.parent().unwrap_or(Path::new(""));
+    let owned: Vec<RustFile> = files
+        .iter()
+        .filter(|file| {
+            dirs.iter()
+                .filter(|d| file.relative.starts_with(d))
+                .max_by_key(|d| d.components().count())
+                .is_none_or(|d| d == mine)
+        })
+        .cloned()
+        .collect();
+    (owned.len() < files.len()).then_some(owned)
 }
 
 /// Whether any attribute in a list is a `cfg`.

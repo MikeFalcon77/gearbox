@@ -767,10 +767,9 @@ pub struct ScaffoldGearResult {
 /// What differs is **which declarations the file offers**, not generated code. A
 /// scaffold has no compiler and does not know where the toolkit or an SDK lives,
 /// so the difference is the next declaration each shape needs, written where it
-/// goes -- and for a plugin, written as a *comment*, because `plugin_interface`
-/// naming a trait no `pub trait` backs is refused (GBX0516) and an `sdk` locator
-/// pointing at a directory that does not exist makes the gear fail to load. A
-/// scaffold must not produce a description that is already wrong.
+/// goes -- and for a plugin with no host chosen, written as a *comment*,
+/// because a `fills` naming a spec no described gear declares is refused
+/// (GBX0519). A scaffold must not produce a description that is already wrong.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum GearKind {
@@ -784,28 +783,25 @@ pub enum GearKind {
     Plugin,
 }
 
-/// The SDK a scaffolded plugin implements, and the point it fills.
+/// The point a scaffolded plugin fills, and the crate its trait lives in.
 ///
-/// Shaped like the `cargo(...)` locator a `gear.gdl` writes, because that is what
-/// it becomes. Chosen from a host gear the catalogue has already projected, so
-/// every field here is something the engine told the client earlier.
+/// Chosen from a host gear the catalogue has already loaded, so every field
+/// here is something the engine told the client earlier.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct PluginScaffold {
-    /// The SDK crate's package name, e.g. `cf-gears-authn-resolver-sdk`.
+    /// The spec's own GTS segment, e.g. `cf.core.authn_resolver.plugin.v1~`.
+    /// Written as `fills = "..."`: the declaration that makes this a plugin.
+    pub spec: String,
+    /// The trait the plugin implements, e.g. `AuthNResolverPluginClient`.
+    pub trait_ident: String,
+    /// The package name of the crate that trait lives in, e.g.
+    /// `cf-gears-authn-resolver-sdk` -- a dependency the plugin's Cargo.toml needs.
     pub crate_name: String,
     /// Its library identifier, e.g. `authn_resolver_sdk`. Never derived from the
-    /// package name -- a crate with an explicit `[lib]` differs, and deriving it
-    /// emits a link line that does not compile.
+    /// package name -- a crate with an explicit `[lib]` differs.
     pub lib_ident: String,
-    /// Where the SDK crate lives, relative to the gear being scaffolded.
+    /// Where that crate lives, relative to the gear being scaffolded.
     pub path: String,
-    /// The plugin-API trait, when reading the `impl` cannot decide.
-    ///
-    /// Optional for the reason the commented form gives: which trait a crate
-    /// implements is read from the `impl`, so declaring it is an escape hatch for
-    /// a crate implementing two, never a statement of intent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugin_interface: Option<String>,
 }
 
 /// `gearbox/gear/scaffold` -- tier-0 gear crate under a writable destination.
@@ -827,14 +823,12 @@ pub struct ScaffoldGearParams {
     /// What this plugin fills, when the kind is [`GearKind::Plugin`].
     ///
     /// **Absent keeps the commented shape, and that shape exists for a reason.**
-    /// An `sdk` locator pointing at a directory that does not exist makes the
-    /// gear fail to load, and `plugin_interface` naming a trait no `pub trait`
-    /// backs is refused (GBX0516) -- so with nothing to point at, a scaffold
-    /// writes the declarations as comments rather than produce a description
-    /// that is already wrong.
+    /// A `fills` naming a spec no described gear declares is refused (GBX0519),
+    /// so with no host chosen a scaffold writes the declaration as a comment
+    /// rather than produce a description that is already wrong.
     ///
     /// Present means the client picked a host out of a loaded catalogue, so the
-    /// locator is a fact rather than a guess and can be written live. That is
+    /// spec is a fact rather than a guess and can be written live. That is
     /// also what makes the kind visible in the preview: it is the same three
     /// files either way, and only the text differs.
     #[serde(default)]

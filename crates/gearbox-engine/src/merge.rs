@@ -46,6 +46,12 @@ pub struct MergedGear {
     /// Built from its `consume(...)` records: identity and sdk only, with
     /// `rest` and `grpc` absent rather than empty.
     pub consumed: Vec<ContractDescriptor>,
+    /// The traits this gear's own files implement outside tests.
+    ///
+    /// Not part of the descriptor: it is evidence the catalogue checks a
+    /// declared `fills` against once every host is known (GBX0526), and nothing
+    /// a client should read a role from.
+    pub implemented_traits: std::collections::BTreeSet<String>,
 }
 
 /// An error attributable to the description, naming the file and no position.
@@ -352,8 +358,8 @@ pub fn merge(
         // Projected from `provider_registry()` plus the plugin crates
         // `cluster_plugins` locates.
         cluster_providers: cluster.providers.clone(),
-        // Projected from the plugin-API traits the declared `sdk` crate holds,
-        // and from which of them this crate implements.
+        // Declared, and checked against the SDK; see `plugin.rs`. A plugin's
+        // `fills.point` is joined to its host after every gear is loaded.
         extension_points: plugin.extension_points.clone(),
         fills: plugin.fills.clone(),
         vendor_selector: plugin.vendor_selector.clone(),
@@ -375,6 +381,7 @@ pub fn merge(
         gear,
         provided: provided_contracts,
         consumed: consumed_contracts,
+        implemented_traits: plugin.implemented.clone(),
     })
 }
 

@@ -1,38 +1,27 @@
-//! Projecting plugin extension points and their implementations.
+//! What the code can say about a declared plugin relationship.
 //!
-//! The chain is: a host gear's SDK crate declares a plugin-API trait; plugin
-//! gears implement it; the host picks one at runtime by matching a `vendor`
-//! string and taking the lowest `priority`. Both sides read that string from
-//! their own config, so both have a compiled-in default, and a product that
-//! overrides one side and not the other breaks silently -- which is the whole
-//! reason this projection exists.
+//! The chain is: a host gear declares an extension point by GTS spec; plugin
+//! gears declare that they fill it; the host picks one at runtime by matching a
+//! `vendor` string and taking the lowest `priority`. Both sides read that string
+//! from their own config, so both have a compiled-in default, and a product that
+//! overrides one side and not the other breaks silently -- which is why the
+//! defaults are projected.
 //!
-//! What is read here, and what is not:
+//! **The role itself is not read here any more.** It used to be: a point was a
+//! `pub trait` with `Plugin` in its name, and a plugin a crate implementing one.
+//! The corpus broke that five ways -- proxies and built-ins implementing their
+//! host's own trait, a trait with no `Plugin` in it, one crate with three gears,
+//! two points over one trait, mocks in test support -- so the description now
+//! declares the role and this module supplies only what checks it:
 //!
-//! - the extension points are **read** from the SDK crate the description
-//!   locates, never derived from a gear's name;
-//! - which point a plugin fills is **read** from its `impl`, so a plugin that
-//!   stops implementing the trait stops being a plugin;
-//! - the `vendor`/`priority` defaults are **read** from the config type, in
-//!   *both* spellings the tree actually uses.
-//!
-//! The trait's identity is its ident as written. Deriving a short name would
-//! repeat the mistake `ClusterProfile` already taught:
-//! `to_kebab_case("AuthNResolverPluginClient")` gives `auth-n-resolver-plugin-client`,
-//! the same `AuthN` -> `auth-n` split GBX0206 exists to catch.
+//! - [`public_traits`], so a declared trait can be confirmed to exist;
+//! - [`implemented_traits`], so a plugin that implements none of its point's
+//!   trait can be warned about;
+//! - the `vendor`/`priority` defaults, in *both* spellings the tree uses.
+
+use std::collections::BTreeSet;
 
 use crate::scan::RustFile;
-
-/// A plugin-API trait declared by a host gear's SDK crate.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ExtensionPoint {
-    /// The trait ident as written, e.g. `AuthNResolverPluginClient`.
-    pub trait_ident: String,
-    /// Path relative to the SDK crate's `src/`, for a diagnostic to point at.
-    pub relative: std::path::PathBuf,
-    /// 1-based line of the `trait` keyword.
-    pub line: usize,
-}
 
 /// The `vendor` / `priority` a config type compiles in as its defaults.
 ///
@@ -50,15 +39,6 @@ pub struct VendorDefault {
     /// answers -- otherwise a field written as `vendor: some_call()` reports as
     /// a gear that compiled in no vendor at all.
     pub unreadable: Vec<String>,
-}
-
-/// Why a plugin's extension point could not be determined.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PluginImplError {
-    /// No `impl <point> for T` for any point the SDK declares.
-    NotFound { points: Vec<String> },
-    /// Several points implemented; which one this gear *is* is ambiguous.
-    Ambiguous { points: Vec<String> },
 }
 
 /// Unwrap the string a literal expression yields.
@@ -116,65 +96,35 @@ pub(crate) fn last_segment(path: &syn::Path) -> String {
         .unwrap_or_default()
 }
 
-/// Every plugin-API trait a scanned SDK crate declares.
+/// Every `pub trait` a scanned crate declares, by ident.
 ///
-/// The rule is "a public trait with `Plugin` in its ident". Deliberately a
-/// shape rather than a fixed list: the real names are versioned
-/// (`CredStorePluginClientV1`, `MiniChatAuditPluginClientV1`), so a list would
-/// rot on the next major. A crate may declare several -- `mini-chat-sdk`
-/// declares two -- so this returns all of them.
+/// What a declared `extension_point(trait = ...)` is checked against. No
+/// filter on the name: the point is declared, so `RateProviderV1` -- which has
+/// no `Plugin` in it -- is as good an answer as `AuthNResolverPluginClient`.
 #[must_use]
-pub fn project_extension_points(sdk_files: &[RustFile]) -> Vec<ExtensionPoint> {
-    let mut out: Vec<ExtensionPoint> = sdk_files
+pub fn public_traits(files: &[RustFile]) -> BTreeSet<String> {
+    files
         .iter()
-        .flat_map(|file| {
-            file.ast.items.iter().filter_map(move |item| {
-                let syn::Item::Trait(t) = item else {
-                    return None;
-                };
-                if !matches!(t.vis, syn::Visibility::Public(_)) {
-                    return None;
-                }
-                let ident = t.ident.to_string();
-                if !ident.contains("Plugin") {
-                    return None;
-                }
-                Some(ExtensionPoint {
-                    trait_ident: ident,
-                    relative: file.relative.clone(),
-                    line: t.trait_token.span.start().line,
-                })
-            })
+        .flat_map(|file| file.ast.items.iter())
+        .filter_map(|item| match item {
+            syn::Item::Trait(t) if matches!(t.vis, syn::Visibility::Public(_)) => {
+                Some(t.ident.to_string())
+            }
+            _ => None,
         })
-        .collect();
-
-    out.sort();
-    out.dedup();
-    out
+        .collect()
 }
 
-/// Which extension point a gear's crate implements, if any.
+/// The traits a crate implements outside test code, by last path segment.
 ///
-/// `points` comes from the SDK crate the description locates. Returns `Ok(None)`
-/// when the gear implements none of them, which is the ordinary case: most gears
-/// are not plugins.
-///
-/// **Test code does not count.** A host's own tests implement its plugin trait
-/// with mocks -- usage-collector, license-resolver and credstore all do, in
-/// `test_support.rs` -- and reading those as the crate's role made each host its
-/// own plugin, with no extension point left for the real plugins to fill. A
-/// file compiled only under `cfg(test)`, or an impl gated that way, is skipped.
-///
-/// # Errors
-/// Returns [`PluginImplError::Ambiguous`] when a crate implements more than one
-/// point, because then "which plugin is this" has no single answer and guessing
-/// would put the gear under the wrong extension point.
-pub fn project_plugin_impl(
-    files: &[RustFile],
-    points: &[ExtensionPoint],
-) -> Result<Option<String>, PluginImplError> {
+/// Evidence for a declared `fills`, never the source of it. **Test code does not
+/// count**: a host's own tests implement its plugin trait with mocks --
+/// usage-collector, license-resolver and credstore all do -- so a file compiled
+/// only under `cfg(test)`, or an impl gated that way, is skipped.
+#[must_use]
+pub fn implemented_traits(files: &[RustFile]) -> BTreeSet<String> {
     let test_only = crate::scan::test_only_files(files);
-    let mut found: Vec<String> = files
+    files
         .iter()
         .filter(|file| !test_only.contains(&file.relative))
         .flat_map(|file| file.ast.items.iter())
@@ -186,22 +136,9 @@ pub fn project_plugin_impl(
                 return None;
             }
             let (_, path, _) = imp.trait_.as_ref()?;
-            let ident = last_segment(path);
-            points
-                .iter()
-                .any(|p| p.trait_ident == ident)
-                .then_some(ident)
+            Some(last_segment(path))
         })
-        .collect();
-
-    found.sort();
-    found.dedup();
-
-    match found.len() {
-        0 => Ok(None),
-        1 => Ok(found.into_iter().next()),
-        _ => Err(PluginImplError::Ambiguous { points: found }),
-    }
+        .collect()
 }
 
 /// The `vendor` / `priority` defaults a crate compiles in.

@@ -72,6 +72,14 @@ fn declared_crates(decl: &GearDecl) -> Vec<DeclaredCrate<'_>> {
             record: &plugin.package,
         });
     }
+    for point in &decl.extension_points {
+        if let Some(sdk) = point.sdk.as_ref() {
+            out.push(DeclaredCrate {
+                field: format!("extension_point(\"{}\").sdk", point.spec),
+                record: sdk,
+            });
+        }
+    }
     out
 }
 

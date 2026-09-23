@@ -6,9 +6,18 @@ import type { ExtensionPointDecl } from "./ExtensionPointDecl";
  */
 export type PluginFill = { 
 /**
- * Which point, matching an [`ExtensionPointDecl`] on the host.
+ * The full GTS type id of the spec this plugin fills; matches
+ * [`ExtensionPointDecl::spec`] on its host.
  */
-point: ExtensionPointDecl, 
+spec: string, 
+/**
+ * The host's declaration of that point, once the catalogue has found it.
+ *
+ * `None` when no described gear declares the spec, which is reported
+ * (GBX0519) rather than guessed at: a plugin names only the spec, and the
+ * trait and SDK are the host's to state.
+ */
+point?: ExtensionPointDecl | null, 
 /**
  * The vendor this plugin registers itself under, compiled in as a default.
  *

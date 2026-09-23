@@ -2088,7 +2088,7 @@ fn rel_path(path: &str) -> Result<RelPath, String> {
 /// **Comments, not values, and that is the whole design.** Every one of these
 /// fields is either projected from Rust or checked against it: a `category` this
 /// method invented would draw GBX's unknown-category warning on the first load, a
-/// `plugin_interface` naming no `pub trait` is refused outright (GBX0516), and an
+/// `fills` naming a spec no described gear declares is refused (GBX0519), and an
 /// `sdk` locator pointing at a directory that does not exist makes the gear fail
 /// to load. So the shape's job is to put the next declaration **where it goes**,
 /// with the sentence that says what decides it -- and to leave it commented until
@@ -2098,39 +2098,22 @@ fn gdl_shape(
     kind: crate::protocol::GearKind,
     plugin: Option<&crate::protocol::PluginScaffold>,
 ) -> std::borrow::Cow<'static, str> {
-    // A host chosen from a loaded catalogue makes the locator a fact, so it is
+    // A host chosen from a loaded catalogue makes the spec a fact, so `fills` is
     // written live rather than as the comment the rest of this function returns.
-    // The comment exists because an `sdk` pointing nowhere makes the gear fail to
-    // load; a path the engine itself projected does not point nowhere.
+    // The comment exists because a spec nobody declares is GBX0519; one the
+    // engine itself reported a host declaring is not.
     if let (crate::protocol::GearKind::Plugin, Some(plugin)) = (kind, plugin) {
         return std::borrow::Cow::Owned(plugin_shape(plugin));
     }
     std::borrow::Cow::Borrowed(gdl_shape_commented(kind))
 }
 
-/// The live `sdk` locator, and `plugin_interface` only when it was given.
+/// The live `fills`, and where the trait it implements comes from.
 ///
 /// Rendered through `quote_string`, not `{:?}`: this text is evaluated as GDL
-/// immediately afterwards, and Rust's debug escaping is not Starlark's. A path
-/// with a backslash in it would otherwise produce a file that reads fine and
-/// does not evaluate.
+/// immediately afterwards, and Rust's debug escaping is not Starlark's.
 fn plugin_shape(plugin: &crate::protocol::PluginScaffold) -> String {
     use gearbox_gdl::edit::quote_string;
-
-    let interface = plugin
-        .plugin_interface
-        .as_deref()
-        .map_or_else(String::new, |name| {
-            format!(
-                r"
-    # Declared because reading the `impl` cannot decide -- a crate implementing
-    # two plugin interfaces. A name no `pub trait` in the sdk backs is refused
-    # (GBX0516), so this is an escape hatch and never a declaration of intent.
-    plugin_interface = {},
-",
-                quote_string(name)
-            )
-        });
 
     format!(
         r#"
@@ -2140,25 +2123,34 @@ fn plugin_shape(plugin: &crate::protocol::PluginScaffold) -> String {
     # category = "core-platform-integration",
     # visibility = "internal",
 
-    # **The locator that makes this a plugin**, written from the host you chose.
-    # Which of the SDK's traits this crate implements is read from the `impl`,
-    # not declared here.
-    sdk = cargo(
-        crate_name = {crate_name},
-        lib = {lib},
-        path = {path},
-    ),
-{interface}
+    # **The declaration that makes this a plugin**, written from the host you
+    # chose: the GTS spec its instances register under. Implement `{trait_ident}`
+    # from `{crate_name}` (`lib = "{lib}"`, at `{path}`) -- the catalogue warns
+    # (GBX0526) while nothing in this crate does. A plugin declares no `sdk`: the
+    # host's SDK is the host's.
+    fills = {spec},
+
     # A plugin's own `vendor` and `priority` are the join key its host's selector
     # matches against, and both are read from this crate's config struct. What is
     # declared is only that they are worth showing an integrator.
     #
     # config_schema = config(exposes = ["vendor", "priority"]),
 "#,
-        crate_name = quote_string(&plugin.crate_name),
-        lib = quote_string(&plugin.lib_ident),
-        path = quote_string(&plugin.path),
+        spec = quote_string(&plugin.spec),
+        trait_ident = comment_safe(&plugin.trait_ident),
+        crate_name = comment_safe(&plugin.crate_name),
+        lib = comment_safe(&plugin.lib_ident),
+        path = comment_safe(&plugin.path),
     )
+}
+
+/// A value from the wire, made safe to write inside a `#` comment.
+///
+/// These fields are shown, not evaluated, so escaping is not the hazard -- a line
+/// break is: a path carrying one would end the comment and put the rest of the
+/// string on a line of its own, evaluated as GDL.
+fn comment_safe(value: &str) -> String {
+    value.replace(['\n', '\r'], " ")
 }
 
 fn gdl_shape_commented(kind: crate::protocol::GearKind) -> &'static str {
@@ -2208,35 +2200,21 @@ fn gdl_shape_commented(kind: crate::protocol::GearKind) -> &'static str {
     # config_schema = config(exposes = ["bind_addr"]),
 "#
         }
-        // A gear that fills another gear's extension point. `sdk` is the locator
-        // that decides *which* point: the SDK crate declares the plugin-API
-        // trait, and which one this crate implements is read from the `impl`
-        // rather than declared. Both stay commented until the SDK path is real --
-        // an `sdk` pointing nowhere fails the load, and `plugin_interface` naming
-        // a trait the SDK does not declare is GBX0516.
+        // A gear that fills another gear's extension point. `fills` is the
+        // declaration that makes it one, and it stays commented until it names
+        // a spec some described gear declares -- otherwise it is GBX0519.
         crate::protocol::GearKind::Plugin => {
             r#"
     # description = "What this plugin does, in one sentence.",
     # category = "core-platform-integration",
     # visibility = "internal",
 
-    # **The locator that makes this a plugin.** The SDK crate declares the
-    # plugin-API trait; which of its traits this crate implements is read from the
-    # `impl`, not declared here. Point `path` at the SDK crate before uncommenting
-    # -- a locator to a directory that does not exist makes this gear fail to
-    # load.
+    # **The declaration that makes this a plugin**: the GTS spec of the point it
+    # fills, as its host declares it in `extension_points`. A spec no described
+    # gear declares is refused (GBX0519), so uncomment it once the host is known.
+    # A plugin declares no `sdk` -- the host's SDK is the host's.
     #
-    # sdk = cargo(
-    #     crate_name = "cf-gears-authn-resolver-sdk",
-    #     lib = "authn_resolver_sdk",
-    #     path = "../../authn-resolver-sdk",
-    # ),
-
-    # Only when reading the `impl` cannot decide -- a crate implementing two
-    # plugin interfaces. A name no `pub trait` in the sdk backs is refused
-    # (GBX0516), so this is an escape hatch and never a declaration of intent.
-    #
-    # plugin_interface = "AuthNResolverPluginClient",
+    # fills = "cf.core.authn_resolver.plugin.v1~",
 
     # A plugin's own `vendor` and `priority` are the join key its host's selector
     # matches against, and both are read from this crate's config struct. What is
@@ -2277,11 +2255,11 @@ fn lib_stub(kind: crate::protocol::GearKind) -> String {
             "// Scaffolded plugin gear.\n\
              //\n\
              // Next, in this order:\n\
-             //   1. add the host's SDK crate to Cargo.toml, and point `sdk` in\n\
-             //      gear.gdl at it -- that locator is what decides which extension\n\
-             //      point this gear fills;\n\
-             //   2. impl the SDK's plugin-API trait. Which one you implement is\n\
-             //      *read* from this file, so there is nothing to declare;\n\
+             //   1. add the crate that declares the point's trait to Cargo.toml,\n\
+             //      and set `fills` in gear.gdl to the point's spec -- that is\n\
+             //      what makes this gear a plugin;\n\
+             //   2. impl that trait; the catalogue warns (GBX0526) while no\n\
+             //      impl of it exists here;\n\
              //   3. register the vendor and priority this plugin answers under --\n\
              //      they are the join key the host's `vendor` selector matches;\n\
              //   4. list this gear under its host's `plugins = [...]` in the\n\

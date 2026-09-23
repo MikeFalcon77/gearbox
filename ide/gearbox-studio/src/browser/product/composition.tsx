@@ -78,9 +78,9 @@ export function Composition({ state, descriptors, selection, select, add, remove
         const connections = (host.plugins ?? []).map(p => ({
           p,
           entryIndex: p.entry_index,
-          point: descriptor(p.gear)?.fills?.point,
+          spec: descriptor(p.gear)?.fills?.spec,
         }));
-        const unassigned = connections.filter(c => !c.point || !points.some(p => p.key === pointKey(c.point!)));
+        const unassigned = connections.filter(c => !c.spec || !points.some(p => p.key === c.spec));
         const renderConnections = (entries: typeof connections) => entries.map(({ p, entryIndex }) => {
           const active = !p.profiles?.length || p.profiles.includes(state.profile ?? "");
           const selected =
@@ -139,7 +139,7 @@ export function Composition({ state, descriptors, selection, select, add, remove
             {!d && <small>Descriptor unavailable or still loading. This gear remains in your product.</small>}
             {points.map(point => <section className="gbx-composition-slot" key={point.key}>
               <h4>{point.label}</h4>
-              {renderConnections(connections.filter(c => c.point && pointKey(c.point) === point.key))}
+              {renderConnections(connections.filter(c => c.spec === point.key))}
               {/* Marked so the dialog can hand the keyboard back to it: Theia
                   restores focus to the *node* that was active, and this tree
                   re-renders while the dialog is up. */}

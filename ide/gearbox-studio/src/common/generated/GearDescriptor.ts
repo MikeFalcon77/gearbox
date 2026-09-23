@@ -69,13 +69,16 @@ cluster_providers?: Array<ClusterProviderDecl>,
 /**
  * Plugin extension points this gear expects an implementation for.
  *
- * Projected from the plugin-API traits its SDK crate declares. A gear may
- * have several: `mini-chat` declares an audit point and a model-policy
- * point, each filled independently.
+ * Declared in the description by GTS spec and verified against the SDK. A
+ * gear may have several: `mini-chat` declares an audit point and a
+ * model-policy point, each filled independently.
  */
 extension_points?: Array<ExtensionPointDecl>, 
 /**
  * The extension point this gear *fills*, if it is a plugin.
+ *
+ * Declared, like the host's side. A gear may be both: bss-rate-provider
+ * fills the ledger's point and declares one of its own.
  */
 fills?: PluginFill | null, 
 /**

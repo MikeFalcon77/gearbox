@@ -219,7 +219,7 @@ fn report_misplaced_plugins(
                 // would report one fault twice.
                 continue;
             };
-            if host.extension_points.contains(&fills.point) {
+            if host.declares_point(&fills.spec) {
                 continue;
             }
             let declares = if host.extension_points.is_empty() {
@@ -241,13 +241,13 @@ fn report_misplaced_plugins(
                         "gear `{}` lists plugin `{}`, which fills `{}`, but `{}` {declares}",
                         selection.gear,
                         plugin.gear,
-                        fills.point.qualified(),
+                        fills.describe(),
                         selection.gear
                     ),
                     format!(
                         "list `{}` under the gear that declares `{}`, or drop it",
                         plugin.gear,
-                        fills.point.qualified()
+                        fills.describe()
                     ),
                 )
                 .at(gearbox_ir::Location::or_file(
@@ -282,7 +282,7 @@ fn resolve_point(
             catalogue
                 .gear(&p.gear)
                 .and_then(|g| g.fills.as_ref())
-                .is_some_and(|f| f.point == *point)
+                .is_some_and(|f| f.spec == point.spec)
         })
         .collect();
 
@@ -437,7 +437,7 @@ fn report_orphan_plugins(
         let has_host = intent.selected_gears.iter().any(|other| {
             catalogue
                 .gear(&other.gear)
-                .is_some_and(|g| g.extension_points.contains(&fills.point))
+                .is_some_and(|g| g.declares_point(&fills.spec))
         });
         if !has_host {
             diagnostics.push(
@@ -447,7 +447,7 @@ fn report_orphan_plugins(
                         "gear `{}` implements extension point `{}`, but no selected gear \
                          expects it",
                         selection.gear,
-                        fills.point.qualified()
+                        fills.describe()
                     ),
                     "select the host gear and list this one under its `plugins = [...]`, or \
                      drop it",
