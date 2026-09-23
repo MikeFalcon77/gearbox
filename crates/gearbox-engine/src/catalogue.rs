@@ -87,6 +87,14 @@ pub enum LoadEvent<'a> {
 
     /// One gear finished projection and entered the catalogue.
     Projected(&'a GearDescriptor),
+
+    /// A gear already sent as `Projected` changed once every gear was known.
+    ///
+    /// A plugin's `fills` names only a spec; the point it joins is its host's
+    /// declaration, and the host may be described later in discovery order. So
+    /// the join runs after the last projection, and the plugins it completes
+    /// are sent again. Not counted as progress: the gear was counted once.
+    Joined(&'a GearDescriptor),
 }
 
 /// Whether the load should keep going.
@@ -335,7 +343,25 @@ pub fn load_catalogue_staged(
     // in would look absent.
     report_unknown_contract_owners(&catalogue, roots, &mut diagnostics);
     // Same reason: a plugin's host may be described later in discovery order.
-    join_plugin_points(&mut catalogue, &implemented, roots, &mut diagnostics);
+    // A stopped load has not reached every host, so an unjoined fill is only
+    // reported when it had the chance to join.
+    let complete = !stopped && pending.is_empty();
+    let joined = join_plugin_points(
+        &mut catalogue,
+        &implemented,
+        roots,
+        complete,
+        &mut diagnostics,
+    );
+    if complete {
+        for id in &joined {
+            if let Some(gear) = catalogue.gears.get(id)
+                && on_event(LoadEvent::Joined(gear)) == Continue::Stop
+            {
+                break;
+            }
+        }
+    }
 
     diagnostics.finish();
     catalogue.diagnostics = diagnostics;
@@ -747,12 +773,17 @@ fn point_sdks<'d>(
 /// - the plugin's crate implements none of the point's trait: GBX0526, a
 ///   warning -- the impl is evidence, and it can hide behind a wrapper this
 ///   reader does not follow.
+///
+/// Returns the plugins whose `fills.point` it set, so a streaming consumer that
+/// saw them before the join can be sent them again.
 fn join_plugin_points(
     catalogue: &mut Catalogue,
     implemented: &BTreeMap<gearbox_ir::GearId, std::collections::BTreeSet<String>>,
     roots: &[SourceRoot],
+    complete: bool,
     diagnostics: &mut Diagnostics,
-) {
+) -> Vec<gearbox_ir::GearId> {
+    let mut joined = Vec::new();
     let mut declared: BTreeMap<String, (gearbox_ir::GearId, gearbox_ir::ExtensionPointDecl)> =
         BTreeMap::new();
     for (id, gear) in &catalogue.gears {
@@ -786,6 +817,7 @@ fn join_plugin_points(
                 .map(|uri| Location::or_file(gear.declared_at.as_ref(), &uri))
         };
         match declared.get(&fill.spec) {
+            None if !complete => {}
             None => {
                 let own = fill
                     .spec
@@ -808,6 +840,7 @@ fn join_plugin_points(
             }
             Some((host, point)) => {
                 fill.point = Some(point.clone());
+                joined.push(id.clone());
                 let implements = implemented
                     .get(id)
                     .is_some_and(|traits| traits.contains(&point.trait_ident));
@@ -831,6 +864,7 @@ fn join_plugin_points(
             }
         }
     }
+    joined
 }
 
 /// Every name the catalogue answers to: a gear's id, and each declared role's

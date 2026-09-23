@@ -47,6 +47,7 @@ enum Seen {
     Declared(String),
     DeclarationComplete(usize),
     Projected(String),
+    Joined(String),
 }
 
 fn record(root: &SourceRoot) -> (Vec<Seen>, gearbox_engine::CatalogueScan) {
@@ -57,10 +58,61 @@ fn record(root: &SourceRoot) -> (Vec<Seen>, gearbox_engine::CatalogueScan) {
             LoadEvent::Declared(p) => Seen::Declared(p.gdl_path.as_str().to_owned()),
             LoadEvent::DeclarationComplete { declared, .. } => Seen::DeclarationComplete(declared),
             LoadEvent::Projected(g) => Seen::Projected(g.id.as_str().to_owned()),
+            LoadEvent::Joined(g) => Seen::Joined(g.id.as_str().to_owned()),
         });
         Continue::Yes
     });
     (seen, scan)
+}
+
+#[test]
+fn a_streaming_consumer_ends_with_every_plugin_joined() {
+    // **What the Studio actually receives**, which is not the returned scan. It
+    // keeps the last copy of each gear it is sent, and a plugin is projected
+    // before its host may have been: `fills` names only a spec, and the point
+    // is the host's declaration. The first conformance run after roles became
+    // declared showed oidc-authn-plugin as "no described host declares it" --
+    // true of the copy sent during projection, false of the catalogue.
+    let root = require!();
+    let mut last: std::collections::BTreeMap<String, gearbox_ir::GearDescriptor> =
+        std::collections::BTreeMap::new();
+    let mut joined_after_projection = true;
+    let mut projecting_done = false;
+    drop(load_catalogue_staged(
+        std::slice::from_ref(&root),
+        &mut |event| {
+            match event {
+                LoadEvent::Projected(g) => {
+                    joined_after_projection &= !projecting_done;
+                    last.insert(g.id.as_str().to_owned(), g.clone());
+                }
+                LoadEvent::Joined(g) => {
+                    projecting_done = true;
+                    last.insert(g.id.as_str().to_owned(), g.clone());
+                }
+                _ => {}
+            }
+            Continue::Yes
+        },
+    ));
+    assert!(
+        joined_after_projection,
+        "every Joined comes after the last Projected"
+    );
+    let plugins: Vec<&gearbox_ir::GearDescriptor> =
+        last.values().filter(|g| g.fills.is_some()).collect();
+    assert!(!plugins.is_empty(), "the corpus has plugins");
+    for plugin in plugins {
+        assert!(
+            plugin
+                .fills
+                .as_ref()
+                .and_then(|f| f.point.as_ref())
+                .is_some(),
+            "`{}` reached the consumer unjoined",
+            plugin.id
+        );
+    }
 }
 
 #[test]
@@ -134,11 +186,24 @@ fn the_boundary_between_the_passes_is_announced_exactly_once() {
         .filter(|e| matches!(e, Seen::Declared(_)))
         .count();
     assert!(matches!(seen[boundary], Seen::DeclarationComplete(n) if n == declared));
+    // Projections follow the boundary, and then the plugins the join completed
+    // -- never interleaved, because the join needs every host.
+    let after = &seen[boundary + 1..];
+    let first_join = after
+        .iter()
+        .position(|e| matches!(e, Seen::Joined(_)))
+        .unwrap_or(after.len());
     assert!(
-        seen[boundary + 1..]
+        after[..first_join]
             .iter()
             .all(|e| matches!(e, Seen::Projected(_))),
-        "only projections follow the boundary"
+        "only projections follow the boundary, until the join"
+    );
+    assert!(
+        after[first_join..]
+            .iter()
+            .all(|e| matches!(e, Seen::Joined(_))),
+        "and only joins follow the last projection"
     );
 }
 

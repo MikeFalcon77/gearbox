@@ -3112,6 +3112,19 @@ fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> 
                     }
                 }
             }
+            // A plugin already sent, now joined to its host. The same
+            // replacement a projection is, and not counted twice.
+            LoadEvent::Joined(gear) => {
+                disconnected |= !notify(
+                    connection,
+                    method::CATALOGUE_CHANGED,
+                    &CatalogueChanged {
+                        gear: gear.clone(),
+                        replaces: gear.gdl_path.as_str().to_owned(),
+                    },
+                )
+                .peer_alive();
+            }
             LoadEvent::Projected(gear) => {
                 completed += 1;
                 disconnected |= !notify(
