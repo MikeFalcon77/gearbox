@@ -485,6 +485,8 @@ export class GearboxServiceImpl implements GearboxService {
     profileKind: string;
     profileId: string;
     cloneFrom?: string;
+    /** Re-base the clone's relative paths onto its new folder: Clone Local only. */
+    rebaseRelativePaths?: boolean;
     dryRun: boolean;
   }): Promise<EditGearResult> {
     return this.request(method.PRODUCT_CREATE, {
@@ -496,6 +498,7 @@ export class GearboxServiceImpl implements GearboxService {
       profile_kind: params.profileKind,
       profile_id: params.profileId,
       clone_from: params.cloneFrom,
+      rebase_relative_paths: params.rebaseRelativePaths ?? false,
       dry_run: params.dryRun,
     });
   }

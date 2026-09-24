@@ -342,6 +342,8 @@ export interface GearboxService {
     profileKind: string;
     profileId: string;
     cloneFrom?: string;
+    /** Re-base the clone's relative paths onto its new folder: Clone Local only. */
+    rebaseRelativePaths?: boolean;
     dryRun: boolean;
   }): Promise<EditGearResult>;
 

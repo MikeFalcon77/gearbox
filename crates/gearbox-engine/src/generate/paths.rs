@@ -21,6 +21,7 @@ use super::GenerateError;
 /// (`pathdiff`, `relative-path`) each add a dependency to this workspace for
 /// twenty lines, and the semantics of the fallback -- which is the part that
 /// actually matters here -- would still be ours to decide.
+#[must_use]
 pub fn relative(from: &Path, target: &Path) -> Option<PathBuf> {
     if !from.is_absolute() || !target.is_absolute() {
         return None;
@@ -128,6 +129,7 @@ pub fn rel(parts: &[&str]) -> Result<RelPath, GenerateError> {
 /// but the generated file would then differ byte for byte between two machines
 /// generating from the same lock -- which is exactly the determinism the lock
 /// hash exists to guarantee.
+#[must_use]
 pub fn to_slash(path: &Path) -> String {
     path.components()
         .map(|c| match c {

@@ -4,4 +4,16 @@ import type { CreateSourceEntry } from "./CreateSourceEntry";
 /**
  * `gearbox/product/create` -- new file from a template or a clone.
  */
-export type CreateProductParams = { path: string, id: string, name: string, version: string, sources: Array<CreateSourceEntry>, profile_kind: string, profile_id: string, clone_from: string | null, dry_run: boolean, };
+export type CreateProductParams = { path: string, id: string, name: string, version: string, sources: Array<CreateSourceEntry>, profile_kind: string, profile_id: string, clone_from: string | null, 
+/**
+ * Re-base the clone's relative paths onto its new folder.
+ *
+ * **Asked for, not inferred, because only the client knows what the source
+ * file's folder means.** A local clone reads a description where it lives,
+ * so its `path("../..")` means something from there and re-basing keeps it.
+ * A git clone reads a temporary checkout whose location means nothing: its
+ * paths were written for the repository's own layout, and re-basing them
+ * from the checkout named directories that do not exist. Off by default, so
+ * a client that does not know the field keeps the behaviour it had.
+ */
+rebase_relative_paths: boolean, dry_run: boolean, };

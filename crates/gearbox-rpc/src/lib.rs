@@ -1779,7 +1779,7 @@ fn create_product(state: &mut State, id: RequestId, params: &CreateProductParams
             }
         };
         let uri = format!("file://{}", PathBuf::from(clone_from).display());
-        match gearbox_gdl::edit::clone_product_text(
+        let stamped = match gearbox_gdl::edit::clone_product_text(
             &uri,
             &source,
             &params.id,
@@ -1788,6 +1788,24 @@ fn create_product(state: &mut State, id: RequestId, params: &CreateProductParams
         ) {
             Ok(text) => text,
             Err(diagnostics) => {
+                return error_with_diagnostics(
+                    id,
+                    error_code::EDIT_REFUSED,
+                    &format!("`{clone_from}` could not be cloned"),
+                    diagnostics.as_slice(),
+                );
+            }
+        };
+        match rebase_cloned_paths(
+            &uri,
+            &stamped,
+            &source_path,
+            &parent,
+            params.rebase_relative_paths,
+        ) {
+            Ok(text) => text,
+            Err(Rebase::Refused(reason)) => return error(id, error_code::EDIT_REFUSED, &reason),
+            Err(Rebase::Unparsed(diagnostics)) => {
                 return error_with_diagnostics(
                     id,
                     error_code::EDIT_REFUSED,
@@ -2345,6 +2363,68 @@ fn writable_path(state: &State, path: &Path) -> Result<PathBuf, String> {
 fn writable_out_root(state: &State, path: &Path) -> Result<PathBuf, String> {
     let roots: Vec<PathBuf> = state.roots.iter().map(|root| root.root.clone()).collect();
     writable_out_root_against(&roots, state.workspace.as_deref(), path)
+}
+
+/// Why a clone's relative paths could not be carried to its new place.
+enum Rebase {
+    Refused(String),
+    Unparsed(gearbox_ir::Diagnostics),
+}
+
+/// A cloned description's relative paths, re-based onto where it is written.
+///
+/// **A clone keeps what its paths mean, not how they are spelled.** `sources`,
+/// `templates` and `target_dir` are relative to the description's own folder, so
+/// copying `path("../../../gears-rust")` one level deeper names a directory that
+/// does not exist and the clone cannot be opened -- measured. Each is resolved
+/// from the source's folder and re-expressed from the destination's; a path with
+/// no relative form from there (another volume) is written absolute rather than
+/// guessed at, and an absolute one is left as written.
+///
+/// A relative `load(...)` has no such answer: the fragment it names is not
+/// copied, so the clone is refused -- before anything is written -- unless it
+/// lands in the source's own folder, where the fragment is still beside it.
+fn rebase_cloned_paths(
+    uri: &str,
+    stamped: &str,
+    source_path: &Path,
+    destination_dir: &Path,
+    rebase: bool,
+) -> Result<String, Rebase> {
+    use gearbox_engine::generate::{normalize, relative, to_slash};
+
+    let Some(source_dir) = source_path.parent() else {
+        return Ok(stamped.to_owned());
+    };
+    let same_folder = normalize(source_dir) == normalize(destination_dir);
+    // The load check runs whether or not paths are re-based: a git clone keeps
+    // its paths as written, but the fragment a relative `load` names is not
+    // copied by either kind of clone.
+    let (text, found) = gearbox_gdl::edit::rebase_product_paths(uri, stamped, |written| {
+        if !rebase || same_folder || Path::new(written).is_absolute() {
+            return None;
+        }
+        let absolute = normalize(&source_dir.join(written));
+        Some(match relative(destination_dir, &absolute) {
+            Some(rebased) => to_slash(&rebased),
+            // No relative form: another volume, so another platform's rules.
+            // `to_slash` is for relative paths -- on an absolute Windows path it
+            // renders the root component as an empty segment, `C://Users` -- so
+            // the absolute fallback is spelled with separators swapped instead.
+            None => absolute.to_string_lossy().replace('\\', "/"),
+        })
+    })
+    .map_err(Rebase::Unparsed)?;
+
+    if !same_folder && let Some(first) = found.relative_loads.first() {
+        return Err(Rebase::Refused(format!(
+            "`{}` loads `{first}` relative to its own folder, and a clone elsewhere would not have \
+             it; clone into `{}`, or make the load `//`-rooted first",
+            source_path.display(),
+            source_dir.display(),
+        )));
+    }
+    Ok(text)
 }
 
 /// `writable_out_root` for `create`, against the declared creation boundary.

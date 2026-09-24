@@ -959,3 +959,112 @@ shape changes with them. The declaration that makes a gear a plugin is `fills = 
 Asserted in `crates/gearbox-rpc/src/write_gate_tests.rs` and, in the browser, by
 `adr-0010-ownership-tiers.spec.ts` ("choosing a host writes the plugin's declaration instead of
 commenting it").
+
+## Amendment 2026-09-24 (later the same day): what a create writes is what can be opened
+
+A live review wrote all three create paths into an ignored folder and compared each file with its
+preview. The files matched, and it still found three defects. None of them was visible from a dry run.
+
+### A clone keeps what its paths mean
+
+The 2026-09-02 amendment says "Sources are not rewritten". The reason it gives still holds: the
+wizard must not show editable source checkboxes that the write ignores. The consequence was not
+written down. `sources`, `templates` and a `self_hosted` `target_dir` are relative to the
+description's own folder, so a clone written one level deeper than `payments-demo` kept
+`path("../../../gears-rust")`. That path names a directory that does not exist. The clone evaluated,
+its preview and its write agreed, and it could not be opened.
+
+**A clone now re-bases every such path onto its new folder.**
+`edit::rebase_product_paths` finds every `path("...")` call and every `target_dir = "..."` in the
+module. That includes a path assigned to a variable. It replaces only the literal's span, so comments
+survive. The RPC resolves each path from the source's folder and re-expresses it from the
+destination's. It uses the same arithmetic as generation, `generate::{relative, normalize}`, so there
+is one fallback rule: when no relative form exists, the path is written absolute. An absolute path is
+left as written. A clone into the source's own folder changes nothing.
+
+A relative `load(...)` has no equivalent, because the fragment it names is not copied. A clone into
+any other folder is refused by name, before anything is written.
+
+Nothing is asked of the person, so the reason for "not rewritten" is kept. What changed is that
+"kept" now means the meaning of the path, not its spelling. The note under the wizard says so.
+
+**Clone Local only, and the client says which.** `CreateProductParams.rebase_relative_paths` is off
+by default. A local clone reads a description where it lives, so its relative paths mean something
+from there. A git clone reads a temporary checkout under `.gearbox/git-clones/<attempt>/`, and that
+folder's location means nothing: the paths were written for the repository's own layout. Re-basing
+from the checkout turned `../../../gears-rust` into `<workspace>/gears-rust`, which does not exist.
+The Clone Git claim caught this on the first run. The engine cannot tell the two apart, since both
+arrive as `clone_from`, so the flag is asked for rather than inferred. A git clone keeps the paths
+exactly as the repository wrote them.
+
+### A product that cannot be opened does not take the engine with it
+
+`ProductSessionService.open` re-initializes the engine twice before it knows whether the product
+opens: first on the product's folder, then on its declared roots. Nothing undid that when a step
+refused. A product whose only source did not exist left the engine disconnected. `CatalogueStore`
+kept the broken session, and every later bare `load()` re-used it. Start then showed
+"Engine disconnected", and New Product, New Gear and Continue were disabled. Retry repeated the
+failure. The only way out was to open some other product.
+
+Three changes:
+
+* A refusal at the `workspace`, `describe` or `catalogue` step now restores the session the open
+  replaced: the previous product's, or the boot one when there was none. A refusal at `resolve` is
+  left as it was, because the new product's catalogue did load and the panel shows the product with
+  its error.
+* Start's Retry re-establishes the boot session instead of re-running whatever was asked for last.
+  Start is Home, and no product is open there.
+* `ProductEditService.createProduct` answers `"created"` when the file was written but the product did
+  not open. The wizard then says the file exists and does not ask for the Product view. Before, it asked
+  anyway and got a command with no enabled handler.
+
+### Create waits for its preview
+
+The wizard's pane is refreshed on a debounce followed by a dry run. For that window it still showed
+the previous answer, "Choose a destination" after one had been typed, next to a live Create. Pressing
+Create then was refused after the person confirmed: the post-dialog dry run was compared with the
+pane rather than with the dialog, and the warning blamed a dialog that had not changed.
+
+Every preview request now takes a token, and only the newest answer is installed. Create is disabled
+while an answer is outstanding, and the pane dims and reports `data-preview-ready="false"`. The
+post-dialog comparison is against the text the dialog showed, which is what the person agreed to.
+The gear wizard had the same gap in a milder form: `plan === undefined` held Create only before the
+first answer. It now waits the same way.
+
+### Confirmation
+
+* `crates/gearbox-gdl/src/edit_tests.rs`: every relative path is rewritten in each place one is written,
+  absolute paths and comments survive, a no-op rebase is byte-exact, and relative loads are reported.
+* `crates/gearbox-rpc/src/write_gate_tests.rs`: a clone three levels down still names `ws/corpus`; a
+  clone that does not ask keeps the spelling; a clone elsewhere with a relative `load` is refused
+  and writes nothing.
+* `ide/tests/conformance/adr-0013-create-product.spec.ts`:
+  * "a clone written deeper still names the same sources" (preview only; a write would land in
+    `products/`);
+  * "Create waits for the preview of what is in the fields" (one snapshot straight after the keystroke);
+  * "does not take the engine with it", against a copy of `payments-demo` whose source names a folder
+    that does not exist.
+
+### An insertion after a trailing comma parses
+
+Found in passing, and wider than it first looked. `set_named_arg_on_call` and the dict editor
+inserted a missing element as `, item` even after a trailing comma. Two things broke because of it:
+* cloning a product that omits `name` produced `,\n, name = …`;
+* adding any new option to `payments-demo`'s postgres provider was refused with a parse error in text
+  the editor itself had written. The provider is written `pool_max_size = 10,` with a trailing comma.
+
+The existing provider-option test performed exactly that insertion and passed, because it only
+checked `contains`.
+
+Both editors now go through `insert_before_close`, which recognises three shapes:
+* empty: the item is written bare;
+* no trailing comma: `, item`;
+* trailing comma: the item goes after it and gets a comma of its own. It goes on its own line at the
+  neighbour's indentation when the list is written one element per line, and after a space otherwise.
+
+The Studio's refusal toast also now carries the engine's own reason (`data.diagnostics`). Before, it
+showed only "could not be edited", which is the envelope rather than the answer.
+
+Asserted in `edit_tests.rs`: the provider case now also checks that the result parses and where the
+option went; a clone without `name`, both multi-line and one-line; a config key after a trailing
+comma.

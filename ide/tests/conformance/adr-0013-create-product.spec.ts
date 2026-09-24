@@ -4,6 +4,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { copyProduct, type ProductCopy } from "../fixtures/product-copy";
+
 import {
   configureConnection,
   configureGear,
@@ -494,7 +496,7 @@ test.describe("create and clone a product", () => {
       timeout: 15_000,
     });
     await expect(page.locator("[data-clone-sources-note]")).toContainText(
-      "sources kept from the cloned file",
+      "relative paths re-based to the new folder",
     );
     await page.locator("[data-create-cancel]").click();
   });
@@ -514,6 +516,130 @@ test.describe("create and clone a product", () => {
       })
       .toBe(comments);
     await page.locator("[data-create-cancel]").click();
+  });
+});
+
+test.describe("a clone and a create say what they will write", () => {
+  test("a clone written deeper still names the same sources [ADR-0013 §Amendment: a clone keeps what its paths mean]", async ({
+    freshStudio,
+  }) => {
+    // Measured before the fix: Clone Local one level deeper than
+    // `payments-demo` wrote `path("../../../gears-rust")` verbatim, the file
+    // evaluated, the preview and the write agreed -- and the product could not
+    // be opened, because its only source root did not exist. Asserted on the
+    // preview alone: the dry run is the text the write would produce, and a
+    // write would land in `products/`, which this harness refuses to dirty.
+    const { page } = freshStudio;
+    await settled(page);
+    await openCreateWizard(page);
+    await page.locator('[data-create-modes] [data-create-mode="clone-local"]').click();
+    await page.locator("[data-clone-path]").fill(DEMO);
+    const destination = page.locator("[data-create-destination]");
+    const suggested = (await destination.getAttribute("placeholder")) ?? "";
+    expect(suggested, "the wizard must suggest a destination").toMatch(/\/product\.gdl$/);
+    const preview = page.locator(".gbx-create-preview");
+
+    // Beside the source's own folder, at its depth: the spelling is unchanged.
+    await destination.fill(suggested);
+    await expect(preview).toContainText('at = path("../../../gears-rust")', { timeout: 15_000 });
+
+    // One folder deeper is one `../` more, for every path the file states
+    // relative to itself -- the source and the self-hosted target directory.
+    await destination.fill(suggested.replace(/\/product\.gdl$/, "/deeper/product.gdl"));
+    await expect(preview).toContainText('at = path("../../../../gears-rust")', {
+      timeout: 15_000,
+    });
+    await expect(preview).toContainText('target_dir = "../../../../gears-rust/target"');
+    await page.locator("[data-create-cancel]").click();
+  });
+
+  test("Create waits for the preview of what is in the fields [ADR-0013 §Amendment: Create waits for its preview]", async ({
+    freshStudio,
+  }) => {
+    // The pane refreshes on a debounce plus a dry run, and for that window it
+    // used to show the previous answer beside a live Create -- pressed then, the
+    // create was refused after the person confirmed. One snapshot straight after
+    // the keystroke: the window lasts at least the 200 ms debounce, so a Create
+    // that is live in it is live on a stale preview.
+    const { page } = freshStudio;
+    await settled(page);
+    await openCreateWizard(page);
+    const destination = page.locator("[data-create-destination]");
+    const submit = page.locator("[data-create-submit]");
+    const preview = page.locator(".gbx-create-preview");
+    const suggested = (await destination.getAttribute("placeholder")) ?? "";
+
+    await destination.fill(suggested);
+    await expect(preview).toContainText("at = path(", { timeout: 15_000 });
+    await expect(submit).toBeEnabled();
+
+    await destination.fill(suggested.replace(/\/product\.gdl$/, "/deeper/product.gdl"));
+    // Polled rather than read once, with a budget well inside the 200 ms
+    // debounce: a Theia widget renders on the next animation frame, not with the
+    // keystroke, so one read can precede the render and see the old button. The
+    // window is at least the debounce long, so a Create that is still live
+    // after 150 ms is live on a stale preview.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => ({
+            disabled: (document.querySelector("[data-create-submit]") as HTMLButtonElement)
+              .disabled,
+            ready: document.querySelector(".gbx-create-preview")?.getAttribute("data-preview-ready"),
+          })),
+        { message: "Create must wait for the preview of the new destination", timeout: 150, intervals: [10] },
+      )
+      .toEqual({ disabled: true, ready: "false" });
+
+    // And comes back once the answer for the new destination is on screen.
+    await expect(preview).toHaveAttribute("data-preview-ready", "true", { timeout: 15_000 });
+    await expect(submit).toBeEnabled();
+    await page.locator("[data-create-cancel]").click();
+  });
+});
+
+test.describe("a product that cannot be opened", () => {
+  let broken: ProductCopy;
+
+  test.beforeEach(() => {
+    broken = copyProduct(REPO, "payments-demo", "missing-source", (text) =>
+      text.replace('path("../../../gears-rust")', 'path("../../../no-such-corpus")'),
+    );
+  });
+
+  test.afterEach(() => {
+    broken?.dispose();
+  });
+
+  test("does not take the engine with it [ADR-0013 §Amendment: a failed open puts the engine back]", async ({
+    freshStudio,
+  }) => {
+    // Measured before the fix: the open re-initialized the engine on the
+    // product's roots, the missing one failed, and nothing put the old session
+    // back. Start said "Engine disconnected", New Product, New Gear and Continue
+    // were disabled, and Retry repeated the same failure.
+    const { page } = freshStudio;
+    await settled(page);
+    expect(readFileSync(broken.path, "utf8")).toContain("no-such-corpus");
+
+    await runCommand(page, "Open Product…");
+    const options = page.locator(`.quick-input-list [role="option"]`);
+    await options.first().waitFor({ state: "visible", timeout: 30_000 });
+    await options.filter({ hasText: broken.id }).first().click();
+
+    await expect(
+      page.locator(".theia-notification-message").filter({ hasText: "no-such-corpus" }).first(),
+      "the refusal names the root that is not there",
+    ).toBeVisible({ timeout: 90_000 });
+    await expectContext(page, "home");
+
+    await expect
+      .poll(() => page.locator('[data-engine-status="disconnected"]').count(), {
+        message: "the engine is back on the session the open replaced",
+        timeout: 60_000,
+      })
+      .toBe(0);
+    await expect(page.locator('[data-start-action="create"]')).toBeEnabled({ timeout: 30_000 });
   });
 });
 

@@ -61,6 +61,11 @@ pub use apply::{
     ApplyOutcome, OUTPUT_DIR, apply_generate, base_root_for, default_out_root, plan, summarize,
 };
 pub use templates::TemplateSet;
+// Re-exported for the one caller outside generation that needs the same
+// arithmetic: a cloned description re-bases its relative paths, and a second
+// implementation of "relative, or absolute when there is none" would be a
+// second place to get the fallback wrong.
+pub use paths::{normalize, relative, to_slash};
 
 /// Numeric uid the image and the chart agree on.
 ///

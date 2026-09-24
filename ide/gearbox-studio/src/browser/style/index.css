@@ -1333,3 +1333,7 @@
      full-width block, which reads as a quote rather than as a division. */
   .gbx-composition-tree { border-right: none; padding-right: 0; border-bottom: 1px solid var(--theia-panel-border); padding-bottom: 12px; }
 }
+
+/* A preview that no longer matches the fields: kept on screen, so the pane does
+   not flash on every keystroke, but visibly not the answer Create would act on. */
+.gbx-create-preview-stale { opacity: 0.55; }

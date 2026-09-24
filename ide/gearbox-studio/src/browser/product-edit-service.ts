@@ -78,6 +78,12 @@ export type ResolutionPreview =
   | { readonly ok: true; readonly resolution: ResolveResult }
   | { readonly ok: false; readonly reason: string };
 
+/**
+ * What `createProduct` achieved: nothing (`false`), the file written but the
+ * product not opened (`"created"` -- the open has already said why), or both.
+ */
+export type CreateOutcome = false | "created" | "opened";
+
 @injectable()
 export class ProductEditService {
   @inject(GearboxService) protected readonly service!: GearboxService;
@@ -351,7 +357,7 @@ export class ProductEditService {
    */
   protected reportFailure(error: unknown): void {
     this.noteEngine(error);
-    this.messages.error(messageOf(error));
+    this.messages.error(failureText(error));
   }
 
   protected noteEngine(error: unknown): void {
@@ -870,8 +876,8 @@ export class ProductEditService {
     profileKind: string;
     profileId: string;
     cloneFrom?: string;
-    preview: string;
-  }, owner?: ContextIdentity): Promise<boolean> {
+    rebaseRelativePaths?: boolean;
+  }, owner?: ContextIdentity): Promise<CreateOutcome> {
     // **What this does and does not protect, since it differs from the others.**
     // There is no target product to get wrong: the path is absolute and chosen
     // in the wizard. What the check refuses is a wizard whose launch context has
@@ -887,6 +893,14 @@ export class ProductEditService {
       this.reportFailure(error);
       return false;
     }
+    // **Compared against what the dialog showed, not what the wizard's pane
+    // showed.** The pane is refreshed on a debounce, so for a moment after a
+    // keystroke it still held the previous answer -- "Choose a destination",
+    // say -- and a Create pressed then was refused after the person confirmed,
+    // with a warning about a dialog that had not changed at all. What a person
+    // agreed to is the text in the dialog; that is the one a change is measured
+    // from.
+    const confirmed = preview.after;
     if (!(await this.confirmCreate(params.name, preview))) return false;
     try {
       preview = await this.service.createProduct({ ...params, dryRun: true });
@@ -894,7 +908,7 @@ export class ProductEditService {
       this.reportFailure(error);
       return false;
     }
-    if (preview.after !== params.preview) {
+    if (preview.after !== confirmed) {
       this.messages.warn("The preview changed while the dialog was open. Try again.");
       return false;
     }
@@ -917,8 +931,15 @@ export class ProductEditService {
     // be. Discovery has just run, so the correct reference is already in hand;
     // the fallback keeps the open working if it has not caught up.
     const discovered = this.product.current.products.find((ref) => ref.path === params.path);
-    await this.session.open(discovered ?? { path: params.path, label: params.name });
-    return true;
+    // **Written is not the same as opened**, and the caller acts on the
+    // difference: it shows the product only if there is one to show. Answering
+    // `true` either way made the wizard ask for the Product view with no product
+    // open -- a command with no enabled handler, thrown into the console -- after
+    // the open had already said why it refused.
+    const opened = await this.session.open(
+      discovered ?? { path: params.path, label: params.name },
+    );
+    return opened ? "opened" : "created";
   }
 
   async addProfile(
@@ -1321,6 +1342,30 @@ function describeEdit(edit: ProductEdit): string {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The refusal, with the reason the engine attached to it.
+ *
+ * **"could not be edited" is the envelope, not the answer.** The engine puts why
+ * in `data.diagnostics` -- the code, the message, what to do -- and this used to
+ * show only the envelope, so an edit refused for a parse error, a stale address
+ * or a secret-looking key all read as the same sentence with nothing to act on.
+ * Two at most: a toast is not the Validation screen, and the first one is almost
+ * always the one that matters.
+ */
+function failureText(error: unknown): string {
+  const data = (error as { data?: unknown } | undefined)?.data;
+  const list = (data as { diagnostics?: unknown } | undefined)?.diagnostics;
+  if (!Array.isArray(list) || list.length === 0) return messageOf(error);
+  const reasons = (list as Array<{ code?: string; message?: string; help?: string }>)
+    .slice(0, 2)
+    .map((d) => {
+      const head = [d.code, d.message].filter((part) => part !== undefined && part !== "").join(" ");
+      return d.help ? `${head} (${d.help})` : head;
+    })
+    .filter((line) => line !== "");
+  return reasons.length === 0 ? messageOf(error) : `${messageOf(error)}: ${reasons.join("; ")}`;
 }
 
 /**

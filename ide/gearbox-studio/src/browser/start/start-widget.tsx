@@ -102,7 +102,12 @@ export class StartWidget extends ReactWidget {
               type="button"
               className="gbx-choice"
               data-engine-retry
-              onClick={() => void this.catalogue.load()}
+              // **The boot session, not whatever was asked for last.** Start is
+              // Home: no product is open, so the session to re-establish is the
+              // one the application starts with. A bare `load()` re-used the last
+              // session, and when that was a product that failed to open, Retry
+              // repeated its failure for ever.
+              onClick={() => void this.catalogue.resetToBootSession()}
             >
               Retry
             </button>

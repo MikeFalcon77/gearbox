@@ -320,6 +320,16 @@ export class CatalogueStore implements Omit<GearboxClient, "onDocumentDiagnostic
   }
 
   /**
+   * The session the engine was last asked for, or `undefined` for the boot one.
+   *
+   * Read by an open that has to put things back when it fails: the session it is
+   * about to replace is the one to return to, and only this store knows it.
+   */
+  currentSession(): StudioSession | undefined {
+    return this.session;
+  }
+
+  /**
    * Forget the product session and put the engine back on its boot roots.
    *
    * **Because closing a product used to leave its roots in force for the rest of

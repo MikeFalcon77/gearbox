@@ -81,6 +81,7 @@ fn create_params(path: &Path, clone_from: Option<String>) -> CreateProductParams
         profile_kind: "embedded".to_owned(),
         profile_id: "dev".to_owned(),
         clone_from,
+        rebase_relative_paths: false,
         dry_run: true,
     }
 }
@@ -539,6 +540,157 @@ fn clone_from_a_non_gdl_path_is_refused_before_read() {
         !message.contains("not a description"),
         "the file's own text must not appear in the refusal: {message}"
     );
+}
+
+/// A clone written one level deeper than its source still names the same
+/// directories.
+///
+/// **The defect this closes, measured in the browser:** Clone Local copied
+/// `path("../../../gears-rust")` verbatim into a folder one level deeper, the
+/// description evaluated -- so the preview and the write both looked fine -- and
+/// then could not be opened, because its only source root did not exist.
+#[test]
+fn a_clone_elsewhere_re_bases_its_relative_paths() {
+    let tmp = scratch("clone-rebase");
+    let workspace = tmp.join("ws");
+    let source_dir = workspace.join("products").join("demo");
+    std::fs::create_dir_all(&source_dir).unwrap();
+    std::fs::create_dir_all(workspace.join("corpus")).unwrap();
+    let source = source_dir.join("product.gdl");
+    std::fs::write(
+        &source,
+        r#"# the corpus is two levels up
+product(
+    id = "demo",
+    name = "Demo",
+    version = "0.1.0",
+    sources = [source(id = "corpus", at = path("../../corpus"))],
+    profiles = [
+        embedded(id = "dev"),
+        self_hosted(id = "local", host = "gateway", worker_discovery = "directory",
+                    target_dir = "../../corpus/target"),
+    ],
+    default_profile = "dev",
+    gears = [],
+)
+"#,
+    )
+    .unwrap();
+
+    let mut state = write_state(workspace.clone());
+    let dest = workspace
+        .join("elsewhere")
+        .join("deeper")
+        .join("clone")
+        .join("product.gdl");
+    let response = create_product(
+        &mut state,
+        RequestId::from(1),
+        &CreateProductParams {
+            rebase_relative_paths: true,
+            ..create_params(&dest, Some(source.display().to_string()))
+        },
+    );
+    let after = match response.response_result {
+        Ok(value) => value["after"].as_str().unwrap().to_owned(),
+        Err(e) => panic!("the clone must be accepted: {} {:?}", e.message, e.data),
+    };
+    assert!(
+        after.contains(r#"at = path("../../../corpus")"#),
+        "the source must still name `ws/corpus` from three levels down:\n{after}"
+    );
+    assert!(
+        after.contains(r#"target_dir = "../../../corpus/target""#),
+        "{after}"
+    );
+    assert!(after.contains("# the corpus is two levels up"), "{after}");
+    assert!(!dest.exists(), "a dry run writes nothing");
+}
+
+/// Without the flag the clone keeps each path as written.
+///
+/// That is the git clone's case: its source is a temporary checkout whose folder
+/// means nothing, and re-basing from it named `<workspace>/gears-rust` -- a
+/// directory that does not exist -- which the Clone Git claim caught.
+#[test]
+fn a_clone_that_does_not_ask_keeps_the_spelling() {
+    let tmp = scratch("clone-keep");
+    let workspace = tmp.join("ws");
+    let source_dir = workspace
+        .join(".gearbox")
+        .join("git-clones")
+        .join("attempt");
+    std::fs::create_dir_all(&source_dir).unwrap();
+    let source = source_dir.join("product.gdl");
+    std::fs::write(
+        &source,
+        "product(id = \"demo\", name = \"Demo\", version = \"0.1.0\", \
+         sources = [source(id = \"corpus\", at = path(\"../../../corpus\"))], \
+         profiles = [embedded(id = \"dev\")], default_profile = \"dev\", gears = [])\n",
+    )
+    .unwrap();
+
+    let mut state = write_state(workspace.clone());
+    let dest = workspace.join("products").join("demo").join("product.gdl");
+    let response = create_product(
+        &mut state,
+        RequestId::from(1),
+        &create_params(&dest, Some(source.display().to_string())),
+    );
+    let after = match response.response_result {
+        Ok(value) => value["after"].as_str().unwrap().to_owned(),
+        Err(e) => panic!("the clone must be accepted: {}", e.message),
+    };
+    assert!(after.contains(r#"path("../../../corpus")"#), "{after}");
+}
+
+/// A relative `load` names a fragment a clone does not copy, so a clone into
+/// another folder is refused -- before anything is written -- rather than written
+/// and then found not to evaluate.
+#[test]
+fn a_clone_elsewhere_with_a_relative_load_is_refused() {
+    let tmp = scratch("clone-load");
+    let workspace = tmp.join("ws");
+    let source_dir = workspace.join("products").join("demo");
+    std::fs::create_dir_all(&source_dir).unwrap();
+    let source = source_dir.join("product.gdl");
+    std::fs::write(
+        &source,
+        "load(\"common.gdl\", \"SOURCES\")\nproduct(id = \"demo\", name = \"Demo\", version = \"0.1.0\", \
+         sources = SOURCES, profiles = [embedded(id = \"dev\")], default_profile = \"dev\", \
+         gears = [])\n",
+    )
+    .unwrap();
+
+    let mut state = write_state(workspace.clone());
+    let dest = workspace.join("elsewhere").join("product.gdl");
+    let response = create_product(
+        &mut state,
+        RequestId::from(1),
+        &CreateProductParams {
+            rebase_relative_paths: true,
+            ..create_params(&dest, Some(source.display().to_string()))
+        },
+    );
+    let message = match response.response_result {
+        Err(e) => e.message,
+        Ok(_) => panic!("a relative load cannot follow a clone elsewhere"),
+    };
+    assert!(message.contains("loads `common.gdl`"), "{message}");
+    assert!(!dest.exists(), "a refused create must write nothing");
+
+    // A clone that keeps its spelling -- the git clone -- does not copy the
+    // fragment either, so it is refused the same way.
+    let kept = create_product(
+        &mut state,
+        RequestId::from(2),
+        &create_params(&dest, Some(source.display().to_string())),
+    );
+    let message = match kept.response_result {
+        Err(e) => e.message,
+        Ok(_) => panic!("a relative load cannot follow a git clone elsewhere either"),
+    };
+    assert!(message.contains("loads `common.gdl`"), "{message}");
 }
 
 #[test]

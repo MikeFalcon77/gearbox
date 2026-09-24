@@ -657,6 +657,88 @@ product(
     );
 }
 
+/// Every relative path a product states, in each of the places one is written:
+/// a `source`'s `path(...)`, one moved into a variable, `templates`, and a
+/// `self_hosted` target directory -- beside an absolute path and a comment that
+/// must both come through untouched.
+const WITH_PATHS: &str = r#"# sources are relative to this file
+SHARED = path("../shared")
+
+product(
+    id = "src",
+    version = "0.1.0",
+    sources = [
+        source(id = "gears-rust", at = path("../../../gears-rust")),  # the corpus
+        source(id = "shared", at = SHARED),
+        source(id = "abs", at = path("/opt/gears")),
+    ],
+    templates = path("templates"),
+    profiles = [
+        embedded(id = "dev"),
+        self_hosted(id = "local", host = "gateway", worker_discovery = "directory",
+                    target_dir = "../../../gears-rust/target"),
+    ],
+    default_profile = "dev",
+    gears = [],
+)
+"#;
+
+#[test]
+fn rebase_rewrites_every_relative_path_and_nothing_else() {
+    let seen = std::cell::RefCell::new(Vec::new());
+    let (rebased, found) = rebase_product_paths(URI, WITH_PATHS, |written| {
+        seen.borrow_mut().push(written.to_owned());
+        (!written.starts_with('/')).then(|| format!("../{written}"))
+    })
+    .expect("parses");
+
+    assert_eq!(
+        seen.into_inner().len(),
+        5,
+        "four relative paths and the absolute one are all offered to the callback"
+    );
+    assert!(
+        rebased.contains(r#"at = path("../../../../gears-rust")),  # the corpus"#),
+        "{rebased}"
+    );
+    assert!(
+        rebased.contains(r#"SHARED = path("../../shared")"#),
+        "{rebased}"
+    );
+    assert!(
+        rebased.contains(r#"templates = path("../templates")"#),
+        "{rebased}"
+    );
+    assert!(
+        rebased.contains(r#"target_dir = "../../../../gears-rust/target""#),
+        "{rebased}"
+    );
+    assert!(
+        rebased.contains(r#"path("/opt/gears")"#),
+        "an absolute path is left alone"
+    );
+    assert!(
+        rebased.contains("# sources are relative to this file"),
+        "{rebased}"
+    );
+    assert!(found.relative_loads.is_empty());
+    AstModule::parse(URI, rebased, &crate::declarative::dialect()).expect("still parses");
+}
+
+#[test]
+fn rebase_that_changes_nothing_is_byte_exact() {
+    let (rebased, _) = rebase_product_paths(URI, WITH_PATHS, |_| None).expect("parses");
+    assert_eq!(rebased, WITH_PATHS);
+}
+
+#[test]
+fn rebase_reports_relative_loads_and_not_rooted_ones() {
+    let source =
+        format!("load(\"common.gdl\", \"SDK\")\nload(\"//shared/x.gdl\", \"X\")\n{WITH_PATHS}");
+    let (_, found) = rebase_product_paths(URI, &source, |_| None).expect("parses");
+    assert_eq!(found.relative_loads, vec!["common.gdl".to_owned()]);
+}
+
 #[test]
 fn profile_add_remove_is_byte_exact_inverse() {
     let added = add_profile(
@@ -1709,6 +1791,17 @@ fn a_provider_option_is_set_on_the_entry_it_addresses() {
         edited.contains("pool_max_size = 10"),
         "the option was not written:\n{edited}"
     );
+    // **And it parses.** This case has always been an insertion after a trailing
+    // comma, and it passed while producing `,\n, pool_max_size = 10` -- because it
+    // asked only whether the option was in the text. The browser found it.
+    AstModule::parse(URI, edited.clone(), &crate::declarative::dialect())
+        .expect("an inserted option must leave the description parseable");
+    assert!(
+        edited.contains(
+            "                schema = \"cluster\",\n                pool_max_size = 10,\n"
+        ),
+        "one per line, at the neighbours' indentation, with its own trailing comma:\n{edited}"
+    );
     // The *other* entry is untouched, which is the whole point of the address.
     assert!(
         edited.contains(r#"cache = provider("standalone"),"#),
@@ -1800,4 +1893,86 @@ fn setting_an_option_to_what_it_already_says_changes_nothing() {
         edit.changed().is_none(),
         "an idempotent edit reported a change"
     );
+}
+
+/// A trailing comma on one line takes the new argument after it, on that line.
+#[test]
+fn a_named_argument_after_a_one_line_trailing_comma_parses() {
+    let source = "product(id = \"p\", version = \"0.1.0\",)\n";
+    let cloned = clone_product_text(URI, source, "q", "Q", None).expect("cloneable");
+    assert_eq!(
+        cloned,
+        "product(id = \"q\", version = \"0.1.0\", name = \"Q\",)\n"
+    );
+}
+
+/// Cloning a product that omits `name` and ends with a trailing comma.
+///
+/// The shape every multi-line description in the corpus has; `name` is optional,
+/// so the stamp is an insertion, and the insertion was the one that broke.
+#[test]
+fn cloning_a_product_without_a_name_keeps_it_parseable() {
+    let source = "product(\n    id = \"p\",\n    version = \"0.1.0\",\n    gears = [],\n)\n";
+    let cloned = clone_product_text(URI, source, "q", "Q", None).expect("cloneable");
+    assert!(
+        cloned.contains("    gears = [],\n    name = \"Q\",\n)"),
+        "{cloned}"
+    );
+    AstModule::parse(URI, cloned, &crate::declarative::dialect()).expect("parses");
+}
+
+/// A config key added to a dict written with a trailing comma.
+#[test]
+fn a_config_key_after_a_trailing_comma_parses() {
+    let source = r#"product(
+    gears = [
+        use_gear("api-gateway", source = "s", config = {
+            "enable_docs": True,
+        }),
+    ],
+)
+"#;
+    let edited = set_gear_config(
+        URI,
+        source,
+        "api-gateway",
+        "prefix_path",
+        Some(&str_value("/cf")),
+    )
+    .expect("editable")
+    .changed()
+    .expect("changed")
+    .to_owned();
+    assert!(
+        edited.contains(
+            "            \"enable_docs\": True,\n            \"prefix_path\": \"/cf\",\n"
+        ),
+        "{edited}"
+    );
+    AstModule::parse(URI, edited, &crate::declarative::dialect()).expect("parses");
+}
+
+/// A comment between the last argument and the bracket does not hide the
+/// trailing comma, nor swallow the new argument.
+#[test]
+fn an_insertion_before_a_trailing_comment_parses() {
+    let whole_line =
+        "product(\n    id = \"p\",\n    version = \"0.1.0\",\n    # why the list ends here\n)\n";
+    let cloned = clone_product_text(URI, whole_line, "q", "Q", None).expect("cloneable");
+    assert!(
+        cloned.contains(
+            "    version = \"0.1.0\",\n    name = \"Q\",\n    # why the list ends here\n)"
+        ),
+        "{cloned}"
+    );
+    AstModule::parse(URI, cloned, &crate::declarative::dialect()).expect("parses");
+
+    // On the same line, and with a `#` inside a string that is not a comment.
+    let inline = "product(id = \"p#1\", version = \"0.1.0\"  # note\n)\n";
+    let cloned = clone_product_text(URI, inline, "q", "Q", None).expect("cloneable");
+    assert!(
+        cloned.contains("version = \"0.1.0\", name = \"Q\"  # note\n)"),
+        "the argument must land before the comment, not inside it:\n{cloned}"
+    );
+    AstModule::parse(URI, cloned, &crate::declarative::dialect()).expect("parses");
 }

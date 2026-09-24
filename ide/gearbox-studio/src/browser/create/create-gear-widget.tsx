@@ -120,6 +120,15 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
    * The same guard `AddGearWidget` documents, for the same reason.
    */
   protected previewToken = 0;
+  /**
+   * A preview has been asked for and not yet answered.
+   *
+   * `plan === undefined` held Create only until the first answer; after that a
+   * plan for the previous field values kept it live through the debounce and the
+   * round trip, so a Create in that window acted on a preview the pane was about
+   * to replace.
+   */
+  protected previewPending = false;
   protected product: { path: string; label: string } | undefined;
   protected applying = false;
 
@@ -235,6 +244,11 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
    * so it is certainly worth showing.
    */
   protected schedulePreview(): void {
+    // Bumped here as well as in `refreshPreview`: an answer still in flight when
+    // a field changes is already stale, and must not clear `previewPending`
+    // during the debounce with a plan for the old values.
+    this.previewToken += 1;
+    this.previewPending = true;
     this.update();
     if (this.previewTimer !== undefined) clearTimeout(this.previewTimer);
     this.previewTimer = setTimeout(() => void this.refreshPreview(), 200);
@@ -244,6 +258,7 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
     if (!this.engine.isConnected) {
       this.plan = undefined;
       this.planError = "";
+      this.previewPending = false;
       this.update();
       return;
     }
@@ -270,6 +285,7 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
       this.plan = undefined;
       this.planError = error instanceof Error ? error.message : String(error);
     }
+    this.previewPending = false;
     this.update();
   }
 
@@ -636,6 +652,7 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
               disabled={
               !connected ||
               this.applying ||
+              this.previewPending ||
               this.plan === undefined ||
               idProblem !== undefined ||
               versionProblem !== undefined ||
@@ -669,7 +686,10 @@ export class CreateGearWidget extends ReactWidget implements OwnedWidget {
         </div>
         <div
           className="gbx-file-plan gbx-create-preview"
-          data-preview-ready={connected && this.plan !== undefined ? "true" : "false"}
+          data-preview-ready={
+            connected && this.plan !== undefined && !this.previewPending ? "true" : "false"
+          }
+          aria-busy={this.previewPending}
         >
           {!connected && "Preview unavailable while the engine is disconnected."}
           {connected && this.planError !== "" && <div className="gbx-error">{this.planError}</div>}

@@ -227,6 +227,37 @@ export class ProductSessionService {
   }
 
   /**
+   * `failStage`, and put the engine back on the session this open replaced.
+   *
+   * **Because a refused open used to take the whole application with it.** By the
+   * time a step refuses, the engine has already been re-initialized for this
+   * product -- its folder as the workspace, then its declared roots -- and nothing
+   * undid that. A product whose only source did not exist left the engine
+   * disconnected with that reason, and every later bare `load()` re-used the same
+   * session: Start said "Engine disconnected", New Product, New Gear and Continue
+   * were disabled, and Retry repeated the failure. The only way out anybody found
+   * was opening some other product. Measured, with a clone whose relative source
+   * pointed nowhere.
+   *
+   * Not for the `resolve` step: by then this product's catalogue loaded, and the
+   * panel shows the product with its error, which is the state to be in.
+   */
+  protected async failAndRestore(
+    stage: OpeningStage,
+    reason: string,
+    generation: number,
+    before: StudioSession | undefined,
+  ): Promise<false> {
+    this.failStage(stage, reason, generation);
+    // A different open has taken over: its session is the one that should stand.
+    if (!this.current(generation)) return false;
+    await (before === undefined
+      ? this.catalogue.resetToBootSession()
+      : this.catalogue.load(before));
+    return false;
+  }
+
+  /**
    * Stop the open at the step that refused, and say why.
    *
    * The message still goes to the message service -- a refusal a person did not
@@ -449,6 +480,10 @@ export class ProductSessionService {
   protected async doOpen(ref: ProductRef, generation: number): Promise<boolean> {
     const directory = parentOf(ref.path);
     const workspace = this.workspaceFor(ref.path, directory);
+    // What to go back to if this open stops before it has a catalogue of its own:
+    // the previous product's session, or the boot one when there was none. See
+    // `failAndRestore`.
+    const before = this.catalogue.currentSession();
 
     if (this.gears.current !== undefined) {
       await this.gears.close();
@@ -478,7 +513,7 @@ export class ProductSessionService {
       this.catalogue.current,
       `The engine could not be started on ${ref.label}'s folder`,
     );
-    if (!spawned.ok) return this.failStage("workspace", spawned.reason, generation);
+    if (!spawned.ok) return this.failAndRestore("workspace", spawned.reason, generation, before);
 
     // Step 2: read what the description declares. `loadProduct` is evaluation
     // only -- nothing is joined against the catalogue -- which is exactly why it
@@ -488,17 +523,18 @@ export class ProductSessionService {
     try {
       intent = (await this.service.loadProduct(ref.path)).intent;
     } catch (error) {
-      return this.failStage(
+      return this.failAndRestore(
         "describe",
         `${ref.label} could not be evaluated, so it cannot be opened: ${messageOf(error)}`,
         generation,
+        before,
       );
     }
     if (!this.current(generation)) return false;
 
     const sources = sourceRootsOf(intent, (at) => resolveFrom(directory, at));
     const usable = sourcesUsable(ref.label, sources);
-    if (!usable.ok) return this.failStage("describe", usable.reason, generation);
+    if (!usable.ok) return this.failAndRestore("describe", usable.reason, generation, before);
     const roots = [...sources.roots];
 
     // Step 3 and 4: the real session, then the catalogue and the product.
@@ -510,7 +546,7 @@ export class ProductSessionService {
       this.catalogue.current,
       `${ref.label}'s gears could not be loaded from ${roots.join(", ")}`,
     );
-    if (!loaded.ok) return this.failStage("catalogue", loaded.reason, generation);
+    if (!loaded.ok) return this.failAndRestore("catalogue", loaded.reason, generation, before);
 
     this.enterStage("resolve", generation);
     // **The last checkpoint, immediately before the answer is installed.** Every

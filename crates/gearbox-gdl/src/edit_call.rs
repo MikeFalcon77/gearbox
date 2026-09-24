@@ -846,9 +846,10 @@ fn render_profile_entry(kind: &str, id: &str) -> String {
 
 /// Clone a product file, changing `id` and `name` on the top-level call.
 ///
-/// When `version` is `Some`, that argument is stamped too. Sources and every
-/// other line are left untouched — comments survive byte-for-byte outside the
-/// replaced named arguments.
+/// When `version` is `Some`, that argument is stamped too. Every other line is
+/// left untouched — comments survive byte-for-byte outside the replaced named
+/// arguments. Relative paths are the caller's next step, not this one's: only
+/// the caller knows both directories (see [`rebase_product_paths`]).
 ///
 /// # Errors
 /// When the source does not parse or has no `product(...)` call.
@@ -881,6 +882,106 @@ pub fn clone_product_text(
         updated = set_named_arg_on_call(uri, &updated, "version", Some(&quote_string(version)))?;
     }
     Ok(replace_span(source, call_expr_span, &updated))
+}
+
+/// The paths in a product description that are written relative to it.
+///
+/// `relative_loads` is kept apart from the rest because nothing can be done for
+/// it: a rebased `path(...)` still names the directory it always named, but a
+/// `load("x.gdl")` names a fragment that a clone does not copy.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RelativePaths {
+    /// `load(...)` modules that are not `//`-rooted, as written.
+    pub relative_loads: Vec<String>,
+}
+
+/// Rewrite every path a product description states relative to itself.
+///
+/// **What counts, by construction rather than by list position.** Every
+/// `path("...")` call -- the `at` of a `source(...)` and `templates = path(...)`
+/// both spell it -- and every `target_dir = "..."`, wherever they are written,
+/// including a top-level assignment the product refers to by name. Walking the
+/// whole module rather than `sources` and `profiles` is what keeps a path moved
+/// into a variable from being silently skipped.
+///
+/// `rebase` gets the string as written and answers the replacement, or `None` to
+/// leave it alone -- an absolute path, or one that already means the same thing
+/// from the new place. Only the literal's span is replaced, so comments and every
+/// other byte survive, which is ADR-0010 tier 3's rule for any edit here.
+///
+/// # Errors
+/// When the source does not parse.
+pub fn rebase_product_paths(
+    uri: &str,
+    source: &str,
+    rebase: impl Fn(&str) -> Option<String>,
+) -> Result<(String, RelativePaths), Diagnostics> {
+    let ast = AstModule::parse(uri, source.to_owned(), &dialect()).map_err(|e| {
+        refuse_with(
+            uri,
+            DiagnosticCode::GdlParse,
+            &format!("`{uri}` does not parse: {e}"),
+            "fix the source description before cloning it",
+        )
+    })?;
+
+    let mut literals: Vec<(Span, String)> = Vec::new();
+    let mut found = RelativePaths::default();
+    collect_relative_loads(ast.statement(), &mut found);
+    // Once, from the root: a statement's `visit_expr` already descends into the
+    // statements nested in it, so calling it again at each level visits every
+    // literal once per enclosing statement.
+    ast.statement()
+        .visit_expr(|expr| walk_expr(expr, &mut literals));
+
+    // Back to front, so an earlier span is still valid after a later one moved.
+    literals.sort_by_key(|(span, _)| std::cmp::Reverse(span.begin()));
+    let mut out = source.to_owned();
+    for (span, written) in literals {
+        if let Some(replacement) = rebase(&written)
+            && replacement != written
+        {
+            out = replace_span(&out, span, &quote_string(&replacement));
+        }
+    }
+    Ok((out, found))
+}
+
+fn collect_relative_loads<P>(stmt: &AstStmtP<P>, found: &mut RelativePaths)
+where
+    P: starlark_syntax::syntax::ast::AstPayload,
+{
+    if let StmtP::Load(load) = &stmt.node
+        && !load.module.node.starts_with("//")
+    {
+        found.relative_loads.push(load.module.node.clone());
+    }
+    stmt.visit_stmt(|child| collect_relative_loads(child, found));
+}
+
+fn walk_expr<P>(expr: &AstExprP<P>, literals: &mut Vec<(Span, String)>)
+where
+    P: starlark_syntax::syntax::ast::AstPayload,
+{
+    if let ExprP::Call(callee, args) = &expr.node {
+        let is_path = crate::edit::is_identifier(callee, "path");
+        for arg in &args.args {
+            match &arg.node {
+                ArgumentP::Positional(value) if is_path => {
+                    if let Some(written) = string_literal(value) {
+                        literals.push((value.span, written));
+                    }
+                }
+                ArgumentP::Named(name, value) if name.node == "target_dir" => {
+                    if let Some(written) = string_literal(value) {
+                        literals.push((value.span, written));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    expr.visit_expr(|child| walk_expr(child, literals));
 }
 
 /// The deployment profile kinds the editor can scaffold and validate.
@@ -1173,14 +1274,12 @@ fn set_named_arg_on_call(
                     "fix the entry shape",
                 ));
             }
-            let insert_at = close - 1;
-            let head = &text[..insert_at];
-            let insert = if head.trim_end().ends_with('(') {
-                format!("{name} = {value}")
-            } else {
-                format!(", {name} = {value}")
-            };
-            Ok(format!("{head}{insert}{}", &text[insert_at..]))
+            Ok(insert_before_close(
+                text,
+                close - 1,
+                '(',
+                &format!("{name} = {value}"),
+            ))
         }
         (None, None) => Ok(text.to_owned()),
     }
@@ -1277,14 +1376,81 @@ fn insert_dict_pair(text: &str, dict_span: Span, pair: &str) -> String {
     if end == 0 || !text[..end].ends_with('}') {
         return text.to_owned();
     }
-    let insert_at = end - 1;
-    let body = text[offset(dict_span.begin(), text) + 1..insert_at].trim();
-    let insert = if body.is_empty() {
-        pair.to_owned()
+    insert_before_close(text, end - 1, '{', pair)
+}
+
+/// Insert `item` as the last element before the closing bracket at `close`.
+///
+/// **Three shapes, and the third was the bug.** An empty call or dict takes the
+/// item bare; a list without a trailing comma takes `, item`; and a list that
+/// ends in a trailing comma -- the house style for anything written one element
+/// per line, `payments-demo`'s `provider("postgres", ..., pool_max_size = 10,)`
+/// included -- used to take `, item` too, producing `,\n, item`, which does not
+/// parse. So adding an option to that provider, or cloning a product that omits
+/// `name`, was refused with a parse error about text this editor had written.
+///
+/// With a trailing comma the item goes after it and keeps the style: on a line
+/// of its own, at the indentation of the line the comma is on, when the list is
+/// written one per line; after a space when it is written on one line. Either
+/// way it gets a trailing comma of its own, so the next insertion finds the same
+/// shape.
+fn insert_before_close(text: &str, close: usize, open: char, item: &str) -> String {
+    // Measured from the last *code*, not the last character: a comment between
+    // the final element and the bracket -- `x = 1,\n    # why\n)` -- would
+    // otherwise hide the trailing comma and put `, item` after it, the same
+    // double comma this function exists to prevent.
+    let end = code_end(&text[..close]);
+    let trimmed = &text[..end];
+    if trimmed.ends_with(open) {
+        return format!("{trimmed}{item}{}", &text[end..]);
+    }
+    if !trimmed.ends_with(',') {
+        return format!("{trimmed}, {item}{}", &text[end..]);
+    }
+    if text[end..close].contains('\n') {
+        let line_start = trimmed.rfind('\n').map_or(0, |at| at + 1);
+        let indent: String = trimmed[line_start..]
+            .chars()
+            .take_while(|c| *c == ' ' || *c == '\t')
+            .collect();
+        format!("{trimmed}\n{indent}{item},{}", &text[end..])
     } else {
-        format!(", {pair}")
-    };
-    format!("{}{insert}{}", &text[..insert_at], &text[insert_at..])
+        format!("{trimmed} {item},{}", &text[end..])
+    }
+}
+
+/// Where the code in `head` ends: trailing whitespace and `#` comments dropped.
+///
+/// Whole-line comments are skipped a line at a time; on the last line with code,
+/// a `#` outside a string literal starts a comment. The quote tracking is
+/// deliberately simple -- `"` and `'`, with backslash escapes -- because what it
+/// scans is the tail of one call's argument list, not arbitrary Starlark.
+fn code_end(head: &str) -> usize {
+    let mut end = head.trim_end().len();
+    loop {
+        let line_start = head[..end].rfind('\n').map_or(0, |at| at + 1);
+        let line = &head[line_start..end];
+        if line.trim_start().starts_with('#') {
+            if line_start == 0 {
+                return 0;
+            }
+            end = head[..line_start].trim_end().len();
+            continue;
+        }
+        let mut quote: Option<char> = None;
+        let mut escaped = false;
+        for (at, c) in line.char_indices() {
+            match quote {
+                Some(_) if escaped => escaped = false,
+                Some(_) if c == '\\' => escaped = true,
+                Some(q) if c == q => quote = None,
+                None if c == '"' || c == '\'' => quote = Some(c),
+                None if c == '#' => return head[..line_start + at].trim_end().len(),
+                Some(_) | None => {}
+            }
+        }
+        return end;
+    }
 }
 
 fn remove_arg_span(text: &str, span: Span) -> String {
