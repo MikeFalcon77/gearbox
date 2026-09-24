@@ -25,7 +25,7 @@ a diagnostic carrying a `file:line` citation, never silently faked. The PRD is s
 written before implementation. There is no CI in this repository.
 
 [docs/conformance.md](docs/conformance.md) checks each documented claim against a running
-Studio: 172 claims, 166 built, 1 not built, 0 broken, 5 not observed.
+Studio: 207 claims, 206 built, 0 not built, 0 broken, 1 not observed.
 
 ## The pipeline
 
