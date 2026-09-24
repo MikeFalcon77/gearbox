@@ -1084,6 +1084,13 @@ test.describe("edit config and profiles in the open product", () => {
         await studio.page.locator("[data-add-profile]").click();
         await studio.page.locator("[data-profile-new-id]").fill(profileId);
         await studio.page.locator("[data-profile-new-kind]").selectOption(kind);
+        if (kind === "self_hosted") {
+          // **The host application is asked for, not assumed.** The box used to
+          // open holding `localhost` -- a hostname -- which became an application
+          // of that name. Empty now, and Add waits for it.
+          await expect(studio.page.locator("[data-profile-add-confirm]")).toBeDisabled();
+          await studio.page.locator("[data-profile-new-host]").fill("gateway");
+        }
         await studio.page.locator("[data-profile-add-confirm]").click();
         await acceptPreview(studio.page);
         await expect(studio.page.locator(`[data-profile="${profileId}"]`)).toBeVisible({
