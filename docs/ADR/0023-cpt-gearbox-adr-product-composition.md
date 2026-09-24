@@ -309,3 +309,55 @@ same product is neither.
   of what is written.
 * The recovery offer is `cpt-gearbox-adr-domain-specific-ide-shell` Amendment 2026-09-21, which
   decided that a stopped engine is re-established on request and never replays.
+
+## Amendment 2026-09-24: a plugin gap is an error the screen shows
+
+"The intent says what is there, the resolution says what follows." The composition followed that
+rule. Two of the things that follow did not reach the resolution at all: a host with no plugin for
+its point (GBX0511, an error) and two plugins sharing the lowest priority (GBX0517). Both were
+reported only by `validate`, and neither the Studio nor `generate` validates.
+
+Measured in a live review:
+* Validation said "errors 0 … none blocking" for a description that `gearbox validate` refused three
+  times, once per profile;
+* Add Gear's "What changes" had nothing to say about a host added with no plugin;
+* Generate wrote a complete tree for it.
+
+The runtime meets that product as `PluginNotFound` at its first request.
+`cpt-gearbox-fr-plugin-selection` says "MUST report an error", and the only screen that did so was the
+CLI.
+
+### The decision
+
+`resolve_at` runs the plugin joins for the profile it resolves, beside the config, feature and
+provider-feature joins that already run on both paths for the same reason. This goes through
+`plugin_select::check_profiles`; `check` is the same function over every profile, which `validate`
+keeps.
+* One profile, because a resolution is for one. A connection scoped to `prod` fills the point there
+  and leaves `dev` empty, and each profile's screen says so for itself.
+* `Diagnostics::finish` dedups, so `validate`, which runs both, reports each gap once.
+
+Every surface that shows a resolution now shows the gap, with no client change:
+* the Validation count and screen;
+* Add Gear's "What changes", as a new error beside the button, which does not block the add;
+* `generate` and the CLI's `resolve`, which exit non-zero on it.
+
+### What it cost, and what it still does not cover
+
+`products/configurable-gears` named `tenant-resolver` with no plugin. That was invalid all along, and
+the Studio simply did not say so. It now attaches `static-tr-plugin`. One accessibility claim needed a
+compatible plugin not yet attached; it now picks `single-tenant-tr-plugin`.
+
+**A host that arrives only through the co-location closure is still unchecked.** `check_profiles`
+walks `selected_gears`, the hosts the description names, and GBX0511 is worded for a *selected* host.
+`api-gateway` pulls in `authn-resolver`, and `mini-chat` pulls in `tenant-resolver` and
+`authz-resolver`. None of those is reported when it has no plugin. Reporting them needs a decision
+about wording and about where a person attaches a plugin to a host they never named, so it is
+recorded here rather than guessed at.
+
+### Confirmation
+
+* `crates/gearbox-engine/tests/plugins.rs`:
+  `a_resolution_reports_an_unfilled_point_for_its_own_profile`. `dev` with no linked implementation
+  reports once; `prod`, which links one, reports nothing.
+* The whole engine suite, including the golden locks, is unchanged for both shipped products.

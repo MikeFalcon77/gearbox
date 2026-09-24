@@ -53,7 +53,13 @@ product(
         # Declares `TenantResolverPluginClient` and exposes `vendor`, whose
         # default is projected from `impl Default` rather than written here --
         # which is what makes a placeholder a claim about projection.
-        use_gear("tenant-resolver", source = "gears-rust"),
+        #
+        # With a plugin, because a host with none is GBX0511 in every profile: it
+        # starts and finds nothing at its first request. `validate` said so all
+        # along; the Studio and `generate` resolve, and did not, until the check
+        # moved onto that path too.
+        use_gear("tenant-resolver", source = "gears-rust",
+            plugins = [plugin("static-tr-plugin")]),
 
         # `cargo_features = []`: a curation that offers nothing. Not the same
         # statement as declaring nothing, and the two used to read alike.

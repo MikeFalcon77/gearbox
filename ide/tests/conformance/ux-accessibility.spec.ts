@@ -241,8 +241,8 @@ test.describe("controls that can be operated can be named", () => {
     // at exactly that moment.
     //
     // `configurable-gears` and `tenant-resolver`, because its extension point
-    // has compatible plugins and none attached: under a host whose slot is
-    // already filled the edit is a no-op and there is no preview to refuse.
+    // has compatible plugins beyond the one attached: choosing the attached one
+    // again is a no-op with no preview to refuse, so the claim picks another.
     const { page } = stalledStudio;
     await openProductById(page, "configurable-gears", "dev");
     await productSection(page, "composition");
@@ -254,7 +254,7 @@ test.describe("controls that can be operated can be named", () => {
     await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
 
     const refused = rpc.failNext("applyEdits", "the engine is not initialized");
-    await page.locator('[data-add-gear-select="static-tr-plugin"]').click();
+    await page.locator('[data-add-gear-select="single-tenant-tr-plugin"]').click();
     await refused.held;
 
     await expect(

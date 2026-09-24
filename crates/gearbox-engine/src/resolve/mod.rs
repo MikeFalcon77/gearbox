@@ -135,6 +135,17 @@ pub fn resolve_at(
     // startup, or, for leader election, does not fail and elects one leader per
     // replica.
     crate::provider_feature_check::check(catalogue, intent, &uri, &mut diagnostics);
+    // And the plugin joins, for the same reason: an unfilled extension point
+    // (GBX0511) and a shared lowest priority (GBX0517) were `validate`-only, so
+    // the Studio said "errors 0" and `generate` wrote a tree for a product whose
+    // host finds no implementation at its first request.
+    drop(crate::plugin_select::check_profiles(
+        catalogue,
+        intent,
+        &[profile],
+        &uri,
+        &mut diagnostics,
+    ));
 
     // Step 4 -- processes. An unknown profile is reported rather than assumed,
     // because guessing `embedded` would silently resolve the wrong topology.

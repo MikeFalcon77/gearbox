@@ -746,3 +746,54 @@ fn plugin_interface_is_gone() {
         catalogue.diagnostics
     );
 }
+
+/// The resolver reports an unfilled point for the profile it resolves, and only
+/// that one.
+///
+/// **The check used to be `validate`-only**, and nothing a person building the
+/// product uses validates: the Studio and `generate` both resolve. Measured in
+/// the Studio -- "errors 0" beside a description `validate` refused, and a tree
+/// generated for it. A plugin scoped to `prod` fills the point there and leaves
+/// `dev` empty, which is the case that shows the check is per profile rather
+/// than a copy of `validate`'s all-profiles answer.
+#[test]
+fn a_resolution_reports_an_unfilled_point_for_its_own_profile() {
+    let cat = require!();
+    let src = product(
+        r#"embedded(id = "dev"), kubernetes(id = "prod", discovery = "static")"#,
+        "dev",
+        &format!(r#"{AUTHN}, plugins = [plugin("oidc-authn-plugin", profiles = ["prod"])])"#),
+    );
+    let identity = FileIdentity {
+        uri: "file:///t/product.gdl".to_owned(),
+        source: SourceId::new("product").unwrap(),
+        gdl_path: RelPath::new("product.gdl").unwrap(),
+        load_paths: None,
+    };
+    let intent = GdlEngine::new()
+        .eval_product(&identity, &src)
+        .value
+        .expect("evaluates");
+
+    let unfilled = |profile: &str| {
+        let resolution = gearbox_engine::resolve::resolve(
+            &cat,
+            &intent,
+            &gearbox_ir::ProfileId::new(profile).unwrap(),
+        );
+        resolution
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::PluginPointUnfilled)
+            .map(|d| d.message.clone())
+            .collect::<Vec<_>>()
+    };
+
+    let dev = unfilled("dev");
+    assert_eq!(dev.len(), 1, "dev has no implementation linked: {dev:?}");
+    assert!(dev[0].contains("in profile `dev`"), "{dev:?}");
+    assert!(
+        unfilled("prod").is_empty(),
+        "prod links oidc-authn-plugin, and dev's gap is not prod's to report"
+    );
+}

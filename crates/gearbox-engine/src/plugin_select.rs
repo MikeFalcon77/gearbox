@@ -157,10 +157,39 @@ pub fn check(
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) -> Vec<PointResolution> {
+    let profiles: Vec<&ProfileId> = intent.profiles.keys().collect();
+    check_profiles(catalogue, intent, &profiles, uri, diagnostics)
+}
+
+/// As [`check`], for the named profiles only.
+///
+/// **What the resolver runs, and why it has to.** This check lived only in
+/// `validate`, and neither the Studio nor `generate` validates: both resolve. So
+/// a host with no plugin for its point -- GBX0511, an error the runtime meets as
+/// `PluginNotFound` at its first request -- was reported by the CLI's `validate`
+/// and by nothing a person building the product would see. Measured in the
+/// Studio: "errors 0" beside a description `validate` refused three times over,
+/// and a generated tree for it. A resolution is for one profile, so it asks about
+/// that one; `validate` still asks about all of them.
+///
+/// A profile the description does not declare is skipped: the resolver reports
+/// it on its own, and "no implementation in a profile that does not exist" would
+/// be a second, wrong, account of the same mistake.
+pub fn check_profiles(
+    catalogue: &Catalogue,
+    intent: &ProductIntent,
+    profiles: &[&ProfileId],
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) -> Vec<PointResolution> {
     let mut out = Vec::new();
     report_plugin_config_types(intent, uri, diagnostics);
 
-    for profile in intent.profiles.keys() {
+    for profile in profiles
+        .iter()
+        .copied()
+        .filter(|p| intent.profiles.contains_key(*p))
+    {
         for selection in &intent.selected_gears {
             let Some(host) = catalogue.gear(&selection.gear) else {
                 continue;
