@@ -499,6 +499,18 @@ pub fn add_profile(
     fields: &[(String, String)],
 ) -> Result<Edit, Diagnostics> {
     require_profile_kind(uri, kind)?;
+    // **Checked before it is written, by the rule that reads it back.** The id
+    // used to be quoted and written whatever it was, so `Bad_Id` produced a
+    // description the evaluator then refused -- the panel's next state was
+    // "could not be evaluated", for a profile the panel itself had offered to
+    // add. `ProfileId::new` is the authority, as `SourceId::new` is for sources.
+    if let Err(e) = gearbox_ir::ProfileId::new(id) {
+        return Err(refuse(
+            uri,
+            &format!("`{id}` is not a valid profile id: {e}"),
+            "use a kebab-case name, like `staging` or `eu-prod`",
+        ));
+    }
     for (k, _) in fields {
         require_gdl_identifier(uri, k, "profile field")?;
     }

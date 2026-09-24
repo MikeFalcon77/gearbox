@@ -9,7 +9,7 @@ import type { ProductStore } from "../product-store";
 import type { ProductEditService } from "../product-edit-service";
 import type { SelectionService } from "../shell/selection-service";
 import { SHOW_PRODUCT } from "../shell/session-command-ids";
-import { fillLabel, fillsPointOf, pointsOf } from "../../common/extension-points";
+import { fillLabel, fillsPointOf, pluginsByPoint, pointsOf } from "../../common/extension-points";
 import { productIdentity } from "../shell/screens";
 import { impactOf, type Impact } from "./impact";
 import { DiagnosticsList } from "../diagnostics/diagnostics-list";
@@ -355,7 +355,19 @@ export class AddGearDialog extends ReactDialog<boolean> {
                   <select data-add-gear-plugin-pick aria-label="Plugin to attach" value={this.pluginPick}
                     onChange={e => { this.pluginPick = e.target.value; this.update(); }}>
                     <option value="">Choose a plugin</option>
-                    {offer.map(p => <option key={p.id} value={p.id}>{p.id}</option>)}
+                    {/* **Grouped by the point it fills when there is more than
+                        one** -- mini-chat declares two, and a flat list left a
+                        person to know which plugin answers which trait. One
+                        point needs no heading. */}
+                    {points.length > 1
+                      ? pluginsByPoint(chosen, offer)
+                          .filter(group => group.plugins.length > 0)
+                          .map(group => (
+                            <optgroup key={group.point.spec} label={group.point.trait_ident}>
+                              {group.plugins.map(p => <option key={p.id} value={p.id}>{p.id}</option>)}
+                            </optgroup>
+                          ))
+                      : offer.map(p => <option key={p.id} value={p.id}>{p.id}</option>)}
                   </select>
                   <button type="button" data-add-gear-plugin-add disabled={!this.pluginPick}
                     onClick={() => { if (this.pluginPick) { this.staged = [...this.staged, { plugin: this.pluginPick, profiles: [] }]; this.pluginPick = ""; void this.refreshPreview(); } }}>Attach plugin</button>

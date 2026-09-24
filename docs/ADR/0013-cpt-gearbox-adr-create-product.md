@@ -1068,3 +1068,33 @@ showed only "could not be edited", which is the envelope rather than the answer.
 Asserted in `edit_tests.rs`: the provider case now also checks that the result parses and where the
 option went; a clone without `name`, both multi-line and one-line; a config key after a trailing
 comma.
+
+## Amendment 2026-09-24 (review follow-up): five things the forms said that were not so
+
+The same review found five places where a form accepted, offered or asserted something that the
+engine, the runtime or the document disagreed with. None is a new rule. Each makes an existing rule
+true at the control where it applies.
+
+* **A profile id is checked before it is written.** `add_profile` quoted whatever arrived, so `Bad_Id`
+  was written and the description then failed to evaluate. `ProfileId::new` now refuses it, as
+  `SourceId::new` already did for sources. The form says why at the field. An id the product already
+  declares is also said there; before, it was a silent no-op. The self-hosted `host` field is labelled
+  as the host *application* and starts empty. It used to hold `localhost`, a hostname, which became an
+  application of that name.
+* **A key the resolver owns is not one a person must supply.** api-gateway's `bind_addr` is required
+  by its struct and has no default, so the form marked it required. Filling it in earned GBX0114,
+  "remove `bind_addr`". The form now reads the gear's `serves`: a key an endpoint derives says the
+  resolver writes it, and carries no required mark. GBX0114 now names its gear and key, like GBX0120,
+  so Validation offers the row that resets it.
+* **Create Gear scopes the connection it writes.** It was the third route to attaching a plugin, and
+  the only one without the `ProfileScope` control that ADR-0023 (2026-09-21) gives the other two. It
+  writes `add_plugin_selection` when the scope is narrowed, and `add_plugin` otherwise, as before.
+* **Plugins are grouped by the point they fill** when a host declares more than one (mini-chat
+  declares two). The 2026-09-07 amendment promised this; `pluginsByPoint` existed and was unused.
+* **A destination is absolute or refused**, in both wizards and in the engine. A relative path used to
+  be joined to the engine's working directory, which is wherever the backend was started. For a
+  product, `relative/dir/product.gdl` previewed cleanly with absolute sources. For a service or
+  minimal gear, nothing refused it.
+
+Asserted in `edit_tests.rs` (malformed profile ids), `config_check_tests.rs` (GBX0114's key and
+subject), and `write_gate_tests.rs` (relative destinations for a product and a gear).

@@ -248,6 +248,9 @@ fn setting_a_derived_key_warns_without_failing() {
         "{:?}",
         reported[0]
     );
+    // Named, so the Validation stage can offer the row that fixes it.
+    assert_eq!(reported[0].config_key.as_deref(), Some("bind_addr"));
+    assert!(reported[0].subject.is_some(), "{:?}", reported[0]);
     assert!(reported[0].help.is_some());
 }
 

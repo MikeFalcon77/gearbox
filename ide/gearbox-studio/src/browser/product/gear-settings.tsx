@@ -153,6 +153,9 @@ export function GearSettings({
           onChange={(key, value) => queueConfig(key, value)}
           provenanceOf={(key) => provenanceOf(sources, gearId, key, savedConfig)}
           isDrafted={(key) => edits.isDraftedConfig(gearId, key)}
+          derivedFrom={(key) =>
+            (descriptor.serves ?? []).find((endpoint) => endpoint.config_key === key)?.name
+          }
           // A reset is a `set_config` with no value, which is how the wire
           // spells "remove this key" -- so it queues into the same draft and
           // waits for the same Apply as typing does.

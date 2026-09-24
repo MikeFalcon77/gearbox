@@ -46,6 +46,15 @@ export interface NewGearPlacement {
     readonly source: string;
     readonly standing: HostStanding;
   };
+  /**
+   * The profiles the connection applies under; absent or empty means every one.
+   *
+   * The wizard's third route to writing a connection, and it used to have no
+   * scope at all: the Add Gear dialog's two routes carry one (ADR-0023,
+   * 2026-09-21), and a plugin created for a product was attached under every
+   * profile, beside whatever its host already runs there.
+   */
+  readonly profiles?: readonly string[];
 }
 
 export type Placement =
@@ -110,7 +119,14 @@ export function placeNewGear(placement: NewGearPlacement, productLabel: string):
       // **The plugin goes inside the host, and appends.** `set_plugins` would
       // rewrite the host's list as bare `plugin("id")` entries and drop the
       // `profiles` and `config` the other entries carry.
-      { kind: "add_plugin", gear: host.id, plugin: placement.gearId },
+      placement.profiles === undefined || placement.profiles.length === 0
+        ? { kind: "add_plugin", gear: host.id, plugin: placement.gearId }
+        : {
+            kind: "add_plugin_selection",
+            gear: host.id,
+            plugin: placement.gearId,
+            profiles: [...placement.profiles],
+          },
     ],
   };
 }

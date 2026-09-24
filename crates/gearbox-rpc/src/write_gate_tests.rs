@@ -1122,3 +1122,46 @@ fn a_stale_document_is_refused_before_any_edit_is_applied() {
         "the other entry with the same name was rewritten:\n{written}"
     );
 }
+
+/// A relative destination is refused by name, for a product and for a gear.
+///
+/// Both used to be joined to the engine's working directory -- wherever the
+/// backend was started -- so a preview of `relative/dir/product.gdl` looked
+/// fine and the write would have landed inside the IDE's own package.
+#[test]
+fn a_relative_destination_is_refused_for_a_product_and_a_gear() {
+    let tmp = scratch("relative-dest");
+    let workspace = tmp.join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+
+    let mut state = write_state(workspace);
+    let product = create_product(
+        &mut state,
+        RequestId::from(1),
+        &create_params(Path::new("relative/dir/product.gdl"), None),
+    );
+    let message = match product.response_result {
+        Err(e) => e.message,
+        Ok(_) => panic!("a relative product path must be refused"),
+    };
+    assert!(message.contains("is not an absolute path"), "{message}");
+
+    let gear = scaffold_gear(
+        &mut state,
+        RequestId::from(2),
+        &ScaffoldGearParams {
+            id: "rel-gear".to_owned(),
+            name: "Rel".to_owned(),
+            version: "0.1.0".to_owned(),
+            kind: crate::protocol::GearKind::Minimal,
+            plugin: None,
+            destination_dir: "relative/gears".to_owned(),
+            dry_run: true,
+        },
+    );
+    let message = match gear.response_result {
+        Err(e) => e.message,
+        Ok(_) => panic!("a relative gear destination must be refused"),
+    };
+    assert!(message.contains("is not an absolute path"), "{message}");
+}

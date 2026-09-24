@@ -1731,6 +1731,21 @@ fn create_product(state: &mut State, id: RequestId, params: &CreateProductParams
     }
 
     let requested = PathBuf::from(&params.path);
+    // **Absolute, or refused by name.** A relative path used to be joined to the
+    // engine process's working directory -- which is wherever the backend was
+    // started, `ide/browser-app` in practice -- so `relative/dir/product.gdl`
+    // previewed cleanly and would have written inside the IDE's own package.
+    // Nobody choosing a destination means that directory.
+    if !requested.is_absolute() {
+        return error(
+            id,
+            error_code::EDIT_REFUSED,
+            &format!(
+                "`{}` is not an absolute path; choose a folder, or give its full path",
+                params.path
+            ),
+        );
+    }
     let parent_input = requested
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -1908,6 +1923,18 @@ fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) 
     };
 
     let dest_dir = PathBuf::from(&params.destination_dir);
+    // Same rule as `create_product`: a relative destination resolved against the
+    // engine's working directory, which is nobody's choice of folder.
+    if !dest_dir.is_absolute() {
+        return error(
+            id,
+            error_code::EDIT_REFUSED,
+            &format!(
+                "`{}` is not an absolute path; choose a folder, or give its full path",
+                params.destination_dir
+            ),
+        );
+    }
     let parent = match writable_out_root(state, &dest_dir) {
         Ok(path) => path,
         Err(refusal) => return error(id, error_code::EDIT_REFUSED, &refusal),

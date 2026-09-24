@@ -812,6 +812,10 @@ const PLACE = { gearId: "ldap-authn-plugin", sourceId: "gears", at: "gears", isP
 
 {
   const point = {
+    // The identity since plugin roles are keyed by GTS spec (ADR-0002,
+    // 2026-09-24); `plugin-locator` reads it, and a fixture without it made this
+    // whole section throw rather than report.
+    spec: "cf.core.authn_resolver.plugin.v1~",
     trait_ident: "AuthNResolverPluginClient",
     sdk_lib: "authn_resolver_sdk",
     sdk: {
@@ -820,7 +824,7 @@ const PLACE = { gearId: "ldap-authn-plugin", sourceId: "gears", at: "gears", isP
       path: "authn-resolver-sdk",
     },
   };
-  const second = { ...point, trait_ident: "AuthNResolverAdmin" };
+  const second = { ...point, spec: "cf.core.authn_resolver_admin.plugin.v1~", trait_ident: "AuthNResolverAdmin" };
   const host = (points) => ({
     id: "authn-resolver",
     source: "gears-rust",
@@ -872,14 +876,18 @@ const PLACE = { gearId: "ldap-authn-plugin", sourceId: "gears", at: "gears", isP
     ready.scaffold?.path === "../../gears-rust/authn-resolver-sdk",
     `the path climbs out of the gear's own folder (got ${ready.scaffold?.path})`,
   );
+  // `plugin_interface` is retired (ADR-0002, 2026-09-24): what makes the gear a
+  // plugin is `fills`, the spec of the point chosen, and the trait rides beside
+  // it only to name the dependency in a comment.
   check(
-    ready.scaffold?.plugin_interface === undefined,
-    "one declared point leaves the trait to the impl",
+    ready.scaffold?.spec === "cf.core.authn_resolver.plugin.v1~" &&
+      ready.scaffold?.trait_ident === "AuthNResolverPluginClient",
+    `the scaffold carries the chosen point's spec (got ${JSON.stringify(ready.scaffold)})`,
   );
   const twoPoints = ask({ hosts: [hostPoint([point, second])] });
   check(
-    twoPoints.scaffold?.plugin_interface === "AuthNResolverPluginClient",
-    "two declared points make the trait an explicit escape hatch",
+    twoPoints.scaffold?.spec === "cf.core.authn_resolver.plugin.v1~",
+    "with two points declared, the spec is the one chosen, not the host's first or last",
   );
 
   const stale = ask({ hosts: [] });

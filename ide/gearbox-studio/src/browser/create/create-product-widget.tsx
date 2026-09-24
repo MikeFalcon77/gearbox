@@ -21,6 +21,7 @@ import { ProductEditService } from "../product-edit-service";
 import { EngineConnectionService } from "../shell/engine-connection-service";
 import { ProductSessionService } from "../shell/product-session-service";
 import type { ContextIdentity, OwnedWidget } from "../shell/screens";
+import { volumeOf } from "./paths";
 
 export type CreateMode = "blank" | "clone-local" | "clone-git";
 
@@ -211,6 +212,20 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
    * destination of `products//product.gdl`; a single space produced `id = " "`
    * and a product that opened and resolved with no diagnostics at all.
    */
+  /**
+   * Why the destination cannot be used, or `undefined`.
+   *
+   * **A relative path is refused here and by the engine.** It used to be joined
+   * to the engine's working directory -- `ide/browser-app`, wherever the backend
+   * was started -- so `relative/dir/product.gdl` previewed cleanly, with
+   * absolute sources, and would have written inside the IDE's own package.
+   */
+  protected destinationRefusal(): string | undefined {
+    const path = this.productPath();
+    if (path === "" || volumeOf(path) !== undefined) return undefined;
+    return `\`${path}\` is not an absolute path. Choose a folder, or give its full path.`;
+  }
+
   protected idRefusal(): string | undefined {
     const id = this.productId.trim();
     if (id === "") return "A product needs an id. Something like `payments-demo`.";
@@ -644,7 +659,7 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
       this.settlePreview(token, `Choose a destination. Suggested: ${this.suggestedProductPath()}`);
       return;
     }
-    const refusal = this.idRefusal();
+    const refusal = this.destinationRefusal() ?? this.idRefusal();
     if (refusal !== undefined) {
       this.settlePreview(token, refusal);
       return;
@@ -939,6 +954,7 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
                 !connected ||
                 this.previewPending ||
                 this.productPath() === "" ||
+                this.destinationRefusal() !== undefined ||
                 this.idRefusal() !== undefined ||
                 (cloning && this.mode === "clone-local" && !this.cloneFrom) ||
                 (this.mode === "clone-git" && this.clone.status !== "reviewing")

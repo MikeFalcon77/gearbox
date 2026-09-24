@@ -147,7 +147,7 @@ export class ProductWidget extends ReactWidget {
   protected stagedFor: string | undefined;
   protected addingProfile = false;
   protected newProfileId = "";
-  protected newProfileHost = "localhost";
+  protected newProfileHost = "";
   protected newProfileDiscovery = "static";
   protected newProfileKind: "embedded" | "self_hosted" | "kubernetes" = "embedded";
 
@@ -547,6 +547,10 @@ export class ProductWidget extends ReactWidget {
                     this.addingProfile = true;
                     this.newProfileId = "";
                     this.newProfileKind = "embedded";
+                    // All four fields belong to one proposal: a host typed for
+                    // the last self_hosted profile is not this one's answer.
+                    this.newProfileHost = "";
+                    this.newProfileDiscovery = "static";
                     this.update();
                   }}
                 >
@@ -918,7 +922,28 @@ export class ProductWidget extends ReactWidget {
     }
   }
 
+  /**
+   * Why the id in the Add profile form cannot be added, or `undefined`.
+   *
+   * **Said at the field, before a round trip.** A malformed id used to reach the
+   * description and make it unreadable, and an id the product already declares
+   * was a silent no-op -- Add pressed, nothing written, nothing said. The engine
+   * refuses the first now as well; this is where a person can act on it.
+   */
+  protected newProfileRefusal(): string | undefined {
+    const id = this.newProfileId.trim();
+    if (id === "") return undefined;
+    if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(id)) {
+      return `\`${id}\` is not a profile id: lowercase letters, digits and single hyphens, starting with a letter.`;
+    }
+    if (this.store.current.intent?.profiles[id] !== undefined) {
+      return `This product already declares \`${id}\`.`;
+    }
+    return undefined;
+  }
+
   protected renderAddProfile(): React.ReactNode {
+    const refusal = this.newProfileRefusal();
     return (
       <div className="gbx-profile-add" data-profile-add>
         <label>
@@ -947,8 +972,16 @@ export class ProductWidget extends ReactWidget {
             <option value="kubernetes">kubernetes</option>
           </select>
         </label>
-        {this.newProfileKind === "self_hosted" && <label>Host (required)
-          <input value={this.newProfileHost} onChange={e => { this.newProfileHost = e.target.value; this.update(); }} />
+        {/* **The host application, not a machine.** `host` names the application
+            the others are spawned from, and the field used to open holding
+            `localhost` -- a hostname, which became an application of that name. */}
+        {this.newProfileKind === "self_hosted" && <label>Host application (required)
+          <input
+            data-profile-new-host
+            value={this.newProfileHost}
+            placeholder="e.g. gateway"
+            onChange={e => { this.newProfileHost = e.target.value; this.update(); }}
+          />
         </label>}
         {this.newProfileKind !== "embedded" && <label>Discovery (required)
           <select value={this.newProfileDiscovery} onChange={e => { this.newProfileDiscovery = e.target.value; this.update(); }}>
@@ -959,7 +992,11 @@ export class ProductWidget extends ReactWidget {
           type="button"
           className="gbx-choice"
           data-profile-add-confirm
-          disabled={!this.newProfileId.trim() || (this.newProfileKind === "self_hosted" && !this.newProfileHost.trim())}
+          disabled={
+            !this.newProfileId.trim() ||
+            refusal !== undefined ||
+            (this.newProfileKind === "self_hosted" && !this.newProfileHost.trim())
+          }
           onClick={() => void this.confirmAddProfile()}
         >
           Add
@@ -975,6 +1012,11 @@ export class ProductWidget extends ReactWidget {
         >
           Cancel
         </button>
+        {refusal !== undefined && (
+          <span className="gbx-error" role="alert" data-profile-new-refusal>
+            {refusal}
+          </span>
+        )}
       </div>
     );
   }
@@ -1101,7 +1143,7 @@ export class ProductWidget extends ReactWidget {
 
   protected async confirmAddProfile(): Promise<void> {
     const id = this.newProfileId.trim();
-    if (id === "") return;
+    if (id === "" || this.newProfileRefusal() !== undefined) return;
     const fields = this.newProfileKind === "embedded" ? [] : this.newProfileKind === "self_hosted"
       ? [{ name: "host", value: this.newProfileHost.trim() }, { name: "worker_discovery", value: this.newProfileDiscovery }]
       : [{ name: "discovery", value: this.newProfileDiscovery }];

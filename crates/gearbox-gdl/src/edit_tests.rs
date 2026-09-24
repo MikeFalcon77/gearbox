@@ -1976,3 +1976,23 @@ fn an_insertion_before_a_trailing_comment_parses() {
     );
     AstModule::parse(URI, cloned, &crate::declarative::dialect()).expect("parses");
 }
+
+/// A malformed profile id is refused before it is written.
+///
+/// It used to be written, and the description then failed to evaluate -- the
+/// panel's next state was "could not be evaluated", for a profile it had offered
+/// to add.
+#[test]
+fn a_malformed_profile_id_is_refused_before_it_is_written() {
+    for bad in ["Bad_Id", "1prod", "has space", "trailing-", "a--b", ""] {
+        let refused = add_profile(URI, WITH_CONFIG, "embedded", bad, &[]);
+        let diagnostics = refused.expect_err(bad);
+        assert!(
+            diagnostics
+                .as_slice()
+                .iter()
+                .any(|d| d.message.contains("is not a valid profile id")),
+            "{bad}: {diagnostics:?}"
+        );
+    }
+}

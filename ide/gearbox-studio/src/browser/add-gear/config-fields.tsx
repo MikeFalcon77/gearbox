@@ -81,6 +81,17 @@ export interface ConfigFieldsProps {
    * Absent means "ask `values`", which is what every caller did before.
    */
   readonly isSet?: (key: string) => boolean;
+  /**
+   * The endpoint whose address the resolver writes under this key, if any.
+   *
+   * **A key the resolver owns is not one a person must supply.** api-gateway's
+   * `bind_addr` is required by its struct and has no default, so the form marked
+   * it required and said the gear declares no default -- and a person who filled
+   * it in got GBX0114, "remove `bind_addr`", because the generator writes the
+   * port the resolver assigned there. The form and the validation contradicted
+   * each other about one field. Read from the gear's own `serves`.
+   */
+  readonly derivedFrom?: (key: string) => string | undefined;
 }
 
 /** How each provenance reads in the panel. */
@@ -169,16 +180,24 @@ export function ConfigFields(props: ConfigFieldsProps): React.ReactElement {
 function ConfigField(
   props: ConfigFieldsProps & { readonly field: ConfigFieldDecl },
 ): React.ReactElement {
-  const { field, values, onChange, provenanceOf, isDrafted, onReset, isSet } = props;
+  const { field, values, onChange, provenanceOf, isDrafted, onReset, isSet, derivedFrom } = props;
   const value = values.get(field.name);
   // Set, whether or not this form can show it. See `ConfigFieldsProps.isSet`.
   const set = value !== undefined || isSet?.(field.name) === true;
   const blocked = refusal(field, set, value !== undefined);
-  const provenance = provenanceShown(field, value, provenanceOf?.(field.name), set);
+  const endpoint = derivedFrom?.(field.name);
+  const provenance =
+    endpoint !== undefined && !set
+      ? "derived"
+      : provenanceShown(field, value, provenanceOf?.(field.name), set);
   const drafted = isDrafted?.(field.name) === true;
   const problem = blocked === undefined ? valueProblem(field, value) : undefined;
   const missing =
-    blocked === undefined && problem === undefined && !set && valueMissing(field, value);
+    endpoint === undefined &&
+    blocked === undefined &&
+    problem === undefined &&
+    !set &&
+    valueMissing(field, value);
 
   return (
     <label
@@ -203,7 +222,7 @@ function ConfigField(
             screen reader nothing, and this panel's own rule two lines down is to
             say things "in words rather than by a colour". The visible glyph
             comes from CSS; the text is for anyone not reading pixels. */}
-        {mustBeSupplied(field) && (
+        {mustBeSupplied(field) && endpoint === undefined && (
           <span className="gbx-config-required" data-config-field-required={field.name}>
             <span className="gbx-sr-only">required</span>
           </span>
@@ -238,7 +257,12 @@ function ConfigField(
       </span>
 
       {blocked === undefined ? (
-        <Control field={field} value={value} onChange={onChange} />
+        <Control
+          field={field}
+          value={value}
+          onChange={onChange}
+          hint={endpoint === undefined ? undefined : "set by the resolver"}
+        />
       ) : (
         <span className="gbx-config-blocked">{blocked}</span>
       )}
@@ -257,6 +281,13 @@ function ConfigField(
       {missing && (
         <span className="gbx-inline-note" data-config-field-missing={field.name}>
           required, and the gear declares no default
+        </span>
+      )}
+      {endpoint !== undefined && (
+        <span className="gbx-inline-note" data-config-field-derived={field.name}>
+          {set
+            ? `the resolver writes this from the \`${endpoint}\` endpoint, so this value is overridden (GBX0114) — reset it`
+            : `the resolver writes this from the \`${endpoint}\` endpoint; leave it empty`}
         </span>
       )}
 
@@ -338,6 +369,8 @@ export function mustBeSupplied(field: ConfigFieldDecl): boolean {
 
 function Control(props: {
   readonly field: ConfigFieldDecl;
+  /** Placeholder in place of the field's own, for a key something else supplies. */
+  readonly hint?: string;
   readonly value: ConfigValue | undefined;
   readonly onChange: (key: string, value: ConfigValue | undefined) => void;
 }): React.ReactElement {
@@ -363,7 +396,7 @@ function Control(props: {
           onChange={(e) => onChange(name, e.target.value === "" ? undefined : e.target.value)}
         >
           {/* Distinguishes "left alone" from "set to the first variant". */}
-          <option value="">{placeholder(field) || "unset"}</option>
+          <option value="">{props.hint ?? (placeholder(field) || "unset")}</option>
           {field.type.variants.map((variant) => (
             <option key={variant} value={variant}>
               {variant}
@@ -380,7 +413,7 @@ function Control(props: {
           aria-label={name}
           // Integers step by one; a float may be anything.
           step={field.type.kind === "int" ? 1 : "any"}
-          placeholder={placeholder(field)}
+          placeholder={props.hint ?? placeholder(field)}
           value={typeof value === "number" ? String(value) : ""}
           onChange={(e) => {
             const text = e.target.value;
@@ -399,7 +432,7 @@ function Control(props: {
         <input
           type="text"
           aria-label={name}
-          placeholder={placeholder(field)}
+          placeholder={props.hint ?? placeholder(field)}
           value={typeof value === "string" ? value : ""}
           onChange={(e) => onChange(name, e.target.value === "" ? undefined : e.target.value)}
         />

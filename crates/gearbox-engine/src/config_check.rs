@@ -90,22 +90,28 @@ pub fn check(
             if !selection.config.contains_key(derived) {
                 continue;
             }
-            diagnostics.push(
-                // `new`, not `error`: the code's own default severity is a
-                // warning, and the product still builds.
-                Diagnostic::new(
-                    DiagnosticCode::GdlConfigKeyDerived,
-                    format!(
-                        "`{}` sets `{derived}`, which its `{}` endpoint derives from the port the resolver assigned",
-                        selection.gear, endpoint.name
-                    ),
-                )
-                .with_help(format!(
-                    "remove `{derived}` from this gear's config; a value written here describes a \
-                     product that was not resolved"
-                ))
-                .at(location(selection, uri)),
-            );
+            // `new`, not `error`: the code's own default severity is a warning,
+            // and the product still builds.
+            let mut diagnostic = Diagnostic::new(
+                DiagnosticCode::GdlConfigKeyDerived,
+                format!(
+                    "`{}` sets `{derived}`, which its `{}` endpoint derives from the port the resolver assigned",
+                    selection.gear, endpoint.name
+                ),
+            )
+            .with_help(format!(
+                "remove `{derived}` from this gear's config; a value written here describes a \
+                 product that was not resolved"
+            ))
+            .at(location(selection, uri))
+            // Named for the same reason GBX0120 is: the fix is a control -- the
+            // row's reset -- and without a subject and a key the Validation
+            // stage could offer only the file and an explanation.
+            .about_config(derived.clone());
+            if let Some(node) = gearbox_ir::NodeKind::Gear.id_for(selection.gear.as_str()) {
+                diagnostic = diagnostic.about(node);
+            }
+            diagnostics.push(diagnostic);
         }
 
         let Some(schema) = gear.config_schema.as_ref() else {
