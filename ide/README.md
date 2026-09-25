@@ -10,12 +10,12 @@ buttons over palette-only command paths.
 
 ## Running it
 
-Node 24 (see `.nvmrc`). Theia 1.75 asks for `>= 24` in its own `doc/Developing.md`, and its
+Node 26 (see `.nvmrc`); 24 is supported too. Theia 1.75 asks for `>= 24` in its own `doc/Developing.md`, and its
 `ci-cd.yml` builds only `[24.x, 26.x]`, which is what `engines.node` here repeats. The `@theia/*`
 packages declare no `engines` of their own, so nothing catches a wrong runtime for you.
 
 ```bash
-nvm use                               # or any Node 24
+nvm use                               # or any Node 26 (24 also works)
 cargo build -p gearbox-cli            # the engine the backend spawns
 cd ide && npm ci
 npm run plugins                       # once: fetches the VS Code git extension
@@ -200,6 +200,20 @@ certificate`, npm aborts, and the tree is left incomplete:
 ```bash
 export NODE_EXTRA_CA_CERTS=/path/to/corp-ca.pem
 ```
+
+**Switching Node major version means rebuilding the native modules**, because they are compiled
+against one ABI: `npm ci` under the new version, then `node-pty` by hand as below. `node-gyp` first
+downloads that version's headers from nodejs.org. On one machine the download failed inside
+`npm ci` with `unable to get local issuer certificate` while a plain `fetch` to the same URL
+worked; running npm's own `node-gyp` directly primed the cache and `npm ci` then went through
+(the exact cause inside npm was not established):
+
+```bash
+node "$(dirname "$(which node)")/../lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js" install "$(node -p 'process.versions.node')"
+```
+
+`SSL_CERT_FILE` pointing at a single root breaks this too, and on Node >= 22 only: it *replaces* the
+trust store, where `NODE_EXTRA_CA_CERTS` appends to it.
 
 **Two of those native modules are load-bearing.** `@theia/core`'s backend requires
 `drivelist/build/Release/drivelist.node` unconditionally, browser target or not, and

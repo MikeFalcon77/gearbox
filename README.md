@@ -109,7 +109,7 @@ in it at all. Engine tests that need the corpus skip themselves when it is missi
 
 - Rust 1.97.0 with `rustfmt` and `clippy`, pinned in `rust-toolchain.toml`. Edition 2024.
 - `cargo-nextest` 0.9.130 or newer and `cargo-deny` 0.20.0 or newer. `make setup` installs both.
-- Node `^24 || >=26` for Studio (`ide/.nvmrc` is 24). This repeats Theia 1.75's own tested
+- Node `^24 || >=26` for Studio (`ide/.nvmrc` is 26). This repeats Theia 1.75's own tested
   matrix; 25 is excluded as a non-LTS line.
 - `npx playwright install chromium`, once, for the conformance suite.
 
