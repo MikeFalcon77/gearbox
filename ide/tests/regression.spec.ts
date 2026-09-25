@@ -226,7 +226,19 @@ test.describe("nothing failed quietly", () => {
     // suite opens and switches editors quickly, and nothing observable breaks --
     // git, the editors and every other claim keep passing. Recorded rather than
     // filtered away quietly, because it is part of what the plugin host costs.
-    const tolerated = [/^pageerror: INVALID tab$/];
+    //
+    // `[DEP0205]` is Node 26's deprecation of `module.register()`, printed on the
+    // plugin host's stderr, which Theia forwards to the console as ERROR. Seen
+    // the first run after moving to Node 26: once per plugin-host start, and
+    // nothing else changed -- all 207 claims passed on the same run. Which module
+    // in the plugin host calls it was *not* established: neither Theia's own
+    // plugin-ext sources nor the bundled plugin host name it plainly. A
+    // deprecation, not a failure; matched by its code, so any other message on
+    // that stream still fails this test.
+    const tolerated = [
+      /^pageerror: INVALID tab$/,
+      /plugin-host ERROR \(node:\d+\) \[DEP0205\] DeprecationWarning: `module\.register\(\)` is deprecated/,
+    ];
     const real = studio.consoleErrors.filter(
       (error) => !tolerated.some((pattern) => pattern.test(error)),
     );
