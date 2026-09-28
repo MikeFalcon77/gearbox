@@ -31,12 +31,17 @@
 // commit through `applyEdits` once (Apply), so the preview dialog is not one
 // blur away from every field.
 
-import { ConfirmDialog, ConfirmDialogProps } from "@theia/core/lib/browser";
+import {
+  ConfirmDialog,
+  ConfirmDialogProps,
+  type FrontendApplicationContribution,
+} from "@theia/core/lib/browser";
 import { Emitter, Event } from "@theia/core/lib/common/event";
 import type { Message } from "@theia/core/shared/@lumino/messaging";
 import { MessageService } from "@theia/core/lib/common/message-service";
 
 import { hasUnsavedEdits } from "./shell/unsaved";
+import { CatalogueStore } from "./catalogue-store";
 import { MonacoTextModelService } from "@theia/monaco/lib/browser/monaco-text-model-service";
 import { inject, injectable } from "@theia/core/shared/inversify";
 
@@ -85,10 +90,11 @@ export type ResolutionPreview =
 export type CreateOutcome = false | "created" | "opened";
 
 @injectable()
-export class ProductEditService {
+export class ProductEditService implements FrontendApplicationContribution {
   @inject(GearboxService) protected readonly service!: GearboxService;
   @inject(ProductStore) protected readonly product!: ProductStore;
   @inject(ProductSessionService) protected readonly session!: ProductSessionService;
+  @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
   @inject(MonacoTextModelService) protected readonly models!: MonacoTextModelService;
   @inject(MessageService) protected readonly messages!: MessageService;
   // Read only, and only to know which subject a caller composed for.
@@ -132,6 +138,17 @@ export class ProductEditService {
   }
 
   /** Whether the open product has unapplied draft edits. */
+  /**
+   * Ask before a reload or a closed tab throws an unapplied draft away.
+   *
+   * The draft lives in memory, so a reload lost it without a word -- while
+   * closing the product keeps it and now says so. Theia's own "leave the page?"
+   * confirmation is what `true` asks for.
+   */
+  onWillStop(): boolean {
+    return [...this.drafts.values()].some((draft) => draft.length > 0);
+  }
+
   hasDraft(path?: string): boolean {
     const target = path ?? this.product.current.open?.path;
     if (target === undefined) return false;
@@ -226,6 +243,11 @@ export class ProductEditService {
       plugin && entryIndex !== undefined
         ? { kind: "remove_plugin", target: { gear, plugin: plugin.gear, entry_index: entryIndex } }
         : { kind: "remove_gear", gear };
+    // The source this gear came from, when removing it leaves the source unused
+    // -- in the same batch, so the preview shows it and Cancel keeps both.
+    const orphan = entryIndex === undefined ? this.sourceLeftUnused(gear) : undefined;
+    const batch: ProductEdit[] =
+      orphan === undefined ? [operation] : [operation, { kind: "remove_source", id: orphan }];
     const affected = (edit: ProductEdit): boolean =>
       "target" in edit
         ? edit.target.gear === gear &&
@@ -240,14 +262,17 @@ export class ProductEditService {
       label: open.label,
       summary:
         `Remove ${plugin?.gear ?? gear}${plugin ? ` from ${gear}` : ""}.` +
+        (orphan === undefined
+          ? ""
+          : ` Its source \`${orphan}\` is removed too: nothing else in the product reads from it.`) +
         (count > 0 ? ` ${count} pending change(s) to it will be discarded.` : ""),
-      targets: [operation],
+      targets: batch,
       dryRun: async () => {
-        const preview = await this.service.applyEdits(open.path, [operation], true);
+        const preview = await this.service.applyEdits(open.path, batch, true);
         before = preview.before;
         return preview;
       },
-      commit: () => this.service.applyEdits(open.path, [operation], false, before),
+      commit: () => this.service.applyEdits(open.path, batch, false, before),
       log: "remove composition entry",
     }));
     if (ok) {
@@ -266,6 +291,40 @@ export class ProductEditService {
       this.onDraftChangedEmitter.fire();
     }
     return ok;
+  }
+
+  /**
+   * The source `gear` is read from, if removing `gear` leaves it unused.
+   *
+   * **Conservative, because a wrong answer breaks a gear silently.** The engine
+   * refuses to remove a source a `use_gear` still names, but it cannot see a
+   * plugin: `plugin("x")` names a gear, not a source, and only the catalogue
+   * knows where `x` was read from. So the source is offered only when no other
+   * selection names it, it is not the product's last source, and every plugin
+   * still connected is known to the catalogue as read from one of the *other*
+   * declared sources. Anything less certain is not offered.
+   */
+  protected sourceLeftUnused(gear: string): string | undefined {
+    const intent = this.product.current.intent;
+    if (intent === undefined) return undefined;
+    const source = intent.selected_gears.find((g) => g.gear === gear)?.source;
+    if (source === undefined) return undefined;
+    const others = new Set(Object.keys(intent.sources).filter((id) => id !== source));
+    if (others.size === 0) return undefined;
+    if (intent.selected_gears.some((g) => g.gear !== gear && g.source === source)) return undefined;
+    const known = new Map(
+      this.catalogue.current.rows.flatMap((row) =>
+        row.kind === "projected" ? [[row.gear.id, row.gear.source] as const] : [],
+      ),
+    );
+    const plugins = intent.selected_gears
+      .filter((g) => g.gear !== gear)
+      .flatMap((g) => (g.plugins ?? []).map((p) => p.gear));
+    const everyPluginElsewhere = plugins.every((id) => {
+      const from = known.get(id);
+      return from !== undefined && others.has(from);
+    });
+    return everyPluginElsewhere ? source : undefined;
   }
 
   async applyDraft(): Promise<boolean> {
@@ -1301,6 +1360,8 @@ function describeEdit(edit: ProductEdit): string {
       return `remove gear \`${edit.gear}\``;
     case "add_source":
       return `add source \`${edit.id}\` at \`${edit.at}\``;
+    case "remove_source":
+      return `remove source \`${edit.id}\``;
     case "set_config":
       return edit.value === null
         ? `gear \`${edit.gear}\`: clear config \`${edit.key}\``

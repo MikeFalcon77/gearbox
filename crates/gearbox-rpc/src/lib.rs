@@ -1526,6 +1526,9 @@ fn apply_product_edits(
             ProductEdit::AddSource { id, at } => {
                 gearbox_gdl::edit::add_source(uri, &current, id, at)?
             }
+            ProductEdit::RemoveSource { id } => {
+                gearbox_gdl::edit::remove_source(uri, &current, id)?
+            }
             ProductEdit::SetConfig { gear, key, value } => {
                 gearbox_gdl::edit::set_gear_config(uri, &current, gear, key, value.as_ref())?
             }

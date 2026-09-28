@@ -9,6 +9,8 @@ import { FileDialogService } from "@theia/filesystem/lib/browser";
 import { PendingCreate } from "../create/pending-create";
 import { PendingCreateGear } from "../create/pending-create-gear";
 import { FILE_PRODUCT } from "../menus";
+import { ConfirmDialog } from "@theia/core/lib/browser";
+import { ProductEditService } from "../product-edit-service";
 import { ProductStore } from "../product-store";
 import { CreateGearViewContribution, CreateProductViewContribution } from "../view-contributions";
 import { EngineConnectionService } from "./engine-connection-service";
@@ -45,6 +47,33 @@ export class SessionCommands implements CommandContribution, MenuContribution {
   @inject(PendingCreateGear) protected readonly pendingGear!: PendingCreateGear;
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
   @inject(FileDialogService) protected readonly fileDialog!: FileDialogService;
+  @inject(ProductEditService) protected readonly edits!: ProductEditService;
+
+  /**
+   * Close the product, saying what happens to an unapplied draft first.
+   *
+   * **The draft survives a close, and nothing used to say so.** It is keyed by
+   * path (ADR-0011, 2026-09-21), so it was kept in silence and reappeared on the
+   * next open as pending changes nobody remembered making -- one Apply away from
+   * a write. Kept still, and deliberately; what changes is that the person
+   * closing is told and can stay.
+   */
+  protected async closeProduct(): Promise<void> {
+    const open = this.products.current.open;
+    if (open !== undefined && this.edits.hasDraft(open.path)) {
+      const name = this.products.current.intent?.display_name || open.name || open.label;
+      const confirmed = await new ConfirmDialog({
+        title: "Close with unapplied changes",
+        msg:
+          `${name} has changes that are not applied. They are kept, and will be pending ` +
+          `again when you reopen it; Discard in the header drops them.`,
+        ok: "Close and keep them",
+        cancel: "Cancel",
+      }).open();
+      if (confirmed !== true) return;
+    }
+    await this.session.close();
+  }
 
   registerCommands(commands: CommandRegistry): void {
     // `isEnabled` is re-queried when the registry fires `onCommandsChanged` and
@@ -62,7 +91,7 @@ export class SessionCommands implements CommandContribution, MenuContribution {
       execute: () => this.pick(),
     });
     commands.registerCommand(CLOSE_PRODUCT, {
-      execute: () => void this.session.close(),
+      execute: () => void this.closeProduct(),
       isEnabled: () => this.products.current.open !== undefined,
     });
     commands.registerCommand(NEW_GEAR, {

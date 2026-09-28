@@ -50,6 +50,7 @@ import {
   type OpeningState,
 } from "../shell/product-session-service";
 import { ADD_GEAR, NEW_GEAR, SHOW_CONFLICTS, SHOW_GENERATE } from "../shell/session-command-ids";
+import type { OpeningStage } from "../shell/opening-outcome";
 import { RevealPathLink } from "../reveal-link";
 import { RevealService } from "../reveal-service";
 import { SelectionService, type Selection } from "../shell/selection-service";
@@ -716,7 +717,7 @@ export class ProductWidget extends ReactWidget {
           <span>Saved</span>
         )}
       </div>
-      <Composition state={state} descriptors={this.catalogue.current.rows.flatMap(row => row.kind === "projected" ? [row.gear] : [])}
+      <Composition state={state} loadingLabel={this.openingLabel()} descriptors={this.catalogue.current.rows.flatMap(row => row.kind === "projected" ? [row.gear] : [])}
         selection={selection} select={selected => { this.selection.select(selected); this.update(); }}
         add={(host, point) => void this.commands.executeCommand(ADD_GEAR.id, { host, point })}
         remove={(host, index) => void this.edits.removeComposition(host, index).then(ok => { if (ok) this.selection.select(undefined); })}
@@ -740,6 +741,14 @@ export class ProductWidget extends ReactWidget {
    * Keyed on the draft epoch for the same reason the Inspector keys them: a
    * Discard or an Apply must take the scratch boxes with it.
    */
+  /** The session's opening step for the product on screen, while it is opening. */
+  protected openingLabel(): string | undefined {
+    const opening = this.session.openingProgress;
+    if (opening.status !== "opening") return undefined;
+    if (opening.product.path !== this.store.current.open?.path) return undefined;
+    return openingSentence(opening.stage);
+  }
+
   protected renderSettings(selection: Selection | undefined): React.ReactNode {
     const state = this.store.current;
     const descriptorFor = (id: string): GearDescriptor | undefined => {
@@ -2026,10 +2035,16 @@ type StepState = "done" | "busy" | "waiting" | "failed";
  */
 const STEP_ICON: Readonly<Record<StepState, string>> = {
   done: codicon("pass"),
-  busy: codicon("circle-large-outline"),
+  busy: `${codicon("loading")} codicon-modifier-spin`,
   waiting: codicon("circle-large-outline"),
   failed: codicon("error"),
 };
+
+/** The opening step a product is on, as a sentence, for the panel that waits on it. */
+function openingSentence(stage: OpeningStage): string {
+  const label = OPENING_LABEL[stage];
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)}…`;
+}
 
 function renderOpening(
   opening: Exclude<OpeningState, { status: "idle" }>,
@@ -2048,7 +2063,9 @@ function renderOpening(
       role={failed ? "alert" : "status"}
     >
       <div className="gbx-opening-head">
-        {failed ? `Could not open ${opening.product.label}` : `Opening ${opening.product.label}…`}
+        {failed
+          ? `Could not open ${opening.product.name ?? opening.product.label}`
+          : `Opening ${opening.product.name ?? opening.product.label}…`}
       </div>
       <ol className="gbx-opening-steps">
         {OPENING_STAGES.map((stage, index) => {
@@ -2058,7 +2075,12 @@ function renderOpening(
           const state: StepState =
             index < at ? "done" : index === at ? (failed ? "failed" : "busy") : "waiting";
           return (
-            <li key={stage} className={`gbx-opening-step gbx-opening-${state}`} data-step={stage}>
+            <li
+              key={stage}
+              className={`gbx-opening-step gbx-opening-${state}`}
+              data-step={stage}
+              aria-current={state === "busy" ? "step" : undefined}
+            >
               <span className={`${STEP_ICON[state]} gbx-opening-icon`} />
               <span>{OPENING_LABEL[stage]}</span>
             </li>

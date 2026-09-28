@@ -597,6 +597,13 @@ pub enum ProductEdit {
         id: String,
         at: String,
     },
+    /// Remove a `source(...)` no gear reads from any more.
+    ///
+    /// The inverse of `AddSource`, offered when removing a gear leaves the source
+    /// it came from unused. The engine refuses a source a `use_gear` still names.
+    RemoveSource {
+        id: String,
+    },
     SetConfig {
         gear: String,
         key: String,

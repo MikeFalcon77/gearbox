@@ -195,9 +195,9 @@ export class StartWidget extends ReactWidget {
           disabled={!connected}
           onClick={() => void this.open("recent", last)}
         >
-          <span className="gbx-start-item-name">Continue {last.label}</span>
+          <span className="gbx-start-item-name">Continue {last.name ?? last.label}</span>
           <span className="gbx-start-item-path">
-            {last.openedAt === undefined ? last.path : `Last opened ${ago(last.openedAt)}`}
+            {last.openedAt === undefined ? <bdi dir="ltr">{last.path}</bdi> : `Last opened ${ago(last.openedAt)}`}
           </span>
         </button>
       </div>
@@ -223,8 +223,13 @@ export class StartWidget extends ReactWidget {
                 data-start-product={ref.path}
                 onClick={() => void this.open(kind, ref)}
               >
-                <span className="gbx-start-item-name">{ref.label}</span>
-                <span className="gbx-start-item-path">{ref.path}</span>
+                <span className="gbx-start-item-name">{ref.name ?? ref.label}</span>
+                {/* `bdi`: the cell is right-to-left so that a long path loses its
+                    start rather than its end, and in a right-to-left run the
+                    leading `/` -- a neutral character -- was drawn at the end,
+                    so every path read `…/product.gdl/`. Isolating the text keeps
+                    the ellipsis where it is and the slash where it belongs. */}
+                <span className="gbx-start-item-path"><bdi dir="ltr">{ref.path}</bdi></span>
               </button>
               {kind === "workspace" && (
                 <button

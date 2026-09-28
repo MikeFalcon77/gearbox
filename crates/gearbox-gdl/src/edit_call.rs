@@ -625,6 +625,55 @@ pub fn remove_profile(uri: &str, source: &str, id: &str) -> Result<Edit, Diagnos
     })
 }
 
+/// Remove one `source(...)` from `sources`, if no gear still reads from it.
+///
+/// For the other half of "a gear created for a product ends up in it": that flow
+/// declares a source, and removing the gear left the source behind, naming a
+/// folder nothing in the description read any more. A source a `use_gear`
+/// still names is refused, because removing it would leave that gear pointing
+/// at a source the product does not declare. A source that is not there is
+/// [`Edit::Unchanged`].
+///
+/// # Errors
+/// When a `use_gear` still names the source, or the description does not parse.
+pub fn remove_source(uri: &str, source: &str, id: &str) -> Result<Edit, Diagnostics> {
+    let gears = named_list_literal(uri, source, "gears")?;
+    for entry in &gears.entries {
+        let text = slice(source, *entry);
+        let Ok(ast) = AstModule::parse(uri, text.to_owned(), &dialect()) else {
+            continue;
+        };
+        let Some(args) = call_args(ast.statement()) else {
+            continue;
+        };
+        let names_it = args.iter().any(|arg| match &arg.node {
+            ArgumentP::Named(name, value) if name.node == "source" => {
+                string_literal(value).as_deref() == Some(id)
+            }
+            _ => false,
+        });
+        if names_it {
+            return Err(refuse(
+                uri,
+                &format!("a gear still reads from source `{id}`"),
+                "remove the gears that use it first, or keep the source",
+            ));
+        }
+    }
+    let list = named_list_literal(uri, source, "sources")?;
+    let Some(target) = list
+        .entries
+        .iter()
+        .copied()
+        .find(|entry| names_entry(source, *entry, id))
+    else {
+        return Ok(Edit::Unchanged);
+    };
+    Ok(Edit::Changed {
+        source: remove_entry(source, target),
+    })
+}
+
 /// Set one scalar field on a profile entry (`host`, `namespace`, …).
 ///
 /// # Errors

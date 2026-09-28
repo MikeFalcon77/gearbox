@@ -131,6 +131,16 @@ export interface ProductRef {
   readonly path: string;
   /** Relative to the repository root, which is what a person recognises. */
   readonly label: string;
+  /**
+   * The product's own name, once its description has been read.
+   *
+   * Beside `label`, not instead of it: `label` is a path by contract and code
+   * compares it as one. A product opened by file from outside the repository has
+   * `product.gdl` for a label -- every such product did -- so the header, the
+   * Continue card and Recent all named it by its file name. This is what they
+   * show when it is known.
+   */
+  readonly name?: string;
 }
 
 /**

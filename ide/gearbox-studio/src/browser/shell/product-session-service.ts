@@ -532,6 +532,14 @@ export class ProductSessionService {
     }
     if (!this.current(generation)) return false;
 
+    // The name is known from here on, so the rest of the open -- the steps on
+    // screen, and the Recent entry it ends in -- says it instead of the file name.
+    ref = { ...ref, name: intent.display_name || intent.id };
+    if (this.openingState.status === "opening") {
+      this.openingState = { ...this.openingState, product: ref };
+      this.onDidChangeOpeningEmitter.fire(this.openingState);
+    }
+
     const sources = sourceRootsOf(intent, (at) => resolveFrom(directory, at));
     const usable = sourcesUsable(ref.label, sources);
     if (!usable.ok) return this.failAndRestore("describe", usable.reason, generation, before);

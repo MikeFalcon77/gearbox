@@ -9,6 +9,13 @@ import type { RevealService } from "../reveal-service";
 
 export interface CompositionProps {
   state: ProductState;
+  /**
+   * What the product is waiting on while it has no intent yet, when the caller
+   * knows. The store's `loading` covers engine round trips, not only reading a
+   * file, so "Reading the description…" was on screen for the ten seconds a
+   * catalogue load took, while the description had been read in milliseconds.
+   */
+  loadingLabel?: string;
   descriptors: readonly GearDescriptor[];
   selection: Selection | undefined;
   select: (selection: Selection) => void;
@@ -42,7 +49,7 @@ function GearLink({ state, id, reveals, select }: {
 }
 
 /** The saved intent is the tree; resolution only annotates it. */
-export function Composition({ state, descriptors, selection, select, add, remove, settings, reveals, folded, toggleFold }: CompositionProps): React.ReactElement {
+export function Composition({ state, loadingLabel, descriptors, selection, select, add, remove, settings, reveals, folded, toggleFold }: CompositionProps): React.ReactElement {
   // A composition is a view of one open document; without one there is nothing
   // to address a connection in. `explicit` is empty in that case anyway, so the
   // tree renders its empty state rather than a non-null assertion.
@@ -62,7 +69,7 @@ export function Composition({ state, descriptors, selection, select, add, remove
           that says a product is empty must be sure it is. */}
       {explicit.length === 0 && (state.status === "loading" || state.status === "resolving") &&
         <div className="gbx-empty" role="status" data-composition-loading={state.status}>
-          {state.status === "loading" ? "Reading the description…" : "Resolving…"}
+          {state.status === "loading" ? (loadingLabel ?? "Loading the product…") : "Resolving…"}
         </div>}
       {explicit.length === 0 && state.status !== "loading" && state.status !== "resolving" && <div className="gbx-empty">Your product has no gears yet. Choose a gear, then configure it here.
         <button type="button" className="gbx-start-primary" onClick={() => add()}>Add gear</button>

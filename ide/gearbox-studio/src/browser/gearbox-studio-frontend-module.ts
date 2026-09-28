@@ -197,6 +197,8 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // confirm. A service rather than a widget handler, so the next widget that
   // wants to edit does not reimplement the four checks.
   bind(ProductEditService).toSelf().inSingletonScope();
+  // For `onWillStop`: a reload with an unapplied draft asks first.
+  bind(FrontendApplicationContribution).toService(ProductEditService);
   bind(PendingCreate).toSelf().inSingletonScope();
   bind(PendingCreateGear).toSelf().inSingletonScope();
   // The policy in front of Apply: generate advertised, writes declared, no

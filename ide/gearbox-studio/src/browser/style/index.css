@@ -1337,3 +1337,6 @@
 /* A preview that no longer matches the fields: kept on screen, so the pane does
    not flash on every keystroke, but visibly not the answer Create would act on. */
 .gbx-create-preview-stale { opacity: 0.55; }
+
+/* The text inside the right-to-left path cell runs left to right; see start-widget. */
+.gbx-start-item-path > bdi { unicode-bidi: isolate; direction: ltr; }

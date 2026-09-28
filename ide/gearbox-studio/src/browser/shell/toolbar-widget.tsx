@@ -166,7 +166,9 @@ export class ToolbarWidget extends ReactWidget {
     // the same product -- while Overview two lines down said the name both
     // times. One entity, two names, side by side. The expression is the one
     // `createGearForProduct` already uses.
-    const name = state.intent?.display_name ?? state.open?.label ?? "";
+    // `||`, not `??`: an empty `display_name` is a name nobody wrote, and it used
+    // to win over everything after it and leave the header blank.
+    const name = state.intent?.display_name || state.intent?.id || state.open?.name || state.open?.label || "";
     return (
       <>
         <span className="gbx-toolbar-name" data-product={name}>

@@ -1996,3 +1996,52 @@ fn a_malformed_profile_id_is_refused_before_it_is_written() {
         );
     }
 }
+
+const TWO_SOURCES: &str = r#"product(
+    id = "p",
+    version = "0.1.0",
+    sources = [
+        source(id = "gears-rust", at = path("../gears-rust")),
+        # scaffolded for this product
+        source(id = "gears", at = path("gears")),
+    ],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [
+        use_gear("api-gateway", source = "gears-rust"),
+    ],
+)
+"#;
+
+/// A source nothing reads is removed, its neighbour and the comments stay.
+#[test]
+fn an_unused_source_is_removed_and_nothing_else() {
+    let removed = remove_source(URI, TWO_SOURCES, "gears")
+        .expect("removable")
+        .changed()
+        .expect("changed")
+        .to_owned();
+    assert!(!removed.contains(r#"source(id = "gears", "#), "{removed}");
+    assert!(
+        removed.contains(r#"source(id = "gears-rust", at = path("../gears-rust"))"#),
+        "{removed}"
+    );
+    AstModule::parse(URI, removed, &crate::declarative::dialect()).expect("parses");
+}
+
+/// A source a gear still reads from is refused, and an absent one is a no-op.
+#[test]
+fn a_source_in_use_is_refused_and_an_absent_one_is_unchanged() {
+    let refused = remove_source(URI, TWO_SOURCES, "gears-rust").expect_err("still used");
+    assert!(
+        refused
+            .as_slice()
+            .iter()
+            .any(|d| d.message.contains("still reads from source `gears-rust`")),
+        "{refused:?}"
+    );
+    assert_eq!(
+        remove_source(URI, TWO_SOURCES, "nowhere").expect("parses"),
+        Edit::Unchanged
+    );
+}
