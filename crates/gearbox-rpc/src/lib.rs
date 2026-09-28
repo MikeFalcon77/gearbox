@@ -991,9 +991,16 @@ fn require_writes(state: &State, id: &RequestId) -> Option<Response> {
 /// Evaluate a `product.gdl`.
 fn product_load(id: RequestId, params: &ProductLoadParams) -> Response {
     let path = PathBuf::from(&params.path);
-    let source = match std::fs::read_to_string(&path) {
+    let source = match gearbox_engine::product::read_product(&path) {
         Ok(source) => source,
-        Err(e) => return error(id, error_code::PRODUCT_LOAD_FAILED, &e.to_string()),
+        Err(diagnostics) => {
+            return error_with_diagnostics(
+                id,
+                error_code::PRODUCT_LOAD_FAILED,
+                &format!("`{}` could not be read", params.path),
+                diagnostics.as_slice(),
+            );
+        }
     };
     let scan = gearbox_engine::product::eval_product_text(&path, None, &source);
     match scan.intent {

@@ -33,26 +33,39 @@ pub struct ProductScan {
 /// wants to share fragments with a sibling has to say so by being rooted higher.
 #[must_use]
 pub fn load_product(path: &Path, root: Option<&Path>) -> ProductScan {
-    let source = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(e) => {
-            let mut diagnostics = Diagnostics::new();
-            diagnostics.push(
-                Diagnostic::error(
-                    DiagnosticCode::GdlEval,
-                    format!("cannot read `{}`: {e}", path.display()),
-                    "check the path and the file's permissions",
-                )
-                .at(Location::file(gearbox_ir::file_uri(path))),
-            );
-            diagnostics.finish();
-            return ProductScan {
-                intent: None,
-                diagnostics,
-            };
-        }
-    };
-    eval_product_text(path, root, &source)
+    match read_product(path) {
+        Ok(source) => eval_product_text(path, root, &source),
+        Err(diagnostics) => ProductScan {
+            intent: None,
+            diagnostics,
+        },
+    }
+}
+
+/// Read a description's text, or the diagnostic that says why it could not be.
+///
+/// **One place for the refusal.** The RPC's `product/load` reads the file itself
+/// -- it needs the text as well as the intent -- and when it inlined the read it
+/// answered a missing file with a bare message and no diagnostic, so a client
+/// had "could not be read" and nothing to put against the path. Both callers
+/// now get the same diagnostic from here.
+///
+/// # Errors
+/// The diagnostic, when the file cannot be read.
+pub fn read_product(path: &Path) -> Result<String, Diagnostics> {
+    std::fs::read_to_string(path).map_err(|e| {
+        let mut diagnostics = Diagnostics::new();
+        diagnostics.push(
+            Diagnostic::error(
+                DiagnosticCode::GdlEval,
+                format!("cannot read `{}`: {e}", path.display()),
+                "check the path and the file's permissions",
+            )
+            .at(Location::file(gearbox_ir::file_uri(path))),
+        );
+        diagnostics.finish();
+        diagnostics
+    })
 }
 
 /// Evaluate a description that is not (yet) what is on disk.

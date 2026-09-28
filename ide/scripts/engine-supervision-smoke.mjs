@@ -199,10 +199,17 @@ if (process.platform === "win32") {
     GEARBOX_WEDGE_METHOD: "gearbox/product/resolve",
     GEARBOX_WEDGE_SENTINEL: sentinel,
     GEARBOX_WEDGE_LOG: log,
-    // Short, because this script sits inside somebody's `npm run verify`. The
-    // point is that the mechanism is the real one, not that the number is.
-    GEARBOX_PRODUCT_TIMEOUT_MS: "3000",
   });
+  // **The short cap is set around the one call that is meant to miss it**, not
+  // for the whole script. Set globally it also capped setup: the engine projects
+  // the catalogue on its request thread, so a `product/load` sent after
+  // `catalogue/load` waits for the whole projection -- about eleven seconds in a
+  // debug build -- and setup failed at the cap before the wedge was ever tried.
+  // Short, because this script sits inside somebody's `npm run verify`; the
+  // point is that the mechanism is the real one, not that the number is.
+  // `productTimeoutMs()` reads the variable per call, which is what makes this
+  // scoping work.
+  const WEDGE_CAP_MS = "3000";
 
   /** The proxy's log, as records. */
   const records = () =>
@@ -252,6 +259,7 @@ if (process.platform === "win32") {
 
     writeFileSync(sentinel, "");
     let refusal = "";
+    process.env.GEARBOX_PRODUCT_TIMEOUT_MS = WEDGE_CAP_MS;
     const timedOut = await settlesWithin(
       20_000,
       service.resolve(product, "prod").catch((error) => {
@@ -259,6 +267,7 @@ if (process.platform === "win32") {
         throw error;
       }),
     );
+    delete process.env.GEARBOX_PRODUCT_TIMEOUT_MS;
     check(timedOut === "rejected", `an answer held past the cap rejects (got ${timedOut})`);
     check(
       refusal.includes("did not answer") && refusal.includes("3000ms"),

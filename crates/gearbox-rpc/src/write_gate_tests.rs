@@ -1165,3 +1165,32 @@ fn a_relative_destination_is_refused_for_a_product_and_a_gear() {
     };
     assert!(message.contains("is not an absolute path"), "{message}");
 }
+
+/// A description that cannot be read is refused with its diagnostic.
+///
+/// Regressed when `product/load` started reading the file itself (b63bb7c): the
+/// refusal went out with a bare I/O message and no `data`, and `rpc-smoke`
+/// said so for a week.
+#[test]
+fn a_product_that_cannot_be_read_is_refused_with_its_diagnostic() {
+    let response = product_load(
+        RequestId::from(1),
+        &crate::protocol::ProductLoadParams {
+            path: "/definitely/absent/product.gdl".to_owned(),
+        },
+    );
+    let Err(refusal) = response.response_result else {
+        panic!("an absent description must be refused");
+    };
+    assert_eq!(refusal.code, error_code::PRODUCT_LOAD_FAILED);
+    let diagnostics = refusal
+        .data
+        .as_ref()
+        .and_then(|d| d["diagnostics"].as_array())
+        .cloned();
+    assert!(
+        diagnostics.is_some_and(|list| !list.is_empty()),
+        "the refusal carries the reason: {:?}",
+        refusal.data
+    );
+}

@@ -127,9 +127,14 @@ try {
   });
 
   check(changed.length > 0, `gears streamed in (${changed.length})`);
+  // Distinct keys, not notifications: since 295f5a3 a plugin is sent a second
+  // time once it is joined to its host (`LoadEvent::Joined`), so the count is
+  // gears plus plugins -- 44 + 18 on this corpus -- and a count check read that
+  // as a failure. Every pending row replaced, each at least once, is the claim.
+  const replacedOnce = new Set(changed.map((c) => `${c.gear?.source}:${c.replaces}`));
   check(
-    changed.length === loaded.total,
-    `every pending gear was replaced (${changed.length}/${loaded.total})`,
+    replacedOnce.size === loaded.total,
+    `every pending gear was replaced (${replacedOnce.size}/${loaded.total}, ${changed.length} notifications)`,
   );
   check(
     changed.every((c) => typeof c.replaces === "string" && c.gear?.id),
@@ -293,7 +298,7 @@ try {
   try {
     await connection.sendRequest("gearbox/product/addGear", {
       path: product,
-      gear: "cluster",
+      gear: "nodes-registry",
       source: "gears-rust",
       dry_run: true,
     });
@@ -337,7 +342,7 @@ try {
     try {
       await connection.sendRequest("gearbox/product/addGear", {
         path: "/etc/hosts",
-        gear: "cluster",
+        gear: "nodes-registry",
         source: "gears-rust",
         dry_run: true,
       });
@@ -354,7 +359,7 @@ try {
 
   const preview = await connection.sendRequest("gearbox/product/addGear", {
     path: product,
-    gear: "cluster",
+    gear: "nodes-registry",
     source: "gears-rust",
     dry_run: true,
   });
