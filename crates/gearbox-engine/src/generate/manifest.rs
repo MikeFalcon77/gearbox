@@ -8,7 +8,7 @@
 //! with a message about workspace inheritance rather than about editions.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use gearbox_ir::{FileEntry, FileKind, GearId, Ownership, ResolvedApplication, ResolvedGear};
 use serde::Serialize;
@@ -16,11 +16,31 @@ use serde::Serialize;
 use super::{GenerateError, GenerateInput, header, paths, workspace};
 
 /// Where the platform SDK lives inside a source root.
-const TOOLKIT_SUBDIR: &str = "libs/toolkit";
+pub const TOOLKIT_SUBDIR: &str = "libs/toolkit";
 
 /// The Cargo package name and the alias the generated code uses for it.
-const TOOLKIT_PACKAGE: &str = "cf-gears-toolkit";
-const TOOLKIT_ALIAS: &str = "toolkit";
+pub const TOOLKIT_PACKAGE: &str = "cf-gears-toolkit";
+pub const TOOLKIT_ALIAS: &str = "toolkit";
+
+/// The toolkit crate under the first of `roots` that has one, checked by its
+/// manifest rather than by the directory existing.
+///
+/// For the one caller that has no anchor gear to resolve it through: a new
+/// gear's scaffold, which wants a dependency on the platform SDK and has only
+/// the session's roots to find it in. The first root wins, as it does for a
+/// gear declared under two roots (ADR-0012). A directory at `libs/toolkit`
+/// whose manifest names another package is not the toolkit, and answering it
+/// would write a dependency on the wrong crate.
+#[must_use]
+pub fn locate_toolkit<'a>(roots: impl IntoIterator<Item = &'a Path>) -> Option<PathBuf> {
+    roots
+        .into_iter()
+        .map(|root| root.join(TOOLKIT_SUBDIR))
+        .find(|dir| {
+            gearbox_project::project_manifest(dir)
+                .is_ok_and(|m| m.package_name == TOOLKIT_PACKAGE && m.lib_ident == TOOLKIT_ALIAS)
+        })
+}
 
 /// The runtime crates a generated host binary needs, with the versions
 /// `gears-rust` resolves.

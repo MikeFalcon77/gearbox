@@ -1973,7 +1973,37 @@ fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) 
         );
     }
 
-    let files = match scaffold_gear_files(params) {
+    // The platform SDK, from the session's own roots, so the skeleton can carry
+    // a real `#[toolkit::gear]` rather than a comment saying one comes next.
+    // Relative to the new crate, or absolute when no relative path exists.
+    let toolkit = gearbox_engine::generate::locate_toolkit(
+        state.roots.iter().map(|root| root.root.as_path()),
+    )
+    .map(|dir| {
+        use gearbox_engine::generate::{relative, to_slash};
+        relative(&out_root, &dir).map_or_else(
+            || dir.to_string_lossy().replace('\\', "/"),
+            |rel| to_slash(&rel),
+        )
+    });
+
+    // The plugin's SDK path arrives relative to the destination *as the client
+    // wrote it*, and `out_root` is canonical. Where the two differ -- `/tmp` is a
+    // link to `/private/tmp` on macOS -- the path climbs the wrong number of
+    // levels from where the crate really is. It only ever reached a comment
+    // before; as a Cargo dependency it has to be right, so it is resolved from
+    // the written destination and re-expressed from the real one.
+    let plugin_dep = params.plugin.as_ref().map(|plugin| {
+        use gearbox_engine::generate::{normalize, relative, to_slash};
+        let written = normalize(&dest_dir.join(gear_id.as_str()).join(&plugin.path));
+        let real = written.canonicalize().unwrap_or(written);
+        relative(&out_root, &real).map_or_else(
+            || real.to_string_lossy().replace('\\', "/"),
+            |rel| to_slash(&rel),
+        )
+    });
+
+    let files = match scaffold_gear_files(params, toolkit.as_deref(), plugin_dep.as_deref()) {
         Ok(files) => files,
         Err(message) => return error(id, error_code::EDIT_REFUSED, &message),
     };
@@ -2073,8 +2103,19 @@ fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) 
 /// taking the stdio server down for the whole editor session.
 type ScaffoldFile = (RelPath, String, gearbox_ir::FileKind);
 
-/// Minimal gear scaffold contents: description, stub crate, empty lib.
-fn scaffold_gear_files(params: &ScaffoldGearParams) -> Result<Vec<ScaffoldFile>, String> {
+/// A scaffold's three files: the description, the manifest and the lib.
+///
+/// `toolkit` is the path from the new crate to the platform SDK, when the
+/// session's roots have one. With it the crate is a real gear -- a
+/// `#[toolkit::gear]` the projector reads and a dependency that makes it build
+/// -- so a gear created for a product is in the catalogue the moment it exists.
+/// Without it the lib stays the comments it always was: an attribute written
+/// against a dependency nobody could add is a crate that does not compile.
+fn scaffold_gear_files(
+    params: &ScaffoldGearParams,
+    toolkit: Option<&str>,
+    plugin_dep: Option<&str>,
+) -> Result<Vec<ScaffoldFile>, String> {
     let crate_name = GearId::new(params.id.trim())
         // The validator's sentence, not a substitute for it: the client needs to
         // know what was wrong with the id it sent.
@@ -2091,8 +2132,8 @@ fn scaffold_gear_files(params: &ScaffoldGearParams) -> Result<Vec<ScaffoldFile>,
     let gdl = format!(
         r#"# Scaffolded gear description for {comment}.
 #
-# Id comes from #[toolkit::gear] once macros land. Until then this file names
-# the package the catalogue will join against.
+# The gear's id is not written here: it comes from `#[toolkit::gear(name = ...)]`
+# in the crate. This file names the package the catalogue joins that id against.
 
 gear(
     name = {name},
@@ -2107,15 +2148,38 @@ gear(
         shape = gdl_shape(params.kind, params.plugin.as_ref()),
     );
 
+    let dependencies = toolkit.map_or_else(String::new, |toolkit| {
+        // The crate that declares the host's trait, which a plugin implements.
+        let sdk = match (params.kind, &params.plugin, plugin_dep) {
+            (crate::protocol::GearKind::Plugin, Some(plugin), Some(path)) => format!(
+                "{key} = {{ package = {package}, path = {path} }}\n",
+                key = toml_basic_string(&plugin.lib_ident),
+                package = toml_basic_string(&plugin.crate_name),
+                path = toml_basic_string(path),
+            ),
+            _ => String::new(),
+        };
+        format!(
+            "\n[dependencies]\n{alias} = {{ package = {package}, path = {path} }}\n{sdk}",
+            alias = gearbox_engine::generate::TOOLKIT_ALIAS,
+            package = toml_basic_string(gearbox_engine::generate::TOOLKIT_PACKAGE),
+            path = toml_basic_string(toolkit),
+        )
+    });
     let cargo = format!(
         r#"[package]
 name = {crate_toml}
 version = {version_toml}
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = {lib_toml}
 path = "src/lib.rs"
+{dependencies}
+# A workspace of its own. A new gear usually lands inside somebody else's tree
+# -- a product folder in a repository with a `[workspace]` of its own -- and
+# Cargo then refuses to build a crate that tree's workspace does not list.
+[workspace]
 "#,
         crate_toml = toml_basic_string(&crate_name),
         version_toml = toml_basic_string(&params.version),
@@ -2127,7 +2191,10 @@ path = "src/lib.rs"
         (rel_path("Cargo.toml")?, cargo, gearbox_ir::FileKind::Toml),
         (
             rel_path("src/lib.rs")?,
-            lib_stub(params.kind),
+            match toolkit {
+                Some(_) => lib_source(params.kind, &crate_name, params.plugin.as_ref()),
+                None => lib_stub(params.kind),
+            },
             gearbox_ir::FileKind::Rust,
         ),
     ])
@@ -2281,13 +2348,81 @@ fn gdl_shape_commented(kind: crate::protocol::GearKind) -> &'static str {
     }
 }
 
-/// The `src/lib.rs` stub for one shape.
+/// The `src/lib.rs` of a real gear, for when the toolkit was found.
 ///
-/// A comment rather than code, for the reason the shapes are comments: the
-/// toolkit's location and version are not known here, so `#[toolkit::gear]` would
-/// be written against a dependency this method cannot add -- a crate that does
-/// not compile is worse than one that is empty. What the stub carries is the
-/// order of the next steps, which is the part a person actually looks up.
+/// The least that projects and builds: `#[toolkit::gear(name = ...)]` on a
+/// `Default` struct -- the macro constructs through it -- and an `impl Gear`
+/// whose `init` does nothing, because the macro registers the struct as a
+/// `dyn Gear`. `name` is the id, which is kebab-case by the time it gets here,
+/// so it needs no escaping. What differs by kind is the comment above the next
+/// thing to write, not generated behaviour.
+///
+/// A plugin's trait is named, not implemented: its methods live in the host's
+/// SDK and nothing here reads them, so an `impl` would be a body this method
+/// invented. The catalogue says so (GBX0526, a warning) until one exists.
+fn lib_source(
+    kind: crate::protocol::GearKind,
+    id: &str,
+    plugin: Option<&crate::protocol::PluginScaffold>,
+) -> String {
+    let type_name: String = id
+        .split('-')
+        .map(|part| {
+            let mut chars = part.chars();
+            chars.next().map_or_else(String::new, |first| {
+                first.to_ascii_uppercase().to_string() + chars.as_str()
+            })
+        })
+        .collect();
+    let next = match kind {
+        crate::protocol::GearKind::Minimal => String::new(),
+        crate::protocol::GearKind::Service => String::from(
+            "\n// Next: runtime capabilities and co-located deps go on the attribute above\n\
+             // (`capabilities = [...]`, `deps = [...]`) -- restating them in gear.gdl is\n\
+             // refused (GBX0210). A single `ctx.config*()` call in `init` links this gear\n\
+             // to its configuration struct; uncomment `config_schema` in gear.gdl then.\n",
+        ),
+        crate::protocol::GearKind::Plugin => match plugin {
+            Some(plugin) => format!(
+                "\n// Next: implement `{lib}::{trait_ident}` for {type_name} -- the host looks\n\
+                 // for it, and the catalogue warns (GBX0526) while no impl exists. Then\n\
+                 // register the `vendor` and `priority` the host's selector matches.\n\
+                 //\n\
+                 // impl {lib}::{trait_ident} for {type_name} {{ ... }}\n",
+                lib = comment_safe(&plugin.lib_ident),
+                trait_ident = comment_safe(&plugin.trait_ident),
+            ),
+            None => String::from(
+                "\n// Next: choose what this plugin fills -- set `fills` in gear.gdl, add the\n\
+                 // crate that declares the point's trait to Cargo.toml, and implement it.\n",
+            ),
+        },
+    };
+    format!(
+        "//! {id}, scaffolded by Gearbox Studio.\n\
+         \n\
+         use toolkit::{{Gear, GearCtx}};\n\
+         \n\
+         #[toolkit::gear(name = \"{id}\")]\n\
+         #[derive(Default)]\n\
+         pub struct {type_name};\n\
+         \n\
+         #[toolkit::async_trait]\n\
+         impl Gear for {type_name} {{\n    \
+             async fn init(&self, _ctx: &GearCtx) -> toolkit::Result<()> {{\n        \
+                 Ok(())\n    \
+             }}\n\
+         }}\n{next}"
+    )
+}
+
+/// The `src/lib.rs` stub for one shape, when the toolkit could not be found.
+///
+/// A comment rather than code, for the reason the shapes are comments: without
+/// the toolkit's location, `#[toolkit::gear]` would be written against a
+/// dependency this method cannot add -- a crate that does not compile is worse
+/// than one that is empty. What the stub carries is the order of the next
+/// steps, which is the part a person actually looks up.
 fn lib_stub(kind: crate::protocol::GearKind) -> String {
     match kind {
         crate::protocol::GearKind::Minimal => String::from(

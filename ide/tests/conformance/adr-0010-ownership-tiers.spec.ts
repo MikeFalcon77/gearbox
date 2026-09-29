@@ -114,9 +114,13 @@ test.describe("what the tool may write", () => {
       // crate with a name. One shape for all of them left a plugin author to
       // find out what else a plugin needs.
       //
-      // What differs is which declarations the file *offers*, not generated
-      // code: a scaffold has no compiler and does not know where the toolkit or
-      // an SDK lives. And for a plugin the field that matters -- `fills`, the
+      // What differs is which declarations the `gear.gdl` *offers*. The Rust
+      // side is the same skeleton for all three since 2026-09-29 -- a
+      // `#[toolkit::gear]` struct when the engine finds the toolkit in its
+      // roots, so the catalogue projects the new gear at once (ADR-0013
+      // amendment); a plugin's trait `impl` is still offered commented, because
+      // writing it needs the SDK's trait read. And for a plugin the field that
+      // matters in the description -- `fills`, the
       // declaration that makes it one -- is offered **commented**, because a
       // spec no described gear declares is refused (GBX0519), so a placeholder
       // would hand its author a description to repair rather than one to fill

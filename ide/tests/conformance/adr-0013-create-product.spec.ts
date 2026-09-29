@@ -698,6 +698,21 @@ test.describe("a gear created for a product ends up in it", () => {
 
       // Back in the Product workspace, which is where the flow started.
       await expect(studio.page.locator(".gbx-product")).toBeVisible({ timeout: 60_000 });
+
+      // **And the gear is one the catalogue has.** The scaffold used to write a
+      // lib of comments, so there was no `#[toolkit::gear]` to project (GBX0211)
+      // and the product the gear had just joined failed with GBX0301. With the
+      // toolkit found in the session's roots, the skeleton is a real gear.
+      await productSection(studio.page, "validation");
+      await expect
+        .poll(
+          async () => {
+            const text = await studio.page.locator(".gbx-product").innerText();
+            return /GBX0301|GBX0211/.test(text) ? "has GBX0301/GBX0211" : "clean";
+          },
+          { message: "the new gear resolves in the product", timeout: 90_000 },
+        )
+        .toBe("clean");
     } finally {
       rmSync(SCAFFOLD, { recursive: true, force: true });
       if (diffOf(DEMO_REL) !== "") {

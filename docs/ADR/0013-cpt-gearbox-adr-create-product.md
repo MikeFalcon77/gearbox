@@ -1098,3 +1098,35 @@ true at the control where it applies.
 
 Asserted in `edit_tests.rs` (malformed profile ids), `config_check_tests.rs` (GBX0114's key and
 subject), and `write_gate_tests.rs` (relative destinations for a product and a gear).
+
+## Amendment 2026-09-29: Create Gear writes a gear the catalogue can project
+
+A gear created from a product became a `use_gear` and a `source` in that product, but its
+`src/lib.rs` held only comments. The catalogue found no `#[toolkit::gear]` in the new source
+(GBX0211). The product the gear had just joined then failed with GBX0301. The 2026-09-07 amendment
+made the gear end up in the product, but the product could not resolve it.
+
+* **The engine finds the toolkit itself**, in its own source roots. It looks where `generate` does,
+  at `libs/toolkit`, and the manifest there must name package `cf-gears-toolkit` and lib `toolkit`.
+  The two share these constants (`generate::locate_toolkit`). If two roots have a toolkit, the first
+  one is used, the same rule as for a gear declared in two roots (ADR-0012). No wire field was
+  added. The Studio does
+  not know where the toolkit is, and should not have to.
+* **When it is found**, the skeleton is real code for all three kinds. The struct carries
+  `#[toolkit::gear(name = "<id>")]` and `#[derive(Default)]`, and `impl toolkit::Gear` has an empty
+  `init`. `Cargo.toml` is edition 2024, depends on the toolkit by relative path, and has an empty
+  `[workspace]`, so the crate builds wherever it was written. A service gets commented hints for
+  `capabilities`, `deps` and `ctx.config`. A plugin also depends on its host's SDK crate. Its trait
+  `impl` is still **commented**, because writing it needs the SDK's trait read and that is not done
+  yet. Until it is, the plugin warns GBX0526 and does not block. The id is no longer written in
+  `gear.gdl`: the attribute is the one place it comes from.
+* **When it is not found**, the scaffold writes the previous comment-only form. It does not write a
+  crate that will not compile.
+
+`cpt-gearbox-fr-scaffold-gear` is therefore met for gears and partly met for plugins: the plugin
+trait implementation and its `vendor` configuration type are the remaining step.
+
+Asserted in `write_gate_tests.rs` (`a_scaffold_with_the_toolkit_is_a_gear_the_catalogue_projects`:
+all three kinds project and only GBX0519 remains; the toolkit and SDK paths cannot inject a line).
+Also asserted in the conformance claim "Create Gear declares its folder as a source and adds the
+gear": after the create, the product shows neither GBX0301 nor GBX0211.

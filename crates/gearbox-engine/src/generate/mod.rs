@@ -65,6 +65,7 @@ pub use templates::TemplateSet;
 // arithmetic: a cloned description re-bases its relative paths, and a second
 // implementation of "relative, or absolute when there is none" would be a
 // second place to get the fallback wrong.
+pub use manifest::{TOOLKIT_ALIAS, TOOLKIT_PACKAGE, TOOLKIT_SUBDIR, locate_toolkit};
 pub use paths::{normalize, relative, to_slash};
 
 /// Numeric uid the image and the chart agree on.

@@ -702,6 +702,10 @@ declaring the `vendor` the host selects on.
 - **Verification Method**: The generated crate resolves to exactly one `#[toolkit::gear]` and passes
   `gearbox validate` with zero diagnostics, including `cpt-gearbox-fr-catalogue-projection`'s own
   manifest check.
+- **Status (2026-09-29)**: met for gears. When the engine finds the toolkit in its roots, a gear
+  scaffold has a live `#[toolkit::gear]` and the catalogue projects it (ADR-0013, Amendment
+  2026-09-29). Partly met for plugins: the trait implementation is offered commented, and the `vendor`
+  configuration type is not written yet.
 
 #### Scaffolding writes only what it owns, and does so atomically
 

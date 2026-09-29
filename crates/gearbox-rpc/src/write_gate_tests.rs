@@ -792,15 +792,19 @@ fn the_clients_scaffold_request_carries_its_plugin() {
 fn a_plugin_scaffold_with_a_host_writes_a_live_fills() {
     use crate::protocol::GearKind;
 
-    let files = super::scaffold_gear_files(&ScaffoldGearParams {
-        id: "ldap-authn-plugin".to_owned(),
-        name: "LDAP AuthN".to_owned(),
-        version: "0.1.0".to_owned(),
-        kind: GearKind::Plugin,
-        plugin: Some(authn_point("../../authn-resolver-sdk")),
-        destination_dir: "/tmp".to_owned(),
-        dry_run: true,
-    })
+    let files = super::scaffold_gear_files(
+        &ScaffoldGearParams {
+            id: "ldap-authn-plugin".to_owned(),
+            name: "LDAP AuthN".to_owned(),
+            version: "0.1.0".to_owned(),
+            kind: GearKind::Plugin,
+            plugin: Some(authn_point("../../authn-resolver-sdk")),
+            destination_dir: "/tmp".to_owned(),
+            dry_run: true,
+        },
+        None,
+        None,
+    )
     .expect("the shape renders");
     let gdl = gear_gdl(&files);
 
@@ -867,15 +871,19 @@ fn a_plugin_scaffold_keeps_wire_values_inside_their_comments() {
         r"..\shared\authn-resolver-sdk",
         "../sdk\nfills = \"x.injected.plugin.v1~\",\ncategory = \"oss\",",
     ] {
-        let files = super::scaffold_gear_files(&ScaffoldGearParams {
-            id: "ldap-authn-plugin".to_owned(),
-            name: "LDAP AuthN".to_owned(),
-            version: "0.1.0".to_owned(),
-            kind: GearKind::Plugin,
-            plugin: Some(authn_point(path)),
-            destination_dir: "/tmp".to_owned(),
-            dry_run: true,
-        })
+        let files = super::scaffold_gear_files(
+            &ScaffoldGearParams {
+                id: "ldap-authn-plugin".to_owned(),
+                name: "LDAP AuthN".to_owned(),
+                version: "0.1.0".to_owned(),
+                kind: GearKind::Plugin,
+                plugin: Some(authn_point(path)),
+                destination_dir: "/tmp".to_owned(),
+                dry_run: true,
+            },
+            None,
+            None,
+        )
         .expect("the shape renders");
         let gdl = gear_gdl(&files);
         assert!(evaluates(gdl), "`{path}` must stay a comment: {gdl}");
@@ -900,15 +908,19 @@ fn a_plugin_scaffold_keeps_wire_values_inside_their_comments() {
 fn a_plugin_scaffold_without_a_host_keeps_the_commented_locator() {
     use crate::protocol::GearKind;
 
-    let files = super::scaffold_gear_files(&ScaffoldGearParams {
-        id: "ldap-authn-plugin".to_owned(),
-        name: "LDAP AuthN".to_owned(),
-        version: "0.1.0".to_owned(),
-        kind: GearKind::Plugin,
-        plugin: None,
-        destination_dir: "/tmp".to_owned(),
-        dry_run: true,
-    })
+    let files = super::scaffold_gear_files(
+        &ScaffoldGearParams {
+            id: "ldap-authn-plugin".to_owned(),
+            name: "LDAP AuthN".to_owned(),
+            version: "0.1.0".to_owned(),
+            kind: GearKind::Plugin,
+            plugin: None,
+            destination_dir: "/tmp".to_owned(),
+            dry_run: true,
+        },
+        None,
+        None,
+    )
     .expect("the shape renders");
 
     let gdl = &files
@@ -937,15 +949,19 @@ fn every_scaffold_shape_evaluates_and_carries_its_own_hints() {
     use crate::protocol::GearKind;
 
     for kind in [GearKind::Minimal, GearKind::Service, GearKind::Plugin] {
-        let files = super::scaffold_gear_files(&ScaffoldGearParams {
-            id: "payments-audit".to_owned(),
-            name: "Payments Audit".to_owned(),
-            version: "0.1.0".to_owned(),
-            kind,
-            plugin: None,
-            destination_dir: "/tmp".to_owned(),
-            dry_run: true,
-        })
+        let files = super::scaffold_gear_files(
+            &ScaffoldGearParams {
+                id: "payments-audit".to_owned(),
+                name: "Payments Audit".to_owned(),
+                version: "0.1.0".to_owned(),
+                kind,
+                plugin: None,
+                destination_dir: "/tmp".to_owned(),
+                dry_run: true,
+            },
+            None,
+            None,
+        )
         .expect("the shape renders");
 
         let gdl = &files
@@ -1192,5 +1208,114 @@ fn a_product_that_cannot_be_read_is_refused_with_its_diagnostic() {
         diagnostics.is_some_and(|list| !list.is_empty()),
         "the refusal carries the reason: {:?}",
         refusal.data
+    );
+}
+
+/// With the toolkit found, a scaffold is a real gear: its attribute projects
+/// into the catalogue with no diagnostics, and its manifest names the SDK.
+///
+/// **The defect this closes.** A gear created for a product was written with a
+/// lib of comments, so the projector found no `#[toolkit::gear]` (GBX0211), the
+/// gear was absent from the catalogue, and the product it had just been added
+/// to failed with GBX0301 the moment the flow finished.
+#[test]
+fn a_scaffold_with_the_toolkit_is_a_gear_the_catalogue_projects() {
+    use crate::protocol::{GearKind, PluginScaffold};
+
+    let tmp = scratch("scaffold-real");
+    for (kind, plugin) in [
+        (GearKind::Minimal, None),
+        (GearKind::Service, None),
+        (
+            GearKind::Plugin,
+            Some(PluginScaffold {
+                spec: "cf.core.tenant_resolver.plugin.v1~".to_owned(),
+                trait_ident: "TenantResolverPluginClient".to_owned(),
+                crate_name: "cf-gears-tenant-resolver-sdk".to_owned(),
+                lib_ident: "tenant_resolver_sdk".to_owned(),
+                // A newline in a wire value must not break the manifest.
+                path: "../sdk\nevil = 1".to_owned(),
+            }),
+        ),
+    ] {
+        let id = format!("demo-{}", format!("{kind:?}").to_lowercase());
+        let files = super::scaffold_gear_files(
+            &ScaffoldGearParams {
+                id: id.clone(),
+                name: "Demo".to_owned(),
+                version: "0.1.0".to_owned(),
+                kind,
+                plugin: plugin.clone(),
+                destination_dir: tmp.display().to_string(),
+                dry_run: false,
+            },
+            Some("../libs/toolkit"),
+            plugin.as_ref().map(|p| p.path.as_str()),
+        )
+        .expect("the shape renders");
+
+        let crate_dir = tmp.join(&id);
+        std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+        for (rel, body, _) in &files {
+            std::fs::write(crate_dir.join(rel.as_str()), body).unwrap();
+        }
+        let lib = std::fs::read_to_string(crate_dir.join("src/lib.rs")).unwrap();
+        assert!(
+            lib.contains(&format!("#[toolkit::gear(name = \"{id}\")]")),
+            "{kind:?}: the attribute is live:\n{lib}"
+        );
+        // The manifest is parsed by the catalogue load below -- GBX0209 reads it --
+        // so a broken one fails there rather than needing a parser here.
+        let cargo = std::fs::read_to_string(crate_dir.join("Cargo.toml")).unwrap();
+        assert!(
+            cargo.contains(
+                r#"toolkit = { package = "cf-gears-toolkit", path = "../libs/toolkit" }"#
+            ),
+            "{kind:?}: {cargo}"
+        );
+        if kind == GearKind::Plugin {
+            assert!(
+                cargo.contains(
+                    r#""tenant_resolver_sdk" = { package = "cf-gears-tenant-resolver-sdk""#
+                ),
+                "{cargo}"
+            );
+            assert!(
+                !cargo.contains("\nevil = 1"),
+                "a wire newline must stay inside the string: {cargo}"
+            );
+        }
+    }
+
+    // And the three together, as a source root: every one projects, none errs.
+    // The plugin fills a point no gear in this root declares, which is GBX0519
+    // here and nothing to do with the scaffold, so it is left out of the count.
+    let root = gearbox_engine::SourceRoot::open(SourceId::new("scaffolds").unwrap(), &tmp)
+        .expect("a root");
+    let scan = gearbox_engine::load_catalogue(&[root]);
+    for id in ["demo-minimal", "demo-service", "demo-plugin"] {
+        assert!(
+            scan.catalogue
+                .gears
+                .contains_key(&gearbox_ir::GearId::new(id).unwrap()),
+            "`{id}` must be in the catalogue: {:?}",
+            scan.catalogue
+                .diagnostics
+                .iter()
+                .map(|d| &d.message)
+                .collect::<Vec<_>>()
+        );
+    }
+    assert!(
+        scan.catalogue
+            .diagnostics
+            .iter()
+            .all(|d| !d.is_error() || d.code == gearbox_ir::DiagnosticCode::PluginSpecUndeclared),
+        "{:?}",
+        scan.catalogue
+            .diagnostics
+            .iter()
+            .map(|d| (d.code, &d.message))
+            .collect::<Vec<_>>()
     );
 }
