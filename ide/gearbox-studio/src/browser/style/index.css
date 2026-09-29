@@ -775,6 +775,19 @@
    badge row moved the primary action to the left of a second line. A row of its
    own cannot do that. The reason Apply is off sits beside it rather than two
    elements away, because the two are one message. */
+.gbx-generate-out {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  margin-top: 8px;
+}
+.gbx-generate-out-label {
+  color: var(--theia-descriptionForeground, var(--theia-foreground));
+}
+.gbx-generate-out-input {
+  font-family: var(--theia-code-font-family, monospace);
+  flex: 1 1 32ch; min-width: 20ch; max-width: 70ch;
+}
+.gbx-generate-out .theia-button { margin: 0; }
+.gbx-generate-out-git { display: inline-flex; gap: 4px; align-items: center; }
 .gbx-generate-actions {
   display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
   margin-top: 8px;

@@ -58,7 +58,8 @@ use gearbox_ir::{
 };
 
 pub use apply::{
-    ApplyOutcome, OUTPUT_DIR, apply_generate, base_root_for, default_out_root, plan, summarize,
+    ApplyOutcome, OUTPUT_DIR, apply_generate, base_root_for, default_out_root, plan,
+    standalone_base_root, summarize,
 };
 pub use templates::TemplateSet;
 // Re-exported for the one caller outside generation that needs the same

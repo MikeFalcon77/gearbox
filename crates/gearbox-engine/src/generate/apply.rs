@@ -657,6 +657,17 @@ pub fn base_root_for(out_root: &Path) -> PathBuf {
         .map_or_else(|| out_root.join(BASE_DIR), |product| product.join(BASE_DIR))
 }
 
+/// The base cache for an output root outside the workspace.
+///
+/// `<out>/.gearbox/base/`, inside the root rather than beside it: such a root
+/// is a folder the operator chose, often a repository, and its parent is not
+/// ours to write. Dot-prefixed, so the orphan checks skip it as they skip
+/// `.base`.
+#[must_use]
+pub fn standalone_base_root(out_root: &Path) -> PathBuf {
+    out_root.join(".gearbox").join("base")
+}
+
 /// Group a plan by action, for a one-line summary.
 #[must_use]
 pub fn summarize(plans: &[FilePlan]) -> BTreeMap<FileAction, usize> {

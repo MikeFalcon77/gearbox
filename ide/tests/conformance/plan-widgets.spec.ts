@@ -7,7 +7,17 @@
 // in the DOM, and the detail panel was in the side panel where its content was
 // clipped -- hiding exactly the projected facts it exists to show.
 
-import { readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
@@ -422,6 +432,71 @@ test.describe("where the views live", () => {
       await expect(apply).toBeDisabled();
     } else {
       await expect(studio.page.locator('[data-apply-block="nothing"]')).toHaveCount(0);
+    }
+  });
+});
+
+test.describe("generating into a folder of one's own", () => {
+  test("Generate writes into a chosen folder and makes it a repository [ADR-0010 amendment 2026-09-29]", async ({
+    studio,
+  }) => {
+    // The tree used to land only under `<workspace>/.gearbox/`, inside this
+    // repository, so a product could not be shipped from a repository of its
+    // own without leaving Studio for the CLI. A folder chosen by name is a
+    // generation target when it is new, holds only dotfiles, or holds a
+    // `product.lock`; anything else is somebody's and is refused.
+    const scratch = realpathSync(mkdtempSync(join(tmpdir(), "gbx-generate-out-")));
+    const app = join(scratch, "app");
+    const theirs = join(scratch, "theirs");
+    mkdirSync(theirs);
+    writeFileSync(join(theirs, "notes.txt"), "mine");
+    const page = studio.page;
+    const field = page.locator("[data-generate-out-input]");
+    try {
+      await openProduct(page, "dev");
+      await openGenerate(page);
+      await expect(field).toBeVisible({ timeout: 60_000 });
+
+      // Somebody's folder is refused, the refusal names the file that makes it
+      // theirs, and the field that answers it stays on screen.
+      await field.fill(theirs);
+      await field.press("Enter");
+      await expect(page.locator(".gbx-generate .gbx-error")).toContainText("notes.txt", {
+        timeout: 60_000,
+      });
+      await expect(field).toBeVisible();
+
+      // A new folder is planned into, and Apply makes it a repository.
+      await field.fill(app);
+      await field.press("Enter");
+      await expect(page.locator(".gbx-generate[data-out-root]")).toHaveAttribute(
+        "data-out-root",
+        app,
+        { timeout: 60_000 },
+      );
+      const apply = page.locator("[data-apply]");
+      await expect(apply).toBeEnabled();
+      await apply.click();
+      await expect(page.locator('[data-generate-repository="initialized"]')).toBeVisible({
+        timeout: 60_000,
+      });
+
+      expect(existsSync(join(app, "product.lock"))).toBe(true);
+      expect(existsSync(join(app, ".git"))).toBe(true);
+      expect(readFileSync(join(app, ".gitignore"), "utf8")).toContain(".gearbox/");
+      // Nothing is written beside the folder: the merge base of a chosen folder
+      // lives inside it (`.gearbox/base`, created once a file needs merging), not
+      // next to it in somebody's home.
+      expect(readdirSync(scratch).sort()).toEqual(["app", "theirs"]);
+
+      // Back to the default, which is where every other claim expects the tree.
+      await page.locator("[data-generate-default-out]").click();
+      await expect(field).toHaveValue("");
+    } finally {
+      if ((await page.locator("[data-generate-default-out]").count()) > 0) {
+        await page.locator("[data-generate-default-out]").click();
+      }
+      rmSync(scratch, { recursive: true, force: true });
     }
   });
 });

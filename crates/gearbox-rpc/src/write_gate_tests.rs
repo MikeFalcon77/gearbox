@@ -502,6 +502,87 @@ fn a_new_directory_inside_the_workspace_is_allowed() {
     assert!(!wanted.exists(), "the gate resolves; it does not create");
 }
 
+/// A folder the person chose outside the workspace is a generation target when it
+/// is new, holds only dotfiles, or was generated before, and nothing else is.
+///
+/// The Studio's Generate view sends `out` when someone picks a folder, typically
+/// the repository the product ships from (ADR-0010, Amendment 2026-09-29).
+/// Without `out` the workspace rule stands, and it is asserted here too, so the
+/// widening cannot leak into the default.
+#[test]
+fn an_explicit_out_outside_the_workspace_is_new_or_gearboxs() {
+    let tmp = scratch("standalone-out");
+    let workspace = tmp.join("ws");
+    let corpus = tmp.join("gears-rust");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(corpus.join("gears")).unwrap();
+    let state = state_with_roots(workspace, std::slice::from_ref(&corpus));
+    let standalone = |path: &Path| match generation_out_root(&state, path, true) {
+        Ok(OutRoot::Standalone(root)) => Ok(root),
+        Ok(OutRoot::Workspace(root)) => panic!("{} judged as the workspace", root.display()),
+        Err(refusal) => Err(refusal),
+    };
+
+    // New, and new under a folder that does not exist yet.
+    let fresh = tmp.join("app");
+    assert!(standalone(&fresh).is_ok());
+    assert!(standalone(&tmp.join("repos").join("app")).is_ok());
+
+    // A fresh `git init` is empty: dotfiles do not make a folder somebody's.
+    let repo = tmp.join("repo");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    assert!(standalone(&repo).is_ok(), "a fresh repository is a target");
+
+    // A folder with a file of its own and no lock is refused, and says which file.
+    let theirs = tmp.join("theirs");
+    std::fs::create_dir_all(&theirs).unwrap();
+    std::fs::write(theirs.join("notes.txt"), "mine").unwrap();
+    let err = standalone(&theirs).expect_err("somebody's folder");
+    assert!(
+        err.contains("notes.txt") && err.contains("product.lock"),
+        "{err}"
+    );
+
+    // ...until Gearbox generated it: a second run goes to the same place.
+    std::fs::write(theirs.join("product.lock"), "").unwrap();
+    assert!(standalone(&theirs).is_ok(), "a regeneration is allowed");
+
+    // Tier 5 holds outside the workspace as it does inside it.
+    let err = standalone(&corpus.join("generated")).expect_err("a source root");
+    assert!(err.contains("inside a source root"), "{err}");
+
+    // A `..` in the part that does not exist would land somewhere it was not
+    // judged.
+    let err = standalone(&tmp.join("missing").join("..").join("gears-rust"))
+        .expect_err("a lexical escape");
+    assert!(err.contains("walks out"), "{err}");
+
+    // Relative is not a choice anybody made in a dialog.
+    assert!(standalone(Path::new("relative/app")).is_err());
+
+    // And without `out`, outside the workspace is still refused.
+    let Err(refusal) = generation_out_root(&state, &fresh, false) else {
+        panic!("the default must stay inside the workspace");
+    };
+    assert!(
+        refusal.contains("outside the declared workspace"),
+        "{refusal}"
+    );
+}
+
+/// A standalone root keeps its merge base inside itself.
+///
+/// `base_root_for` answers `<out>/../.base`, which for a repository root is a
+/// folder beside it in somebody's home directory.
+#[test]
+fn a_standalone_root_keeps_its_base_inside() {
+    let out = Path::new("/home/someone/app");
+    assert_eq!(
+        gearbox_engine::generate::standalone_base_root(out),
+        out.join(".gearbox").join("base")
+    );
+}
+
 /// A clone source that is not a description is refused for being one, and
 /// refused before it is read.
 ///

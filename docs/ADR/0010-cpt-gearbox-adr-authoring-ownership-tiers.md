@@ -402,3 +402,31 @@ and never inside a source root — the same boundary generation already enforces
 
 The **Gear** working context (ADR `cpt-gearbox-adr-domain-specific-ide-shell`) becomes reachable
 only after this scaffold exists. Until then Home must not advertise New Gear or Open Gear.
+
+## Amendment 2026-09-29: generation into a folder the person chose
+
+A product is shipped from a repository of its own, and generation could write only under the
+declared workspace, which is this repository. The only way to get the tree into a separate
+repository was to leave Studio and use the CLI's `--out`.
+
+* **An explicit `out` outside the workspace is accepted when the folder is new, holds only
+  dotfiles, or holds a `product.lock`.** The first two cover a folder that is empty, including a
+  fresh `git init`. The third is a folder Gearbox generated before, so it can be regenerated. Any
+  other folder belongs to somebody and is refused, and the refusal names the file that shows it.
+  Tier 5 is unchanged: inside a source root is refused wherever the folder is. The rule applies
+  only to an `out` a client sent. The default tree stays under the workspace, and nothing that
+  omits `out` can reach this rule.
+* **Such a folder keeps its merge base inside itself**, at `<out>/.gearbox/base/`. The default
+  `<out>/../.base` would put it in the chosen folder's parent, which is not ours to write. The
+  folder is also offered a `.gitignore` (`target/`, `.gearbox/`) once, as `GeneratedOnce`.
+* **Studio's Generate view** has an "Output folder" field with a Choose… dialog and a "Use default"
+  button. The choice is remembered per product and profile. It also has an option, on by default,
+  that makes the folder a git repository with one commit after Apply. A folder that is already a
+  repository is left alone: committing into somebody's repository is not Studio's decision.
+
+The CLI's `--out` still uses `base_root_for`. Moving it to the same rule is follow-up work, and until
+then a CLI run into a repository root puts `.base` beside the repository.
+
+Asserted in `write_gate_tests.rs` (`an_explicit_out_outside_the_workspace_is_new_or_gearboxs`,
+`a_standalone_root_keeps_its_base_inside`). Also asserted in the conformance claim "Generate writes
+into a chosen folder and makes it a repository".

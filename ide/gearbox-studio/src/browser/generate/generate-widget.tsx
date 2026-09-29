@@ -10,6 +10,7 @@ import { codicon, ReactWidget } from "@theia/core/lib/browser";
 import { CommandService } from "@theia/core/lib/common/command";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
+import { FileDialogService } from "@theia/filesystem/lib/browser";
 import * as monaco from "@theia/monaco-editor-core";
 
 import type { FileAction } from "../../common/generated/FileAction";
@@ -97,11 +98,14 @@ export class GenerateWidget extends ReactWidget {
   @inject(CommandService) protected readonly commands!: CommandService;
   // For the trip from a blocked generation to the object that blocked it.
   @inject(SelectionService) protected readonly selection!: SelectionService;
+  @inject(FileDialogService) protected readonly fileDialog!: FileDialogService;
 
   protected selected: string | undefined;
   protected preview: GenerateFileResult | undefined;
   protected previewError: string | undefined;
   protected previewing = false;
+  /** The folder field while it is being typed in; `undefined` shows the choice. */
+  protected outDraft: string | undefined;
 
   @postConstruct()
   protected init(): void {
@@ -154,6 +158,121 @@ export class GenerateWidget extends ReactWidget {
     );
   }
 
+  /**
+   * Where Apply writes, and the control to put it somewhere else.
+   *
+   * The default is the tree under the workspace that the Lock view reads. A
+   * chosen folder is for shipping: the repository the product is built and
+   * deployed from, which is why the git option sits beside it. Shown in the
+   * error state too, because "this folder holds somebody's files" is a refusal
+   * whose only answer is this control.
+   */
+  protected renderOut(outRoot: string | undefined): React.ReactNode {
+    const chosen = this.generate.outFolder;
+    const repository = this.generate.current.repository;
+    // Editable as well as chosen, like New Product's destination: a path is
+    // often faster to paste than to navigate to. Empty means the default, which
+    // the placeholder names once the engine has said where it is.
+    return (
+      <div className="gbx-generate-out" data-generate-out={chosen ?? ""}>
+        <label className="gbx-generate-out-label" htmlFor="gbx-generate-out-input">
+          Output folder
+        </label>
+        <input
+          id="gbx-generate-out-input"
+          className="theia-input gbx-generate-out-input"
+          data-generate-out-input="true"
+          dir="ltr"
+          spellCheck={false}
+          placeholder={chosen === undefined && outRoot !== undefined ? outRoot : "default: .gearbox/<product>/<profile>"}
+          title={outRoot ?? chosen ?? ""}
+          value={this.outDraft ?? chosen ?? ""}
+          onChange={(event) => {
+            this.outDraft = event.currentTarget.value;
+            this.update();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void this.commitOut();
+          }}
+          onBlur={() => void this.commitOut()}
+        />
+        <button
+          type="button"
+          className="theia-button secondary"
+          data-generate-choose-out="true"
+          onClick={() => void this.chooseOut()}
+        >
+          Choose…
+        </button>
+        {chosen !== undefined && (
+          <>
+            <button
+              type="button"
+              className="theia-button secondary"
+              data-generate-default-out="true"
+              title="Generate into the workspace's .gearbox tree again"
+              onClick={() => void this.generate.chooseOut(undefined)}
+            >
+              Use default
+            </button>
+            <label className="gbx-generate-out-git">
+              <input
+                type="checkbox"
+                data-generate-git-init="true"
+                checked={this.generate.initializesRepository}
+                onChange={(event) => {
+                  this.generate.initializesRepository = event.currentTarget.checked;
+                }}
+              />
+              Make it a git repository on Apply, if it is not one
+            </label>
+          </>
+        )}
+        {repository !== undefined && (
+          <span
+            className="gbx-badge"
+            data-generate-repository={repository.initialized ? "initialized" : "existing"}
+          >
+            {repository.initialized
+              ? `git repository created, first commit ${repository.commit ?? ""}`
+              : "already a git repository; nothing committed"}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  /** Take what was typed in the folder field, if it changed anything. */
+  protected async commitOut(): Promise<void> {
+    const draft = this.outDraft;
+    this.outDraft = undefined;
+    if (draft === undefined) return;
+    const folder = draft.trim().replace(/\/+$/, "");
+    const next = folder === "" ? undefined : folder;
+    if (next === this.generate.outFolder) {
+      this.update();
+      return;
+    }
+    this.selected = undefined;
+    this.preview = undefined;
+    await this.generate.chooseOut(next);
+  }
+
+  protected async chooseOut(): Promise<void> {
+    const uri = await this.fileDialog.showOpenDialog({
+      title: "Folder to generate into",
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+    });
+    if (uri === undefined) return;
+    const folder = uri.path.fsPath().replace(/\\/g, "/").replace(/\/+$/, "");
+    this.selected = undefined;
+    this.preview = undefined;
+    this.outDraft = undefined;
+    await this.generate.chooseOut(folder);
+  }
+
   protected render(): React.ReactNode {
     const caps = this.catalogue.engineCapabilities;
     if (caps !== undefined && !caps.generate) {
@@ -186,6 +305,7 @@ export class GenerateWidget extends ReactWidget {
       return (
         <div className="gbx-generate">
           {this.renderProfile()}
+          {this.renderOut(undefined)}
           <div className="gbx-error" role="alert">
             {gen.error}
           </div>
@@ -197,6 +317,10 @@ export class GenerateWidget extends ReactWidget {
               <DiagnosticsList diagnostics={errors} density="compact" />
             </>
           )}
+          {/* A refusal of the chosen folder has no resolution error to fix, and
+              its answer is the folder row above; the trip to the product would
+              be a trip to nothing. */}
+          {(errors.length > 0 || this.generate.outFolder === undefined) && (
           <div className="gbx-generate-actions">
             {/* **To the object, not just to the view.** Landing on the Product
                 view left a person to find, among the gears, the one the error is
@@ -223,6 +347,7 @@ export class GenerateWidget extends ReactWidget {
               Generation resumes on its own once the resolution has no errors.
             </span>
           </div>
+          )}
         </div>
       );
     }
@@ -291,6 +416,7 @@ export class GenerateWidget extends ReactWidget {
 
             Under the head rather than at the bottom of the panel: the tree and
             the diff below both scroll, and a footer would leave the screen. */}
+        {this.renderOut(gen.plan.out_root)}
         <div className="gbx-generate-actions">
           <button
             className="gbx-start-primary"

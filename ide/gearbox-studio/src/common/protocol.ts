@@ -206,6 +206,14 @@ export interface AiConnectivityResult {
   };
 }
 
+/** What `initRepository` did. */
+export interface InitRepositoryResult {
+  /** `false` when the folder was a repository already and nothing was run. */
+  readonly initialized: boolean;
+  /** The short hash of the first commit, when one was made. */
+  readonly commit?: string;
+}
+
 export const GearboxService = Symbol("GearboxService");
 export interface GearboxService {
   /**
@@ -441,6 +449,17 @@ export interface GearboxService {
     profile?: string,
     out?: string,
   ): Promise<GenerateFileResult>;
+
+  /**
+   * Make a generated folder a git repository with one commit of what is in it.
+   *
+   * For an output folder a person chose outside the workspace -- the repository
+   * the product ships from. Refused unless `dir` is absolute and holds a
+   * `product.lock`, so it only ever runs on a tree generation just wrote. A
+   * folder that already has `.git` is left alone: committing into somebody's
+   * repository is not this method's decision.
+   */
+  initRepository(dir: string): Promise<InitRepositoryResult>;
 
   /**
    * Can this backend reach the model provider?

@@ -2843,6 +2843,96 @@ fn default_out_root(
     )))
 }
 
+/// Where generation writes, and whether it is the person's own folder.
+enum OutRoot {
+    /// Under the declared workspace: the default `.gearbox/<product>/<profile>/`,
+    /// or an `out` a test or the CLI's layout put there.
+    Workspace(PathBuf),
+    /// A folder the person chose outside the workspace, typically the root of a
+    /// repository the product is shipped from (ADR-0010, Amendment 2026-09-29).
+    Standalone(PathBuf),
+}
+
+/// The output root for `out`, judged by the rule that applies to it.
+///
+/// Inside the workspace nothing changes. **Outside it, only an explicit `out`
+/// is considered, and only a folder that is new or already Gearbox's.** The
+/// workspace boundary existed so that a client could not write just anywhere;
+/// a folder chosen by name in a dialog is a different request from a default,
+/// and the question that still matters is whether it holds anything generation
+/// would clobber. An empty folder (dotfiles aside, so a fresh `git init` is
+/// empty) or one with a `product.lock` in it is a generation target; any other
+/// folder is somebody's, and is refused. Tier 5 holds either way.
+fn generation_out_root(state: &State, requested: &Path, explicit: bool) -> Result<OutRoot, String> {
+    let refusal = match writable_out_root(state, requested) {
+        Ok(root) => return Ok(OutRoot::Workspace(root)),
+        Err(refusal) => refusal,
+    };
+    if !explicit {
+        return Err(refusal);
+    }
+    let roots: Vec<PathBuf> = state.roots.iter().map(|root| root.root.clone()).collect();
+    standalone_out_root(&roots, requested).map(OutRoot::Standalone)
+}
+
+/// The rule for an output folder outside the workspace.
+fn standalone_out_root(roots: &[PathBuf], path: &Path) -> Result<PathBuf, String> {
+    if !path.is_absolute() {
+        return Err(format!(
+            "`{}` is outside the declared workspace; an output folder there must be an \
+             absolute path",
+            path.display()
+        ));
+    }
+    let existing = nearest_existing(path)?;
+    let canonical = existing
+        .canonicalize()
+        .map_err(|e| format!("cannot canonicalize `{}`: {e}", existing.display()))?;
+    // The part that does not exist yet is only ever new names. A `..` in it
+    // would be judged here and land somewhere else.
+    let suffix = path.strip_prefix(&existing).unwrap_or(Path::new(""));
+    if !suffix
+        .components()
+        .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+    {
+        return Err(format!(
+            "`{}` walks out of the folder it names; choose the folder itself",
+            path.display()
+        ));
+    }
+    let resolved = canonical.join(suffix);
+    if let Some(refusal) = inside_a_source_root(roots, &resolved, path) {
+        return Err(refusal);
+    }
+    if resolved.exists() && !resolved.is_dir() {
+        return Err(format!("`{}` is not a folder", path.display()));
+    }
+    if resolved.is_dir() && !resolved.join("product.lock").is_file() {
+        let entries = std::fs::read_dir(&resolved)
+            .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+        let foreign = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .find(|name| !name.starts_with('.'));
+        if let Some(name) = foreign {
+            return Err(format!(
+                "`{}` already holds `{name}` and no `product.lock`, so Gearbox did not \
+                 generate it; choose an empty folder or one Gearbox generated before",
+                path.display()
+            ));
+        }
+    }
+    Ok(resolved)
+}
+
+/// What a standalone output root carries that the workspace tree does not.
+///
+/// The workspace's `.gitignore` already covers `.gearbox/`; a repository of its
+/// own has none, and without one the first `git add .` commits the build and the
+/// merge base. Offered once and then the operator's.
+const STANDALONE_GITIGNORE: &str =
+    "# Written once by Gearbox; yours from now on.\ntarget/\n.gearbox/\n";
+
 /// The nearest ancestor of `path` that exists, including `path` itself.
 fn nearest_existing(path: &Path) -> Result<PathBuf, String> {
     let mut cursor = path.to_path_buf();
@@ -2898,11 +2988,15 @@ fn prepare_generate(
             return Err(error(id.clone(), error_code::GENERATE_REFUSED, &refusal));
         }
     };
-    let out_root = match writable_out_root(state, &requested) {
+    let out_root = match generation_out_root(state, &requested, out.is_some()) {
         Ok(root) => root,
         Err(refusal) => {
             return Err(error(id.clone(), error_code::GENERATE_REFUSED, &refusal));
         }
+    };
+    let (out_root, standalone) = match out_root {
+        OutRoot::Workspace(root) => (root, false),
+        OutRoot::Standalone(root) => (root, true),
     };
 
     let source_roots: BTreeMap<_, _> = state
@@ -2941,14 +3035,30 @@ fn prepare_generate(
         }
     };
 
-    let base_root = gearbox_engine::generate::base_root_for(&out_root);
+    // A standalone root keeps its merge base inside itself: its parent is the
+    // person's, and `.gearbox/<product>/.base` next to a repository would be a
+    // stray folder in their home directory.
+    let base_root = if standalone {
+        gearbox_engine::generate::standalone_base_root(&out_root)
+    } else {
+        gearbox_engine::generate::base_root_for(&out_root)
+    };
+    let mut files = generated.files;
+    if standalone && let Ok(path) = RelPath::new(".gitignore") {
+        drop(files.insert(gearbox_ir::FileEntry::text(
+            path,
+            STANDALONE_GITIGNORE,
+            gearbox_ir::FileKind::Text,
+            gearbox_ir::Ownership::GeneratedOnce,
+        )));
+    }
     let mut diagnostics = resolved.diagnostics;
     // See `Generated::diagnostics`: computing this and dropping it is exactly
     // what made a house template invisible in Studio for a milestone.
     diagnostics.extend(generated.diagnostics.as_slice().iter().cloned());
 
     Ok(PreparedGenerate {
-        files: generated.files,
+        files,
         out_root,
         base_root,
         diagnostics,

@@ -17,8 +17,9 @@
 // it, and a plan from the previous profile is worse than none.
 
 import { Emitter, Event } from "@theia/core/lib/common/event";
+import { StorageService } from "@theia/core/lib/browser/storage-service";
 import { MessageService } from "@theia/core/lib/common/message-service";
-import { inject, injectable } from "@theia/core/shared/inversify";
+import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 
 import type { FileAction } from "../../common/generated/FileAction";
 import type { FilePlan } from "../../common/generated/FilePlan";
@@ -41,7 +42,16 @@ export interface GenerateState {
    */
   readonly written: number | undefined;
   readonly error: string | undefined;
+  /**
+   * What the last apply did about git, when it wrote to a chosen folder:
+   * `initialized` with the first commit, or not when the folder was a
+   * repository already and was left alone.
+   */
+  readonly repository?: { readonly initialized: boolean; readonly commit?: string };
 }
+
+/** Where the chosen output folders are kept, per product and profile. */
+const OUT_KEY = "gearbox.generate.out";
 
 export interface ApplyBlock {
   readonly id: "generate" | "writes" | "resolution" | "conflict" | "nothing";
@@ -74,6 +84,7 @@ export class GenerateService {
   @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
   @inject(MessageService) protected readonly messages!: MessageService;
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
+  @inject(StorageService) protected readonly storage!: StorageService;
 
   protected readonly onChangedEmitter = new Emitter<void>();
   readonly onChanged: Event<void> = this.onChangedEmitter.event;
@@ -86,9 +97,65 @@ export class GenerateService {
    * different resolution is discarded rather than shown.
    */
   protected forKey: string | undefined;
+  /**
+   * Output folders a person chose, keyed by `path::profile`. Absent means the
+   * engine's default tree under the workspace.
+   */
+  protected outs: Record<string, string> = {};
+  /** Whether an apply to a chosen folder makes it a repository. On by default. */
+  protected gitInit = true;
+
+  @postConstruct()
+  protected init(): void {
+    void this.storage.getData<Record<string, string>>(OUT_KEY).then((saved) => {
+      if (saved === undefined) return;
+      this.outs = saved;
+      this.forgetIfStale();
+    });
+  }
 
   get current(): GenerateState {
     return this.state;
+  }
+
+  /** The folder chosen for what is on screen, or `undefined` for the default. */
+  get outFolder(): string | undefined {
+    const key = this.outKey();
+    return key === undefined ? undefined : this.outs[key];
+  }
+
+  get initializesRepository(): boolean {
+    return this.gitInit;
+  }
+
+  set initializesRepository(on: boolean) {
+    this.gitInit = on;
+    this.onChangedEmitter.fire();
+  }
+
+  /**
+   * Generate into `folder` from now on, or back into the default tree.
+   *
+   * A different folder is a different plan -- the same files can be `create`
+   * in one and `unchanged` in the other -- so the plan on screen is dropped and
+   * asked for again.
+   */
+  async chooseOut(folder: string | undefined): Promise<void> {
+    const key = this.outKey();
+    if (key === undefined) return;
+    const next = { ...this.outs };
+    if (folder === undefined) delete next[key];
+    else next[key] = folder;
+    this.outs = next;
+    await this.storage.setData(OUT_KEY, next);
+    this.forgetIfStale();
+  }
+
+  protected outKey(): string | undefined {
+    const open = this.product.current.open;
+    const profile = this.product.current.profile;
+    if (open === undefined || profile === undefined) return undefined;
+    return `${open.path}::${profile}`;
   }
 
   /**
@@ -151,7 +218,10 @@ export class GenerateService {
     );
   }
 
-  // No output root is sent, and that is the whole of the policy now.
+  // No output root is sent unless a person chose a folder, and that is the whole
+  // of the policy now. A chosen folder is for shipping the product from its own
+  // repository (ADR-0010, Amendment 2026-09-29); the default below is the tree
+  // the Lock view compares against.
   //
   // Studio used to write `.gearbox/studio/<product>/<profile>/` to keep out of
   // the CLI's tree, because `product.lock` was not client-independent: `digest`
@@ -182,7 +252,9 @@ export class GenerateService {
     const open = this.product.current.open;
     const profile = this.product.current.profile;
     if (open === undefined || profile === undefined) return undefined;
-    return `${open.path}::${profile}::${this.product.revision}`;
+    // The folder is part of what the plan is *of*: the same files are `create`
+    // in an empty repository and `unchanged` in the default tree.
+    return `${open.path}::${profile}::${this.product.revision}::${this.outFolder ?? ""}`;
   }
 
   /**
@@ -228,7 +300,7 @@ export class GenerateService {
     this.forKey = key;
     this.update({ status: "planning", plan: undefined, written: undefined, error: undefined });
     try {
-      const plan = await this.service.planGenerate(open.path, profile, undefined);
+      const plan = await this.service.planGenerate(open.path, profile, this.outFolder);
       if (epoch !== this.epoch) return;
       this.update({ status: "ready", plan, error: undefined });
     } catch (error) {
@@ -254,7 +326,8 @@ export class GenerateService {
     const profile = this.product.current.profile;
     if (open === undefined || profile === undefined) return undefined;
     try {
-      const outcome = await this.service.applyGenerate(open.path, profile, undefined);
+      const out = this.outFolder;
+      const outcome = await this.service.applyGenerate(open.path, profile, out);
       this.update({
         plan: {
           plans: outcome.plans,
@@ -266,7 +339,18 @@ export class GenerateService {
           overridden_templates: outcome.overridden_templates,
         },
         written: outcome.written,
+        repository: undefined,
       });
+      if (out !== undefined && this.gitInit) {
+        try {
+          const repository = await this.service.initRepository(this.state.plan?.out_root ?? out);
+          this.update({ repository });
+        } catch (error) {
+          // The files are written either way; the repository is a convenience
+          // on top, and failing it must not read as a failed generation.
+          this.messages.warn(`Generated, but git init failed: ${messageOf(error)}`);
+        }
+      }
       // An apply rewrites `product.lock` in the output tree, so the Lock view's
       // comparison against disk is now about the previous file. Nothing watches
       // `.gearbox/**` -- it is excluded from the file watcher on purpose -- so the
@@ -292,7 +376,7 @@ export class GenerateService {
     if (this.planKey() !== this.forKey) {
       throw new Error("this plan describes a resolution that has since changed");
     }
-    return this.service.generateFile(open.path, plan.path, profile, undefined);
+    return this.service.generateFile(open.path, plan.path, profile, this.outFolder);
   }
 
   /**
