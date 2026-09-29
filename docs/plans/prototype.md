@@ -2603,6 +2603,13 @@ narrative; Generate shows 0 conflicts, and after hand-editing `values.yaml` a re
     `deps` target.** The resolver enforces it (that *is* `CutBlocker::ColocationClosure`), so
     `calculator-gateway`-shaped designs cannot be reproduced by the generator — and should not be,
     because they are the double-instantiation bug.
+13. **A product in the user's own folder.** New Product and Clone write only inside the workspace
+    the Studio declared, which is the repository (ADR-0013 §Where the file is created, and its
+    creation boundary, Amendment 2026-09-16). A product in a folder of the user's choosing, which
+    is how a user would expect to work, is refused. Opening a product from anywhere by file works;
+    creating one there does not. This is a known limit, recorded 2026-09-29 at the user's request.
+    The fix is deliberately postponed: widening the boundary means deciding what the session's
+    workspace and source roots are for a product outside the repository.
 
 Every "not supported" diagnostic (GBX0402, 0409, 0505, 0601–0606) carries an `evidence` field with a
 real `file:line` in `gears-rust`, so a reader can verify the claim in ten seconds instead of

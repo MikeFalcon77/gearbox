@@ -156,6 +156,10 @@ never matches a `file:///Users/...` root; and Theia requires its *own* generated
 `Untitled-NN.theia-workspace` to be trusted, which no setting can express, so
 `StudioWorkspaceTrustService` drops it from the set.
 
+**New Product writes only inside the repository.** Create and Clone are bounded by the workspace the
+Studio declared, so a product cannot be created in a folder of your own yet. It can be opened from
+anywhere. This is a recorded limit (`docs/plans/prototype.md` §13), not a design goal.
+
 ## The `.gdl` language
 
 Syntax highlighting is a native Theia contribution
