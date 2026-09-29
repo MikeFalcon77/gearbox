@@ -143,11 +143,42 @@ fn default_out_root(product_id: &str, profile: &ProfileId) -> anyhow::Result<Pat
 ///
 /// `canonicalize` is not usable here: the output root is usually a directory
 /// generation is about to create.
+/// The output root as an absolute, symlink-free path.
+///
+/// **Canonical, not just absolute.** Every relative path the tree writes --
+/// `path = "..."` to a gear, a `[patch]` entry, the shared target directory --
+/// is computed between this and the source roots, which are canonical. On macOS
+/// `/tmp` is a link to `/private/tmp`, so `--out /tmp/app` counted one level
+/// fewer than the directory really has and every dependency path missed by one
+/// `..`. The directory need not exist yet, so the nearest ancestor that does is
+/// canonicalized and the rest is appended; a `..` in that rest has nothing to
+/// resolve against and is refused.
 fn absolute(path: PathBuf) -> anyhow::Result<PathBuf> {
-    if path.is_absolute() {
-        return Ok(path);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut existing = path.as_path();
+    let mut rest = Vec::new();
+    while !existing.exists() {
+        let Some(name) = existing.file_name() else {
+            break;
+        };
+        rest.push(name.to_owned());
+        existing = existing.parent().unwrap_or(existing);
     }
-    Ok(std::env::current_dir()?.join(path))
+    let mut out = existing.canonicalize()?;
+    for part in rest.iter().rev() {
+        if part == ".." {
+            anyhow::bail!(
+                "`{}` walks up out of a directory that does not exist yet; name the folder directly",
+                path.display()
+            );
+        }
+        out.push(part);
+    }
+    Ok(out)
 }
 
 fn print_plans(plans: &[FilePlan], out_root: &Path, dry_run: bool, written: usize) {
@@ -190,7 +221,7 @@ mod tests {
 
     use gearbox_ir::ProfileId;
 
-    use super::{OUTPUT_DIR, default_out_root, run};
+    use super::{OUTPUT_DIR, absolute, default_out_root, run};
     use crate::Format;
 
     fn dev() -> ProfileId {
@@ -306,5 +337,21 @@ mod tests {
             err.to_string()
         );
         assert!(!out.exists(), "the refusal came after a write");
+    }
+    /// An output root reached through a symlink is the directory it points at,
+    /// even before it exists: relative dependency paths are counted from it.
+    #[cfg(unix)]
+    #[test]
+    fn an_output_root_through_a_symlink_is_canonical() {
+        let base = std::env::temp_dir().join(format!("gbx-cli-out-{}", std::process::id()));
+        drop(std::fs::remove_dir_all(&base));
+        let real = base.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        std::os::unix::fs::symlink(&real, base.join("link")).unwrap();
+
+        let got = absolute(base.join("link").join("new").join("app")).unwrap();
+        assert_eq!(got, real.canonicalize().unwrap().join("new").join("app"));
+        assert!(absolute(base.join("link").join("new").join("..").join("x")).is_err());
+        drop(std::fs::remove_dir_all(&base));
     }
 }
