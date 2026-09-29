@@ -983,7 +983,7 @@ A future registry can add semver resolution without changing the core product mo
 
 One of the strongest ideas from earlier exploration is:
 
-> **Gearbox should behave like “Cargo for products”.**
+> **`product.lock` plays for a product the role `Cargo.lock` plays for a crate** — though Gearbox itself is more than a package manager: from one description it derives applications, configuration, images, charts and the reason for each choice.
 
 The central resolved artifact is:
 
@@ -3697,7 +3697,7 @@ The proposed direction can be summarized as:
 ```text
 GEARBOX
 
-“Cargo for Gears products”
+“Describe what the product needs. Gearbox derives the rest — and says why.”
 
 gear.gdl              product.gdl
 Gear metadata         Product intent
