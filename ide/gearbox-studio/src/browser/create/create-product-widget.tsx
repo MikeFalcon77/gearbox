@@ -873,9 +873,19 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
           <label>
             destination
             <div className="gbx-create-row">
+              {/* **The end of the path is the part that matters**, and a
+                  single-line input shows its start -- the half that is the same
+                  for every product. So while the field is not being edited it is
+                  scrolled to its end (`…/demo-shop/product.gdl`), and the whole
+                  path is its tooltip. This replaces a second copy of the path
+                  under the field, which came with a Copy button of its own. */}
               <input
                 data-create-destination
                 value={this.destination}
+                title={this.productPath() || this.suggestedProductPath()}
+                ref={(el) => {
+                  if (el !== null && document.activeElement !== el) el.scrollLeft = el.scrollWidth;
+                }}
                 placeholder={this.suggestedProductPath()}
                 disabled={!connected}
                 onChange={(e) => {
@@ -899,27 +909,6 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
               </button>
             </div>
           </label>
-          {/* **The whole path, wrapped, outside the field.** A destination is
-              long -- an absolute path plus `products/<id>/product.gdl` -- and a
-              single-line input shows its *start*, which is the half that is the
-              same for every product. The end is the half that says where this
-              one lands, so it was the half nobody could read. Outside the label
-              because clicking a label focuses its input, and Copy is not that. */}
-          {this.productPath() !== "" && (
-            <div className="gbx-create-row" data-destination-resolved>
-              <span className="gbx-destination-full" data-destination-full>
-                {this.productPath()}
-              </span>
-              <button
-                type="button"
-                className="theia-button secondary"
-                data-destination-copy
-                onClick={() => void navigator.clipboard?.writeText(this.productPath())}
-              >
-                Copy path
-              </button>
-            </div>
-          )}
           {this.mode === "blank" ? (
             <div className="gbx-create-sources">
               <div>sources</div>

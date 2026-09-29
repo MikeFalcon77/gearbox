@@ -1329,7 +1329,6 @@
 .gbx-catalogue-choice small { margin-top: 4px; }
 .gbx-composition button, .gbx-add-dialog button { cursor: pointer; }
 .gbx-composition button:focus-visible, .gbx-add-dialog button:focus-visible { outline: 1px solid var(--theia-focusBorder); outline-offset: 2px; }
-.gbx-destination-full { display: block; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 /* **Asked of the pane, not of the window.** Both of these live inside a
    containment context declared above, so the threshold is about the space the
    columns actually have. 800px is where a 230px tree plus a 20px gap stops
@@ -1365,3 +1364,6 @@
   left: calc(var(--theia-private-location-list-panel-left) + 22px);
   width: calc(var(--theia-private-location-list-panel-width) - 22px);
 }
+
+/* Generator diagnostics above the plan tree (GBX07xx: patched crates, overridden templates, stale files). */
+.gbx-generate-diagnostics { margin-top: 8px; max-height: 30%; overflow: auto; }

@@ -438,6 +438,21 @@ export class GenerateWidget extends ReactWidget {
             </ul>
           )}
         </div>
+        {/* **What generation itself has to say.** The plan carries the
+            generator's diagnostics -- a crate patched in because the checkout
+            differs from what was published (GBX0709), a template overridden, a
+            stale file left behind -- and this view used to render none of them,
+            so a registry-backed product built with local patches and nothing on
+            screen said so. Only the generator's own (GBX07xx): the resolution's
+            are in Validation already, and repeating them here would bury these. */}
+        {(gen.plan.diagnostics ?? []).some((d) => d.code.startsWith("GBX07")) && (
+          <div className="gbx-generate-diagnostics" data-generate-diagnostics>
+            <DiagnosticsList
+              diagnostics={(gen.plan.diagnostics ?? []).filter((d) => d.code.startsWith("GBX07"))}
+              density="compact"
+            />
+          </div>
+        )}
         <div className="gbx-generate-body">
           <div className="gbx-generate-tree" role="tree">
             {treeOf(plans).map((node) => this.renderNode(node, 0))}
