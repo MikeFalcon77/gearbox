@@ -17,7 +17,7 @@ import { CatalogueStore } from "../gearbox-studio/lib/browser/catalogue-store.js
 import { ProductStore } from "../gearbox-studio/lib/browser/product-store.js";
 import { stagedEditsFor } from "../gearbox-studio/lib/browser/add-gear/staged-edits.js";
 import { placeNewGear } from "../gearbox-studio/lib/browser/create/gear-edits.js";
-import { relativePath } from "../gearbox-studio/lib/browser/create/paths.js";
+import { productPathIn, relativePath } from "../gearbox-studio/lib/browser/create/paths.js";
 import { pluginLocatorFor } from "../gearbox-studio/lib/browser/create/plugin-locator.js";
 import {
   catalogueUsable,
@@ -796,6 +796,13 @@ const PLACE = { gearId: "ldap-authn-plugin", sourceId: "gears", at: "gears", isP
     "two UNC shares have no path between them",
   );
   check(relativePath("a/b", "/a/b") === undefined, "a relative input has no base to relate from");
+  // Choose… cannot make a folder, so a non-empty pick gets one named by id.
+  check(productPathIn("/w/products", "demo-shop", false) === "/w/products/demo-shop/product.gdl",
+    "a non-empty folder gets the product's own subfolder");
+  check(productPathIn("/w/empty/", "demo-shop", true) === "/w/empty/product.gdl",
+    "an empty folder is the product's");
+  check(productPathIn("C:\\w", " ", false) === "C:/w/new-product/product.gdl",
+    "a blank id still names a folder, and backslashes are normalised");
 }
 
 // ============================================ whether a plugin's sdk locator fits

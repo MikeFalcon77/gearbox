@@ -71,9 +71,7 @@ export function Composition({ state, loadingLabel, descriptors, selection, selec
         <div className="gbx-empty" role="status" data-composition-loading={state.status}>
           {state.status === "loading" ? (loadingLabel ?? "Loading the product…") : "Resolving…"}
         </div>}
-      {explicit.length === 0 && state.status !== "loading" && state.status !== "resolving" && <div className="gbx-empty">Your product has no gears yet. Choose a gear, then configure it here.
-        <button type="button" className="gbx-start-primary" onClick={() => add()}>Add gear</button>
-      </div>}
+      {explicit.length === 0 && state.status !== "loading" && state.status !== "resolving" && <div className="gbx-empty">Your product has no gears yet. Add one with <strong>Add Gear</strong> above, then configure it here.</div>}
       {explicit.map(host => {
         const d = descriptor(host.gear);
         const points = d ? pointsOf(d).map(p => ({ key: pointKey(p), label: p.trait_ident })) : [];

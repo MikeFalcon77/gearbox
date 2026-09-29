@@ -13,6 +13,7 @@ import { MessageService } from "@theia/core/lib/common/message-service";
 import { inject, injectable, postConstruct } from "@theia/core/shared/inversify";
 import React from "@theia/core/shared/react";
 import { FileDialogService } from "@theia/filesystem/lib/browser";
+import { FileService } from "@theia/filesystem/lib/browser/file-service";
 import { WorkspaceService } from "@theia/workspace/lib/browser/workspace-service";
 
 import { GearboxService, type CloneCandidate } from "../../common/protocol";
@@ -21,7 +22,7 @@ import { ProductEditService } from "../product-edit-service";
 import { EngineConnectionService } from "../shell/engine-connection-service";
 import { ProductSessionService } from "../shell/product-session-service";
 import type { ContextIdentity, OwnedWidget } from "../shell/screens";
-import { volumeOf } from "./paths";
+import { productPathIn, volumeOf } from "./paths";
 
 export type CreateMode = "blank" | "clone-local" | "clone-git";
 
@@ -80,6 +81,7 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
   @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
   @inject(EngineConnectionService) protected readonly engine!: EngineConnectionService;
   @inject(FileDialogService) protected readonly fileDialog!: FileDialogService;
+  @inject(FileService) protected readonly files!: FileService;
   @inject(CatalogueStore) protected readonly catalogue!: CatalogueStore;
 
   protected mode: CreateMode = "blank";
@@ -116,6 +118,12 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
   /** Editable destination; empty means use the default under the workspace. */
   protected destination = "";
   protected destinationTouched = false;
+  /**
+   * The non-empty folder Choose… picked, while the path is still the one it
+   * derived: an id typed afterwards moves the product's subfolder with it.
+   * Cleared the moment the path is edited by hand.
+   */
+  protected destinationParent: string | undefined;
   protected preview = "";
   protected previewTimer: ReturnType<typeof setTimeout> | undefined;
   /**
@@ -159,6 +167,7 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
     if (state?.id !== undefined) this.productId = state.id;
     if (state?.name !== undefined) this.name = state.name;
     this.destinationTouched = false;
+    this.destinationParent = undefined;
     this.destination = "";
     void this.refreshPreview();
     this.update();
@@ -700,15 +709,25 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
    */
   protected async browseDestination(): Promise<void> {
     const uri = await this.fileDialog.showOpenDialog({
-      title: "Folder for the new product",
+      title: "Folder for the product — a folder named after its id is created inside, unless it is empty",
       canSelectFiles: false,
       canSelectFolders: true,
       canSelectMany: false,
     });
     if (uri === undefined) return;
     const folder = uri.path.fsPath().replace(/\\/g, "/").replace(/\/+$/, "");
+    // Unreadable counts as not empty: a subfolder is the choice that cannot
+    // land a description among somebody's files.
+    let empty = false;
+    try {
+      const stat = await this.files.resolve(uri);
+      empty = (stat.children ?? []).length === 0;
+    } catch {
+      empty = false;
+    }
     this.destinationTouched = true;
-    this.destination = `${folder}/product.gdl`;
+    this.destinationParent = empty ? undefined : folder;
+    this.destination = productPathIn(folder, this.productId, empty);
     this.selectedRoots = new Set(this.selectableRoots());
     this.schedulePreview();
   }
@@ -818,6 +837,11 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
               disabled={!connected}
               onChange={(e) => {
                 this.productId = e.target.value;
+                // A folder picked with Choose… gets the product's subfolder by
+                // id, so the subfolder follows the id until the path is edited.
+                if (this.destinationParent !== undefined) {
+                  this.destination = productPathIn(this.destinationParent, this.productId, false);
+                }
                 this.schedulePreview();
               }}
             />
@@ -856,6 +880,7 @@ export class CreateProductWidget extends ReactWidget implements OwnedWidget {
                 disabled={!connected}
                 onChange={(e) => {
                   this.destinationTouched = true;
+                  this.destinationParent = undefined;
                   this.destination = e.target.value;
                   // Which roots may be sources depends on where the product
                   // lands, so the selection follows the destination.

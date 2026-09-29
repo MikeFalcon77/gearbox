@@ -92,3 +92,19 @@ export function relativeTo(descriptionPath: string, to: string): string | undefi
   return target.slice(base.length + 1);
 }
 
+
+/**
+ * Where a product goes when a person picks `folder` for it.
+ *
+ * **The dialog cannot make a folder, so the wizard does.** Theia's folder
+ * picker has no "New folder", and taking the picked folder as the product's
+ * own meant a new product could only get a directory of its own by typing the
+ * path. So an empty folder is taken as the product's, and any other gets a
+ * subfolder named after the id -- which the engine creates with the file, as it
+ * does for a typed path. Picking `products/` gives `products/<id>/product.gdl`.
+ */
+export function productPathIn(folder: string, id: string, empty: boolean): string {
+  const base = folder.replace(/\\/g, "/").replace(/\/+$/, "");
+  const name = id.trim() === "" ? "new-product" : id.trim();
+  return empty ? `${base}/product.gdl` : `${base}/${name}/product.gdl`;
+}
