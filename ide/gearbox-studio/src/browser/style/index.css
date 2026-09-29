@@ -798,7 +798,7 @@
   display: flex; gap: 8px; margin-top: 8px;
 }
 .gbx-generate-tree {
-  flex: 0 0 280px; overflow: auto;
+  flex: 0 0 320px; overflow: auto;
   border-right: 1px solid var(--theia-editorGroup-border);
   padding-right: 6px;
 }
@@ -1367,3 +1367,9 @@
 
 /* Generator diagnostics above the plan tree (GBX07xx: patched crates, overridden templates, stale files). */
 .gbx-generate-diagnostics { margin-top: 8px; max-height: 30%; overflow: auto; }
+
+/* Generate's file tree: one line per file, the name shortened rather than wrapped. */
+.gbx-generate-tree .gbx-row { flex-wrap: nowrap; padding-top: 2px; padding-bottom: 2px; }
+.gbx-generate-tree .gbx-row-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gbx-generate-tree .gbx-badge { flex: 0 0 auto; }
+.gbx-generate-tree .gbx-generate-dir-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

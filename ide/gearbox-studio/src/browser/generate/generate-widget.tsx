@@ -42,6 +42,9 @@ const KIND_LANGUAGE: Record<FileKind, string> = {
   text: "plaintext",
 };
 
+/** Pixels per tree level. */
+const INDENT = 12;
+
 interface TreeNode {
   readonly name: string;
   readonly plan?: FilePlan;
@@ -469,8 +472,13 @@ export class GenerateWidget extends ReactWidget {
     const plan = node.plan;
     if (plan === undefined) {
       return (
-        <div className="gbx-generate-dir" key={node.name} style={{ paddingLeft: depth * 14 }}>
-          <div className="gbx-generate-dir-label">
+        // **The indent is per level, not per ancestor.** The folder used to pad
+        // itself and render its children inside the padding, and each child
+        // padded again -- so the offset grew as a sum, and four levels down
+        // `helm/<product>/charts/<app>/templates` pushed every name off a 280px
+        // column. Only the label is padded now; children carry their own depth.
+        <div className="gbx-generate-dir" key={node.name}>
+          <div className="gbx-generate-dir-label" style={{ paddingLeft: 4 + depth * INDENT }}>
             <span className="codicon codicon-folder" />
             {node.name}
           </div>
@@ -485,7 +493,7 @@ export class GenerateWidget extends ReactWidget {
         key={plan.path}
         role="treeitem"
         tabIndex={0}
-        style={{ paddingLeft: 4 + depth * 14 }}
+        style={{ paddingLeft: 4 + depth * INDENT }}
         data-plan-path={plan.path}
         data-action={plan.action}
         data-ownership={plan.ownership}
@@ -499,10 +507,15 @@ export class GenerateWidget extends ReactWidget {
         }}
       >
         <span className={`gbx-leaf-icon codicon codicon-${ACTION_ICON[plan.action]}`} />
-        <span className="gbx-row-name">{node.name}</span>
-        <span className="gbx-badge" data-ownership={plan.ownership}>
-          {plan.ownership}
-        </span>
+        <span className="gbx-row-name" title={plan.path}>{node.name}</span>
+        {/* Only when it says something: nearly every file is `generated`, and a
+            badge on every row wrapped under the name and read as noise. The
+            ones worth a mark are the files that become the operator's. */}
+        {plan.ownership !== "generated" && (
+          <span className="gbx-badge" data-ownership={plan.ownership}>
+            {plan.ownership}
+          </span>
+        )}
       </div>
     );
   }
