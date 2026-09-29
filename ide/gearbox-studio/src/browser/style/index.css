@@ -1353,3 +1353,15 @@
 
 /* The text inside the right-to-left path cell runs left to right; see start-widget. */
 .gbx-start-item-path > bdi { unicode-bidi: isolate; direction: ltr; }
+
+/* The New Folder button in Theia's file dialogs (theia/filesystem/new-folder-file-dialog.ts).
+   Theia positions back/forward/home/up absolutely at 0/23/45/67px and the
+   location list at 92px; the button takes the next slot and the list moves
+   over by the same 22px. */
+.dialogContent .theia-NavigationPanel .gbx-NavigationNewFolder {
+  left: 89px;
+}
+.dialogContent .theia-NavigationPanel:has(.gbx-NavigationNewFolder) .theia-LocationListPanel {
+  left: calc(var(--theia-private-location-list-panel-left) + 22px);
+  width: calc(var(--theia-private-location-list-panel-width) - 22px);
+}

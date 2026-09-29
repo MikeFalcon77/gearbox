@@ -1,5 +1,16 @@
 // Frontend wiring: the views, two stores, one proxied service.
 
+import {
+  OpenFileDialog,
+  OpenFileDialogFactory,
+  OpenFileDialogProps,
+  SaveFileDialog,
+  SaveFileDialogFactory,
+  SaveFileDialogProps,
+  createOpenFileDialogContainer,
+  createSaveFileDialogContainer,
+} from "@theia/filesystem/lib/browser";
+import { NewFolderOpenFileDialog, NewFolderSaveFileDialog } from "./theia/filesystem/new-folder-file-dialog";
 import { Agent, AIVariableContribution, bindToolProvider } from "@theia/ai-core";
 import { ChatAgent, DefaultChatAgentId, FallbackChatAgentId } from "@theia/ai-chat";
 import {
@@ -148,6 +159,22 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   // saved layout is still respected and the view is one command away.
   rebind(DebugFrontendApplicationContribution).to(HiddenDebugView).inSingletonScope();
   rebind(TestViewContribution).to(HiddenTestView).inSingletonScope();
+
+  // Why: Theia's file dialog cannot make a folder, and every folder Studio asks
+  // for -- a new product's, a new gear's, Generate's output -- is often one that
+  // does not exist yet. The factories are rebound, not the dialogs, because each
+  // dialog is built in a child container of its own; see
+  // `theia/filesystem/new-folder-file-dialog.ts`.
+  rebind(OpenFileDialogFactory).toFactory((ctx) => (props: OpenFileDialogProps) => {
+    const child = createOpenFileDialogContainer(ctx.container, props);
+    child.rebind(OpenFileDialog).to(NewFolderOpenFileDialog);
+    return child.get(OpenFileDialog);
+  });
+  rebind(SaveFileDialogFactory).toFactory((ctx) => (props: SaveFileDialogProps) => {
+    const child = createSaveFileDialogContainer(ctx.container, props);
+    child.rebind(SaveFileDialog).to(NewFolderSaveFileDialog);
+    return child.get(SaveFileDialog);
+  });
 
   // Why: the same mechanism for two panels this application does choose the
   // package of and does not choose the panel of. Markers are load-bearing --
