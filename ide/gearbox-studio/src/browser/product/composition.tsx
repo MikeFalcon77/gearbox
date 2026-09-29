@@ -173,7 +173,17 @@ export function Composition({ state, loadingLabel, descriptors, selection, selec
               ? <button type="button" className="gbx-choice" onClick={() => select({ kind: "gear", id: reason.gear })}>{describeInclusion(reason)}</button>
               : describeInclusion(reason)}
           </div>)}
-          {descriptor(id)?.extension_points?.length ? <button type="button" onClick={() => add(id)}>Add plugin (select host explicitly)</button> : null}
+          {/* The same offer as a selected host's: compatible plugins only, and
+              one point passed through when there is just one. Adding makes the
+              host an explicitly selected gear, which the dialog says too. */}
+          {(() => {
+            const d = descriptor(id);
+            const points = d ? pointsOf(d) : [];
+            if (!points.length) return null;
+            return <button type="button" data-add-plugin-for={`${id}:${points.length === 1 ? pointKey(points[0]!) : ""}`}
+              title={`${id} becomes an explicitly selected gear`}
+              onClick={() => add(id, points.length === 1 ? pointKey(points[0]!) : undefined)}>Add compatible plugin</button>;
+          })()}
         </div>)}
       </details>}
     </nav>

@@ -35,7 +35,8 @@ define check_rustup_component
 endef
 
 .PHONY: help setup build fmt fmt-check dev-fmt clippy dev-clippy lint deny test dev-test \
-        ts ts-check grammar grammar-check diagnostics diagnostics-check check dev clean
+        ts ts-check grammar grammar-check diagnostics diagnostics-check check dev clean \
+        ide ide-release
 
 help:
 	@echo "build      compile the workspace"
@@ -53,6 +54,9 @@ help:
 	@echo "check      fmt + clippy + lint + deny + test + ts-check + grammar-check + diagnostics-check"
 	@echo "dev        dev-fmt + dev-clippy + test"
 	@echo "setup      install the tools the above targets need"
+	@echo "ide        build the engine + Studio (dev bundle) and start it, http://127.0.0.1:3000"
+	@echo "ide-release  same, but a minified production bundle"
+	@echo "           both pass ANTHROPIC_API_KEY through if set, e.g. 'make ide ANTHROPIC_API_KEY=sk-...'"
 
 setup:
 	rustup component add rustfmt clippy
@@ -61,7 +65,7 @@ setup:
 	@echo "Setup complete."
 
 build:
-	$(CARGO) build --workspace --all-targets
+	$(CARGO) build--workspace --all-targets
 
 # Check formatting. `dev-fmt` applies it.
 fmt:
@@ -164,6 +168,40 @@ check: fmt clippy lint deny test ts-check grammar-check diagnostics-check
 	@echo "all checks passed"
 
 dev: dev-fmt dev-clippy test
+
+# ide/README.md has the full story (multi-root workspace, plugins, the CA
+# traps); these two wrap its documented sequence so a clean checkout starts
+# with one command instead of four. `ide-release` differs only in bundle mode
+# -- `theia start` serves whichever bundle `npm run build[:release]` produced.
+#
+# ANTHROPIC_API_KEY is optional -- the chat says so and works without it -- and
+# is only exported here if it already has a value, from the environment or
+# from `make ide ANTHROPIC_API_KEY=...`; a bare `make ide` leaves it unset so
+# start-studio.mjs falls back to the repo-root `.env` exactly as it does today.
+ifdef ANTHROPIC_API_KEY
+export ANTHROPIC_API_KEY
+endif
+
+# Hardcoded because browser-app/package.json's own `start` script hardcodes
+# --hostname and --port; this just names what that already fixes.
+IDE_URL := http://127.0.0.1:3000
+
+# tools/ide-open.sh polls $(IDE_URL) and opens it once `theia start` actually
+# answers, rather than the instant it is launched. Backgrounded here and left
+# to time out on its own so it never blocks or outlives the foreground server.
+ide: ts
+	cd ide && npm run engine
+	cd ide && npm run build
+	@echo "Studio: $(IDE_URL)"
+	tools/ide-open.sh $(IDE_URL) &
+	cd ide && npm run start:browser
+
+ide-release: ts
+	cd ide && npm run engine
+	cd ide && npm run build:release
+	@echo "Studio: $(IDE_URL)"
+	tools/ide-open.sh $(IDE_URL) &
+	cd ide && npm run start:browser
 
 ## oop-run: start the generated host, let it spawn the worker, prove the binding is remote
 oop-run:

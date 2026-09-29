@@ -23,6 +23,14 @@ npm run build
 npm run start:browser                 # http://127.0.0.1:3000
 ```
 
+`make ide` from the repository root wraps that sequence (engine build, frontend build, start),
+prints the URL and opens it in a browser once the server actually answers (`tools/ide-open.sh`
+polls it in the background). `make ide-release` does the same with a minified production bundle
+(`theia build --mode production`, via `npm run build:release`) instead of the development one
+`build` produces; `start:browser` is otherwise identical, since `theia start` just serves whichever
+bundle is on disk. Both pass `ANTHROPIC_API_KEY` through if it is set, e.g.
+`make ide ANTHROPIC_API_KEY=sk-...`.
+
 `start:browser` goes through `scripts/start-studio.mjs`, which loads a `.env` at the repository
 root (see `.env.example`) for `ANTHROPIC_API_KEY` and refuses to pass on a `NODE_OPTIONS` that
 leaves Node with no CA store. A variable already exported in the shell always wins over the file.

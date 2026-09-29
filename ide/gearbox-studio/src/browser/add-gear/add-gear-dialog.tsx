@@ -291,8 +291,13 @@ export class AddGearDialog extends ReactDialog<boolean> {
 
   protected render(): React.ReactNode {
     const chosen = this.chosen(), all = this.descriptors();
+    // With a host and no point -- a host that is in the product only through a
+    // closure, or one with several points -- the offer is every plugin that
+    // fills *some* point of that host. `!!d.fills` alone offered the whole
+    // catalogue's plugins beside authn-resolver.
+    const hostDescriptor = this.initial.host !== undefined ? all.find(d => d.id === this.initial.host) : undefined;
     const filtered = all.filter(d => (!this.initial.point || (d.fills && d.fills.spec === this.initial.point)) &&
-      (!this.initial.host || !!d.fills) && (!this.category || d.category === this.category) &&
+      (!this.initial.host || (!!d.fills && (hostDescriptor === undefined || fillsPointOf(d, hostDescriptor)))) && (!this.category || d.category === this.category) &&
       `${d.id} ${d.display_name} ${d.description}`.toLowerCase().includes(this.search.toLowerCase()));
     const introduced = this.impact?.newDiagnostics.length ?? 0;
     // `data-add-gear-flow` is the marker the old Add Gear *panel* carried, kept

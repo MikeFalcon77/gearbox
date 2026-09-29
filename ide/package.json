@@ -47,6 +47,7 @@
     "supervision-smoke": "node scripts/engine-supervision-smoke.mjs",
     "store-smoke": "node scripts/store-smoke.mjs",
     "build": "npm run build --workspace gearbox-studio && npm run build --workspace browser-app",
+    "build:release": "npm run build --workspace gearbox-studio && npm run build:release --workspace browser-app",
     "start:browser": "node scripts/start-studio.mjs",
     "conformance": "playwright test",
     "wedge": "playwright test --config playwright.wedge.config.ts",

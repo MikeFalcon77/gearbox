@@ -30,6 +30,7 @@
   "scripts": {
     "clean": "theia clean",
     "build": "theia build --mode development",
+    "build:release": "theia build --mode production",
     "download:plugins": "theia download:plugins",
     "start": "theia start --plugins=local-dir:../plugins --hostname=127.0.0.1 --port=3000"
   },
