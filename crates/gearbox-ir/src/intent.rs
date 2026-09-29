@@ -27,6 +27,16 @@ pub enum SourceDecl {
     /// A local directory, relative to the product description.
     Path {
         at: String,
+        /// `crates = registry("crates.io")`: the gears here are also published,
+        /// so the generated build takes their crates from this registry at the
+        /// versions the checkout declares, and reads only descriptions from the
+        /// checkout. `None` is a path dependency on the checkout, as before.
+        ///
+        /// A declaration of intent, not a guarantee: generation checks each
+        /// crate against what was actually published and falls back to the
+        /// checkout, loudly, where the two differ.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        crates: Option<String>,
         /// Where `source(...)` was written in the product description.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         declared_at: Option<Location>,

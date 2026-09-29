@@ -230,15 +230,20 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         })
     }
 
-    /// `source(id = ..., at = path(...) | git(...))`
+    /// `source(id = ..., at = path(...) | git(...), crates = registry(...)?)`
+    ///
+    /// `crates` says the gears in a checkout are also published: descriptions
+    /// come from `at`, crates from the registry, at the versions `at` declares.
     fn source<'v>(
         #[starlark(require = named)] id: &str,
         #[starlark(require = named)] at: &'v SourceAtRecord,
+        #[starlark(require = named)] crates: Option<&'v SourceAtRecord>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<SourceRecord> {
         Ok(SourceRecord {
             id: id.to_owned(),
             at: at.clone(),
+            crates: crates.cloned(),
             declared_at: call_location(eval),
         })
     }

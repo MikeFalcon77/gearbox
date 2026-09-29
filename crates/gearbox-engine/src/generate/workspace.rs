@@ -1,5 +1,7 @@
 //! The generated workspace root, its toolchain pin, and the lock beside them.
 
+use std::collections::BTreeMap;
+
 use gearbox_ir::{FileEntry, FileKind, Ownership, ResolvedApplication, ResolvedProduct};
 use serde::Serialize;
 
@@ -40,6 +42,15 @@ const RUST_VERSION: &str = "1.95.0";
 #[derive(Serialize)]
 struct WorkspaceManifest {
     workspace: WorkspaceTable,
+    /// `[patch.<registry>]`: crates named by registry version whose checkout
+    /// differs from what was published, pointed back at the checkout.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    patch: BTreeMap<String, BTreeMap<String, PatchEntry>>,
+}
+
+#[derive(Serialize)]
+struct PatchEntry {
+    path: String,
 }
 
 #[derive(Serialize)]
@@ -61,7 +72,26 @@ struct WorkspaceTable {
 pub fn workspace_manifest(
     applications: &[&ResolvedApplication],
     layout: &str,
+    input: &GenerateInput<'_>,
 ) -> Result<FileEntry, GenerateError> {
+    let mut patch: BTreeMap<String, BTreeMap<String, PatchEntry>> = BTreeMap::new();
+    if let Some(plan) = input.registry {
+        for (registry, crates) in plan.patches() {
+            // Cargo spells the default registry `crates-io` in a `[patch]` key,
+            // and every other one by the name its configuration gives it.
+            let key = if registry == "crates.io" {
+                "crates-io"
+            } else {
+                registry
+            };
+            let table = patch.entry(key.to_owned()).or_default();
+            for (name, dir) in crates {
+                let spelled = paths::relative(input.out_root, dir)
+                    .map_or_else(|| paths::to_slash(dir), |rel| paths::to_slash(&rel));
+                table.insert(name.to_owned(), PatchEntry { path: spelled });
+            }
+        }
+    }
     let manifest = WorkspaceManifest {
         workspace: WorkspaceTable {
             resolver: "3",
@@ -70,6 +100,7 @@ pub fn workspace_manifest(
                 .map(|p| format!("{layout}/{}", p.name))
                 .collect(),
         },
+        patch,
     };
     let body = toml::to_string_pretty(&manifest).map_err(|source| GenerateError::Toml {
         what: "the generated workspace manifest",

@@ -220,10 +220,39 @@ fn build_sources(
                     ));
                     continue;
                 };
+                let crates = match &record.crates {
+                    None => None,
+                    Some(crates) if crates.kind == "registry" => non_empty(crates.url.as_deref()),
+                    Some(crates) => {
+                        diagnostics.push(invalid(
+                            Location::or_file(record.declared_at.as_ref(), uri),
+                            format!(
+                                "source `{id}` takes its crates from `{}()`, which is not a \
+                                 registry",
+                                crates.kind
+                            ),
+                            "write `crates = registry(\"crates.io\")`",
+                        ));
+                        None
+                    }
+                };
                 SourceDecl::Path {
                     at,
+                    crates,
                     declared_at: record.declared_at.clone(),
                 }
+            }
+            "git" | "registry" if record.crates.is_some() => {
+                diagnostics.push(invalid(
+                    Location::or_file(record.declared_at.as_ref(), uri),
+                    format!(
+                        "source `{id}` declares `crates` on a `{}()` source",
+                        record.at.kind
+                    ),
+                    "`crates = registry(...)` belongs to a `path(...)` checkout: it says where \
+                     the build takes the crates whose descriptions the checkout carries",
+                ));
+                continue;
             }
             "git" => {
                 let Some(url) = non_empty(record.at.url.as_deref()) else {

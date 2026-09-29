@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **99**.
+Codes: **102**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -1352,6 +1352,9 @@ reading.
 | [GBX0706](#gbx0706) | warning | a generated crate directory is no longer part of the product |
 | [GBX0707](#gbx0707) | warning | a generated file is no longer part of the product |
 | [GBX0708](#gbx0708) | warning | a product template replaced a builtin |
+| [GBX0709](#gbx0709) | warning | a crate differs from the version published, so the checkout is patched in |
+| [GBX0710](#gbx0710) | warning | a crate is not published at the checkout's version |
+| [GBX0711](#gbx0711) | warning | the registry could not be reached |
 
 ### GBX0701
 
@@ -1445,4 +1448,33 @@ being a diagnostic: the overlay was named in the text output alone, so
 chart with no visible cause and read it as a generator change. A
 template is chosen by the description, so the file it produces is the
 product's doing -- which is a fact an operator has to be told.
+
+### GBX0709
+
+**a crate differs from the version published, so the checkout is patched in**
+
+A crate the product takes from a registry differs from what was published.
+
+`crates = registry(...)` on a source says its gears are published, and
+generation checks that per crate: the published package records the
+commit it was cut from (`.cargo_vcs_info.json`), and the checkout is
+compared against it. Where they differ the build still names the
+published version, and `[patch]` points it at the checkout -- so one copy
+of the crate is linked, and it is the code the resolver read. A warning,
+because the product builds; the output simply is not self-contained until
+the change is released.
+
+### GBX0710
+
+**a crate is not published at the checkout's version**
+
+A crate the product takes from a registry is not published at the
+version the checkout declares, so it stays a path dependency.
+
+### GBX0711
+
+**the registry could not be reached**
+
+The registry could not be asked at all -- offline, or cargo failed -- so
+every crate of the source stays a path dependency.
 

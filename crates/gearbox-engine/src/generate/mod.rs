@@ -227,6 +227,12 @@ pub struct GenerateInput<'a> {
     /// already loaded a catalogue (CLI, RPC) pass it so a literal credential
     /// cannot land in a `ConfigMap` or image.
     pub catalogue: Option<&'a Catalogue>,
+
+    /// Crates the build takes from a registry rather than the checkout, decided
+    /// by the caller with `gearbox_engine::published::plan`. `None` is a path
+    /// dependency on every crate, which is what a product without
+    /// `crates = registry(...)` on any source gets.
+    pub registry: Option<&'a crate::published::RegistryPlan>,
 }
 
 impl GenerateInput<'_> {
@@ -292,6 +298,7 @@ pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
         templates: input.templates.clone(),
         product_dir: input.product_dir,
         catalogue: input.catalogue,
+        registry: input.registry,
     };
 
     // Every process is a workspace member, host or worker. A generated crate
@@ -301,7 +308,7 @@ pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
 
     insert(
         &mut files,
-        workspace::workspace_manifest(&applications, input.layout())?,
+        workspace::workspace_manifest(&applications, input.layout(), input)?,
     )?;
     insert(&mut files, workspace::toolchain()?)?;
     insert(&mut files, workspace::lock_file(input.lock)?)?;

@@ -101,6 +101,15 @@ struct CreationBoundaryState {
 /// Everything the server knows between requests.
 struct State {
     roots: Vec<SourceRoot>,
+    /// Registry plans already computed, by product, sources and gear set; see
+    /// `prepare_generate`. Emptied with the catalogue, whose roots they read.
+    registry_plans: BTreeMap<
+        String,
+        (
+            Option<gearbox_engine::published::RegistryPlan>,
+            Vec<Diagnostic>,
+        ),
+    >,
     /// The catalogue from the last load.
     ///
     /// Cached because resolving re-reads nothing else: a load parses every gear
@@ -187,6 +196,7 @@ fn new_state(default_roots: &[PathBuf]) -> State {
     let (roots, failed_roots) = open_roots(default_roots);
     State {
         roots,
+        registry_plans: BTreeMap::new(),
         catalogue: None,
         failed_roots,
         // Nothing to hold yet: the CLI's `--root` values are already `roots`
@@ -865,6 +875,7 @@ fn initialize(state: &mut State, id: RequestId, params: &InitializeParams) -> Re
         // `initialize_tests.rs` pins all three cases rather than leaving the
         // invariant to be inferred from where two statements sit.
         state.catalogue = None;
+        state.registry_plans.clear();
     }
     state.initialized = true;
     state.allow_writes = params.allow_writes;
@@ -1035,6 +1046,9 @@ struct Resolved {
     /// resolves to, and which directory the chart templates came from does not
     /// change that answer.
     templates: Option<String>,
+    /// Sources whose crates the build takes from a registry, by id -- also an
+    /// input to generation rather than a resolution decision.
+    registry_sources: BTreeMap<SourceId, String>,
     explanation: ExplanationGraph,
     /// The description's diagnostics plus the resolution's.
     diagnostics: Vec<Diagnostic>,
@@ -1113,6 +1127,7 @@ fn resolve_once(
     Ok(Resolved {
         product,
         templates: intent.templates,
+        registry_sources: gearbox_engine::published::registry_sources(&intent.sources),
         explanation,
         diagnostics,
         profile,
@@ -3017,6 +3032,30 @@ fn prepare_generate(
             ));
         }
     };
+    // `crates = registry(...)`. Asking cargo takes seconds, and the Generate view
+    // plans on every change it sees, so the answer is kept per product, sources
+    // and gear set: none of those moving means cargo would answer the same.
+    let registry_key = format!(
+        "{path}|{:?}|{:?}|{:?}",
+        resolved.registry_sources,
+        resolved.product.sources,
+        resolved.product.gears.keys().collect::<Vec<_>>()
+    );
+    let (registry, registry_diagnostics) =
+        if let Some(cached) = state.registry_plans.get(&registry_key) {
+            cached.clone()
+        } else {
+            let computed = gearbox_engine::published::for_product(
+                &resolved.registry_sources,
+                &resolved.product,
+                &source_roots,
+                &std::env::temp_dir()
+                    .join("gearbox-published")
+                    .join(&resolved.product.product.id),
+            );
+            state.registry_plans.insert(registry_key, computed.clone());
+            computed
+        };
     let generated = match gearbox_engine::generate(&gearbox_engine::generate::GenerateInput {
         lock: &resolved.product,
         source_roots: &source_roots,
@@ -3024,6 +3063,7 @@ fn prepare_generate(
         templates,
         product_dir: Path::new(path).parent(),
         catalogue: state.catalogue.as_ref(),
+        registry: registry.as_ref(),
     }) {
         Ok(generated) => generated,
         Err(e) => {
@@ -3053,6 +3093,7 @@ fn prepare_generate(
         )));
     }
     let mut diagnostics = resolved.diagnostics;
+    diagnostics.extend(registry_diagnostics);
     // See `Generated::diagnostics`: computing this and dropping it is exactly
     // what made a house template invisible in Studio for a milestone.
     diagnostics.extend(generated.diagnostics.as_slice().iter().cloned());
@@ -3595,6 +3636,7 @@ fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> 
     // routine, and this becomes the line that poisons the session.
     if disconnected {
         state.catalogue = None;
+        state.registry_plans.clear();
     } else {
         state.catalogue = Some(scan.catalogue);
     }

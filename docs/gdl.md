@@ -289,8 +289,17 @@ Positional constructors in a product file: `path`, `registry`, `plugin`, `use_ge
 path("relative/dir") -> source-at
 git(url, tag?, rev?, branch?) -> source-at          # at least one of tag / rev / branch
 registry("crates.io", prefix?) -> source-at         # the registry, not one package
-source(id, at) -> source                            # id is kebab-case
+source(id, at, crates?) -> source                   # id is kebab-case
 ```
+
+`crates = registry("crates.io")` on a `path(...)` source says its gears are also published. Descriptions still come from the checkout (a published crate carries no `gear.gdl`), and the generated build names each crate by its exact version instead of a path. Generation checks every crate against the commit its release was cut from (`.cargo_vcs_info.json`):
+
+- as published: `version = "=X"`;
+- changed since: the same version, plus a `[patch.crates-io]` entry pointing at the checkout, so one copy links (**GBX0709**);
+- not published at that version: a path dependency (**GBX0710**);
+- registry unreachable: every crate stays a path dependency (**GBX0711**).
+
+Path dependencies reached from patched crates or from path gears, `workspace = true` ones included, are patched too, so each crate appears only once in the build. `crates` on a `git(...)` or `registry(...)` source is refused.
 
 `git` and `source` are keyword-only. `path` / `registry` take the first string positionally. `path(...)` is relative to the product file. `git` with only `branch` pins a moving line; accepted, recorded as such.
 

@@ -71,6 +71,7 @@ fn state() -> Option<State> {
     let (roots, failed_roots) = open_roots(&[root]);
     Some(State {
         roots,
+        registry_plans: BTreeMap::new(),
         catalogue: None,
         failed_roots,
         creation_boundary: None,

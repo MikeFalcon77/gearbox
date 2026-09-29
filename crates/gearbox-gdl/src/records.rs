@@ -376,6 +376,8 @@ gdl_record! {
     SourceRecord as "gdl_source" {
         pub id: String,
         pub at: SourceAtRecord,
+        /// `crates = registry(...)`: where the build takes this source's crates.
+        pub crates: Option<SourceAtRecord>,
         /// Where this `source(...)` call was written.
         #[allocative(skip)]
         pub declared_at: Option<gearbox_ir::Location>,

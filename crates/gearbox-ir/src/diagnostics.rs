@@ -1340,6 +1340,26 @@ diagnostic_codes! {
     /// template is chosen by the description, so the file it produces is the
     /// product's doing -- which is a fact an operator has to be told.
     GenTemplateOverridden = "GBX0708", Generator, Warning, false, "a product template replaced a builtin";
+
+    /// A crate the product takes from a registry differs from what was published.
+    ///
+    /// `crates = registry(...)` on a source says its gears are published, and
+    /// generation checks that per crate: the published package records the
+    /// commit it was cut from (`.cargo_vcs_info.json`), and the checkout is
+    /// compared against it. Where they differ the build still names the
+    /// published version, and `[patch]` points it at the checkout -- so one copy
+    /// of the crate is linked, and it is the code the resolver read. A warning,
+    /// because the product builds; the output simply is not self-contained until
+    /// the change is released.
+    GenCrateNotAsPublished = "GBX0709", Generator, Warning, false, "a crate differs from the version published, so the checkout is patched in";
+
+    /// A crate the product takes from a registry is not published at the
+    /// version the checkout declares, so it stays a path dependency.
+    GenCrateNotPublished = "GBX0710", Generator, Warning, false, "a crate is not published at the checkout's version";
+
+    /// The registry could not be asked at all -- offline, or cargo failed -- so
+    /// every crate of the source stays a path dependency.
+    GenRegistryUnavailable = "GBX0711", Generator, Warning, false, "the registry could not be reached";
 }
 
 /// A diagnostic code string that this build does not know.

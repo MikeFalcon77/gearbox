@@ -52,6 +52,7 @@ fn state_with_roots(workspace: PathBuf, roots: &[PathBuf]) -> State {
     let (roots, failed_roots) = open_roots(roots);
     State {
         roots,
+        registry_plans: BTreeMap::new(),
         catalogue: None,
         failed_roots,
         creation_boundary: None,

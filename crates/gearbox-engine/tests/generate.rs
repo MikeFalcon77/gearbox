@@ -107,6 +107,7 @@ fn generate_tree(
         templates: TemplateSet::new(),
         product_dir: None,
         catalogue: None,
+        registry: None,
     })
     .expect("generation succeeds for the demo product")
 }
@@ -848,6 +849,7 @@ fn a_product_template_overrides_the_builtin() {
         templates: TemplateSet::from_overrides(overrides),
         product_dir: None,
         catalogue: None,
+        registry: None,
     })
     .expect("generation succeeds with an overlay");
     let main = text(&generated.files, "apps/payments-demo/src/main.rs");
@@ -1333,6 +1335,7 @@ fn a_secret_config_field_becomes_an_env_placeholder() {
         templates: TemplateSet::new(),
         product_dir: None,
         catalogue: Some(&catalogue),
+        registry: None,
     })
     .expect("generation succeeds");
     let config = text(&generated.files, "config/payments-demo.yaml");
@@ -1398,6 +1401,7 @@ fn a_helm_mustache_in_prefix_path_is_refused() {
         templates: TemplateSet::new(),
         product_dir: None,
         catalogue: None,
+        registry: None,
     }) else {
         panic!("mustache in a probe path is Helm injection");
     };
@@ -1502,6 +1506,7 @@ fn host_probes_follow_the_rest_prefix_and_worker_probes_do_not() {
         templates: TemplateSet::new(),
         product_dir: None,
         catalogue: None,
+        registry: None,
     })
     .expect("generation succeeds")
     .files;
@@ -2418,5 +2423,83 @@ fn the_generated_worker_separates_what_it_registers_as_from_what_it_reads_by() {
     assert!(
         main.contains("config_gear_name: Some(CONFIG_GEAR_NAME.to_owned())"),
         "and it is passed, not left to follow the registration name:\n{main}"
+    );
+}
+
+/// A registry plan turns path dependencies into exact versions, and a crate
+/// that differs from what was published into a `[patch]` entry.
+///
+/// The plan is built by hand here: deciding it asks cargo and git, which is
+/// `gearbox_engine::published`'s job and has its own tests. What this asserts is
+/// that generation spells the answer the way cargo reads it.
+#[test]
+fn a_registry_plan_names_crates_by_version_and_patches_what_differs() {
+    use gearbox_engine::published::{RegistryCrate, RegistryPlan};
+
+    let Some((lock, source_roots)) = resolve("dev") else {
+        return;
+    };
+    let toolkit_dir = source_roots
+        .values()
+        .next()
+        .expect("one source")
+        .join("libs/toolkit");
+    let mut plan = RegistryPlan::default();
+    plan.crates.insert(
+        "cf-gears-api-gateway".to_owned(),
+        RegistryCrate {
+            registry: "crates.io".to_owned(),
+            version: "0.5.2".to_owned(),
+            patch: None,
+        },
+    );
+    plan.crates.insert(
+        "cf-gears-toolkit".to_owned(),
+        RegistryCrate {
+            registry: "crates.io".to_owned(),
+            version: "0.10.0".to_owned(),
+            patch: Some(toolkit_dir),
+        },
+    );
+    let out = out_root();
+    let files = generate(&GenerateInput {
+        lock: &lock,
+        source_roots: &source_roots,
+        out_root: &out,
+        templates: TemplateSet::new(),
+        product_dir: None,
+        catalogue: None,
+        registry: Some(&plan),
+    })
+    .expect("generation succeeds with a registry plan")
+    .files;
+
+    let app = text(&files, "apps/payments-demo/Cargo.toml");
+    let gateway = app
+        .split("[dependencies.api_gateway]")
+        .nth(1)
+        .and_then(|rest| rest.split("\n[").next())
+        .expect("api-gateway is a dependency");
+    assert!(gateway.contains("version = \"=0.5.2\""), "{gateway}");
+    assert!(
+        !gateway.contains("path ="),
+        "a registry crate carries no path: {gateway}"
+    );
+    // A gear the plan does not name stays on the checkout.
+    assert!(app.contains("[dependencies.authn_resolver]"), "{app}");
+    let authn = app.split("[dependencies.authn_resolver]").nth(1).unwrap();
+    assert!(
+        authn.split("\n[").next().unwrap().contains("path ="),
+        "{authn}"
+    );
+
+    let root = text(&files, "Cargo.toml");
+    assert!(
+        root.contains("[patch.crates-io.cf-gears-toolkit]"),
+        "{root}"
+    );
+    assert!(
+        !root.contains("cf-gears-api-gateway"),
+        "a crate as published is not patched: {root}"
     );
 }

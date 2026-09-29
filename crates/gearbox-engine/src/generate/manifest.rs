@@ -86,7 +86,9 @@ struct Dependency {
     #[serde(skip_serializing_if = "Option::is_none")]
     package: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    version: Option<&'static str>,
+    version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    registry: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     path: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -100,7 +102,8 @@ impl Dependency {
     fn version(version: &'static str, features: &[&str]) -> Self {
         Self {
             package: None,
-            version: Some(version),
+            version: Some(version.to_owned()),
+            registry: None,
             path: None,
             features: features.iter().map(|f| (*f).to_owned()).collect(),
             default_features: None,
@@ -174,12 +177,19 @@ fn dependencies(
     // available that is not a guess about directory names.
     let anchor = gear_of(input, application, &application.anchor)?;
     let anchor_root = source_root(input, anchor)?;
+    let (version, registry, path) = located(
+        input,
+        TOOLKIT_PACKAGE,
+        crate_dir,
+        &anchor_root.join(TOOLKIT_SUBDIR),
+    );
     dependencies.insert(
         TOOLKIT_ALIAS.to_owned(),
         Dependency {
             package: Some(TOOLKIT_PACKAGE.to_owned()),
-            version: None,
-            path: Some(dep_path(crate_dir, &anchor_root.join(TOOLKIT_SUBDIR))),
+            version,
+            registry,
+            path,
             features: vec!["bootstrap".to_owned()],
             default_features: None,
         },
@@ -192,14 +202,21 @@ fn dependencies(
     for id in &application.gears {
         let gear = gear_of(input, application, id)?;
         let root = source_root(input, gear)?;
+        let (version, registry, path) = located(
+            input,
+            &gear.package.crate_name,
+            crate_dir,
+            &root.join(gear.package.path.as_str()),
+        );
         let dependency = Dependency {
             // Always spelled out, even where it matches the key: the key is the
             // library identifier and this is the package name, and
             // `cf-api-contracts` linking as `cf_api_contracts` rather than as
             // `api_contracts` is precisely the mistake GBX0209 exists for.
             package: Some(gear.package.crate_name.clone()),
-            version: None,
-            path: Some(dep_path(crate_dir, &root.join(gear.package.path.as_str()))),
+            version,
+            registry,
+            path,
             // The union of what the gear declares and what the product asked
             // for. Kept separate in the lock and joined here, which is the one
             // place the distinction stops mattering: cargo takes a set.
@@ -224,6 +241,29 @@ fn dependencies(
     }
 
     Ok(dependencies)
+}
+
+/// How a crate is named: the exact registry version when the product takes it
+/// from a registry (`crates = registry(...)` on its source, and checked by
+/// `gearbox_engine::published`), otherwise a path into the checkout.
+///
+/// A crate that differs from what was published is still named by version here;
+/// the workspace's `[patch]` table points it at the checkout, so every crate
+/// that depends on it links the same copy.
+fn located(
+    input: &GenerateInput<'_>,
+    crate_name: &str,
+    crate_dir: &Path,
+    checkout: &Path,
+) -> (Option<String>, Option<String>, Option<String>) {
+    match input.registry.and_then(|plan| plan.get(crate_name)) {
+        Some(entry) => (
+            Some(format!("={}", entry.version)),
+            (entry.registry != "crates.io").then(|| entry.registry.clone()),
+            None,
+        ),
+        None => (None, None, Some(dep_path(crate_dir, checkout))),
+    }
 }
 
 /// The lock's entry for a gear the process claims to contain.

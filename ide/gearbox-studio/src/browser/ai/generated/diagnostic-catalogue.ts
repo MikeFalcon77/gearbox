@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 99, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 102, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -829,6 +829,30 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "warning",
     domain: "generator",
     docs: "A house template replaced a builtin for this run.\n\nReported rather than only summarized, and that is the whole point of it\nbeing a diagnostic: the overlay was named in the text output alone, so\n`--format json` and every RPC client saw an unexpected Dockerfile or\nchart with no visible cause and read it as a generator change. A\ntemplate is chosen by the description, so the file it produces is the\nproduct's doing -- which is a fact an operator has to be told.",
+    requiresEvidence: false,
+  },
+  GBX0709: {
+    code: "GBX0709",
+    title: "a crate differs from the version published, so the checkout is patched in",
+    severity: "warning",
+    domain: "generator",
+    docs: "A crate the product takes from a registry differs from what was published.\n\n`crates = registry(...)` on a source says its gears are published, and\ngeneration checks that per crate: the published package records the\ncommit it was cut from (`.cargo_vcs_info.json`), and the checkout is\ncompared against it. Where they differ the build still names the\npublished version, and `[patch]` points it at the checkout -- so one copy\nof the crate is linked, and it is the code the resolver read. A warning,\nbecause the product builds; the output simply is not self-contained until\nthe change is released.",
+    requiresEvidence: false,
+  },
+  GBX0710: {
+    code: "GBX0710",
+    title: "a crate is not published at the checkout's version",
+    severity: "warning",
+    domain: "generator",
+    docs: "A crate the product takes from a registry is not published at the\nversion the checkout declares, so it stays a path dependency.",
+    requiresEvidence: false,
+  },
+  GBX0711: {
+    code: "GBX0711",
+    title: "the registry could not be reached",
+    severity: "warning",
+    domain: "generator",
+    docs: "The registry could not be asked at all -- offline, or cargo failed -- so\nevery crate of the source stays a path dependency.",
     requiresEvidence: false,
   },
 };

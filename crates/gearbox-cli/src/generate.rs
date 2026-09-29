@@ -75,6 +75,18 @@ pub fn run(
         .map(|root| (root.id.clone(), root.root.clone()))
         .collect();
     let templates = TemplateSet::load_for_product(&product_file, intent.templates.as_deref())?;
+    // `crates = registry(...)`: which crates the build names by version, each
+    // checked against what was published. Asks cargo, so only when a source
+    // asked for it.
+    let (registry, registry_diagnostics) = gearbox_engine::published::for_product(
+        &gearbox_engine::published::registry_sources(&intent.sources),
+        &lock,
+        &source_roots,
+        &std::env::temp_dir()
+            .join("gearbox-published")
+            .join(&lock.product.id),
+    );
+    diagnostics.extend(registry_diagnostics);
     let generated = gearbox_engine::generate(&GenerateInput {
         lock: &lock,
         source_roots: &source_roots,
@@ -82,6 +94,7 @@ pub fn run(
         templates,
         product_dir: product_file.parent(),
         catalogue: Some(&scan.catalogue),
+        registry: registry.as_ref(),
     })?;
 
     // Generation's own diagnostics, before the plan's: a credential replaced in
@@ -338,6 +351,7 @@ mod tests {
         );
         assert!(!out.exists(), "the refusal came after a write");
     }
+
     /// An output root reached through a symlink is the directory it points at,
     /// even before it exists: relative dependency paths are counted from it.
     #[cfg(unix)]

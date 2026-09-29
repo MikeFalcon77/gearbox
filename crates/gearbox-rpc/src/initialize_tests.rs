@@ -74,6 +74,7 @@ fn state_with(root: &Path) -> State {
     let (roots, failed_roots) = open_roots(&[root.to_path_buf()]);
     State {
         roots,
+        registry_plans: BTreeMap::new(),
         catalogue: Some(marked_catalogue()),
         failed_roots,
         creation_boundary: None,
@@ -282,6 +283,7 @@ fn a_completed_load_is_cached() {
     let (roots, failed_roots) = open_roots(&[dir]);
     let mut state = State {
         roots,
+        registry_plans: BTreeMap::new(),
         catalogue: None,
         failed_roots,
         creation_boundary: None,
@@ -348,6 +350,7 @@ fn a_load_that_stopped_early_is_not_cached() {
     let (roots, failed_roots) = open_roots(&[dir]);
     let mut state = State {
         roots,
+        registry_plans: BTreeMap::new(),
         catalogue: None,
         failed_roots,
         creation_boundary: None,

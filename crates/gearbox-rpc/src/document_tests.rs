@@ -47,6 +47,7 @@ fn scratch(label: &str) -> PathBuf {
 fn state() -> State {
     State {
         roots: Vec::new(),
+        registry_plans: BTreeMap::new(),
         catalogue: None,
         failed_roots: Vec::new(),
         creation_boundary: None,

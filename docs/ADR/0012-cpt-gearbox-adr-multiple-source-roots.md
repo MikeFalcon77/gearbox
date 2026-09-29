@@ -143,3 +143,18 @@ to partition the corpus.
   projected, which is why the key includes the source).
 * Constrains: `docs/plans/prototype.md` §9 (the product session's initialization
   order).
+
+## Amendment 2026-09-29: a checkout whose crates the build takes from a registry
+
+Every gear in `gears-rust` is also published on crates.io, at the version the checkout declares (`cf-gears-api-gateway 0.5.2`, `cf-gears-toolkit 0.10.0`). A generated product still named every one of them by a path into the checkout, so the repository it was generated into could not be built without that checkout next to it.
+
+* **`source(id, at = path(...), crates = registry("crates.io"))`.** Descriptions come from the checkout, as before, because a published crate carries no `gear.gdl`. Crates come from the registry, at the checkout's versions. Gears from a source without `crates`, such as one Create Gear wrote beside the product, stay path dependencies.
+* **Declared, then checked per crate.** The published package records the commit it was cut from and its path in that repository (`.cargo_vcs_info.json`). Generation diffs the checkout against that commit under that path, ignoring `gear.gdl`:
+  * A crate as published is named `version = "=X"`.
+  * A crate changed since keeps that version, and `[patch.crates-io]` points it at the checkout (GBX0709). The code the resolver read is the code that links. Measured on the branch this was written against: `cf-gears-toolkit` carries the fix for out-of-process worker names (`f01773ce2`), which no release has yet.
+  * A version the registry does not have stays a path (GBX0710).
+  * An unreachable registry leaves every crate on its path (GBX0711).
+* **Patches close over path dependencies.** Found by building. A patched toolkit depends by path on the checkout's directory SDK, while a published grpc-hub depends on the published SDK. Cargo linked both, and `RegisterInstanceInfo` did not unify. The walk now follows every path dependency, `workspace = true` included, from patched crates and path gears. It patches each crate it reaches that is also in the registry's dependency graph, and names nothing outside that graph, so cargo never reports an unused patch.
+* **The lock is unchanged.** Which crates come from a registry is an input to generation, like `templates`, not a resolution decision. It is computed where the CLI and the RPC server already read the world (`gearbox_engine::published`), and `generate` receives the answer. The RPC server keeps the answer per product, sources and gear set, because asking cargo takes seconds and the Generate view plans on every change.
+
+Asserted in `published_tests.rs` (the three verdicts against a real repository, `workspace = true` versions, path gears unified) and in `tests/generate.rs` (version dependencies and the `[patch]` table).

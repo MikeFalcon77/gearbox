@@ -770,3 +770,31 @@ product(
         "{codes:?}"
     );
 }
+
+/// `crates = registry(...)` on a checkout says where the build takes its crates;
+/// on anything but a `path(...)` it means nothing and is refused.
+#[test]
+fn a_checkout_can_take_its_crates_from_a_registry() {
+    let src = product("").replace(
+        r#"at = path("../gears-rust"))"#,
+        r#"at = path("../gears-rust"), crates = registry("crates.io"))"#,
+    );
+    let (intent, codes, messages) = eval(&src);
+    assert!(codes.is_empty(), "{codes:?} {messages}");
+    let intent = intent.unwrap();
+    let source = intent.sources.values().next().unwrap();
+    assert!(
+        matches!(source, gearbox_ir::SourceDecl::Path { crates: Some(r), .. } if r == "crates.io"),
+        "{source:?}"
+    );
+
+    let git = product("").replace(
+        r#"at = path("../gears-rust"))"#,
+        r#"at = git(url = "https://x/y", tag = "v1"), crates = registry("crates.io"))"#,
+    );
+    let (_, codes, messages) = eval(&git);
+    assert!(
+        !codes.is_empty() && messages.contains("crates"),
+        "{codes:?} {messages}"
+    );
+}
