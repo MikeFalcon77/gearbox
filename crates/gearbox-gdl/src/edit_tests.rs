@@ -1062,6 +1062,49 @@ fn add_source_inserts_a_path_entry() {
     );
 }
 
+/// A list written one entry per line with no comma after the last one.
+///
+/// Valid Starlark, and the shape the blank template wrote for `sources`. The
+/// append used to put a new line after the entry without a comma between them,
+/// so Create Gear wrote its scaffold and then failed to declare the source with
+/// a parse error about text this editor had produced. Found in a demo rehearsal.
+#[test]
+fn an_entry_without_a_trailing_comma_gets_one_before_the_next() {
+    let source = r#"product(
+    sources = [
+        source(id = "gears-rust", at = path("../gears-rust"))  # the corpus
+    ],
+)
+"#;
+    let edited = add_source(URI, source, "gears", "gears")
+        .expect("editable")
+        .changed()
+        .expect("changed")
+        .to_owned();
+    AstModule::parse(URI, edited.clone(), &crate::declarative::dialect()).expect("still parses");
+    assert!(
+        edited.contains(
+            "source(id = \"gears-rust\", at = path(\"../gears-rust\")),  # the corpus\n        source(id = \"gears\", at = path(\"gears\")),\n    ],"
+        ),
+        "{edited}"
+    );
+}
+
+/// The first entry of an empty list goes one level in from the line it opens on.
+#[test]
+fn the_first_entry_of_an_empty_list_is_indented_under_it() {
+    let source = "product(\n    gears = [\n    ],\n)\n";
+    let edited = add_gear(URI, source, "api-gateway", "gears-rust")
+        .expect("editable")
+        .changed()
+        .expect("changed")
+        .to_owned();
+    assert!(
+        edited.contains("    gears = [\n        use_gear(\"api-gateway\""),
+        "{edited}"
+    );
+}
+
 /// The shape `payments-demo` actually has: a multiline list whose entries carry
 /// `profiles` and `config`, with a comment between them and a trailing comma.
 ///

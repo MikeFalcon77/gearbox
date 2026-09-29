@@ -1116,7 +1116,20 @@ export class ProductEditService implements FrontendApplicationContribution {
       this.messages.error(messageOf(error));
       return "refused";
     }
-    await this.product.reload();
+    // **A changed source list is a different session, not a re-read.** The
+    // engine's catalogue roots are the product's sources, fixed when the session
+    // was opened, so after `add_source` a re-resolve looked for the new gear in
+    // the old roots and answered GBX0301 until the product was closed and
+    // reopened -- which is what Create Gear's own batch does every time. Opening
+    // again re-initializes the engine with the sources the file now declares.
+    const sourcesChanged = (args.targets ?? []).some(
+      (edit) => edit.kind === "add_source" || edit.kind === "remove_source",
+    );
+    if (sourcesChanged && open !== undefined) {
+      await this.session.open(open);
+    } else {
+      await this.product.reload();
+    }
     return "written";
   }
 

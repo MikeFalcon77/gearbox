@@ -703,16 +703,23 @@ test.describe("a gear created for a product ends up in it", () => {
       // lib of comments, so there was no `#[toolkit::gear]` to project (GBX0211)
       // and the product the gear had just joined failed with GBX0301. With the
       // toolkit found in the session's roots, the skeleton is a real gear.
+      //
+      // **Read once the resolution has settled, and read it twice.** A single
+      // "clean" sample passed while the re-resolve was still in flight, so this
+      // check stayed green through the defect it names: the batch adds a source,
+      // the engine's roots were the old ones until the product was reopened, and
+      // the settled answer was GBX0301.
       await productSection(studio.page, "validation");
-      await expect
-        .poll(
-          async () => {
-            const text = await studio.page.locator(".gbx-product").innerText();
-            return /GBX0301|GBX0211/.test(text) ? "has GBX0301/GBX0211" : "clean";
-          },
-          { message: "the new gear resolves in the product", timeout: 90_000 },
-        )
-        .toBe("clean");
+      const settledText = async (): Promise<string> => {
+        await expect(studio.page.locator('.gbx-toolbar [data-status="working"]')).toHaveCount(0, {
+          timeout: 90_000,
+        });
+        return studio.page.locator(".gbx-product").innerText();
+      };
+      await studio.page.waitForTimeout(3_000);
+      expect(await settledText()).not.toMatch(/GBX0301|GBX0211/);
+      await studio.page.waitForTimeout(3_000);
+      expect(await settledText()).not.toMatch(/GBX0301|GBX0211/);
     } finally {
       rmSync(SCAFFOLD, { recursive: true, force: true });
       if (diffOf(DEMO_REL) !== "") {

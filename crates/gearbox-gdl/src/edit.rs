@@ -339,10 +339,18 @@ pub(crate) fn insert_entry(source: &str, list: &NamedList, entry: &str) -> Strin
         .is_some_and(|last| slice(source, *last).contains('\n') || spans_own_line(source, *last));
 
     let insertion = if multiline || list.entries.is_empty() {
-        let indent = list
-            .entries
-            .last()
-            .map_or_else(|| "    ".to_owned(), |last| indent_of(source, *last));
+        // An empty list's first entry goes one level in from the line the list
+        // opens on. A fixed four spaces put `use_gear(...)` at the depth of
+        // `gears = [` itself in every product the blank template wrote.
+        let indent = list.entries.last().map_or_else(
+            || {
+                format!(
+                    "{}    ",
+                    line_indent(source, offset(list.span.begin(), source))
+                )
+            },
+            |last| indent_of(source, *last),
+        );
         format!("{indent}{entry},\n")
     } else {
         format!(", {entry}")
@@ -355,7 +363,21 @@ pub(crate) fn insert_entry(source: &str, list: &NamedList, entry: &str) -> Strin
         let cut = before_bracket
             .rfind('\n')
             .map_or(before_bracket.len(), |at| at + 1);
-        out.push_str(&source[..cut]);
+        // **The last entry may have no trailing comma.** One entry per line with
+        // no comma after the last is valid Starlark, and it is what the blank
+        // template wrote for `sources`; appending a line after it produced
+        // `source(...)\n    source(...),`, which does not parse -- so Create Gear
+        // wrote the scaffold and then could not declare its source. The comma goes
+        // right after the entry, before any comment on its line.
+        let last_end = list.entries.last().map(|last| offset(last.end(), source));
+        match last_end {
+            Some(end) if end <= cut && !source[end..cut].trim_start().starts_with(',') => {
+                out.push_str(&source[..end]);
+                out.push(',');
+                out.push_str(&source[end..cut]);
+            }
+            _ => out.push_str(&source[..cut]),
+        }
         out.push_str(&insertion);
         out.push_str(&source[cut..]);
     } else {
@@ -419,6 +441,15 @@ fn spans_own_line(source: &str, span: Span) -> bool {
     source[..begin]
         .rfind('\n')
         .is_some_and(|at| source[at + 1..begin].trim().is_empty())
+}
+
+/// The leading whitespace of the line `at` is on.
+fn line_indent(source: &str, at: usize) -> String {
+    let line_start = source[..at].rfind('\n').map_or(0, |i| i + 1);
+    source[line_start..]
+        .chars()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .collect()
 }
 
 fn indent_of(source: &str, span: Span) -> String {
