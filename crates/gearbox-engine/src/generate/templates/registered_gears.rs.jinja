@@ -1,0 +1,13 @@
+{{ header }}
+// Every gear registers itself with `inventory` from a static in its own crate,
+// so a crate the linker drops is a gear the registry never sees. These lines
+// are what keep each one alive. There are no `#[cfg(feature = ...)]` gates: the
+// generated manifest's dependency set *is* the feature switch, and a gate here
+// would be a second place to get the composition wrong.
+#![allow(
+    unused_imports,
+    reason = "each `use ... as _;` exists for its link-time effect, not for a name"
+)]
+
+{% for ident in idents %}use {{ ident }} as _;
+{% endfor %}

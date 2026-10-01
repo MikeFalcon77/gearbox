@@ -1,0 +1,199 @@
+{
+  "batch": "gearbox-cli",
+  "scope": "crates/gearbox-cli",
+  "head_sha": "b5a8d7e6c53fb744863502a175c9a3b2a42dd43b",
+  "reported": [
+    {
+      "file": "crates/gearbox-cli/src/generate.rs",
+      "line": 82,
+      "severity": "CRITICAL",
+      "id": "RUST-SEC-001",
+      "comment": "`lock.product.id` is a plain `String` lowered straight from `product(id = ...)` with no validation, and `Path::join` on an absolute or `..`-bearing segment walks right out of `.gearbox/`. An id of `/tmp/x` or `../../../..` makes `gearbox generate` write the whole artefact tree outside the output root. The GDL boundary already refuses `layout` for exactly this reason, so run the id through `ProductId::new` before using it as a path segment.",
+      "issue": "Unvalidated product id from product.gdl is used as an output path segment, so generation can write outside the intended output root.",
+      "fix": "Validate `lock.product.id` with `gearbox_ir::ProductId::new` or `gearbox_ir::is_valid_layout` before joining it into `out_root`, and fail the run when it is not a single kebab-case segment.",
+      "_anchor_text": ".join(lock.product.id.as_str())"
+    },
+    {
+      "file": "crates/gearbox-cli/src/lock.rs",
+      "line": 134,
+      "severity": "CRITICAL",
+      "id": "RUST-NO-002",
+      "comment": "If the application lists a gear that `lock.gears` has no entry for, this prints it with an empty dep column and exits 0. Nothing validates that cross-reference on read, `gearbox_lock::read` only checks the hash, and this output is the reference side of the `--list-registered-gears` oracle, so an empty column reads as \"this gear has no co-location deps\" rather than \"the lock is inconsistent\". Fail with the gear id instead of defaulting.",
+      "issue": "A gear missing from `lock.gears` is defaulted to an empty dependency list, so an inconsistent lock yields a silently wrong oracle reference with exit code 0.",
+      "fix": "Replace `.unwrap_or_default()` with an error that names the gear present in the application but absent from `lock.gears`.",
+      "_anchor_text": ".unwrap_or_default();"
+    },
+    {
+      "file": "crates/gearbox-cli/src/main.rs",
+      "line": 945,
+      "severity": "CRITICAL",
+      "id": "RUST-SEC-001",
+      "comment": "Both the `Registry` and `Git` arms print `url` verbatim, and a git or alternate-registry URL is a normal place to find `https://user:TOKEN@host/...`. `gearbox product` prints this to stdout via `print_intent`, so under CI the token ends up in the build log. Strip the userinfo component before formatting.",
+      "issue": "Source URLs are rendered verbatim, so a credential embedded in a git or registry URL is printed to stdout.",
+      "fix": "Drop the userinfo component from `url` before formatting it in both the `Registry` and `Git` arms of `describe_source`.",
+      "_anchor_text": "fn describe_source(source: &gearbox_ir::SourceDecl) -> String {"
+    },
+    {
+      "file": "crates/gearbox-cli/src/generate.rs",
+      "line": 30,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "Nothing in this crate tests `run`. The two paths that matter most are the fail-closed gate on line 74, which must refuse to generate from a lock carrying errors, and the `dry_run` branch on line 108, which must write nothing: if either breaks, the result is a tree nobody asked for or an unwanted write, and no test notices. Can we add tests over a temp output root, one with an unwritable lock asserting the bail, one with `dry_run` asserting no file appears under `out_root`?",
+      "issue": "`generate::run` has no test anywhere in the crate; the non-writable-lock refusal and the dry-run no-write guarantee are unverified.",
+      "fix": "Add a `#[cfg(test)]` module in generate.rs covering the `!lock.is_writable()` bail and a `dry_run` invocation that asserts nothing was written under a temp `out_root`.",
+      "_anchor_text": "pub fn run("
+    },
+    {
+      "file": "crates/gearbox-cli/src/generate.rs",
+      "line": 60,
+      "severity": "HIGH",
+      "id": "RUST-ARCH-001",
+      "comment": "This repeats the whole pipeline `resolve_product` in main.rs already runs: open roots, refuse catalogue errors, canonicalize the product file, load it, default the profile, `resolve_at`, `lock_sources`, `assemble`, down to identical error strings. Two copies of a resolution sequence drift, and they already spell `load_product` through different module paths. Can this move into one helper both `resolve` and `generate` call?",
+      "issue": "The resolve pipeline is duplicated between `resolve_product` in main.rs and `generate::run`.",
+      "fix": "Extract the open-roots-through-assemble sequence into a single function returning the resolved lock plus diagnostics, and call it from both `resolve` and `generate`.",
+      "_anchor_text": "let resolution = gearbox_engine::resolve::resolve_at("
+    },
+    {
+      "file": "crates/gearbox-cli/src/lock.rs",
+      "line": 85,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "No test covers `run` or either query under it. The two failures a user actually hits are a lock that fails the hash check inside `read` and an `--application` the lock does not name (line 112), and both are untested, so the nonzero exit on a tampered lock and the `it has: ...` listing can regress silently. This module is documented as the reference side of the verification oracles, which makes a wrong answer here worse than no answer.",
+      "issue": "`lock::run` and its error paths (hash-check failure, unknown application id) have no tests.",
+      "fix": "Add tests calling `gears()` with a lock whose recorded hash does not verify and with an application id the lock does not contain, asserting both return `Err` and that the unknown-id message lists the known applications.",
+      "_anchor_text": "pub fn run(query: &LockQuery) -> anyhow::Result<ExitCode> {"
+    },
+    {
+      "file": "crates/gearbox-cli/src/lock.rs",
+      "line": 101,
+      "severity": "HIGH",
+      "id": "RUST-NO-002",
+      "comment": "The hash check only proves the file was not edited, not that the resolution finished: `ResolvedProduct::diagnostics` is serialized into the lock (skipped only when empty), so a lock carrying its own error diagnostics loads cleanly here and every `gearbox lock` answer then comes from a topology the resolver could not finish deciding. `generate` gates on `is_writable()` for exactly this reason. Separately, no path context is added here, so `--lock other.lock` fails with `failed to parse product.lock`, which names the wrong file.",
+      "issue": "Lock read accepts a product whose own recorded diagnostics contain errors, and wraps `LockError` without the actual lock path.",
+      "fix": "After `gearbox_lock::read`, bail when `!product.is_writable()` reporting its diagnostics, and wrap the error with the `path` being read.",
+      "_anchor_text": "Ok(gearbox_lock::read(&text)?)"
+    },
+    {
+      "file": "crates/gearbox-cli/src/lock.rs",
+      "line": 121,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "Nothing pins the output ordering for `--order name` or the dep list under `--with-deps`. Drop this `sort()` and the output falls back to the lock's topo order, which the doc on `Order::Topo` says is not canonical, so the comparison against a running binary becomes order-dependent and flaky without failing here. Hard to test as written because `gears()` prints directly: splitting the line construction out into a function that returns the lines would make it testable.",
+      "issue": "The ordering contract for `Order::Name` and the `with_deps` dep list, used as the oracle's reference side, is untested and unreachable from a test because the function prints directly.",
+      "fix": "Extract gear ordering and dep formatting from `gears()` into a function returning the output lines, and test that `Order::Name` yields name-sorted gears and `with_deps` yields sorted comma-separated deps for a lock with two independent gears.",
+      "_anchor_text": "if order == Order::Name {"
+    },
+    {
+      "file": "crates/gearbox-cli/src/main.rs",
+      "line": 315,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "Both tests in this crate call `list_plugins` with `Catalogue::default()`, so this filter never executes. `a_named_gear_miss_is_failure` reports a miss because the catalogue is empty, not because a name failed to match, and it keeps passing if the comparison here is inverted. Can we add a catalogue holding one host with an extension point and assert a matching id and a non-matching id separately?",
+      "issue": "The `--gear` name filter in `list_plugins` is never exercised: both tests pass an empty catalogue, so an inverted comparison still passes.",
+      "fix": "Add a test that populates `Catalogue.gears` with a host declaring an extension point and asserts `list_plugins` returns true for the matching id and false for a non-matching one.",
+      "_anchor_text": "if only.is_some_and(|id| host.id.as_str() != id) {"
+    },
+    {
+      "file": "crates/gearbox-cli/src/main.rs",
+      "line": 341,
+      "severity": "HIGH",
+      "id": "RUST-ARCH-001",
+      "comment": "This re-implements the vendor match in the CLI instead of asking the engine. `check_plugins` already decides vendor selection, which is where the `linked, but no vendor match` arm below comes from, so `NEEDS vendor override` here can tell an operator the opposite of what the resolver will do once product overrides and profiles are applied. Can `list_plugins` render an outcome the engine computed?",
+      "issue": "The plugin vendor-match rule is computed in the CLI as well as in the engine's `check_plugins`, so the two can disagree.",
+      "fix": "Have the engine expose the default-vendor agreement for a host/extension-point pair and render that in `list_plugins` instead of comparing `vendor_selector` against `default_vendor` in the CLI.",
+      "_anchor_text": "let mark = if host.vendor_selector.as_deref()"
+    },
+    {
+      "file": "crates/gearbox-cli/src/main.rs",
+      "line": 386,
+      "severity": "HIGH",
+      "id": "RUST-ERR-001",
+      "comment": "The canonicalize failure is discarded here, and `file_uri` turns a relative path into `file:///product.gdl`, an absolute-looking URI pointing at the filesystem root. That is the dead-link failure `resolve_product` refuses outright on line 644, so the same mistyped `--product` gives a hard error from one command and a diagnostic pointing at the wrong file from this one.",
+      "issue": "Canonicalize error swallowed by `unwrap_or_else`, producing a `file:///<relative>` URI that resolves to the wrong path in every plugin diagnostic.",
+      "fix": "Canonicalize with the error propagated, changing `resolve_plugins` to return `anyhow::Result<ExitCode>`, instead of falling back to the raw path.",
+      "_anchor_text": "let uri = gearbox_ir::file_uri(&file.canonicalize().unwrap_or_else(|_| file.to_path_buf()));"
+    },
+    {
+      "file": "crates/gearbox-cli/src/main.rs",
+      "line": 603,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "This refusal has no test, and the doc above says what it is holding back: before it, `--source-id x --root a --root b` gave both roots one identity and the second root's gears quietly replaced the first's. The `ensure!` fires before any root is opened, so a test needs no filesystem at all.",
+      "issue": "The `--source-id` with multiple roots refusal, a fix for silent gear replacement, has no test.",
+      "fix": "Add a test calling `open_source_roots` with two root paths and an explicit source id, asserting it returns `Err` before opening anything.",
+      "_anchor_text": "anyhow::ensure!("
+    },
+    {
+      "file": "crates/gearbox-cli/src/main.rs",
+      "line": 669,
+      "severity": "HIGH",
+      "id": "RUST-NO-002",
+      "comment": "This prints the lock without checking `resolved.is_writable()`, so a resolution that reported errors still comes out as a well formed lock on stdout. `generate.rs:74` refuses at that point and so does the RPC path in `gearbox-rpc`. `write_canonical` stamps a fresh valid hash, so redirected into a file this output passes `gearbox_lock::read` and `gearbox lock gears` will answer from it.",
+      "issue": "`resolve --format toml` emits a non-writable lock as a valid artifact; only the exit code signals the failure.",
+      "fix": "Gate the `Toml` arm on `resolved.is_writable()` and bail with the resolution diagnostics, matching `generate::run`.",
+      "_anchor_text": "ResolveFormat::Toml => print!(\"{}\", gearbox_lock::write_canonical(&resolved)?),"
+    },
+    {
+      "file": "crates/gearbox-cli/src/main.rs",
+      "line": 892,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "This gate exists because `resolve` and `generate` used to build a lock from a catalogue that had failed to load, and nothing tests it. It is a pure function over a `Catalogue`, so the test is as short as the `list_plugins` tests below: `is_none()` for a clean catalogue, `is_some()` for one with an error diagnostic pushed into `catalogue.diagnostics`.",
+      "issue": "`refuse_catalogue_errors`, the fail-closed gate shared by resolve and generate, has no test.",
+      "fix": "Add tests asserting `refuse_catalogue_errors` is `None` for `Catalogue::default()` and `Some` for a catalogue whose `diagnostics` carry an error-severity `Diagnostic`.",
+      "_anchor_text": "pub(crate) fn refuse_catalogue_errors(catalogue: &gearbox_ir::Catalogue) -> Option<ExitCode> {"
+    },
+    {
+      "file": "crates/gearbox-cli/src/generate.rs",
+      "line": 47,
+      "severity": "MEDIUM",
+      "id": "RUST-ERR-001",
+      "comment": "This flattens the `io::Error` into a string, so the source chain is gone and `{e:#}` in `main` has nothing to unwrap. `anyhow::Context` keeps the cause attached. The wording is also internal vocabulary: the common case is a mistyped or missing `--product`, and \"cannot canonicalize\" does not say that.",
+      "issue": "Canonicalize error stringified into a new `anyhow` error, dropping the source chain, with a message that does not name the actual failure.",
+      "fix": "Use `.with_context(|| format!(\"cannot read product description `{}`\", product_file.display()))` so the io cause stays in the chain.",
+      "_anchor_text": ".map_err(|e| anyhow::anyhow!(\"cannot canonicalize `{}`: {e}\", product_file.display()))?;"
+    },
+    {
+      "file": "crates/gearbox-cli/src/generate.rs",
+      "line": 124,
+      "severity": "MEDIUM",
+      "id": "RUST-ARCH-001",
+      "comment": "`overridden_templates` is reported only in the text arm, so `--format json` never mentions that a template was replaced. Unless the override is also carried in `generated.diagnostics`, a JSON client, which is the CI case, loses a signal the comment above calls something the operator must act on.",
+      "issue": "Template overrides are surfaced only in text output, not in JSON output or as a diagnostic.",
+      "fix": "Emit a warning diagnostic for each overridden template in the engine so both output formats report it, and keep the text line as a summary.",
+      "_anchor_text": "if !generated.overridden_templates.is_empty() {"
+    },
+    {
+      "file": "crates/gearbox-cli/src/main.rs",
+      "line": 325,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "`implementations_of` walks the whole `catalogue.gears` map and allocates a `Vec` on every call (`gearbox-ir/src/catalogue.rs:766`), and this call sits inside the per-host, per-extension-point loop. So listing costs one full catalogue scan per extension point, quadratic in catalogue size. Grouping gears by `fills.point` in a single pass before the loop makes it linear.",
+      "issue": "list_plugins calls Catalogue::implementations_of inside a nested per-host/per-point loop, and that method scans every gear in the catalogue, so the command is quadratic in catalogue size.",
+      "fix": "Build a map from extension point to implementing gears with one pass over `catalogue.gears` before the host loop, and look each point up in that map instead of calling `implementations_of` per point.",
+      "_anchor_text": "let impls = catalogue.implementations_of(point);"
+    },
+    {
+      "file": "crates/gearbox-cli/src/main.rs",
+      "line": 644,
+      "severity": "MEDIUM",
+      "id": "RUST-ERR-001",
+      "comment": "Same stringification as in `generate.rs`: the `io::Error` is interpolated into a fresh `anyhow!`, so the cause is no longer a source and `{e:#}` in `main` cannot expand it. `with_context` keeps it, and the message should say the product description could not be read rather than \"cannot canonicalize\".",
+      "issue": "Canonicalize error stringified into a new `anyhow` error here as well, losing the io source chain.",
+      "fix": "Use `.with_context(|| format!(\"cannot read product description `{}`\", product_file.display()))` instead of `map_err` with `anyhow!`.",
+      "_anchor_text": ".map_err(|e| anyhow::anyhow!(\"cannot canonicalize `{}`: {e}\", product_file.display()))?;"
+    }
+  ],
+  "dropped_low": [
+    {
+      "file": "crates/gearbox-cli/src/main.rs",
+      "line": 581,
+      "severity": "LOW",
+      "id": "RUST-ARCH-001",
+      "comment": "`open_roots` only forwards to `open_source_roots`, and `catalogue` calls `open_source_roots` directly, so the doc claim about sharing this with `catalogue` does not hold. Two names for one operation invite the next command to pick the wrong one.",
+      "issue": "`open_roots` is a pass-through alias for `open_source_roots`, and `catalogue` bypasses it, contradicting the wrapper's doc comment.",
+      "fix": "Drop `open_roots`, make `open_source_roots` `pub(crate)` under one name, and call it from every subcommand including `catalogue`."
+    }
+  ],
+  "dropped_anchor": []
+}

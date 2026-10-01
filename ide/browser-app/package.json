@@ -1,0 +1,79 @@
+{
+  "private": true,
+  "name": "gearbox-studio-app",
+  "version": "0.1.0",
+  "dependencies": {
+    "@theia/ai-anthropic": "1.75.0",
+    "@theia/ai-chat": "1.75.0",
+    "@theia/ai-chat-ui": "1.75.0",
+    "@theia/core": "1.75.0",
+    "@theia/editor": "1.75.0",
+    "@theia/filesystem": "1.75.0",
+    "@theia/markers": "1.75.0",
+    "@theia/messages": "1.75.0",
+    "@theia/monaco": "1.75.0",
+    "@theia/navigator": "1.75.0",
+    "@theia/plugin-ext": "1.75.0",
+    "@theia/plugin-ext-vscode": "1.75.0",
+    "@theia/preferences": "1.75.0",
+    "@theia/process": "1.75.0",
+    "@theia/scm": "1.75.0",
+    "@theia/terminal": "1.75.0",
+    "@theia/userstorage": "1.75.0",
+    "@theia/variable-resolver": "1.75.0",
+    "@theia/workspace": "1.75.0",
+    "gearbox-studio": "0.1.0"
+  },
+  "devDependencies": {
+    "@theia/cli": "1.75.0"
+  },
+  "scripts": {
+    "clean": "theia clean",
+    "build": "theia build --mode development",
+    "build:release": "theia build --mode production",
+    "download:plugins": "theia download:plugins",
+    "start": "theia start --plugins=local-dir:../plugins --hostname=127.0.0.1 --port=3000"
+  },
+  "//theiaPlugins": "Git. Theia 1.75 does not ship `@theia/git` -- its last release was 1.61.0-next.8 -- so git is the VS Code extension, running in the plugin host. `git-base` is not optional: `vscode.git` depends on it. Versions are pinned in the URL, so an upgrade is an edit somebody makes on purpose rather than a drift. Fetched by `npm run plugins`, deliberately not by `build`: it downloads a third-party artefact over the network, and the precedent in this repo is `npx playwright install chromium` -- an explicit step, documented, never a postinstall.",
+  "theiaPluginsDir": "../plugins",
+  "theiaPlugins": {
+    "vscode-builtin-git": "https://open-vsx.org/api/vscode/git/1.95.3/file/vscode.git-1.95.3.vsix",
+    "vscode-builtin-git-base": "https://open-vsx.org/api/vscode/git-base/1.95.3/file/vscode.git-base-1.95.3.vsix"
+  },
+  "theia": {
+    "target": "browser",
+    "frontend": {
+      "config": {
+        "applicationName": "Gearbox Studio",
+        "//defaultTheme": "Both keys name the same theme on purpose. `defaultTheme` governs the first paint, before preferences are ready (`ThemeServiceWithDB.loadUserTheme` reads `localStorage.theme ?? defaultTheme`); the `workbench.colorTheme` preference below is registered second, shadows the value derived from this one, and is what `validateActiveTheme` settles on. Moving only this key changes nothing observable; moving only the preference leaves a dark first frame that flips. The dark `gearbox-fabric` stays registered and selectable in the Color Theme picker.",
+        "defaultTheme": "gearbox-fabric-light",
+        "preferences": {
+          "workbench.colorTheme": "gearbox-fabric-light",
+          "//ai-features": "Theia AI ships off unless something says otherwise. `@theia/ai-ide` is deliberately NOT installed -- it drags puppeteer-core and an AI terminal surface, which ADR-0011 withdrew -- and it is that package that would rebind AIActivationService to be preference-gated. Without it the service defaults to active, so this key is a statement rather than a switch: the shell offers the chat on purpose. The API key is never written here: Studio's own `gearbox.ai.apiKey` setting is the primary source and wins, and `ANTHROPIC_API_KEY` in the backend's environment is the fallback -- see ADR-0011's 2026-09-14 amendment and the root README.",
+          "ai-features.AiEnable.enableAI": true,
+          "//tool-confirmation": "The eight read tools are pre-approved; `gearbox_toggle_gear` is deliberately absent and so falls back to `defaultToolConfirmation`, which ships as `confirm`. The asymmetry is the ADR-0017 boundary made operational: a read returns engine output and writes nothing, so a per-call dialog in front of it is friction that teaches people to click through dialogs -- which is the habit the write gate depends on them NOT having. The write verb keeps both gates: this one, and the diff dialog `ProductEditService.toggle` shows.",
+          "ai-features.chat.toolConfirmation": {
+            "gearbox_get_selection": "always_allow",
+            "gearbox_get_product": "always_allow",
+            "gearbox_list_gears": "always_allow",
+            "gearbox_get_gear": "always_allow",
+            "gearbox_get_diagnostics": "always_allow",
+            "gearbox_explain_diagnostic": "always_allow",
+            "gearbox_resolve_preview": "always_allow",
+            "gearbox_generate_preview": "always_allow"
+          },
+          "editor.fontFamily": "'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace",
+          "files.enableTrash": false,
+          "//files.watcherExclude": "Not optional once a workspace is opened. The roots are two Rust checkouts, and `target/` in either is multi-gigabyte -- Theia would walk both. `.gearbox/` is generated output, regenerated wholesale, so watching it reports churn nobody acts on.",
+          "files.watcherExclude": {
+            "**/.git/objects/**": true,
+            "**/.git/subtree-cache/**": true,
+            "**/node_modules/**": true,
+            "**/target/**": true,
+            "**/.gearbox/**": true
+          }
+        }
+      }
+    }
+  }
+}

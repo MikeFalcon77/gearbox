@@ -1,0 +1,71 @@
+/* Geist Sans / Geist Mono — same pairing as constructorfabric.org.
+   Vendored OFL woff2 under ./fonts/; no network fetch at runtime. */
+
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/geist-sans-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/geist-sans-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./fonts/geist-sans-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/geist-sans-latin-700-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/geist-mono-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/geist-mono-latin-500-normal.woff2") format("woff2");
+}
+
+/* Theia's own `--theia-code-font-family` is Menlo/Monaco/Consolas and is *not*
+   derived from the `editor.fontFamily` preference -- so setting that preference
+   restyled the editor and left every widget reading the variable in Menlo.
+   Overriding the variable fixes all of them at once, including the three the
+   selector list below does not name (`.gbx-application-gears`, `.gbx-step-origin`,
+   `.gbx-lock-text`), and any future one. */
+:root {
+  --theia-code-font-family: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas,
+    monospace;
+}
+
+body {
+  font-family: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.theia-monaco,
+.monaco-editor,
+.monaco-editor .view-lines,
+code,
+pre,
+.gbx-id,
+.gbx-node-label {
+  font-family: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}

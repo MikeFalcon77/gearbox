@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: << service_name >>
+  labels:
+    {{- include "<< name >>.labels" . | nindent 4 }}
+  {{- $ann := include "<< name >>.annotations" . | trim }}
+  {{- if or $ann .Values.service.annotations }}
+  annotations:
+    {{- with $ann }}
+    {{- . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.service.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  {{- with .Values.service.sessionAffinity }}
+  sessionAffinity: {{ . }}
+  {{- end }}
+  selector:
+    {{- include "<< name >>.selectorLabels" . | nindent 4 }}
+  ports:
+<% for port in ports %>
+    - name: << port.name >>
+      port: << port.port >>
+      targetPort: << port.port >>
+      protocol: TCP
+<% endfor %>
+<% if cluster_service %>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cluster
+  labels:
+    {{- include "<< name >>.labels" . | nindent 4 }}
+  {{- with (include "<< name >>.annotations" . | trim) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    {{- include "<< name >>.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: grpc
+      port: << cluster_port >>
+      targetPort: << cluster_port >>
+      protocol: TCP
+<% endif %>

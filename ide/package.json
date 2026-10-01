@@ -1,0 +1,60 @@
+{
+  "private": true,
+  "name": "gearbox-studio-root",
+  "engines": {
+    "node": "^24 || >=26"
+  },
+  "//engines": "Theia 1.75 asks for Node >= 24 in its own doc/Developing.md, and its ci-cd.yml build matrix tests exactly [24.x, 26.x] -- so this repeats upstream's tested set instead of inventing one. Node 25 is excluded because it is an odd, non-LTS line nobody upstream builds on. The @theia/* packages declare no engines at all, which is how the previous value -- >=20 <21, our own invention, committed in 8c79cef with no reason given -- went unchallenged until a tool refused to install on it. Recorded in .nvmrc too, so the version lives in the tree rather than in a shell.",
+  "workspaces": [
+    "gearbox-studio",
+    "browser-app"
+  ],
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "vscode-jsonrpc": "8.2.0"
+  },
+  "//": "Every @theia/* pinned to the one version in theia-version.txt, and repeated here as overrides. A transitive ^ pulls a second @theia/core copy, which breaks inversify identity -- the most common Theia build failure.",
+  "//monaco-editor-core": "Not on theia-version.txt's schedule -- it tracks Monaco, and 1.108.201 is what @theia/monaco 1.75.0 asks for. Pinned for the same reason as the rest and then some: StandaloneServices is a module-level singleton, so a second copy would hand gearbox-studio's monaco.languages.register a different ILanguageService than the one MonacoTextmateService waits on, and .gdl would render as plaintext with no error anywhere.",
+  "overrides": {
+    "@theia/ai-anthropic": "1.75.0",
+    "@theia/ai-chat": "1.75.0",
+    "@theia/ai-chat-ui": "1.75.0",
+    "@theia/ai-core": "1.75.0",
+    "@theia/ai-core-ui": "1.75.0",
+    "@theia/ai-mcp": "1.75.0",
+    "@theia/core": "1.75.0",
+    "@theia/editor": "1.75.0",
+    "@theia/filesystem": "1.75.0",
+    "@theia/markers": "1.75.0",
+    "@theia/messages": "1.75.0",
+    "@theia/monaco": "1.75.0",
+    "@theia/monaco-editor-core": "1.108.201",
+    "@theia/navigator": "1.75.0",
+    "@theia/outline-view": "1.75.0",
+    "@theia/plugin-ext": "1.75.0",
+    "@theia/plugin-ext-vscode": "1.75.0",
+    "@theia/preferences": "1.75.0",
+    "@theia/process": "1.75.0",
+    "@theia/scm": "1.75.0",
+    "@theia/terminal": "1.75.0",
+    "@theia/userstorage": "1.75.0",
+    "@theia/variable-resolver": "1.75.0",
+    "@theia/workspace": "1.75.0"
+  },
+  "scripts": {
+    "smoke": "node scripts/rpc-smoke.mjs",
+    "error-smoke": "node scripts/rpc-error-smoke.mjs",
+    "supervision-smoke": "node scripts/engine-supervision-smoke.mjs",
+    "store-smoke": "node scripts/store-smoke.mjs",
+    "build": "npm run build --workspace gearbox-studio && npm run build --workspace browser-app",
+    "build:release": "npm run build --workspace gearbox-studio && npm run build:release --workspace browser-app",
+    "start:browser": "node scripts/start-studio.mjs",
+    "conformance": "playwright test",
+    "wedge": "playwright test --config playwright.wedge.config.ts",
+    "plugins": "npm run download:plugins --workspace browser-app",
+    "verify": "npm run engine && npm run smoke && npm run build && npm run error-smoke && npm run supervision-smoke && npm run store-smoke && npm run conformance && npm run wedge",
+    "engine": "cargo build --manifest-path ../Cargo.toml -p gearbox-cli"
+  },
+  "//conformance": "Playwright, and the browser is a separate explicit step: `npx playwright install chromium`. Playwright has no postinstall of its own -- not in @playwright/test, playwright or playwright-core -- so npm's install-script gate does not apply to it, and nothing downloads 100MB behind your back either.",
+  "//engine": "The backend spawns ../target/debug/gearbox, so a change to the Rust side is invisible to `npm run build`. Leaving the two out of step cost a debugging session: the client reported a missing source root that the engine had already been taught to send."
+}

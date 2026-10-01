@@ -1,0 +1,627 @@
+// The service the frontend talks to, and the callback it registers.
+//
+// Types crossing the wire come from `generated/`, written by
+// `cargo test -p gearbox-rpc --test export_bindings`. Nothing here restates a
+// field: a transcribed wire format diverges, and diverges silently
+// (cpt-gearbox-nfr-no-type-drift).
+//
+// The `textDocument/*` methods are the one place that reads differently, and for
+// the same reason rather than against it. Their payloads are LSP's, not
+// Gearbox's, so the definition both ends share is the protocol's own -- imported
+// below from `vscode-languageserver-protocol`, written by neither side and
+// therefore unable to drift from either (cpt-gearbox-adr-gdl-language-server).
+
+import type {
+  CompletionItem,
+  Hover,
+  PublishDiagnosticsParams,
+} from "@theia/core/shared/vscode-languageserver-protocol";
+
+import type { CatalogueChanged } from "./generated/CatalogueChanged";
+import type { CatalogueDiagnostics } from "./generated/CatalogueDiagnostics";
+import type { CatalogueLoadResult } from "./generated/CatalogueLoadResult";
+import type { EditGearResult } from "./generated/EditGearResult";
+import type { GenerateApplyResult } from "./generated/GenerateApplyResult";
+import type { GenerateFileResult } from "./generated/GenerateFileResult";
+import type { GeneratePlanResult } from "./generated/GeneratePlanResult";
+import type { GearKind } from "./generated/GearKind";
+import type { PluginScaffold } from "./generated/PluginScaffold";
+import type { ScaffoldGearResult } from "./generated/ScaffoldGearResult";
+import type { LockResult } from "./generated/LockResult";
+import type { ProductEdit } from "./generated/ProductEdit";
+import type { ProductLoadResult } from "./generated/ProductLoadResult";
+import type { ResolveResult } from "./generated/ResolveResult";
+import type { ValidateResult } from "./generated/ValidateResult";
+import type { Diagnostic } from "./generated/Diagnostic";
+import type { FailedRoot } from "./generated/FailedRoot";
+import type { GearDescriptor } from "./generated/GearDescriptor";
+import type { InitializeResult } from "./generated/InitializeResult";
+import type { PendingGear } from "./generated/PendingGear";
+import type { ProgressParams } from "./generated/ProgressParams";
+
+export const GEARBOX_SERVICE_PATH = "/services/gearbox";
+
+/**
+ * The engine's JSON-RPC method names, in one place.
+ *
+ * ts-rs exports types, not constants, so these cannot be generated from
+ * `gearbox_rpc::protocol::method` the way the payloads are. One table is the
+ * next best thing: a rename then breaks in one place rather than in whichever
+ * `sendRequest("...")` string was missed, which compiles and fails at runtime.
+ * **Keep in sync with `crates/gearbox-rpc/src/protocol.rs`.**
+ */
+export const method = {
+  INITIALIZE: "initialize",
+  INITIALIZED: "initialized",
+  SHUTDOWN: "shutdown",
+  EXIT: "exit",
+  CATALOGUE_LOAD: "gearbox/catalogue/load",
+  PRODUCT_LOAD: "gearbox/product/load",
+  PRODUCT_RESOLVE: "gearbox/product/resolve",
+  PRODUCT_RESOLVE_PREVIEW: "gearbox/product/resolvePreview",
+  PRODUCT_LOCK: "gearbox/product/lock",
+  PRODUCT_ADD_GEAR: "gearbox/product/addGear",
+  PRODUCT_REMOVE_GEAR: "gearbox/product/removeGear",
+  PRODUCT_SET_CONFIG: "gearbox/product/setConfig",
+  PRODUCT_SET_FEATURES: "gearbox/product/setFeatures",
+  PRODUCT_ADD_PROFILE: "gearbox/product/addProfile",
+  PRODUCT_REMOVE_PROFILE: "gearbox/product/removeProfile",
+  PRODUCT_SET_PROFILE_FIELD: "gearbox/product/setProfileField",
+  PRODUCT_APPLY_EDITS: "gearbox/product/applyEdits",
+  PRODUCT_CREATE: "gearbox/product/create",
+  GEAR_SCAFFOLD: "gearbox/gear/scaffold",
+  VALIDATE: "gearbox/validate",
+  GENERATE_PLAN: "gearbox/generate/plan",
+  GENERATE_APPLY: "gearbox/generate/apply",
+  GENERATE_FILE: "gearbox/generate/file",
+  CATALOGUE_CHANGED: "gearbox/catalogueChanged",
+  CATALOGUE_DIAGNOSTICS: "gearbox/catalogueDiagnostics",
+  PROGRESS: "$/progress",
+  LOG: "gearbox/log",
+  // LSP's own, and spelled as LSP spells them rather than under a `gearbox/`
+  // prefix: the engine answers these to any language client, not only to this
+  // one (`cpt-gearbox-adr-gdl-language-server`).
+  DID_OPEN: "textDocument/didOpen",
+  DID_CHANGE: "textDocument/didChange",
+  DID_CLOSE: "textDocument/didClose",
+  COMPLETION: "textDocument/completion",
+  HOVER: "textDocument/hover",
+  PUBLISH_DIAGNOSTICS: "textDocument/publishDiagnostics",
+} as const;
+
+/**
+ * A product description the client offered to open.
+ *
+ * A client-side convenience, not part of the engine's contract: the engine only
+ * ever receives an explicit absolute path. Discovery lives here for the same
+ * reason `InitializeResult.roots` does -- where the repository is on this
+ * machine is the one thing only the server knows -- and for the reason an IDE
+ * lists sketches rather than making a person type a path.
+ */
+/**
+ * One `product.gdl` a clone turned out to contain.
+ *
+ * `id` is opaque and is the only handle the browser gets: it is minted by the
+ * node layer for one attempt, so a request naming it cannot ask for a file
+ * outside that attempt's own directory. `relPath` exists to be *shown*.
+ */
+export interface CloneCandidate {
+  readonly id: string;
+  /** Where it is, relative to the clone's root, for display. */
+  readonly relPath: string;
+}
+
+/**
+ * What a clone turned out to be, before anything is created from it.
+ *
+ * The `commit` is here because "cloned `main`" is not what a person needs to
+ * know when a repository moves: what was actually checked out is.
+ */
+export interface GitCloneReview {
+  readonly attemptId: string;
+  /** Every `product.gdl` found, not the first — several is a choice, not a guess. */
+  readonly candidates: readonly CloneCandidate[];
+  readonly commit: string;
+  /** The ref git resolved to, when it reported one. */
+  readonly resolvedRef?: string;
+}
+
+export interface ProductRef {
+  /** Absolute path, which is what `loadProduct` and `resolve` take. */
+  readonly path: string;
+  /** Relative to the repository root, which is what a person recognises. */
+  readonly label: string;
+  /**
+   * The product's own name, once its description has been read.
+   *
+   * Beside `label`, not instead of it: `label` is a path by contract and code
+   * compares it as one. A product opened by file from outside the repository has
+   * `product.gdl` for a label -- every such product did -- so the header, the
+   * Continue card and Recent all named it by its file name. This is what they
+   * show when it is known.
+   */
+  readonly name?: string;
+}
+
+/**
+ * Where a session may read and where it may write.
+ *
+ * Declared by the client because the engine cannot judge it: `writable_path` and
+ * `writable_out_root` both measure from `workspace`, so a product outside it can
+ * be *read* and never edited or generated. Until this existed the backend fixed
+ * both values -- `../gears-rust` and the repository root -- which made "open a
+ * product" mean "open one of the products in this checkout".
+ */
+export interface StudioSession {
+  /** Source roots to scan for `gear.gdl`. Absolute. */
+  readonly roots: readonly string[];
+  /** The directory writes are confined to. Absolute. */
+  readonly workspace: string;
+}
+
+/**
+ * What the backend sees when it tries to reach the model provider.
+ *
+ * Hand-written rather than generated, because the engine has nothing to do with
+ * it: this is a fact about the Node process Studio's backend runs in, and
+ * `generated/` holds only what crosses the engine's wire.
+ *
+ * **Why this exists at all.** A TLS or DNS failure reaches the chat as the
+ * Anthropic SDK's `APIConnectionError`, whose default message is the bare string
+ * `Connection error.` It carries no status, so Theia has nothing to format and
+ * renders it verbatim, without even a Details expander. The cause chain that
+ * *does* say what happened -- `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`, say -- does
+ * not survive Theia's RPC error serialization, so it has to be read where the
+ * error is born.
+ */
+export interface AiConnectivityResult {
+  /**
+   * Whether the endpoint answered at all.
+   *
+   * **Any HTTP status counts, 401 included.** The question is whether bytes make
+   * the round trip, and the probe deliberately sends no key: it has to work
+   * before a key is configured, and it must not spend one.
+   */
+  readonly ok: boolean;
+  /** The URL probed, after `ANTHROPIC_BASE_URL` is applied. */
+  readonly url: string;
+  /** The status, when there was one. */
+  readonly status?: number;
+  /** The most specific error code in the `cause` chain, e.g. `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`. */
+  readonly code?: string;
+  /** The `cause` chain, outermost first, one entry per link. */
+  readonly detail?: readonly string[];
+  /**
+   * The TLS-relevant environment, because on this failure it is the answer.
+   *
+   * Reported rather than interpreted here: naming what is set lets the reader
+   * recognise their own machine, and keeps the remedy out of a type.
+   */
+  readonly env: {
+    readonly nodeOptions?: string;
+    readonly extraCaCerts?: string;
+    readonly sslCertFile?: string;
+    readonly sslCertDir?: string;
+    readonly nodeVersion: string;
+  };
+}
+
+/** What `initRepository` did. */
+export interface InitRepositoryResult {
+  /** `false` when the folder was a repository already and nothing was run. */
+  readonly initialized: boolean;
+  /** The short hash of the first commit, when one was made. */
+  readonly commit?: string;
+}
+
+export const GearboxService = Symbol("GearboxService");
+export interface GearboxService {
+  /**
+   * Start the engine and hand back what it can do.
+   *
+   * Omitting the session keeps the built-in defaults, which is what the
+   * catalogue's own reload does when no product has been opened yet. A session
+   * replaces both values, and because `initialize` disposes and respawns the
+   * engine, it takes effect wholesale rather than merging with what was there.
+   */
+  initialize(session?: StudioSession): Promise<InitializeResult>;
+
+  /**
+   * Begin a staged load. Resolves at the boundary between the two passes: the
+   * whole tree by name, none of it projected. Projections arrive on the client
+   * callback.
+   */
+  loadCatalogue(): Promise<CatalogueLoadResult>;
+
+  /**
+   * The directories a Studio workspace should contain.
+   *
+   * The repository root plus every source root the engine was given. Answered
+   * here for the same reason `InitializeResult.roots` is: where things are on
+   * this machine is the one thing only the server knows. And answered as one
+   * list rather than assembled in the client, because the two halves come from
+   * two different places on this side and joining them there would put the
+   * layout knowledge in a second file.
+   *
+   * Why a workspace at all: the Explorer needs one to show anything, an opened
+   * `product.lock` needs one to be openable, and the VS Code git extension finds
+   * repositories by walking workspace folders. The two that matter here --
+   * `gearbox` and `gears-rust` -- are *siblings*, so one folder cannot
+   * cover both and the workspace has to be multi-root.
+   */
+  workspaceRoots(): Promise<string[]>;
+
+  /**
+   * The product descriptions under the repository root.
+   *
+   * Does not touch the engine: this is the Theia backend answering "what could I
+   * open", so it works before `initialize` and does not fail when the engine is
+   * down.
+   */
+  listProducts(): Promise<ProductRef[]>;
+
+  /** Evaluate a `product.gdl`. Evaluation only; nothing is joined against the
+   * catalogue. */
+  loadProduct(path: string): Promise<ProductLoadResult>;
+
+  /**
+   * Resolve a product for one profile.
+   *
+   * `profile` omitted uses the product's own default, so the answer still comes
+   * from the description rather than from a guess made in the client.
+   */
+  resolve(path: string, profile?: string): Promise<ResolveResult>;
+
+  /**
+   * Resolve the description a configurator is about to write, without writing it.
+   *
+   * The answer `Add Gear` needs before the person commits to finding out: which
+   * gears the closure would pull in, which applications change, which bindings stop
+   * being local. `add` and `edits` are applied to the text in memory, in the same
+   * order `commitAddGear` writes them, so the preview and the write cannot drift.
+   */
+  resolvePreview(params: {
+    path: string;
+    profile?: string;
+    add?: { gear: string; source: string };
+    edits?: readonly ProductEdit[];
+  }): Promise<ResolveResult>;
+
+  /**
+   * The canonical `product.lock` text for one profile.
+   *
+   * A separate call rather than a field on `resolve`: serializing the lock costs
+   * work and bytes the other panels do not need. And it is the engine's call to
+   * make -- a client rendering its own TOML would be a second answer to the one
+   * question the lock exists to settle byte-for-byte.
+   */
+  lock(path: string, profile?: string): Promise<LockResult>;
+
+  /**
+   * Add a gear to a product description, or preview the change.
+   *
+   * `dryRun` returns what the file would become and writes nothing, which is
+   * ADR-0010's "a preview is not optional" rather than a convenience. The engine
+   * refuses unless this client declared write capability at initialize and the
+   * path is inside the declared workspace.
+   */
+  addGear(path: string, gear: string, source: string, dryRun: boolean, expectedBefore?: string): Promise<EditGearResult>;
+
+  /** Remove a gear from a product description, or preview the removal. */
+  removeGear(path: string, gear: string, dryRun: boolean, expectedBefore?: string): Promise<EditGearResult>;
+
+  setConfig(
+    path: string,
+    gear: string,
+    key: string,
+    value: string | undefined,
+    dryRun: boolean,
+  ): Promise<EditGearResult>;
+
+  setFeatures(
+    path: string,
+    gear: string,
+    features: readonly string[],
+    dryRun: boolean,
+  ): Promise<EditGearResult>;
+
+  addProfile(
+    path: string,
+    kind: string,
+    id: string,
+    fields: ReadonlyArray<{ name: string; value: string }>,
+    dryRun: boolean,
+  ): Promise<EditGearResult>;
+
+  removeProfile(path: string, id: string, dryRun: boolean, expectedBefore?: string): Promise<EditGearResult>;
+
+  setProfileField(
+    path: string,
+    id: string,
+    field: string,
+    value: string | undefined,
+    dryRun: boolean,
+  ): Promise<EditGearResult>;
+
+  /**
+   * Apply several description edits in one pass, or preview them.
+   *
+   * One dry-run and one write for a draft of config, features and profile
+   * scalars — the Studio's Apply path, not N per-field RPCs.
+   */
+  applyEdits(path: string, edits: readonly ProductEdit[], dryRun: boolean, expectedBefore?: string): Promise<EditGearResult>;
+
+  createProduct(params: {
+    path: string;
+    id: string;
+    name: string;
+    version: string;
+    sources: ReadonlyArray<{ id: string; at: string }>;
+    profileKind: string;
+    profileId: string;
+    cloneFrom?: string;
+    /** Re-base the clone's relative paths onto its new folder: Clone Local only. */
+    rebaseRelativePaths?: boolean;
+    dryRun: boolean;
+  }): Promise<EditGearResult>;
+
+  /**
+   * Scaffold a new gear crate (`gear.gdl`, `Cargo.toml`, `src/lib.rs`), or
+   * preview the `FilePlan[]` when `dryRun` is true.
+   */
+  scaffoldGear(params: {
+    id: string;
+    name: string;
+    version: string;
+    /** Which shape to write; the engine defaults to `minimal` when absent. */
+    kind?: GearKind;
+    /**
+     * What a `plugin` scaffold fills, when a host has been chosen.
+     *
+     * Absent keeps the engine's commented locator, which exists because an `sdk`
+     * pointing nowhere makes the gear fail to load. Present means the host came
+     * out of a loaded catalogue, so the locator is a fact and is written live.
+     */
+    plugin?: PluginScaffold;
+    destinationDir: string;
+    dryRun: boolean;
+  }): Promise<ScaffoldGearResult>;
+
+  /**
+   * Shallow-clone a product repository into a temporary place and describe what
+   * was found, without committing to any of it.
+   *
+   * Does not enable `git(...)` sources in a session — this is only the Clone Git
+   * wizard's path, and the engine still receives a local file.
+   *
+   * **Three methods rather than one, because the old one could not express the
+   * flow it was used for.** It returned a single path, so there was nowhere to
+   * report several `product.gdl` candidates, nothing to name the checkout that
+   * was made, and no way to say "throw that away" — a failed attempt left a
+   * directory behind and the deterministic destination made every retry fail on
+   * `already exists`.
+   */
+  gitCloneProduct(url: string, ref: string | undefined): Promise<GitCloneReview>;
+
+  /**
+   * Take one candidate from an attempt, and get the path the engine will read.
+   *
+   * **A `candidateId`, never a path.** The browser names something this attempt
+   * handed it, and the node layer resolves it inside that attempt's own root —
+   * an absolute path from a client is a path the node layer would have to
+   * validate anyway, and validating a token it minted is the smaller job.
+   */
+  selectClonedProduct(attemptId: string, candidateId: string): Promise<string>;
+
+  /**
+   * Throw an attempt away, with its directory.
+   *
+   * Idempotent, and that is a contract rather than a convenience: Cancel, the
+   * wizard closing, a changed URL and a late result can all reach it for the
+   * same attempt. An unknown or already-removed attempt succeeds — turning
+   * routine cleanup into a failure is how callers learn to skip it.
+   */
+  discardGitClone(attemptId: string): Promise<void>;
+
+  /** Everything checkable without resolving. `product` omitted checks only the
+   * catalogue. */
+  validate(product?: string): Promise<ValidateResult>;
+
+  /**
+   * What applying generation would do, without doing it.
+   *
+   * `out` is the CLI's `--out`. Omitted, the engine writes under
+   * `<workspace>/.gearbox/<product>/<profile>/`.
+   */
+  planGenerate(path: string, profile?: string, out?: string): Promise<GeneratePlanResult>;
+
+  /** Write the planned tree. Refused unless this client declared writes. */
+  applyGenerate(path: string, profile?: string, out?: string): Promise<GenerateApplyResult>;
+
+  /**
+   * The two sides of one planned file: proposed bytes and what is on disk.
+   *
+   * Re-runs generation; there is no cached plan. `file` is `FilePlan.path`.
+   */
+  generateFile(
+    path: string,
+    file: string,
+    profile?: string,
+    out?: string,
+  ): Promise<GenerateFileResult>;
+
+  /**
+   * Make a generated folder a git repository with one commit of what is in it.
+   *
+   * For an output folder a person chose outside the workspace -- the repository
+   * the product ships from. Refused unless `dir` is absolute and holds a
+   * `product.lock`, so it only ever runs on a tree generation just wrote. A
+   * folder that already has `.git` is left alone: committing into somebody's
+   * repository is not this method's decision.
+   */
+  initRepository(dir: string): Promise<InitRepositoryResult>;
+
+  /**
+   * Can this backend reach the model provider?
+   *
+   * Answered here, and not in the frontend, for two reasons: the request that
+   * fails is the backend's, and the browser's `fetch` goes through a different
+   * stack that would answer a different question; and the `cause` chain naming
+   * the real failure is lost crossing the RPC boundary as an error, so it is
+   * turned into data on this side.
+   */
+  checkAiConnectivity(): Promise<AiConnectivityResult>;
+
+  /**
+   * Tell the engine an editor opened a `.gdl`, and what is in the buffer.
+   *
+   * The three document methods are LSP notifications, so they answer nothing:
+   * what comes back is `onDocumentDiagnostics`, whenever the engine has an
+   * opinion. The `Promise<void>` is the RPC layer's, not the protocol's.
+   *
+   * `text` rather than a path, because the buffer is the question. What is on
+   * disk is what `validate` and the catalogue load answer about, and an editor
+   * that asked about a file it had not saved would be told about the version it
+   * was replacing.
+   */
+  didOpenDocument(uri: string, version: number, text: string): Promise<void>;
+
+  /** The whole buffer again. The engine advertises `textDocumentSync: Full`. */
+  didChangeDocument(uri: string, version: number, text: string): Promise<void>;
+
+  /**
+   * The editor closed it.
+   *
+   * The engine answers with an empty diagnostic list, but that is not what the
+   * markers rely on: `DescriptionMarkers.forget` clears them as it stops
+   * tracking the file, because the engine may already be gone and a `didClose`
+   * sent into a dead connection is dropped on purpose. Having stopped tracking
+   * it, the client then ignores that empty list along with any other answer
+   * about a closed buffer. What must not happen on either path is a marker
+   * outliving its buffer, pointing at text nobody can see.
+   */
+  didCloseDocument(uri: string): Promise<void>;
+
+  /**
+   * What may be typed at one position in an open description.
+   *
+   * The first *request* on the document surface, unlike the three notifications
+   * above. The engine answers from the buffer it was last told about, so a
+   * caller must have sent `didOpenDocument` first -- an unknown document answers
+   * with an empty list rather than failing, because an editor can legitimately
+   * ask before the open has crossed the wire.
+   *
+   * `CompletionItem` is LSP's, imported rather than generated, for the reason
+   * the header of this file gives.
+   */
+  completion(uri: string, line: number, character: number): Promise<CompletionItem[]>;
+
+  /**
+   * The documentation for whatever call the caret is inside.
+   *
+   * `null` when the caret is not inside a known construct, which is most of a
+   * file.
+   */
+  hover(uri: string, line: number, character: number): Promise<Hover | null>;
+
+  dispose(): void;
+  setClient(client: GearboxClient | undefined): void;
+}
+
+export const GearboxClient = Symbol("GearboxClient");
+export interface GearboxClient {
+  onCatalogueChanged(event: CatalogueChanged): void;
+  /** Diagnostics the second pass produced, after the load response went out. */
+  onCatalogueDiagnostics(event: CatalogueDiagnostics): void;
+  onProgress(event: ProgressParams): void;
+  onLog(message: string): void;
+  /**
+   * The engine process is gone, and with it any load still streaming.
+   *
+   * Its own callback rather than a line on `onLog`, because it is the one thing
+   * that has to change state: `loadCatalogue` resolves at the S1/S2 boundary,
+   * so an engine that dies during projection has already answered every request
+   * and there is nothing left to reject. Without this the panel keeps its
+   * `loading` status and reads `n gear(s) projecting` forever -- the progress
+   * `done` that would have ended it died with the process.
+   */
+  onEngineExit(reason: string): void;
+  /**
+   * Diagnostics for one open description, replacing whatever was published for
+   * that URI before.
+   *
+   * `PublishDiagnosticsParams` is imported from the protocol rather than
+   * generated from Rust like every other type on this wire. That is not an
+   * exception to `cpt-gearbox-nfr-no-type-drift` but the same rule reaching its
+   * better answer: these four methods carry LSP's payloads, so the definition
+   * both sides agree on is LSP's own, written by neither of them. See
+   * `cpt-gearbox-adr-gdl-language-server`.
+   */
+  onDocumentDiagnostics(params: PublishDiagnosticsParams): void;
+}
+
+/**
+ * One row of the catalogue tree.
+ *
+ * A row is pending or projected, and the union is what keeps the two apart at
+ * every use site: there is no way to read `runtime_caps` off a pending row,
+ * because a pending row has no such field. That is the same reason the engine
+ * keeps unprojected gears in a separate list rather than as a state on
+ * `GearDescriptor` (ADR cpt-gearbox-adr-staged-catalogue-loading).
+ */
+export type Row =
+  | { readonly kind: "pending"; readonly gear: PendingGear }
+  | { readonly kind: "projected"; readonly gear: GearDescriptor };
+
+/**
+ * What a row is keyed by, and it is never the id.
+ *
+ * Both variants carry `source` and `gdl_path` precisely so this function does
+ * not have to branch: the key has to survive the pending-to-projected
+ * transition, and an id cannot, because it does not exist until S2 has run.
+ *
+ * `source` is part of the key because `gdl_path` alone is not unique. It is
+ * relative to *one* source root, and the engine accepts several -- two roots
+ * with the same layout both hold `foo/gear.gdl`, and keying on the path alone
+ * collapses them into one row that the second projection then overwrites.
+ */
+export function rowKey(row: Row): string {
+  return keyFor(row.gear.source, row.gear.gdl_path);
+}
+
+/** The row key for a `(source, gdl_path)` pair, as the notification sends it. */
+export function keyFor(source: string, gdlPath: string): string {
+  return `${source}:${gdlPath}`;
+}
+
+export function rowName(row: Row): string {
+  return row.kind === "pending"
+    ? (row.gear.display_name ?? row.gear.gdl_path)
+    : row.gear.display_name;
+}
+
+export function rowCategory(row: Row): string {
+  return row.gear.category ?? "uncategorised";
+}
+
+/**
+ * Where a load has got to.
+ *
+ * A discriminant rather than a `loading: boolean`, because the boolean could
+ * not say "the load failed": a rejected `load()` left it stuck at `true`, and
+ * the empty state is gated on it, so a missing engine rendered as an eternal
+ * `0 gear(s) projecting 0/0` with no error anywhere.
+ */
+export type CatalogueStatus = "idle" | "loading" | "ready" | "error";
+
+export interface CatalogueState {
+  readonly status: CatalogueStatus;
+  readonly rows: readonly Row[];
+  readonly diagnostics: readonly Diagnostic[];
+  /** Roots `initialize` was asked for and could not open. */
+  readonly failedRoots: readonly FailedRoot[];
+  /** Set only when `status === "error"`. */
+  readonly error: string | undefined;
+  readonly total: number;
+  readonly completed: number;
+}

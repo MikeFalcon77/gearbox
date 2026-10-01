@@ -1,0 +1,379 @@
+{
+  "batch": "gearbox-rpc",
+  "scope": "crates/gearbox-rpc",
+  "head_sha": "b5a8d7e6c53fb744863502a175c9a3b2a42dd43b",
+  "reported": [
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 201,
+      "severity": "HIGH",
+      "id": "RUST-CONC-001",
+      "comment": "`connection` is still alive at this point, so this join never returns. `IoThreads::join` waits on lsp-server's message-dropper thread, which waits on the writer thread, which is parked in `writer_receiver.into_iter()` because the only sender is `connection.sender`. After the client sends `exit` the process hangs here instead of returning to the CLI. `drop(connection)` before the join, or move the receive loop into a helper that takes the connection by value the way lsp-server's own example does.",
+      "issue": "serve_stdio calls IoThreads::join while Connection is still in scope, so the writer channel never disconnects and the join deadlocks on every clean exit.",
+      "fix": "Drop `connection` (or move the receive loop into a function that owns it) before calling `io_threads.join()`.",
+      "_anchor_text": ".join()"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 228,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "No test opens a root that does not exist or two roots that collide on an id, so neither `FailedRoot` push runs and `failed_roots` in `InitializeResult` is never asserted anywhere. The comment above records that `.ok()` used to stand here and discard the cause; a change back to it would keep every test in `initialize_tests.rs` green while roots vanished from the list with nothing reported to the client.",
+      "issue": "Both failure branches of `open_roots` and the `failed_roots` field of `InitializeResult` are untested.",
+      "fix": "Add an `initialize` test with a missing directory and one with two roots sharing a source id, asserting `failed_roots` names both with their causes.",
+      "_anchor_text": "Err(e) => failed.push(FailedRoot {"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 338,
+      "severity": "HIGH",
+      "id": "RUST-ERR-001",
+      "comment": "A malformed notification is reported only on stderr, which the client cannot read. For `didChange` that is worse than silent: the stored document keeps its previous text and nothing is republished, so the editor keeps markers computed from text the buffer no longer has. The incremental-change branch handles its own client mistake by sending `gearbox/log`; this path has the same channel available.",
+      "issue": "Undecodable notification params are logged to stderr only, leaving the server's document copy stale and the client uninformed.",
+      "fix": "Report the decode failure to the client over a `gearbox/log` notification as the incremental-change branch does, and name the document that was not updated.",
+      "_anchor_text": "eprintln!(\"gearbox: cannot read `{method}` params: {e}\");"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 398,
+      "severity": "HIGH",
+      "id": "RUST-ARCH-001",
+      "comment": "This picks the deepest matching root, but `load_catalogue` attributes a discovered `gear.gdl` to the root it was walked from and keeps the *first* declaration in roots order, so with nested roots the editor evaluates the file against a different `load()` boundary than the catalogue entry used. A `load(\"//...\")` that the catalogue's surviving entry resolved can then be underlined here, which is the disagreement the comment above says this ordering prevents. Which root owns a path is the engine's rule, so it should answer it instead of having it recomputed from component counts.",
+      "issue": "The owning source root of a description is re-derived in the RPC layer by nesting depth, while the engine's catalogue attributes it by roots-list order, so the two can pick different `load()` boundaries for the same file.",
+      "fix": "Add an engine function that answers which source root owns a path, using the same rule `load_catalogue` applies, and call it from `document_diagnostics` instead of selecting by component count.",
+      "_anchor_text": ".max_by_key(|source| source.root.components().count())"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 892,
+      "severity": "HIGH",
+      "id": "RUST-SEC-001",
+      "comment": "`params.out` goes straight into `default_out_root` with no boundary check, and `compare_to_disk` then reads `<out>/product.lock` and returns its bytes verbatim in `LockResult.on_disk.canonical`. `prepare_generate` runs the same client field through `writable_out_root` before using it, so the client can read any `product.lock` on the machine through this method and not through generate. The field's own doc says it exists so a test can point somewhere else, which is not a reason to accept it unchecked off the wire.",
+      "issue": "The client-supplied `out` on gearbox/product/lock is never validated against the workspace or source roots, and the file it names is echoed back in full.",
+      "fix": "Pass `params.out` through `writable_out_root` before joining `product.lock` onto it and refuse with `EDIT_REFUSED` when it is outside the declared boundary.",
+      "_anchor_text": "let lock_path = default_out_root(state, params.out.as_deref(), &resolved)"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 909,
+      "severity": "HIGH",
+      "id": "RUST-ERR-001",
+      "comment": "When neither `out` nor a workspace was declared, `default_out_root` returns `None` and the client gets `lock_path: \"\"` with `on_disk: null`. `LockResult::lock_path` is documented as reported even when absent precisely so \"there is no lock yet\" and \"I did not look\" stay distinguishable, and an empty string is exactly the unanswerable case it was meant to prevent. `prepare_generate` refuses the same condition with `GENERATE_REFUSED`.",
+      "issue": "A missing output root is downgraded to an empty `lock_path` sentinel instead of a refusal, contradicting the field's documented contract.",
+      "fix": "Return an error naming the undeclared workspace, the way `prepare_generate` does, instead of sending an empty `lock_path`.",
+      "_anchor_text": ".unwrap_or_default(),"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 1103,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "`ProductEdit::AddPlugin` has no test in the crate, while `SetPlugins`, the variant it exists to avoid, is covered in `preview_tests.rs`. The documented reason for this arm is that attaching must append instead of rewriting the list and dropping the `profiles` and `config` on entries already there, and nothing would fail if this line called `set_gear_plugins`. Can we add a batch that attaches a plugin to a gear that already has configured ones and assert their config survives?",
+      "issue": "The `AddPlugin` edit, whose contract is to append without destroying existing plugin config, has no test.",
+      "fix": "Add an `apply_product_edits` test with `ProductEdit::AddPlugin` against a gear with configured plugins and assert the existing entries keep their `profiles` and `config`.",
+      "_anchor_text": "gearbox_gdl::edit::add_gear_plugin(uri, &current, gear, plugin)?"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 1210,
+      "severity": "HIGH",
+      "id": "RUST-SEC-001",
+      "comment": "`dry_run` lets a session that declared no write capability past the gate, and the clone branch below then reads the source `.gdl` and hands its full text back in `after`. `edit_gear` and `edit_with` refuse the dry run too, for the reason written above `edit_gear`: a client without write capability should not learn anything about which paths exist. The gate should be `!state.allow_writes` alone, with `dry_run` decided after it. The durable fix is structural: this gate is spelled out in five handlers (`edit_gear` 941, `edit_with` 1139, here, `scaffold_gear` 1380, `generate_apply` 2270) and the copies have already diverged, so it belongs in one function that takes `dry_run` and decides once.",
+      "issue": "create_product's write gate is bypassed whenever dry_run is set, so a read-only session can read .gdl contents and probe path existence; the gate is duplicated across five handlers, which is how the copies diverged.",
+      "fix": "Refuse when `state.allow_writes` is false regardless of `params.dry_run`, matching `edit_gear` and `edit_with`, and move the gate into one shared function called by every mutating method.",
+      "_anchor_text": "if !state.allow_writes && !params.dry_run {"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 1389,
+      "severity": "HIGH",
+      "id": "RUST-ERR-001",
+      "comment": "The `GearId::new` error is discarded and replaced with a fixed sentence, so a client is told the rule but not what was wrong with the id it actually sent. `create_product` formats the validator's own refusal into its message; this path can do the same.",
+      "issue": "Validator error from `GearId::new` is dropped in favour of a hardcoded message.",
+      "fix": "Match on the `Err` and include the validator's message in the `EDIT_REFUSED` response.",
+      "_anchor_text": "let Ok(gear_id) = GearId::new(params.id.trim()) else {"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 1456,
+      "severity": "HIGH",
+      "id": "RUST-PANIC-001",
+      "comment": "`rel` comes from `scaffold_gear_files`, so this holds for today's three literals, but the invariant sits in another function while the panic sits in a request handler. A fourth scaffold file whose path `RelPath` rejects turns one client request into a process panic, and that takes the stdio server down for the whole editor session.",
+      "issue": "`unreachable!()` in a request handler relies on a path validity invariant established in a different function.",
+      "fix": "Have `scaffold_gear_files` produce `RelPath` values directly (or return the refusal) so this call site cannot panic.",
+      "_anchor_text": "let path = RelPath::new(rel).unwrap_or_else(|_| unreachable!(\"scaffold paths are valid\"));"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 1523,
+      "severity": "HIGH",
+      "id": "RUST-ERR-001",
+      "comment": "`map_err(|_| ...)` throws away what `GearId::new` said and substitutes a fixed sentence, so the reason the id was rejected never reaches the response.",
+      "issue": "`map_err(|_| ...)` discards the source error from `GearId::new`.",
+      "fix": "Format the validator's error into the returned message instead of ignoring it.",
+      "_anchor_text": ".map_err(|_| \"gear id must be kebab-case\".to_owned())?"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 2489,
+      "severity": "HIGH",
+      "id": "RUST-ERR-001",
+      "comment": "Only `.catalogue` is kept, and nothing on this path ever reports `catalogue.diagnostics`: `resolve_once` sends the description's and the resolution's diagnostics only. So a `product/resolve` that triggers this implicit load answers as if the catalogue loaded clean, while the same load through `gearbox/catalogue/load` would have sent every one of those diagnostics to the client.",
+      "issue": "Diagnostics from the lazily triggered catalogue load are never reported in any response.",
+      "fix": "Merge the load's `catalogue.diagnostics` into the triggering response, or send them as a `gearbox/catalogueDiagnostics` notification.",
+      "_anchor_text": ".get_or_insert_with(|| gearbox_engine::load_catalogue(&state.roots).catalogue)"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 2640,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "Only the `disconnected` branch is tested (`initialize_tests::a_load_that_stopped_early_is_not_cached`), and it asserts `state.catalogue.is_none()`, which is also true of a load that never cached at all. The comment above records \"it was never being filled\" as a real past bug, so that regression comes back with the suite green. Can we run `catalogue_load` against a live in-memory connection and assert the catalogue is stored?",
+      "issue": "No test asserts that a completed staged load populates `state.catalogue`; only the negative branch is covered.",
+      "fix": "Add a `catalogue_load` test with a live `Connection::memory()` peer that drains the channel and asserts `state.catalogue` holds the scanned gears.",
+      "_anchor_text": "state.catalogue = Some(scan.catalogue);"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 2669,
+      "severity": "HIGH",
+      "id": "RUST-ERR-001",
+      "comment": "Returning `true` here tells every caller the notification went out, when nothing was sent. For `publishDiagnostics` that means the client keeps the markers it already had and the only trace is a stderr line it cannot see; the bool has no way to say \"dropped\".",
+      "issue": "A serialization failure in `notify` is logged to stderr and reported to callers as success.",
+      "fix": "Have `notify` return a `Result` (or a three-state outcome) so a dropped notification is distinguishable from a delivered one, and surface it to the client.",
+      "_anchor_text": "return true;"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 2699,
+      "severity": "HIGH",
+      "id": "RUST-ERR-001",
+      "comment": "A result that cannot be serialized answers with `LOAD_FAILED`, which `error_code` documents as a catalogue load failure, on whatever method was called. `protocol.rs` makes this exact argument about not reusing `-32002`: a client mapping codes to causes reports the wrong one. This is an internal failure, not a load failure.",
+      "issue": "Serialization failure reuses `LOAD_FAILED`, a distinct domain code, making the cause indistinguishable to clients.",
+      "fix": "Answer with `lsp_server::ErrorCode::InternalError` or a dedicated code for a result that cannot be serialized.",
+      "_anchor_text": "error_code::LOAD_FAILED,"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lsp.rs",
+      "line": 136,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "Nothing in the crate gives `publishable` a diagnostic whose `location.uri` names another file, so the `location.uri == uri` half is unpinned. Drop it and a diagnostic reported inside a `load()`ed fragment gets published under the open document's URI, with a position from a file the editor is not showing. `document_tests::a_diagnostic_with_no_position_is_not_underlined` covers the `whole_file` half only; can we add a fixture whose error lives in the loaded file?",
+      "issue": "The URI-equality half of `publishable` has no test; only the `Range::whole_file` half is covered.",
+      "fix": "Add a test with a diagnostic whose `location.uri` differs from the published URI and assert it is filtered out.",
+      "_anchor_text": ".is_some_and(|location| location.uri == uri && location.range != Range::whole_file())"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lsp.rs",
+      "line": 163,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "No test in the crate asserts the folded message. `to_lsp` is the only path by which `help` reaches the editor, and all three arms here (no help, empty help, help appended after the separator) are unchecked, so losing `help` or appending a bare separator to an empty string would not fail anything. Can we call `to_lsp` directly with a `help` set and with `Some(\"\")`?",
+      "issue": "`to_lsp`'s help-folding arms, including the empty-help case, have no test.",
+      "fix": "Add `to_lsp` cases in `lsp_tests.rs` asserting the message for absent, empty and present `help`.",
+      "_anchor_text": "Some(help) => format!(\"{} \u2014 {help}\", diagnostic.message),"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/protocol.rs",
+      "line": 74,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "`envelopes.rs::application_error_codes_avoid_the_ones_lsp_defines` loops over four codes: `NOT_INITIALIZED`, `WORKSPACE_NOT_OPEN`, `LOAD_FAILED` and `GENERATE_REFUSED`. This one, plus `RESOLVE_FAILED`, `WRITES_NOT_ALLOWED` and `EDIT_REFUSED`, is not in that list, so half the codes have nothing checking them against LSP's reserved window or against `-32001`. A new code added outside the window would be caught only if somebody remembered to extend the array.",
+      "issue": "Half the `error_code` constants are absent from the guard that checks codes against LSP's reserved range.",
+      "fix": "Extend the array in `envelopes.rs` to every constant in `error_code`, or assert over a slice defined next to the constants.",
+      "_anchor_text": "pub const PRODUCT_LOAD_FAILED: i32 = -32053;"
+    },
+    {
+      "file": "crates/gearbox-rpc/tests/export_bindings.rs",
+      "line": 161,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "This path is fixed, so two runs of this test on one machine (two worktrees, or two jobs sharing a temp dir) clear and rewrite each other's export directories and the byte comparison fails for a reason that has nothing to do with drift. Every other test file in this crate namespaces its scratch directory with `std::process::id()` and a counter; can we do the same here?",
+      "issue": "`export_is_deterministic` uses a fixed temp directory, so concurrent runs clobber each other and the comparison flakes.",
+      "fix": "Include `std::process::id()` and a counter in the temp directory name, as the other test files in this crate do.",
+      "_anchor_text": "let base = std::env::temp_dir().join(\"gearbox-ts-determinism\");"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 63,
+      "severity": "MEDIUM",
+      "id": "RUST-ERR-001",
+      "comment": "Both variants carry a `String`, so all three construction sites in `serve_stdio` do `e.to_string()` and the underlying io or channel error is gone from the chain. Whoever prints a `ServeError` gets one flattened sentence and no source to walk.",
+      "issue": "`ServeError` variants hold stringified causes, so the source error is discarded at every construction site.",
+      "fix": "Hold the real error types with `#[from]`/`#[source]` on the variants instead of a `String`.",
+      "_anchor_text": "Transport(String),"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 297,
+      "severity": "MEDIUM",
+      "id": "RUST-SEC-001",
+      "comment": "`didChange` inserts for a URI that was never opened, so the argument in `State::documents` that LSP guarantees a `didClose` for every `didOpen` does not hold for these entries and nothing ever removes them. Key and text are both unbounded client strings, so a client that only sends `didChange` grows this map for the life of the process.",
+      "issue": "didChange inserts documents that were never opened, so entries with unbounded client-supplied keys and text are never removed.",
+      "fix": "Replace text only for a URI already present in `state.documents` and report the unopened `didChange` on stderr instead of inserting.",
+      "_anchor_text": "state.documents.insert(uri.clone(), change.text);"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 298,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "Every `didChange` runs a full parse and evaluation on the request thread, and nothing coalesces them. A burst of keystrokes is evaluated once per event even though only the newest text matters, and `product/resolve` or `generate` queue behind all of them, since this loop is the only thread. Draining queued `didChange` for the same URI off `connection.receiver` before evaluating would skip the superseded edits.",
+      "issue": "didChange triggers a full document evaluation per notification with no coalescing of superseded edits, on the single thread that also serves requests.",
+      "fix": "Drain pending didChange notifications for the same URI and evaluate only the newest text before publishing diagnostics.",
+      "_anchor_text": "publish_document_diagnostics(connection, state, &uri, version)"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 426,
+      "severity": "MEDIUM",
+      "id": "RUST-ARCH-001",
+      "comment": "This arm repeats `require_ready` inline, both guards and both message strings. `require_ready` already returns `Option<Response>`, so this arm can call it and fall through to `catalogue_load`, which is what its own doc comment says it was factored out for.",
+      "issue": "The not-initialized and no-open-root guards exist twice, inlined in the `catalogue/load` arm and in `require_ready`, with duplicated message text.",
+      "fix": "Call `require_ready(state, &id)` at the top of this arm and delete the inlined copy.",
+      "_anchor_text": "if !state.initialized {"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 539,
+      "severity": "MEDIUM",
+      "id": "RUST-ARCH-001",
+      "comment": "`create` needs no session source root once a `creation_boundary` is declared, since `creation_out_root` judges it against the boundary, but `require_ready` here still refuses whenever `state.roots` is empty. A start-screen session that declares a boundary and no roots gets `WORKSPACE_NOT_OPEN` from the one method the ADR says must not be judged by the session, and the write-gate tests call `create_product` directly so nothing pins this.",
+      "issue": "The dispatch arm applies the session readiness guard to `product/create`, re-coupling it to `state.roots` that `creation_boundary` exists to decouple it from.",
+      "fix": "Split the readiness guard so `create` is gated on `initialized` only, and let `creation_out_root` decide the boundary.",
+      "_anchor_text": "method::PRODUCT_CREATE => Some(match require_ready(state, &id) {"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 1234,
+      "severity": "MEDIUM",
+      "id": "RUST-SEC-001",
+      "comment": "`id` and `profile_id` are validated here, `version` is not, and it is written into the description either as a rendered template field or stamped onto a clone. `scaffold_gear_files` runs `is_semver` on the same field, and `product()` does not check it, so this is the one wizard field that can carry anything through to a written file.",
+      "issue": "create_product validates id and profile_id but writes params.version unchecked, unlike the scaffold path which requires a semver triple.",
+      "fix": "Reject with `EDIT_REFUSED` when `!is_semver(params.version.trim())`, beside the two id checks.",
+      "_anchor_text": "if let Err(refusal) = gearbox_ir::ProfileId::new(params.profile_id.trim()) {"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 1380,
+      "severity": "MEDIUM",
+      "id": "RUST-SEC-001",
+      "comment": "Same hole as `create_product`: with `dry_run` set, a session that never declared write capability reaches `writable_out_root` and `out_root.exists()`, so it can walk arbitrary destinations and read back which ones exist and which are inside a source root from the refusal text. `edit_with` refuses the dry run as well, and this method should too.",
+      "issue": "scaffold_gear's write gate is bypassed by dry_run, letting a read-only session probe filesystem layout through refusal messages.",
+      "fix": "Refuse when `state.allow_writes` is false regardless of `params.dry_run`.",
+      "_anchor_text": "if !state.allow_writes && !params.dry_run {"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 2089,
+      "severity": "MEDIUM",
+      "id": "RUST-ARCH-001",
+      "comment": "The `.gearbox/<product>/<profile>` layout is spelled here and again in `gearbox-cli/src/generate.rs` (`OUTPUT_DIR`), with nothing tying the two together. It matches today, so `product/lock`'s `on_disk` diff finds the tree the CLI wrote; change the layout in one crate and the diff compares against a directory nobody writes, and reports the lock as missing rather than stale.",
+      "issue": "The default generated-tree layout is computed independently in gearbox-rpc and gearbox-cli rather than owned by the engine's generate module.",
+      "fix": "Move the default output layout into `gearbox_engine::generate` beside `base_root_for` and have both the CLI and this crate call it.",
+      "_anchor_text": ".join(\".gearbox\")"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 2343,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "This plans the whole generated tree to answer about the single path in `params.file`. `generate::plan` stages every entry, which reads each target file off disk, clones its bytes, and then walks the out tree for orphans, and the diff view calls `gearbox/generate/file` once per file the person opens. Can we stage just the requested entry instead of the full `FileSet`?",
+      "issue": "generate_file plans the entire generated FileSet to obtain one file's plan, re-reading and re-digesting the whole out tree on every single-file request.",
+      "fix": "Plan only the requested entry in `generate_file` by passing a FileSet containing that one path, instead of the full `prepared.files`.",
+      "_anchor_text": "let (plans, _) = match gearbox_engine::generate::plan("
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 2436,
+      "severity": "MEDIUM",
+      "id": "RUST-SEC-001",
+      "comment": "The temp path is fully predictable (`.<file name>.gearbox-tmp` beside the target), and `fs::write` follows a symlink at that path, so anything that can create that one name in the product directory gets our content written wherever it points, outside every boundary `writable_path` just enforced. The rename also gives the description the temp file's fresh mode, so an edit silently widens a description that was not 0644.",
+      "issue": "write_atomically writes to a predictable temp path with symlink-following create and hands the destination the temp file's permissions.",
+      "fix": "Create the temp file with `OpenOptions::new().write(true).create_new(true)` under a non-predictable name, and copy the destination's existing mode onto it before the rename.",
+      "_anchor_text": "std::fs::write(&temporary, contents)?;"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lib.rs",
+      "line": 2556,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "A progress notification per projected gear doubles the message count during the most expensive thing this server does, and each send blocks the load until the writer thread has pushed it to stdout, because the stdio channel is `bounded(0)`. No UI can use one update per gear on a real registry. Send it on a step, every Nth gear or a time interval, and keep the final `done: true` unconditional.",
+      "issue": "The staged catalogue load emits one PROGRESS notification per gear on a rendezvous channel, doubling wire traffic and stalling the load on stdout for each one.",
+      "fix": "Throttle the PROGRESS notification in the Projected arm to a count or time step instead of sending one per gear.",
+      "_anchor_text": "method::PROGRESS,"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lsp.rs",
+      "line": 83,
+      "severity": "MEDIUM",
+      "id": "RUST-ERR-001",
+      "comment": "The `from_utf8` error is dropped here, so a `file://` URI whose percent-escapes decode to invalid UTF-8 comes back as the same `None` an `untitled:` buffer gets. `document_diagnostics` reads that `None` as \"not a local file\" and the caller publishes an empty diagnostic list, so a real file the editor is showing is reported as clean.",
+      "issue": "Percent-decode failure is collapsed into the same `None` as a non-file URI, and the caller turns it into a clean document.",
+      "fix": "Distinguish a malformed `file://` URI from a non-file URI (return a `Result` or a dedicated variant) so the caller can report it instead of publishing an empty diagnostic set.",
+      "_anchor_text": "Some(normalized(Path::new(&String::from_utf8(out).ok()?)))"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lsp_tests.rs",
+      "line": 94,
+      "severity": "MEDIUM",
+      "id": "TEST-QUALITY-7",
+      "comment": "This covers an escape that decodes to valid UTF-8 but not one that does not: `file:///a/%FF.gdl` decodes to bytes `String::from_utf8` rejects, and `path_from_uri` then answers `None`, which is the \"not a local file\" answer for a path that is legal on this platform. That is the same failure mode the test's own doc comment is about, and no case says which answer we want there.",
+      "issue": "The outer `String::from_utf8` failure in `path_from_uri` (valid escape, invalid UTF-8) is untested.",
+      "fix": "Add a `path_from_uri(\"file:///a/%FF.gdl\")` case pinning the intended result.",
+      "_anchor_text": "path_from_uri(\"file:///a/%E2%82%AC.gdl\"),"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/lsp_tests.rs",
+      "line": 114,
+      "severity": "MEDIUM",
+      "id": "TEST-QUALITY-7",
+      "comment": "Both `..` cases in this test have a component left to pop, so the arm in `normalized` that keeps a `..` when `out.pop()` fails never runs. `file:///../etc/gear.gdl` is the untested shape, and it is the one the doc comment calls load bearing: if a climb above the root were swallowed instead of kept, a path that leaves its root would come back looking like one that stays inside it.",
+      "issue": "The `ParentDir`-kept branch of `normalized` (a `..` with nothing to pop) has no test.",
+      "fix": "Add a case for a URI whose `..` climbs above the root and assert the `..` survives in the result.",
+      "_anchor_text": "path_from_uri(\"file:///a/./b/c/../gear.gdl\"),"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/preview_tests.rs",
+      "line": 93,
+      "severity": "MEDIUM",
+      "id": "TEST-QUALITY-4",
+      "comment": "All six tests in this file go through `require_corpus!`, so when `../gears-rust` or `products/payments-demo` is absent every one of them returns before asserting anything and the run reports six passes. The rule this file exists for, that a preview writes nothing, is then claimed by a suite that never ran it. Either fail when the corpus is missing, or build a minimal product fixture in the scratch directory instead of depending on a sibling checkout.",
+      "issue": "The corpus guard early-returns with no assertion, so all six preview tests pass vacuously wherever the sibling checkout is absent.",
+      "fix": "Make the missing corpus a test failure, or replace the sibling checkout with a self-contained fixture written under `target/`.",
+      "_anchor_text": "return;"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/write_gate_tests.rs",
+      "line": 333,
+      "severity": "MEDIUM",
+      "id": "TEST-QUALITY-4",
+      "comment": "`secret.txt` sits outside the workspace as well as being a non-`.gdl`, and this `||` accepts either refusal, so deleting the extension check in `writable_path` leaves the test green on the \"outside\" message the next gate produces. Nothing here checks the \"before read\" part of the name either. Put the clone source inside the workspace and assert on the `.gdl` sentence alone.",
+      "issue": "The disjunctive assertion passes via the workspace refusal, so the `.gdl` gate the test is named for could be removed without failing it.",
+      "fix": "Place the non-`.gdl` clone source inside the declared workspace and assert only on the \"is not a `.gdl` description\" message.",
+      "_anchor_text": "message.contains(\"not a `.gdl`\") || message.contains(\"outside\"),"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/write_gate_tests.rs",
+      "line": 447,
+      "severity": "MEDIUM",
+      "id": "TEST-QUALITY-7",
+      "comment": "The doc comment says quoting is the half that fails silently, then the fixture path carries no backslash and no quote, so `quote_string` is never handed anything Rust-debug escaping would render differently. Can we run one of these with a path like `..\\shared\\sdk`, or one containing a quote, and keep the eval assertion at the end?",
+      "issue": "The quoting hazard the test documents is never exercised: the plugin path contains no characters that escaping would change.",
+      "fix": "Add a case with a backslash or quote in `PluginScaffold::path` and assert the rendered `gear.gdl` still evaluates.",
+      "_anchor_text": "path: \"../../authn-resolver-sdk\".to_owned(),"
+    },
+    {
+      "file": "crates/gearbox-rpc/src/write_gate_tests.rs",
+      "line": 463,
+      "severity": "MEDIUM",
+      "id": "TEST-QUALITY-4",
+      "comment": "`contains(\"sdk = cargo(\")` is also true of the commented shape, whose line is `# sdk = cargo(`, so this assertion cannot fail for the reason its message states. The value assertions below match `#`-prefixed lines too, and the commented text still evaluates, so commenting out the block inside `plugin_shape` keeps this whole test green. Check the line the way `a_plugin_scaffold_without_a_host_keeps_the_commented_locator` does, over `lines()` with `trim_start().starts_with(...)`.",
+      "issue": "The live-locator assertions are substring checks that a commented-out locator satisfies, so the live/commented distinction is unverified.",
+      "fix": "Assert over `gdl.lines()` that a line starts with `sdk = cargo(` after `trim_start()` rather than using `contains`.",
+      "_anchor_text": "gdl.contains(\"sdk = cargo(\"),"
+    }
+  ],
+  "dropped_low": [],
+  "dropped_anchor": []
+}

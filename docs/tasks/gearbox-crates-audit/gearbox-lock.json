@@ -1,0 +1,307 @@
+{
+  "batch": "gearbox-lock",
+  "scope": "crates/gearbox-lock",
+  "head_sha": "b5a8d7e6c53fb744863502a175c9a3b2a42dd43b",
+  "reported": [
+    {
+      "file": "crates/gearbox-lock/src/canonical.rs",
+      "line": 56,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "Nothing asserts this dedup runs. The fixture builds a duplicate `ColocatedBy` edge for exactly this line, but every test that could notice compares two already-canonicalized products (`write_then_read_round_trips_and_verifies`, `read_returns_canonical_collections`), so if this line went away both sides would keep the duplicate and still compare equal. Can we canonicalize the fixture and assert `provenance.len()` dropped from 4 to 3?",
+      "issue": "The provenance dedup in canonicalize_order has no test; all comparisons canonicalize both sides, so its removal is invisible.",
+      "fix": "Add a test in tests/canonical.rs that calls canonicalize_order on support::fixture() and asserts the duplicate ColocatedBy edge is gone by checking provenance.len().",
+      "_anchor_text": "product.provenance.dedup();"
+    },
+    {
+      "file": "crates/gearbox-lock/src/canonical.rs",
+      "line": 59,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "This sort can never be observed by the suite: `resolved_gear` builds every fixture gear with `selected_by: vec![one_reason]`, so a single-element vector is all it ever sorts. Deleting this line would leave every test green, including the golden snapshot, while breaking determinism for that field.",
+      "issue": "gear.selected_by.sort() is unexercised because every fixture gear has exactly one inclusion reason.",
+      "fix": "Give one fixture gear two InclusionReason entries in a non-sorted order so the determinism and snapshot tests actually depend on this sort.",
+      "_anchor_text": "gear.selected_by.sort();"
+    },
+    {
+      "file": "crates/gearbox-lock/src/canonical.rs",
+      "line": 62,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "Both cluster bindings in `support::fixture()` carry a single requester (`requesters: vec![gid(\"payments-audit\")]`), so this sort is a no-op in every test and its removal would go unnoticed. A second requester on the cache binding, listed out of order, would make the ordering observable.",
+      "issue": "binding.requesters.sort() is unexercised because every fixture cluster binding has exactly one requester.",
+      "fix": "Add a second, out-of-order requester to the cache cluster binding in tests/support/mod.rs so the sort has an effect the snapshot and determinism tests can see.",
+      "_anchor_text": "binding.requesters.sort();"
+    },
+    {
+      "file": "crates/gearbox-lock/src/canonical.rs",
+      "line": 121,
+      "severity": "HIGH",
+      "id": "RUST-SEC-001",
+      "comment": "This serializes `gears[].config` verbatim, and a literal credential in it is only stripped on the generate path by `secrets::redact_product`. `gearbox resolve --format toml` writes through `write_canonical` directly, so a lock from an older build that still carries a literal password gets printed unredacted. Redaction needs to cover every path that renders a lock, not one of them.",
+      "issue": "The only lock writer emits config values verbatim; credential redaction lives in the generate path, so other callers write plaintext secrets.",
+      "fix": "Route every lock-rendering path through `secrets::redact_product`, or take a catalogue here and redact inside `write_canonical`, so the writer cannot emit a literal credential.",
+      "_anchor_text": "let body = to_toml(&canonical)?;"
+    },
+    {
+      "file": "crates/gearbox-lock/src/diff.rs",
+      "line": 116,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "Twelve of the 21 added/removed/changed lists are never non-empty in any test: `sources_added/removed`, `applications_added/removed`, `bindings_added/removed`, `cluster_added/removed`, `cuts_added/changed`, `provenance_added/removed`. The destructure catches a *new* field, not an existing field left out of this boolean chain, and that second shape is the bug `fields_changed`'s own doc comment records happening once already.",
+      "issue": "Half of LockDiff's lists are never populated in any test, so a conjunct missing from is_empty() for one of them would report nothing changed.",
+      "fix": "Add diff tests that populate each currently untested added/removed/changed list and assert !is_empty() plus the expected keys for it.",
+      "_anchor_text": "pub fn is_empty(&self) -> bool {"
+    },
+    {
+      "file": "crates/gearbox-lock/src/diff.rs",
+      "line": 246,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "Neither arm of this is ever rendered. The four tests that call `summary()` all pass a diff with an empty cuts list, and the fixture's only `CutCandidate` has `contract: None`, so the `Some` arm is unreachable from the fixture at all and the ` : {contract}` suffix is unverified.",
+      "issue": "The cuttable summary renderer, including the Some(contract) branch, is never executed by any test.",
+      "fix": "Add a diff test that removes or adds a CutCandidate carrying a contract and asserts the rendered summary line, covering both the Some and None suffixes.",
+      "_anchor_text": ".map_or_else(String::new, |c| format!(\" : {c}\"));"
+    },
+    {
+      "file": "crates/gearbox-lock/src/diff.rs",
+      "line": 456,
+      "severity": "HIGH",
+      "id": "RUST-ARCH-001",
+      "comment": "`diff` never applies `canonicalize_order`, it compares `ResolvedApplication` and `ResolvedGear` values as they arrive. Two products that differ only in the order of `listens`, `spawns`, `selected_by` or `cluster[].requesters` come out as changed, and that is the normal case when one side comes straight from the resolver and the other from `read`, which returns a canonicalized product. `diff_is_order_independent` only passes because every nested list in the fixture has at most one element, so the shuffle helper is a no-op on them.",
+      "issue": "diff() compares products without canonicalizing them, so ordering differences inside nested collections are reported as content changes.",
+      "fix": "Canonicalize both inputs at the top of `diff` before keying and comparing, or require an already canonicalized product in the signature.",
+      "_anchor_text": "pub fn diff(before: &ResolvedProduct, after: &ResolvedProduct) -> LockDiff {"
+    },
+    {
+      "file": "crates/gearbox-lock/src/diff.rs",
+      "line": 531,
+      "severity": "HIGH",
+      "id": "RUST-NO-002",
+      "comment": "`CutKey` is not a unique key over `cuttable_if_declared`: `canonicalize_order` sorts that vector by exactly `(consumer, provider, contract)` and never dedups it, so two candidates sharing the triple but differing in `blocked_by`, `suggested_edit` or `file` both stay in the lock. Collecting into a `BTreeMap` keyed on the triple keeps only the last, so a change to the shadowed candidate shows up in no list and `is_empty()` still says nothing changed. The invariants the `diff` doc says it assumes do not cover cut candidates.",
+      "issue": "by_cut_key collapses CutCandidates sharing (consumer, provider, contract), so changes to a shadowed candidate are dropped from the diff.",
+      "fix": "Key cut candidates by the whole CutCandidate, or map each CutKey to the Vec of candidates carrying it, so duplicate keys are compared instead of overwritten.",
+      "_anchor_text": ".collect::<BTreeMap<_, _>>()"
+    },
+    {
+      "file": "crates/gearbox-lock/src/diff.rs",
+      "line": 550,
+      "severity": "HIGH",
+      "id": "RUST-NO-002",
+      "comment": "`ProvenanceKey` is not unique over `product.provenance`. `canonicalize_order` sorts by `(from, kind, to)` and then calls `dedup()`, which only drops edges equal in *all* fields, so two edges with the same triple and a different `because` both survive into the lock. Collecting into a `BTreeMap` keyed on the triple keeps only the last, so a change to the other edge lands in no list at all and `is_empty()` returns true for a lock that did change.",
+      "issue": "by_provenance_key collapses provenance edges sharing (from, kind, to), so a changed `because` on a shadowed edge is silently absent from the diff.",
+      "fix": "Key provenance by the whole ProvenanceEdge, or map each ProvenanceKey to the Vec of edges carrying it, so duplicate keys are compared instead of overwritten.",
+      "_anchor_text": ".collect::<BTreeMap<_, _>>()"
+    },
+    {
+      "file": "crates/gearbox-lock/src/read.rs",
+      "line": 43,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "`LockError::Parse` is documented on `read` but no test reaches it. The suite only covers an unsupported version and a hash mismatch, so neither `from_str` call here is tested against a truncated or mangled lock, which is the common corruption case for a generated file people are told not to edit. Can we add a case for malformed TOML and one for valid TOML that misses a required field?",
+      "issue": "The LockError::Parse path of the only reader has no test, on either the version probe or the full parse.",
+      "fix": "Add tests in tests/canonical.rs calling read() with malformed TOML and with valid TOML missing a required ResolvedProduct field, asserting LockError::Parse in both.",
+      "_anchor_text": "let probe: VersionProbe = toml::from_str(input)?;"
+    },
+    {
+      "file": "crates/gearbox-lock/src/read.rs",
+      "line": 61,
+      "severity": "HIGH",
+      "id": "RUST-SEC-001",
+      "comment": "`read` verifies the hash and then hands back the product without checking any of its content. `product.layout` reaches `out_root.join(input.layout())` in the generator, and the GDL front end already refuses a bad value with `gearbox_ir::is_valid_layout`, so a lock read from disk is the one way into the generator that skips that check. `spawns[].bin_name`, `args` and `working_directory` become a process the host starts, also unchecked here.",
+      "issue": "read() returns a parsed lock with no content validation; layout and spawn bin_name reach path-join and process-spawn sinks unvalidated.",
+      "fix": "Validate the parsed product before returning it: run `product.layout` through `gearbox_ir::is_valid_layout` and reject a `spawns[].bin_name` that is not a plain file name.",
+      "_anchor_text": "Ok(product)"
+    },
+    {
+      "file": "crates/gearbox-lock/tests/canonical.rs",
+      "line": 63,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "`hash_a` and `hash_b` hold whole lock documents, not hashes. They differ because `version = \"0.2.0\"` sits in the body, so this passes even if `compute_hash` returned a constant, which is the one thing the test's name claims to check.",
+      "issue": "hash_changes_when_content_changes compares full lock texts, so it passes regardless of whether the hash tracks content.",
+      "fix": "Extract product.lock_hash from each written document and assert the two hash values differ, instead of comparing the documents.",
+      "_anchor_text": "assert_ne!("
+    },
+    {
+      "file": "crates/gearbox-lock/tests/determinism.rs",
+      "line": 46,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "This guard only inspects `provenance` and `cluster`, and breaks out on the first seed that moves either. `fisher_yates` could stop touching `applications`, `listens`, `spawns`, `bindings`, `cuttable_if_declared` or `diagnostics` and this test would still pass, which is precisely the vacuous-determinism case it exists to rule out.",
+      "issue": "The shuffle guard checks only 2 of the 8 collections shuffle_orderings claims to reorder, so a partially dead shuffle still passes.",
+      "fix": "Assert per collection that at least one seed reorders it, covering every collection shuffle_orderings touches, rather than OR-ing two of them and breaking early.",
+      "_anchor_text": "if shuffled.provenance != base.provenance || shuffled.cluster != base.cluster {"
+    },
+    {
+      "file": "crates/gearbox-lock/tests/diff.rs",
+      "line": 166,
+      "severity": "HIGH",
+      "id": "RUST-TEST-001",
+      "comment": "Nothing here checks the sorting the test name promises. Both assertions use `.any()`, so the order `summary()` emits is unpinned, even though `LockDiff`'s doc states every list is sorted and that determinism is the point of `cpt-gearbox-nfr-lock-diff-minimal`.",
+      "issue": "summary_lines_are_sorted_and_readable asserts only membership, leaving the documented sort order of summary() untested.",
+      "fix": "Remove two gears in this test and assert the two `- gear` lines appear in name order, so the sortedness of the category lists is pinned.",
+      "_anchor_text": "assert!(summary.iter().any(|l| l == \"- gear types-registry\"));"
+    },
+    {
+      "file": "crates/gearbox-lock/src/canonical.rs",
+      "line": 50,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "This builds two owned keys per comparison, so every `cmp` allocates six Strings and the sort does that O(n log n) times. The bindings sort just above compares borrowed fields directly, and `(&a.consumer, &a.provider, a.contract.as_ref().map_or(\"\", ContractId::as_str))` gives the same ordering here with no allocation.",
+      "issue": "Cut-candidate comparator allocates an owned 3-String key for both operands on every comparison.",
+      "fix": "Compare borrowed fields as a tuple, using `map_or(\"\", ContractId::as_str)` for the optional contract, instead of building cloned keys inside the comparator.",
+      "_anchor_text": "key(a).cmp(&key(b))"
+    },
+    {
+      "file": "crates/gearbox-lock/src/canonical.rs",
+      "line": 56,
+      "severity": "MEDIUM",
+      "id": "RUST-ARCH-001",
+      "comment": "`provenance` is the only collection deduped here, `bindings`, `cluster` and `cuttable_if_declared` are sorted only. A duplicate `(consumer, contract)` binding therefore gets hashed and written into the lock, while `diff` keys those entries into a `BTreeMap` and keeps one, so the writer and the differ disagree about the content of the same file. The uniqueness `diff` documents as an assumption is not checked anywhere in this crate.",
+      "issue": "canonicalize_order dedups provenance only, so duplicate keys in bindings, cluster and cut candidates reach the written lock while diff silently collapses them.",
+      "fix": "Dedup the keyed collections in `canonicalize_order` next to their sorts, or reject a product carrying duplicate keys with a dedicated `LockError` variant.",
+      "_anchor_text": "product.provenance.dedup();"
+    },
+    {
+      "file": "crates/gearbox-lock/src/canonical.rs",
+      "line": 81,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "This deep-clones the entire `ResolvedProduct` just to blank one String field, and it happens on every write and every read. `write_canonical` already holds an owned copy whose `lock_hash` it overwrites two lines later, so the hash pass could clear the field in place rather than copying every gear, binding and provenance edge a second time.",
+      "issue": "compute_hash clones the whole resolved product to blank a single field, doubling the copy cost on both the write and read paths.",
+      "fix": "Add an internal hash helper that takes the already-owned product, clears `product.lock_hash` in place, and hashes it, and have `write_canonical` and `read` use that instead of cloning.",
+      "_anchor_text": "let mut blanked = canonical.clone();"
+    },
+    {
+      "file": "crates/gearbox-lock/src/diff.rs",
+      "line": 181,
+      "severity": "MEDIUM",
+      "id": "RUST-SEC-001",
+      "comment": "`change.before` and `change.after` come straight from a parsed lock and land in a line the CLI and the Studio widget print. Nothing rejects control characters in those scalars, `product.id`, `kubernetes.namespace` and the rest are plain `String` unlike the id newtypes that check for controls, so a lock value holding an escape sequence or a newline can forge or erase lines in the summary someone reads to decide whether a lock change is acceptable.",
+      "issue": "Unvalidated lock scalars are interpolated into summary lines, allowing control-character and newline injection into CLI output.",
+      "fix": "Escape or strip control characters and newlines from lock scalars when rendering them into summary lines.",
+      "_anchor_text": "change.field, change.before, change.after"
+    },
+    {
+      "file": "crates/gearbox-lock/src/diff.rs",
+      "line": 429,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "`before.keys()` is already sorted, so collecting it into a `BTreeSet` re-sorts it and allocates a second index for nothing, twice per call and seven calls per diff. A single merge walk over the two sorted key iterators yields added/removed/changed in one O(n) pass and has both values in hand, which also drops the `before[*k]`/`after[*k]` lookups on line 442.",
+      "issue": "diff_keyed rebuilds two BTreeSets from already-sorted BTreeMap keys and then re-looks-up each shared key to compare values.",
+      "fix": "Replace the two BTreeSet collections and the set operations with a single merge walk over `before.iter()` and `after.iter()`, comparing values in place.",
+      "_anchor_text": "let before_keys: std::collections::BTreeSet<&K> = before.keys().collect();"
+    },
+    {
+      "file": "crates/gearbox-lock/src/diff.rs",
+      "line": 475,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "`p.clone()` deep-copies every `ResolvedApplication`, with its gears, listens, spawns and feature sets, into a throwaway map whose values only feed the `!=` in `diff_keyed`. `diff_keyed`'s `V: PartialEq` is satisfied by `&ResolvedApplication`, so the map can hold borrows and copy nothing.",
+      "issue": "Application values are deep-cloned into a temporary BTreeMap that exists only for equality comparison.",
+      "fix": "Build the map as `BTreeMap<ApplicationId, &ResolvedApplication>` and drop the `p.clone()`.",
+      "_anchor_text": ".map(|p| (p.name.clone(), p.clone()))"
+    },
+    {
+      "file": "crates/gearbox-lock/src/diff.rs",
+      "line": 547,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "`e.clone()` copies every provenance edge into a temporary map that is used only for the `!=` inside `diff_keyed`. Provenance is the largest collection in a real lock, and `V: PartialEq` holds for `&ProvenanceEdge`, so the map can borrow the edges instead of duplicating both sides.",
+      "issue": "Provenance edge values are deep-cloned into a temporary BTreeMap used only for equality comparison.",
+      "fix": "Build the map as `BTreeMap<ProvenanceKey, &ProvenanceEdge>` and drop the `e.clone()`.",
+      "_anchor_text": "e.clone(),"
+    },
+    {
+      "file": "crates/gearbox-lock/src/error.rs",
+      "line": 30,
+      "severity": "MEDIUM",
+      "id": "RUST-ERR-001",
+      "comment": "This message states a cause that `read` has not established. The hash is recomputed from a re-serialized product, and `ResolvedProductHeader::layout` carries `#[serde(default = \"default_layout\")]` while `LOCK_SCHEMA_VERSION` is still 1, so a lock written by a build from before `layout` existed parses fine, re-serializes with an extra line, and ends up here being told it was edited by hand.",
+      "issue": "HashMismatch asserts a hand edit, but the same variant fires on serialization drift inside an unchanged schema_version.",
+      "fix": "Reword the message to report the mismatch without asserting a hand edit, and include the lock's recorded gearbox_version so a version-drift cause is visible in the error.",
+      "_anchor_text": "\"product.lock has been modified: it claims hash {expected}, but its \\"
+    },
+    {
+      "file": "crates/gearbox-lock/src/read.rs",
+      "line": 43,
+      "severity": "MEDIUM",
+      "id": "RUST-PERF-001",
+      "comment": "The whole document is parsed twice here, once for the one-field probe and again in full on line 51. Parsing once into a `toml::Table`, reading `schema_version` off it, then deserializing that value into `ResolvedProduct` keeps the clear version error without a second pass over the file.",
+      "issue": "read() runs two full TOML parses of the same input to extract one field before the real deserialization.",
+      "fix": "Parse the input once into a `toml::Table`, check `schema_version` from it, and deserialize `ResolvedProduct` from that parsed value.",
+      "_anchor_text": "let probe: VersionProbe = toml::from_str(input)?;"
+    },
+    {
+      "file": "crates/gearbox-lock/src/read.rs",
+      "line": 54,
+      "severity": "MEDIUM",
+      "id": "RUST-SEC-001",
+      "comment": "The hash is computed after `canonicalize_order`, which sorts and dedups, so an edit that canonicalization erases still verifies. Duplicating a provenance edge or a diagnostic in the file passes this check, and so does any unknown TOML key, since nothing sets `deny_unknown_fields` on the lock types. `LockError::HashMismatch` promises a hand edit is caught, and for that class of edit it is not.",
+      "issue": "Hash verification runs over the canonicalized, serde-filtered model, so duplicate entries and unknown keys in the file are invisible to the integrity check.",
+      "fix": "Reject a parsed lock that carries duplicate provenance edges or diagnostics before hashing, and add `#[serde(deny_unknown_fields)]` to the lock types so ignored keys cannot ride in a lock that reports as verified.",
+      "_anchor_text": "canonicalize_order(&mut product);"
+    },
+    {
+      "file": "crates/gearbox-lock/src/read.rs",
+      "line": 55,
+      "severity": "MEDIUM",
+      "id": "RUST-ERR-001",
+      "comment": "A failure here surfaces as `LockError::Serialize`, whose message is \"failed to serialize product.lock\". That reads backwards on a read path, and `read`'s `# Errors` section lists only `UnsupportedSchemaVersion`, `Parse` and `HashMismatch`, so a caller matching on what this function documents will not handle it.",
+      "issue": "read() can return the write-side LockError::Serialize variant, which its # Errors doc omits and whose message describes the wrong operation.",
+      "fix": "Add a read-side variant for a failed hash recomputation, or list LockError::Serialize in read's # Errors section and reword its message so it fits both directions.",
+      "_anchor_text": "let found = compute_hash(&product)?;"
+    },
+    {
+      "file": "crates/gearbox-lock/tests/diff.rs",
+      "line": 276,
+      "severity": "MEDIUM",
+      "id": "TEST-QUALITY-2",
+      "comment": "`after` is still an untouched `support::fixture()` on this line, so this compares the fixture's diagnostics count with itself and can never fail. The precondition the test actually needs is already guaranteed by the `map` below, which preserves length by construction.",
+      "issue": "The length assertion compares two unmodified fixture() clones, so it is true by construction.",
+      "fix": "Drop this assertion and instead assert the observed counts in diagnostics_changed are equal to each other and to the fixture's diagnostics length.",
+      "_anchor_text": "assert_eq!(before.diagnostics.len(), after.diagnostics.len());"
+    },
+    {
+      "file": "crates/gearbox-lock/tests/snapshot.rs",
+      "line": 16,
+      "severity": "MEDIUM",
+      "id": "TEST-QUALITY-8",
+      "comment": "This golden file is currently the only coverage for canonical ordering and provenance dedup, and it covers them opaquely: a reviewer sees a whole-document text diff, not which ordering rule moved. It also embeds `lock_hash`, so any fixture edit churns the snapshot, and an accidental ordering change gets re-accepted along with the intended one when someone runs `cargo insta accept`.",
+      "issue": "The full-text snapshot is the sole coverage for ordering and dedup guarantees and hides which guarantee broke; the embedded hash makes it churn on every fixture edit.",
+      "fix": "Keep the snapshot but add named assertions in tests/canonical.rs for each documented ordering and for the provenance dedup, so a rule change fails a specific test rather than only moving the golden file.",
+      "_anchor_text": "insta::assert_snapshot!(text);"
+    }
+  ],
+  "dropped_low": [
+    {
+      "file": "crates/gearbox-lock/src/canonical.rs",
+      "line": 124,
+      "severity": "LOW",
+      "id": "RUST-SEC-001",
+      "comment": "The header is a TOML comment, so it sits outside the hashed body: the `gearbox <version>` it names can be changed to anything and `read` still verifies the lock. The body's `product.gearbox_version` is covered by the hash, so the file's first line can disagree with the field it was rendered from and nothing notices.",
+      "issue": "The generated header line is not covered by lock_hash, so the version it advertises is unverified and can contradict product.gearbox_version.",
+      "fix": "Have `read` rebuild the header from `product.gearbox_version` and reject a lock whose first line does not match, or include the header text in the hashed input."
+    },
+    {
+      "file": "crates/gearbox-lock/tests/canonical.rs",
+      "line": 145,
+      "severity": "LOW",
+      "id": "TEST-QUALITY-5",
+      "comment": "This is already covered three times over: `hash_is_blake3_hex`, `write_then_read_round_trips_and_verifies` and `read_returns_canonical_collections` all call `read()` on `write_canonical` output, which always carries the header comment. The `starts_with('#')` assertion above repeats `header_names_the_gearbox_version_and_warns_against_editing` as well.",
+      "issue": "toml_comments_do_not_confuse_the_parser repeats setup and assertions already made by three other tests in the same file.",
+      "fix": "Delete this test, or make it feed read() a lock with comments in positions write_canonical does not produce, such as an inline or mid-table comment."
+    },
+    {
+      "file": "crates/gearbox-lock/tests/determinism.rs",
+      "line": 63,
+      "severity": "LOW",
+      "id": "TEST-QUALITY-5",
+      "comment": "`byte_stable_across_a_thousand_shuffled_orderings` already writes `fixture()` 1000 times and compares every result against one reference text, so ten more writes of the same product add no coverage.",
+      "issue": "repeated_writes_of_the_same_product_are_identical is subsumed by the 1000-iteration byte-stability test above it.",
+      "fix": "Delete repeated_writes_of_the_same_product_are_identical."
+    }
+  ],
+  "dropped_anchor": []
+}
