@@ -307,5 +307,4 @@ database and no Docker. Ports 8087, 8090 and 50051 must be free; the log goes to
 | [docs/cargo-gears-comparison.md](docs/cargo-gears-comparison.md) | Why this is not `cargo-gears`. In Russian. |
 | [docs/ADR/](docs/ADR/) | Decisions. Numbering starts at 0002: 0001 and 0003 to 0008 live in `gears-rust`. |
 
-There is no `LICENSE` file yet. The workspace manifest declares `LicenseRef-Proprietary`, and
-the licence is still an open question.
+Licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE).

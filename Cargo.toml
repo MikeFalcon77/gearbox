@@ -7,9 +7,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.97.0"
 publish = false
-# Not an SPDX identifier, so it needs SPDX's LicenseRef- escape hatch to parse.
-# The actual licence for this tool is still an open question.
-license = "LicenseRef-Proprietary"
+license = "Apache-2.0"
 
 # Build profiles, ported verbatim from gears-rust so a backtrace or a build
 # time here means the same thing it does there.
