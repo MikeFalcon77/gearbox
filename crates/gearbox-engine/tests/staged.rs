@@ -45,6 +45,7 @@ macro_rules! require {
 enum Seen {
     Discovered(usize),
     Declared(String),
+    Design(String),
     DeclarationComplete(usize),
     Projected(String),
     Joined(String),
@@ -56,6 +57,7 @@ fn record(root: &SourceRoot) -> (Vec<Seen>, gearbox_engine::CatalogueScan) {
         seen.push(match event {
             LoadEvent::Discovered { total } => Seen::Discovered(total),
             LoadEvent::Declared(p) => Seen::Declared(p.gdl_path.as_str().to_owned()),
+            LoadEvent::Design(d) => Seen::Design(d.id.as_str().to_owned()),
             LoadEvent::DeclarationComplete { declared, .. } => Seen::DeclarationComplete(declared),
             LoadEvent::Projected(g) => Seen::Projected(g.id.as_str().to_owned()),
             LoadEvent::Joined(g) => Seen::Joined(g.id.as_str().to_owned()),
@@ -338,13 +340,14 @@ fn stopping_midway_through_projection_keeps_what_is_done() {
         "the gears not reached are still pending, not lost"
     );
     // The invariant, not the number: nothing discovered is lost on a stop. The
-    // total is the corpus's description count -- forty-four since the
-    // implemented gears were described -- and it is written out rather than
-    // read from the scan so that a gear vanishing between discovery and
-    // projection cannot satisfy both sides of the equation at once.
+    // total is the corpus's description count -- fifty-six since `gear.toml`
+    // was retired: forty-five gears with code and eleven designs -- and it is
+    // written out rather than read from the scan so that a gear vanishing
+    // between discovery and projection cannot satisfy both sides of the
+    // equation at once. Designs complete in the first pass, before the stop.
     assert_eq!(
-        scan.catalogue.gears.len() + scan.pending.len(),
-        44,
-        "every discovered gear is either projected or pending"
+        scan.catalogue.gears.len() + scan.pending.len() + scan.catalogue.designs.len(),
+        56,
+        "every discovered description is projected, pending or a design"
     );
 }

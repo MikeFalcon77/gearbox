@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **102**.
+Codes: **103**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -432,6 +432,7 @@ nothing pointing back at the description.
 | [GBX0318](#gbx0318) | warning | a gear's roles cannot all be deployed |
 | [GBX0319](#gbx0319) | error | an application names a role its anchor does not declare |
 | [GBX0320](#gbx0320) | warning | two applications register the same directory name |
+| [GBX0321](#gbx0321) | error | gear is at design maturity |
 
 ### GBX0301
 
@@ -716,6 +717,17 @@ the third can collide.
 service is load balancing; between two that own disjoint state it is
 corruption, and only the gear can say which it is
 (ADR `cpt-gearbox-adr-one-per-installation`).
+
+### GBX0321
+
+**gear is at design maturity**
+
+A product selects a gear that is described but has no code yet.
+
+`maturity = "design"` in its `gear.gdl`: the catalogue knows the gear's
+id, purpose and documents, and there is no crate to link. Distinct from
+GBX0301 because "not in the catalogue" sends the reader looking for a
+typo or a closed source root, and neither is the problem.
 
 ## `GBX04xx` — Contract bindings and severability
 

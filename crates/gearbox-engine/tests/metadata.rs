@@ -58,7 +58,9 @@ fn gear<'a>(c: &'a Catalogue, id: &str) -> &'a gearbox_ir::GearDescriptor {
 ///
 /// Written down here rather than read from disk on purpose: `gear.toml` landed on
 /// `main` after this checkout, so the values were taken from the repository and
-/// pinned. If they change, this test is where the disagreement surfaces.
+/// pinned. The files are gone now -- folded into each `gear.gdl` (ADR-0002,
+/// Amendment 2026-10-02) -- and the pins are what proves the move kept them.
+/// If they change, this test is where the disagreement surfaces.
 const PLATFORM_CATEGORIES: &[(&str, &str)] = &[
     ("api-gateway", "api-ingress"),
     ("authn-resolver", "core-platform-integration"),

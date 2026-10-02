@@ -236,7 +236,8 @@ Positional. States that this description is invalid. Not a branch.
 
 ```
 gear(
-  package,                          # cargo, required
+  package,                          # cargo, required unless maturity = "design"
+  maturity?,                        # "stable" (default) or "design"
   name?, description?, category?, visibility?,
   sdk?,                             # cargo, where this gear's own SDK crate lives
   extension_points = [],            # extension_point(...), points plugins fill
@@ -274,6 +275,38 @@ These fields are accepted only to be refused by name (**GBX0210**). They live in
 | `cluster_providers` | `ClusterGear::provider_registry()` |
 
 `lifecycle(...)` exists as a constructor (`entry?`, `stop_timeout?`, `await_ready = False`) so a restatement can be named. Passing it to `gear()` is still **GBX0210**.
+
+### `maturity = "design"`: a gear with no code yet
+
+A gear can be described before its crate exists: what it is for, where its documents are, and
+the id it will have. It is listed in the catalogue apart from the gears that can be used
+(`Catalogue.designs`), nothing is projected, and a product that names it is **GBX0321** -- not
+GBX0301, because the gear is neither a typo nor in a closed source root.
+
+```python
+gear(
+    maturity = "design",
+    id = "approval-service",
+    name = "Approval Service",
+    description = "Multi-step approvals for tenant operations.",
+    category = "core-functionality",
+    sdk = cargo(crate_name = "cf-approval-sdk", lib = "approval_sdk", path = "approval-sdk"),  # when one exists
+)
+```
+
+The rules:
+
+- `id` is required, and must be a gear id. It is the one place an id is declared: a stable
+  gear's id is projected, and restating it stays **GBX0210**.
+- `name`, `description`, `category`, `sdk` and `docs` are the whole vocabulary. Everything else
+  describes code -- `package`, `implements`, `extension_points`, `provides`, `serves`,
+  `visibility` and the rest -- and is refused at evaluation.
+- Documents are found by the same convention as for any gear, beside the description.
+- A design id that also has a gear with code is **GBX0105**, the same code as a gear declared
+  twice: the design description has been outgrown and should be deleted.
+
+This is what replaced the platform's `gear.toml` for the gears that had only documents
+(ADR-0002, Amendment 2026-10-02).
 
 ---
 

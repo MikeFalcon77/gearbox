@@ -310,3 +310,67 @@ fn the_old_fills_keyword_names_what_it_became() {
         "got: {message}"
     );
 }
+
+/// The message of the first diagnostic, for the refusal tests below.
+fn refusal(src: &str) -> String {
+    let out = GdlEngine::new().eval_gear(&identity(), src);
+    assert!(out.value.is_none(), "`{src}` should not evaluate");
+    out.diagnostics.as_slice()[0].message.clone()
+}
+
+#[test]
+fn a_design_gear_names_its_id_and_has_no_package() {
+    let (decl, codes) = eval(
+        r#"gear(maturity = "design", id = "approval-service", name = "Approval Service",
+                sdk = cargo(crate_name = "approval-sdk", lib = "approval_sdk", path = "sdk"))"#,
+    );
+    assert!(codes.is_empty(), "{codes:?}");
+    let decl = decl.expect("evaluates");
+    assert_eq!(decl.maturity, gearbox_gdl::Maturity::Design);
+    assert_eq!(decl.id.as_deref(), Some("approval-service"));
+    assert!(decl.package.is_none());
+}
+
+#[test]
+fn a_design_gear_without_an_id_is_refused() {
+    let message = refusal(r#"gear(maturity = "design", name = "X")"#);
+    assert!(message.contains("names its own id"), "got: {message}");
+}
+
+#[test]
+fn a_design_gear_id_must_be_a_gear_id() {
+    let message = refusal(r#"gear(maturity = "design", id = "Not Kebab")"#);
+    assert!(message.contains("not a valid gear id"), "got: {message}");
+}
+
+#[test]
+fn a_design_gear_refuses_what_describes_code() {
+    for field in [
+        r#"package = cargo(crate_name = "p", lib = "p")"#,
+        r#"implements = "cf.core.authn_resolver.plugin.v1~""#,
+        "runtime_caps = [cap.rest]",
+        r#"visibility = "public""#,
+    ] {
+        let message = refusal(&format!(r#"gear(maturity = "design", id = "x", {field})"#));
+        assert!(
+            message.contains("a design gear has none yet"),
+            "`{field}`: got {message}"
+        );
+    }
+}
+
+#[test]
+fn an_unknown_maturity_is_refused() {
+    let message = refusal(
+        r#"gear(maturity = "planned", package = cargo(crate_name = "p", lib = "p"))"#,
+    );
+    assert!(message.contains("unknown maturity `planned`"), "got: {message}");
+}
+
+#[test]
+fn a_stable_gear_still_may_not_restate_its_id() {
+    let (_, codes) = eval(
+        r#"gear(maturity = "stable", id = "x", package = cargo(crate_name = "p", lib = "p"))"#,
+    );
+    assert_eq!(codes, [DiagnosticCode::ValidateRestatement]);
+}

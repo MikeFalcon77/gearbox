@@ -75,11 +75,10 @@ pub fn expand(
                 .iter()
                 .find(|s| &s.gear == gear)
                 .and_then(|s| s.declared_at.clone());
-            diagnostics.push(unknown(
-                gear,
-                None,
-                gearbox_ir::Location::or_file(declared_at.as_ref(), uri),
-            ));
+            let at = gearbox_ir::Location::or_file(declared_at.as_ref(), uri);
+            diagnostics.push(
+                at_design(catalogue, gear, &at).unwrap_or_else(|| unknown(gear, None, at)),
+            );
             continue;
         }
         closure
@@ -102,11 +101,11 @@ pub fn expand(
                 continue;
             }
             if !catalogue.gears.contains_key(&plugin.gear) {
-                diagnostics.push(unknown_plugin(
-                    &plugin.gear,
-                    &selection.gear,
-                    gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri),
-                ));
+                let at = gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri);
+                diagnostics.push(
+                    at_design(catalogue, &plugin.gear, &at)
+                        .unwrap_or_else(|| unknown_plugin(&plugin.gear, &selection.gear, at)),
+                );
                 continue;
             }
             let reason = InclusionReason::PluginOf {
@@ -130,7 +129,11 @@ pub fn expand(
         };
         for dep in &descriptor.colocated_deps {
             if !catalogue.gears.contains_key(dep) {
-                diagnostics.push(unknown(dep, Some(&current), Location::file(uri.to_owned())));
+                let at = Location::file(uri.to_owned());
+                diagnostics.push(
+                    at_design(catalogue, dep, &at)
+                        .unwrap_or_else(|| unknown(dep, Some(&current), at)),
+                );
                 continue;
             }
             let reason = InclusionReason::ColocatedBy {
@@ -183,6 +186,38 @@ fn applies(
     profile: &gearbox_ir::ProfileId,
 ) -> bool {
     profiles.is_empty() || profiles.contains(profile)
+}
+
+/// GBX0321, when a gear absent from `gears` is a design gear.
+///
+/// Asked before "unknown gear" at every place a gear id fails to resolve:
+/// GBX0301 says to look for a typo or a closed source root, and for a design
+/// gear neither is the answer. Shared with `validate`, which checks
+/// selections without resolving.
+pub(crate) fn at_design(catalogue: &Catalogue, gear: &GearId, at: &gearbox_ir::Location) -> Option<Diagnostic> {
+    let design = catalogue.designs.get(gear)?;
+    Some(
+        Diagnostic::error(
+            DiagnosticCode::TopologyDesignGear,
+            format!(
+                "`{gear}` is at design maturity: it is described, and there is no crate to \
+                 build yet"
+            ),
+            format!(
+                "`{}` in source `{}` says `maturity = \"design\"`; leave the gear out of the \
+                 product until it has code{}",
+                design.gdl_path,
+                design.source,
+                design
+                    .docs
+                    .as_ref()
+                    .and_then(|d| d.prd.as_ref().or(d.design.as_ref()))
+                    .map(|doc| format!(", and see `{doc}` for what is planned"))
+                    .unwrap_or_default()
+            ),
+        )
+        .at(at.clone()),
+    )
 }
 
 /// A plugin named under a host that the catalogue does not have.

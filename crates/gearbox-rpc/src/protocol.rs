@@ -11,7 +11,7 @@
 
 use gearbox_ir::{
     ConfigValue, Diagnostic, ExplanationGraph, FileAction, FilePlan, GearDescriptor, Ownership,
-    PendingGear, ProductIntent, ResolvedProduct,
+    DesignGear, PendingGear, ProductIntent, ResolvedProduct,
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -941,6 +941,9 @@ pub struct CatalogueLoadResult {
     /// denominator immediately.
     pub total: u32,
     pub pending: Vec<PendingGear>,
+    /// Gears at design maturity. Complete as declared, so they arrive here
+    /// and never as `gearbox/catalogueChanged`: there is nothing to project.
+    pub designs: Vec<DesignGear>,
     /// Diagnostics raised while evaluating descriptions. Projection diagnostics
     /// arrive later, with the gears they belong to.
     pub diagnostics: Vec<Diagnostic>,

@@ -544,6 +544,49 @@ pub struct PendingGear {
     pub category: Option<String>,
 }
 
+/// A gear described before it has code: `maturity = "design"` in its `gear.gdl`.
+///
+/// **A separate collection, not a state of [`GearDescriptor`].** A descriptor's
+/// facts are projected from a crate -- its package, capabilities, contracts --
+/// and a design gear has none, so as a descriptor every one of them would be a
+/// default standing in for "unknown", and every consumer of `gears` would have
+/// to learn to skip it. Kept apart, the resolver and the generator never see a
+/// design gear at all, and the one thing that does -- naming it in
+/// `use_gear(...)` -- gets its own diagnostic (GBX0321) instead of
+/// "unknown gear".
+///
+/// What it carries is what the platform's `gear.toml` carried for these gears
+/// before it was retired: a name, a description, a category, plus where its
+/// SDK and documents are.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DesignGear {
+    /// Declared, not projected: there is no attribute yet to project it from.
+    pub id: GearId,
+
+    pub display_name: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+
+    pub source: SourceId,
+
+    pub gdl_path: RelPath,
+
+    /// The SDK crate, when one exists ahead of the gear -- `llm-gateway` and
+    /// `model-registry` publish their SDKs first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sdk: Option<CargoRef>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<GearDocs>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_at: Option<crate::diagnostics::Location>,
+}
+
 /// Documents describing one gear, all relative to its source root.
 ///
 /// Paths rather than content: the catalogue stays small, and an editor can open
@@ -771,6 +814,11 @@ pub struct Catalogue {
     pub gears: BTreeMap<GearId, GearDescriptor>,
     pub contracts: BTreeMap<ContractId, ContractDescriptor>,
     pub sources: BTreeMap<SourceId, ResolvedSource>,
+
+    /// Gears described before they have code. Never resolved; see
+    /// [`DesignGear`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub designs: BTreeMap<GearId, DesignGear>,
 
     /// Problems found while building the catalogue.
     #[serde(default)]

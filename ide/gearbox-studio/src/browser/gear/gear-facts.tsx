@@ -66,7 +66,9 @@ export function GearDocs({
   descriptor,
   reveals,
 }: {
-  readonly descriptor?: GearDescriptor;
+  // Only where the documents are, so a design gear -- which has documents
+  // and nothing projected -- renders through the same component.
+  readonly descriptor?: Pick<GearDescriptor, "docs" | "source">;
   readonly reveals: RevealService;
 }): React.ReactElement | null {
   const docs = descriptor?.docs;

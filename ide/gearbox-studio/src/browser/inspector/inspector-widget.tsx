@@ -218,6 +218,39 @@ export class InspectorWidget extends ReactWidget {
       );
     }
 
+    if (row.kind === "design") {
+      // Complete, not waiting: there is nothing to parse. What it lacks is
+      // code, and saying so is why it has no "Add to product".
+      return (
+        <div className="gbx-detail" data-design-gear={row.gear.id}>
+          <div className="gbx-detail-title">
+            {row.gear.display_name}
+            <span className="gbx-badge gbx-design">design</span>
+          </div>
+          <div className="gbx-kv">
+            <span>id</span>
+            <span>
+              <code>{row.gear.id}</code>
+            </span>
+          </div>
+          <div className="gbx-kv">
+            <span>description</span>
+            <span>{row.gear.description ?? "—"}</span>
+          </div>
+          <div className="gbx-kv">
+            <span>category</span>
+            <span>{row.gear.category ?? "—"}</span>
+          </div>
+          <GearDocs descriptor={row.gear} reveals={this.reveals} />
+          {this.renderPath(row.gear.source, row.gear.gdl_path)}
+          <div className="gbx-empty">
+            Described at design maturity: there is no crate yet, so it cannot be added to a
+            product. Its documents say what is planned.
+          </div>
+        </div>
+      );
+    }
+
     return (
       <>
         {this.renderProjected(row.gear)}

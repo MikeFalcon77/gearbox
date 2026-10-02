@@ -33,6 +33,14 @@ use crate::records::{ConsumeRecord, ProvideRecord, RoleRecord};
 /// [`crate::engine`] converts.
 #[derive(Debug, Clone, Default)]
 pub struct GearDecl {
+    /// How far the gear has got: code to project, or a description of intent.
+    pub maturity: Maturity,
+    /// The id, written only by a design gear.
+    ///
+    /// A stable gear's id is projected from `#[toolkit::gear(name = ...)]` and
+    /// restating it is GBX0210. A design gear has no attribute to project it
+    /// from, so it is the one place the id is declared.
+    pub id: Option<String>,
     pub name: Option<String>,
     pub description: Option<String>,
     pub category: Option<String>,
@@ -74,6 +82,21 @@ pub struct GearDecl {
     pub cargo_features: Option<Vec<crate::records::FeatureRecord>>,
     /// Where the `gear(...)` call was written in the description.
     pub declared_at: Option<gearbox_ir::Location>,
+}
+
+/// `maturity = "..."` on a `gear(...)`.
+///
+/// `Design` is a gear described before it has code: it names an id, says what
+/// the gear is for and where its documents are, and stops there. It has no
+/// `package`, so nothing is projected and nothing can be resolved into a
+/// product; the catalogue lists it apart from the gears that can be used.
+/// This is what replaced the platform's `gear.toml` for the gears that had
+/// only documents.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Maturity {
+    #[default]
+    Stable,
+    Design,
 }
 
 /// The raw result of one `product(...)` call.

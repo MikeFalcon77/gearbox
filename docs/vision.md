@@ -339,9 +339,12 @@ gear(
 )
 ```
 
-There is no `gear.toml` to migrate away from: `find . -name gear.toml` over `gears-rust` returns
-nothing. Descriptive metadata of that shape exists nowhere today, which is exactly what makes
-`gear.gdl` genuinely new information rather than a re-encoding of something already written down.
+There is no `gear.toml` to migrate away from. When this was written, `find . -name gear.toml` over
+`gears-rust` returned nothing. The platform later added 41 of them for catalogue discovery, read by
+no code; they carried a name, a description, a category and three role flags, and were folded into
+`gear.gdl` (ADR-0002, Amendment 2026-10-02): the three descriptive fields moved as they were, the
+flags follow from what a description declares, and a gear with only documents is described at
+`maturity = "design"`.
 
 ---
 
@@ -2677,7 +2680,8 @@ Cargo features
 handwritten registration code
 ```
 
-There is no `gear.toml`; that file does not exist in the repository.
+There is no `gear.toml`: the descriptive files the platform added for a while were folded into
+`gear.gdl` (ADR-0002, Amendment 2026-10-02).
 
 Adopting Gearbox is **additive**. No attribute is migrated away from, rewritten, or
 deleted. The attributes keep every fact they already carry, and `gear.gdl` is added beside the crate

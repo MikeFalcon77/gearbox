@@ -120,7 +120,8 @@ test.describe("projected facts", () => {
       ),
     );
     expect(groups.length).toBeGreaterThan(1);
-    // The seven values come from `gear.toml` files the platform team committed.
+    // The seven values come from `gear.toml` files the platform team committed,
+    // since folded into each `gear.gdl`.
     // "platform" is not one of them, and its appearance would mean the widget had
     // invented a bucket.
     expect(groups).not.toContain("platform");

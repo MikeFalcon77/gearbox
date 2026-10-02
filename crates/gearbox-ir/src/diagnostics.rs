@@ -842,6 +842,14 @@ diagnostic_codes! {
     /// (ADR `cpt-gearbox-adr-one-per-installation`).
     TopologyDuplicateRegistration = "GBX0320", Topology, Warning, false, "two applications register the same directory name";
 
+    /// A product selects a gear that is described but has no code yet.
+    ///
+    /// `maturity = "design"` in its `gear.gdl`: the catalogue knows the gear's
+    /// id, purpose and documents, and there is no crate to link. Distinct from
+    /// GBX0301 because "not in the catalogue" sends the reader looking for a
+    /// typo or a closed source root, and neither is the problem.
+    TopologyDesignGear = "GBX0321", Topology, Error, false, "gear is at design maturity";
+
     // ---------------------------------------------------------------- GBX04xx
     /// This consumer and provider could be placed in separate processes, but the
     /// dependency between them is not declared as a contract consumption.

@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 102, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 103, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -406,6 +406,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "warning",
     domain: "topology",
     docs: "Two applications register the same name in the directory.\n\nA worker registers one name -- its own, or its role's. A host registers\none per REST provider it contains, plus one per gRPC provider, each\nunder that gear's own name. So the same name can be registered twice:\nby a host that reaches a gear through its closure, and by a worker\nanchored on that same gear because a description forced it out. A\nconsumer resolving the name then round-robins between two endpoints\nwith nothing marking either as the one meant.\n\n**Not about linking.** A gear compiled into several binaries is expected\nand correct -- co-location is a closure, not a partition -- and produces\nno second registration by itself: a gear linked into a worker anchored\non something else is not registered there at all. Linked, serving\nroutes, and registered under a name are three different sets, and only\nthe third can collide.\n\n**A warning ordinarily and an error for a gear declared\n`one_per_installation`.** Round-robin between two copies of a stateless\nservice is load balancing; between two that own disjoint state it is\ncorruption, and only the gear can say which it is\n(ADR `cpt-gearbox-adr-one-per-installation`).",
+    requiresEvidence: false,
+  },
+  GBX0321: {
+    code: "GBX0321",
+    title: "gear is at design maturity",
+    severity: "error",
+    domain: "topology",
+    docs: "A product selects a gear that is described but has no code yet.\n\n`maturity = \"design\"` in its `gear.gdl`: the catalogue knows the gear's\nid, purpose and documents, and there is no crate to link. Distinct from\nGBX0301 because \"not in the catalogue\" sends the reader looking for a\ntypo or a closed source root, and neither is the problem.",
     requiresEvidence: false,
   },
   GBX0401: {

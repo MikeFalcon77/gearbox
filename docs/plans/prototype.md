@@ -59,7 +59,7 @@ Verified against `gears-rust` (all claims spot-checked in source):
 
 | Fact | Evidence | Consequence for GDL |
 |---|---|---|
-| No gear manifest exists. Gear metadata lives **only** in `#[toolkit::gear(name, deps, capabilities, ctor, client, lifecycle)]`, and no `gear.toml` exists anywhere (`find -name gear.toml` = 0) | `libs/toolkit-macros/src/lib.rs` | `gear.gdl` carries **only** genuinely new information — enforced, not merely intended, by `cpt-gearbox-fr-gdl-no-restatement` |
+| No gear manifest exists. Gear metadata lives **only** in `#[toolkit::gear(name, deps, capabilities, ctor, client, lifecycle)]`, and no `gear.toml` exists anywhere (`find -name gear.toml` = 0; the platform added some later, folded into `gear.gdl` on 2026-10-02) | `libs/toolkit-macros/src/lib.rs` | `gear.gdl` carries **only** genuinely new information — enforced, not merely intended, by `cpt-gearbox-fr-gdl-no-restatement` |
 | The gear attribute's location is not uniform: 34 of 44 at `src/gear.rs`, 8 at `src/module.rs`, 2 nested; and `gears/mini-chat/mini-chat` declares **three** gears in one crate | `grep -rln '#\[toolkit::gear('` over `gears/` + `examples/` | projection needs a locator: scan `src/` by default, optional `cargo(attr = …)` to narrow, exactly-one-match required (`cpt-gearbox-fr-attribute-location`) |
 | `capabilities` is a **closed set of 7**: `db, rest, rest_host, stateful, system, grpc_hub, grpc` | same, `Capability` enum | GDL exposes exactly these, nothing more |
 | **`deps` means link-time co-location** — the macro emits `pub use ::crate as _gear_dep_x` to keep `inventory::submit!` alive | same | must be named so it can't be confused with contract consumption |

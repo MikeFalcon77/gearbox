@@ -100,6 +100,7 @@ fn slice() -> Catalogue {
     Catalogue {
         gears: gears.into_iter().map(|g| (g.id.clone(), g)).collect(),
         contracts: BTreeMap::new(),
+        designs: BTreeMap::new(),
         sources: BTreeMap::from([(
             source_id(),
             ResolvedSource {
