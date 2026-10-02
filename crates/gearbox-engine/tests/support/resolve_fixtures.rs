@@ -61,7 +61,7 @@ pub fn descriptor(id: &str) -> GearDescriptor {
         client_trait: None,
         cluster_providers: Vec::new(),
         extension_points: Vec::new(),
-        fills: None,
+        implements: None,
         vendor_selector: None,
         declared_roles: Vec::new(),
         available_features: BTreeSet::new(),

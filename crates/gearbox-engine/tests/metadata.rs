@@ -233,7 +233,9 @@ fn an_openapi_spec_is_claimed_only_by_the_gears_that_have_one() {
     // for none of the others. Describing the rest of the corpus added two more
     // that are real: `gears/chat-engine/docs/openapi.json` and
     // `gears/mini-chat/docs/openapi.json` -- and none for the other thirty-nine
-    // gears, mini-chat's two co-located plugins included.
+    // gears, mini-chat's two co-located plugins included. mini-chat's spec was
+    // later removed from the corpus (gears-rust 00e182646), and its claim with
+    // it: the convention follows the file, not a memory of it.
     let c = require!();
     let claimed: Vec<&str> = c
         .gears
@@ -243,13 +245,7 @@ fn an_openapi_spec_is_claimed_only_by_the_gears_that_have_one() {
         .collect();
     assert_eq!(
         claimed,
-        [
-            "chat-engine",
-            "credstore",
-            "event-broker",
-            "mini-chat",
-            "resource-group"
-        ],
+        ["chat-engine", "credstore", "event-broker", "resource-group"],
         "openapi claims moved"
     );
 }

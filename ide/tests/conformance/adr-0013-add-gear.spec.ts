@@ -115,7 +115,7 @@ test.describe("Add Gear shows consequences before the write", () => {
     // catalogue, chose `oidc-authn-plugin`, and was told it would join the
     // closure as a "plugin of types-registry". The data to refuse that was
     // already on the wire in both directions -- the host's `extension_points`
-    // and the plugin's `fills.point` -- so the offer was the defect.
+    // and the plugin's `implements.point` -- so the offer was the defect.
     const page = studio.page;
     await configure(page, "types-registry");
     await expect(page.locator("[data-add-gear-plugins]")).toBeVisible({ timeout: 60_000 });
@@ -129,7 +129,7 @@ test.describe("Add Gear shows consequences before the write", () => {
     studio,
   }) => {
     // `tenant-resolver` declares one point, and three gears in the corpus fill
-    // it; `oidc-authn-plugin` fills a different SDK's trait and must not be on
+    // it; `oidc-authn-plugin` implements a different SDK's trait and must not be on
     // offer here. The join key is the pair, never a derived short name -- see
     // `common/extension-points.ts`.
     const page = studio.page;
@@ -266,7 +266,7 @@ test.describe("Add Gear shows consequences before the write", () => {
       await revealCatalogue(page);
       await resetCatalogueView(page);
 
-      // `oidc-authn-plugin` fills the point `authn-resolver` declares, and the
+      // `oidc-authn-plugin` implements the point `authn-resolver` declares, and the
       // product has that host -- so this is the case that works.
       await page.locator('[data-toggle-gear="oidc-authn-plugin"]').click();
       await expect(page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
@@ -314,7 +314,7 @@ test.describe("Add Gear shows consequences before the write", () => {
 
       // **And the host does not survive a change of plugin.** It used to: the
       // next plugin was reported as "already attached to authn-resolver" while
-      // the section above correctly said that host declares no point it fills.
+      // the section above correctly said that host declares no point it implements.
       //
       // Straight to the next candidate, with no "choose a different gear" step.
       // The panel needed one because the picker and the overview shared a slot,

@@ -392,16 +392,16 @@ pub struct GearDescriptor {
     ///
     /// Declared in the description by GTS spec and verified against the SDK. A
     /// gear may have several: `mini-chat` declares an audit point and a
-    /// model-policy point, each filled independently.
+    /// model-policy point, each implemented independently.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extension_points: Vec<ExtensionPointDecl>,
 
-    /// The extension point this gear *fills*, if it is a plugin.
+    /// The extension point this gear *implements*, if it is a plugin.
     ///
     /// Declared, like the host's side. A gear may be both: bss-rate-provider
-    /// fills the ledger's point and declares one of its own.
+    /// implements the ledger's point and declares one of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fills: Option<PluginFill>,
+    pub implements: Option<PluginImpl>,
 
     /// The vendor string this gear's config selects a plugin by.
     ///
@@ -627,7 +627,7 @@ pub struct GtsTypeDecl {
 pub struct ExtensionPointDecl {
     /// The full GTS type id of the plugin spec, e.g.
     /// `cf.toolkit.plugins.plugin.v1~cf.core.authn_resolver.plugin.v1~`. The
-    /// join key: a plugin's [`PluginFill::spec`] matches this.
+    /// join key: a plugin's [`PluginImpl::spec`] matches this.
     pub spec: String,
 
     /// The interface plugins register under, as written, e.g.
@@ -664,10 +664,10 @@ impl ExtensionPointDecl {
     }
 }
 
-/// The extension point a plugin gear fills.
+/// The extension point a plugin gear implements.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct PluginFill {
-    /// The full GTS type id of the spec this plugin fills; matches
+pub struct PluginImpl {
+    /// The full GTS type id of the spec this plugin implements; matches
     /// [`ExtensionPointDecl::spec`] on its host.
     pub spec: String,
 
@@ -691,8 +691,8 @@ pub struct PluginFill {
     pub default_priority: Option<i64>,
 }
 
-impl PluginFill {
-    /// How the filled point is spelled in diagnostics: the host's trait when the
+impl PluginImpl {
+    /// How the implemented point is spelled in diagnostics: the host's trait when the
     /// catalogue has joined it, the spec when no described gear declares it.
     #[must_use]
     pub fn describe(&self) -> String {
@@ -798,7 +798,7 @@ impl Catalogue {
     pub fn implementations_of(&self, point: &ExtensionPointDecl) -> Vec<&GearDescriptor> {
         self.gears
             .values()
-            .filter(|g| g.fills.as_ref().is_some_and(|f| f.spec == point.spec))
+            .filter(|g| g.implements.as_ref().is_some_and(|f| f.spec == point.spec))
             .collect()
     }
 

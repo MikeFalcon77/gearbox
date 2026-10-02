@@ -437,7 +437,7 @@ contract has no projection for, and **MUST NOT** accept a declared transport lis
 - [ ] `p1` - **ID**: `cpt-gearbox-fr-plugin-extension-points`
 
 The system **MUST** take a gear's plugin extension points and the point it fills from its
-description, keyed by GTS plugin spec (`extension_point(...)`, `fills`), **MUST** verify each
+description, keyed by GTS plugin spec (`extension_point(...)`, `implements`), **MUST** verify each
 declared point against the SDK -- the spec a `PluginV1`-derived type it declares, the trait a
 `pub trait` in the crate the point names -- **MUST** report a fill no described gear declares,
 **MUST** read each side's `vendor` and `priority` defaults from both the `impl Default` and the

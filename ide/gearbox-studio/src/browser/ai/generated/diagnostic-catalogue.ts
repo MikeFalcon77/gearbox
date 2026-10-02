@@ -647,7 +647,7 @@ export const DIAGNOSTIC_CATALOGUE: {
   },
   GBX0518: {
     code: "GBX0518",
-    title: "plugin fills a point its host does not declare",
+    title: "plugin implements a point its host does not declare",
     severity: "error",
     domain: "cluster",
     docs: "A gear lists a plugin under a host that does not declare that point.\n\nThe gap [`PluginHostNotSelected`] leaves. That code asks whether *some*\nselected gear expects the plugin's point, which is the right question for\na plugin selected as an ordinary gear -- and it says nothing about the\n`plugins = [...]` list a plugin was actually written into. So a product\ncould list an authentication plugin under `types-registry`, whose\nprojected `extension_points` is empty, and be told nothing: the host\nlooks for no implementation, the plugin registers for a trait nobody\nqueries, and the link is inert.\n\nFound by a UX pass rather than by a resolution, which is the useful part:\nthe Add Gear panel offered the choice because nothing refused it, and a\nclient is not a boundary (`cpt-gearbox-fr-rpc-writes-opt-in`).",
@@ -655,10 +655,10 @@ export const DIAGNOSTIC_CATALOGUE: {
   },
   GBX0519: {
     code: "GBX0519",
-    title: "plugin fills a point no described gear declares",
+    title: "plugin implements a point no described gear declares",
     severity: "error",
     domain: "cluster",
-    docs: "A plugin fills a spec no described gear declares as an extension point.\n\nThe plugin names only the spec; which trait and which SDK are the host's\nto say. With no host describing it, the fill has nothing to join to, so\nit is reported rather than left to look connected.",
+    docs: "A plugin implements a spec no described gear declares as an extension point.\n\nThe plugin names only the spec; which trait and which SDK are the host's\nto say. With no host describing it, the fill has nothing to join to, so\nit is reported rather than left to look connected.",
     requiresEvidence: false,
   },
   GBX0520: {
@@ -715,7 +715,7 @@ export const DIAGNOSTIC_CATALOGUE: {
     title: "a plugin implements none of its point's trait",
     severity: "warning",
     domain: "cluster",
-    docs: "A gear declares it fills a point, and its crate implements none of that\npoint's trait.\n\nA warning, because the implementation is evidence and not the source of\nthe role: an impl can sit in a generic wrapper or a macro this reader\ncannot see. But the ordinary cause is a `fills` naming the wrong spec,\nand that one is worth a line.",
+    docs: "A gear declares it implements a point, and its crate implements none of that\npoint's trait.\n\nA warning, because the implementation is evidence and not the source of\nthe role: an impl can sit in a generic wrapper or a macro this reader\ncannot see. But the ordinary cause is an `implements` naming the wrong spec,\nand that one is worth a line.",
     requiresEvidence: false,
   },
   GBX0602: {

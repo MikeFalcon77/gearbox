@@ -1984,7 +1984,7 @@ fn scaffold_gear(state: &mut State, id: RequestId, params: &ScaffoldGearParams) 
         return error(
             id,
             error_code::EDIT_REFUSED,
-            "`plugin` describes what a plugin fills, so it only applies to `kind = \"plugin\"`",
+            "`plugin` describes what a plugin implements, so it only applies to `kind = \"plugin\"`",
         );
     }
 
@@ -2225,7 +2225,7 @@ fn rel_path(path: &str) -> Result<RelPath, String> {
 /// **Comments, not values, and that is the whole design.** Every one of these
 /// fields is either projected from Rust or checked against it: a `category` this
 /// method invented would draw GBX's unknown-category warning on the first load, a
-/// `fills` naming a spec no described gear declares is refused (GBX0519), and an
+/// `implements` naming a spec no described gear declares is refused (GBX0519), and an
 /// `sdk` locator pointing at a directory that does not exist makes the gear fail
 /// to load. So the shape's job is to put the next declaration **where it goes**,
 /// with the sentence that says what decides it -- and to leave it commented until
@@ -2235,7 +2235,7 @@ fn gdl_shape(
     kind: crate::protocol::GearKind,
     plugin: Option<&crate::protocol::PluginScaffold>,
 ) -> std::borrow::Cow<'static, str> {
-    // A host chosen from a loaded catalogue makes the spec a fact, so `fills` is
+    // A host chosen from a loaded catalogue makes the spec a fact, so `implements` is
     // written live rather than as the comment the rest of this function returns.
     // The comment exists because a spec nobody declares is GBX0519; one the
     // engine itself reported a host declaring is not.
@@ -2245,7 +2245,7 @@ fn gdl_shape(
     std::borrow::Cow::Borrowed(gdl_shape_commented(kind))
 }
 
-/// The live `fills`, and where the trait it implements comes from.
+/// The live `implements`, and where the trait it implements comes from.
 ///
 /// Rendered through `quote_string`, not `{:?}`: this text is evaluated as GDL
 /// immediately afterwards, and Rust's debug escaping is not Starlark's.
@@ -2265,7 +2265,7 @@ fn plugin_shape(plugin: &crate::protocol::PluginScaffold) -> String {
     # from `{crate_name}` (`lib = "{lib}"`, at `{path}`) -- the catalogue warns
     # (GBX0526) while nothing in this crate does. A plugin declares no `sdk`: the
     # host's SDK is the host's.
-    fills = {spec},
+    implements = {spec},
 
     # A plugin's own `vendor` and `priority` are the join key its host's selector
     # matches against, and both are read from this crate's config struct. What is
@@ -2337,7 +2337,7 @@ fn gdl_shape_commented(kind: crate::protocol::GearKind) -> &'static str {
     # config_schema = config(exposes = ["bind_addr"]),
 "#
         }
-        // A gear that fills another gear's extension point. `fills` is the
+        // A gear that implements another gear's extension point. `implements` is the
         // declaration that makes it one, and it stays commented until it names
         // a spec some described gear declares -- otherwise it is GBX0519.
         crate::protocol::GearKind::Plugin => {
@@ -2347,11 +2347,11 @@ fn gdl_shape_commented(kind: crate::protocol::GearKind) -> &'static str {
     # visibility = "internal",
 
     # **The declaration that makes this a plugin**: the GTS spec of the point it
-    # fills, as its host declares it in `extension_points`. A spec no described
+    # implements, as its host declares it in `extension_points`. A spec no described
     # gear declares is refused (GBX0519), so uncomment it once the host is known.
     # A plugin declares no `sdk` -- the host's SDK is the host's.
     #
-    # fills = "cf.core.authn_resolver.plugin.v1~",
+    # implements = "cf.core.authn_resolver.plugin.v1~",
 
     # A plugin's own `vendor` and `priority` are the join key its host's selector
     # matches against, and both are read from this crate's config struct. What is
@@ -2408,7 +2408,7 @@ fn lib_source(
                 trait_ident = comment_safe(&plugin.trait_ident),
             ),
             None => String::from(
-                "\n// Next: choose what this plugin fills -- set `fills` in gear.gdl, add the\n\
+                "\n// Next: choose the point this plugin implements -- set `implements` in gear.gdl, add the\n\
                  // crate that declares the point's trait to Cargo.toml, and implement it.\n",
             ),
         },
@@ -2461,7 +2461,7 @@ fn lib_stub(kind: crate::protocol::GearKind) -> String {
              //\n\
              // Next, in this order:\n\
              //   1. add the crate that declares the point's trait to Cargo.toml,\n\
-             //      and set `fills` in gear.gdl to the point's spec -- that is\n\
+             //      and set `implements` in gear.gdl to the point's spec -- that is\n\
              //      what makes this gear a plugin;\n\
              //   2. impl that trait; the catalogue warns (GBX0526) while no\n\
              //      impl of it exists here;\n\

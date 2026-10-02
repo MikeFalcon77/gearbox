@@ -1,8 +1,8 @@
-//! Plugin extension points and fills: declared in the description, checked here.
+//! Plugin extension points and implements: declared in the description, checked here.
 //!
 //! **The role is declared, not read.** A host writes
 //! `extension_points = [extension_point("<spec>", trait = "...")]`; a plugin
-//! writes `fills = "<spec>"`. The key is the GTS spec every plugin family
+//! writes `implements = "<spec>"`. The key is the GTS spec every plugin family
 //! registers instances under and the host selects by, so two points over one
 //! trait stay two points (the ledger's rate provider and bss-rate-provider's
 //! sources both implement `bss_ledger_sdk::RateProviderV1`).
@@ -29,7 +29,7 @@ use std::collections::BTreeSet;
 use gearbox_gdl::GearDecl;
 use gearbox_gdl::engine::FileIdentity;
 use gearbox_ir::{
-    Diagnostic, DiagnosticCode, Diagnostics, ExtensionPointDecl, GtsTypeDecl, Location, PluginFill,
+    Diagnostic, DiagnosticCode, Diagnostics, ExtensionPointDecl, GtsTypeDecl, Location, PluginImpl,
 };
 use gearbox_project::RustFile;
 
@@ -45,9 +45,9 @@ pub const PLUGIN_BASE: &str = "cf.toolkit.plugins.plugin.v1~";
 pub struct PluginProjection {
     /// Points this gear lets plugins fill, each checked against its SDK.
     pub extension_points: Vec<ExtensionPointDecl>,
-    /// The point this gear fills, if it is a plugin. `point` is `None` here and
+    /// The point this gear implements, if it is a plugin. `point` is `None` here and
     /// set by the catalogue once the host is known.
-    pub fills: Option<PluginFill>,
+    pub implements: Option<PluginImpl>,
     /// The vendor string this gear's config selects by. Hosts only.
     pub vendor_selector: Option<String>,
     /// The traits this gear's own files implement outside tests; evidence for
@@ -173,7 +173,7 @@ pub fn project(
         });
     }
 
-    let fill = decl.fills.as_ref().map(|segment| PluginFill {
+    let fill = decl.implements.as_ref().map(|segment| PluginImpl {
         spec: format!("{PLUGIN_BASE}{segment}"),
         point: None,
         default_vendor: own_default.vendor.clone(),
@@ -191,7 +191,7 @@ pub fn project(
 
     PluginProjection {
         extension_points,
-        fills: fill,
+        implements: fill,
         vendor_selector,
         implemented: gearbox_project::implemented_traits(files),
     }

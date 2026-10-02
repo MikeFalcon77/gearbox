@@ -216,14 +216,14 @@ extension_points = [
 ],
 ```
 
-A plugin names the same segment: `fills = "cf.core.authn_resolver.plugin.v1~"`, and declares no
+A plugin names the same segment: `implements = "cf.core.authn_resolver.plugin.v1~"`, and declares no
 `sdk` -- the host's SDK is the host's.
 
 Both are checked, not trusted:
 
 - the spec must be a `PluginV1`-derived GTS type the gear's `sdk` declares, and the trait a
   `pub trait` in the crate the point names (GBX0516);
-- a `fills` no described gear declares is GBX0519;
+- an `implements` no described gear declares is GBX0519;
 - a plugin whose crate implements none of the point's trait gets a warning (GBX0526).
 
 Why declared: see ADR-0002, Amendment 2026-09-24.
@@ -240,7 +240,7 @@ gear(
   name?, description?, category?, visibility?,
   sdk?,                             # cargo, where this gear's own SDK crate lives
   extension_points = [],            # extension_point(...), points plugins fill
-  fills?,                           # spec segment of the point this plugin fills
+  implements?,                      # spec segment of the point this plugin implements
   docs?,                            # docs(...)
   provides = [],                    # provide(...)
   consumes = [],                    # consume(...)

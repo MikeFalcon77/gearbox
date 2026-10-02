@@ -318,7 +318,7 @@ fn implementations_by_point(
 ) -> BTreeMap<&str, Vec<&GearDescriptor>> {
     let mut by_point: BTreeMap<&str, Vec<&GearDescriptor>> = BTreeMap::new();
     for gear in catalogue.gears.values() {
-        if let Some(fill) = gear.fills.as_ref() {
+        if let Some(fill) = gear.implements.as_ref() {
             by_point.entry(fill.spec.as_str()).or_default().push(gear);
         }
     }
@@ -348,7 +348,7 @@ fn list_plugins(catalogue: &gearbox_ir::Catalogue, only: Option<&str>) -> bool {
                 continue;
             };
             for gear in impls {
-                let fill = gear.fills.as_ref();
+                let fill = gear.implements.as_ref();
                 let vendor = fill
                     .and_then(|f| f.default_vendor.as_deref())
                     .unwrap_or("<none>");
@@ -506,7 +506,7 @@ fn print_intent(intent: &gearbox_ir::ProductIntent) {
     println!("\n  gears");
     for selection in &intent.selected_gears {
         println!("    {} from {}", selection.gear, selection.source);
-        // Which extension point each fills is a catalogue fact, so it is not
+        // Which extension point each implements is a catalogue fact, so it is not
         // shown here: this command evaluates the product alone. `gearbox
         // plugins --product` resolves them against the catalogue.
         for plugin in &selection.plugins {
@@ -832,7 +832,7 @@ fn validate(
             if let Some(path) = product_file {
                 let selected = intent.as_ref().map_or(0, |i| i.selected_gears.len());
                 println!("  product {}: {selected} selected gear(s)", path.display());
-                // Per profile, because "is this point filled" only has an
+                // Per profile, because "is this point implemented" only has an
                 // answer once a profile is fixed.
                 let filled = checked
                     .plugins
@@ -1054,7 +1054,7 @@ mod tests {
 
     use gearbox_ir::{
         CargoRef, Catalogue, Diagnostic, DiagnosticCode, ExtensionPointDecl, GearDescriptor,
-        GearId, PluginFill, RelPath, SourceId, Visibility,
+        GearId, PluginImpl, RelPath, SourceId, Visibility,
     };
 
     use super::{
@@ -1085,7 +1085,7 @@ mod tests {
             client_trait: None,
             cluster_providers: Vec::new(),
             extension_points: Vec::new(),
-            fills: None,
+            implements: None,
             vendor_selector: None,
             declared_roles: Vec::new(),
             one_per_installation: false,
@@ -1122,7 +1122,7 @@ mod tests {
         host.vendor_selector = Some("constructorfabric".to_owned());
 
         let mut plugin = gear("static-authn-plugin");
-        plugin.fills = Some(PluginFill {
+        plugin.implements = Some(PluginImpl {
             spec: point().spec,
             point: Some(point()),
             default_vendor: Some("constructorfabric".to_owned()),

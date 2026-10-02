@@ -49,7 +49,7 @@ pub struct MergedGear {
     /// The traits this gear's own files implement outside tests.
     ///
     /// Not part of the descriptor: it is evidence the catalogue checks a
-    /// declared `fills` against once every host is known (GBX0526), and nothing
+    /// declared `implements` against once every host is known (GBX0526), and nothing
     /// a client should read a role from.
     pub implemented_traits: std::collections::BTreeSet<String>,
 }
@@ -359,9 +359,9 @@ pub fn merge(
         // `cluster_plugins` locates.
         cluster_providers: cluster.providers.clone(),
         // Declared, and checked against the SDK; see `plugin.rs`. A plugin's
-        // `fills.point` is joined to its host after every gear is loaded.
+        // `implements.point` is joined to its host after every gear is loaded.
         extension_points: plugin.extension_points.clone(),
-        fills: plugin.fills.clone(),
+        implements: plugin.implements.clone(),
         vendor_selector: plugin.vendor_selector.clone(),
         declared_roles,
         one_per_installation: projected.one_per_installation,
