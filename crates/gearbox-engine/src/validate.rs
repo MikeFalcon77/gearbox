@@ -158,6 +158,12 @@ fn check_selections(
         if scan.catalogue.gears.contains_key(&selection.gear) {
             continue;
         }
+        let at = gearbox_ir::Location::or_file(selection.declared_at.as_ref(), uri);
+        if let Some(design) = crate::resolve::closure::at_design(&scan.catalogue, &selection.gear, &at)
+        {
+            diagnostics.push(design);
+            continue;
+        }
 
         match crate::undescribed::find(roots, &selection.gear) {
             Some(found) => diagnostics.push(

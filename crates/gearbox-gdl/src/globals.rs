@@ -40,7 +40,7 @@ use crate::records::{
     DocsRecord, EndpointRecord, ExtensionPointRecord, FeatureRecord, GrpcRecord, LifecycleRecord,
     ProvideRecord, RestRecord, RoleRecord,
 };
-use crate::sink::{GdlSink, GearDecl};
+use crate::sink::{GdlSink, GearDecl, Maturity};
 use crate::values::GdlEnum;
 use crate::vocabulary;
 
@@ -429,7 +429,11 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] description: Option<&str>,
         #[starlark(require = named)] category: Option<&str>,
         #[starlark(require = named)] visibility: Option<&str>,
-        #[starlark(require = named)] package: &'v CargoRecord,
+        // Required at `stable`, refused at `design`: it is what tells the
+        // projector which crate to scan, and a design gear has none yet.
+        #[starlark(require = named)] package: Option<&'v CargoRecord>,
+        // `"stable"` (the default) or `"design"`. See `Maturity`.
+        #[starlark(require = named)] maturity: Option<&str>,
         // A locator, like `cluster_plugins`: nothing in a gear's own crate says
         // where its SDK lives, and the SDK is what declares the GTS types this
         // gear exposes and the traits its extension points name.
@@ -452,7 +456,8 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] config_schema: Option<&'v ConfigRecord>,
         #[starlark(require = named)] cargo_features: Option<UnpackList<&'v FeatureRecord>>,
         // Accepted only to be refused by name, so the diagnostic can say which
-        // attribute owns the fact instead of "unknown argument".
+        // attribute owns the fact instead of "unknown argument" -- except `id`
+        // on a design gear, which has no attribute to project it from.
         #[starlark(require = named)] id: Option<&str>,
         #[starlark(require = named)] runtime_caps: Option<UnpackList<&'v GdlEnum>>,
         #[starlark(require = named)] colocated_deps: Option<UnpackList<String>>,
@@ -463,8 +468,67 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] cluster_providers: Option<Value<'v>>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<NoneType> {
+        if fills.is_some() {
+            return Err(anyhow::anyhow!(
+                "`fills` was renamed to `implements`: write `implements = \"<spec>~\"`"
+            ));
+        }
+
+        let maturity = match maturity {
+            None | Some("stable") => Maturity::Stable,
+            Some("design") => Maturity::Design,
+            Some(other) => {
+                return Err(anyhow::anyhow!(
+                    "unknown maturity `{other}`: expected \"stable\" or \"design\""
+                ));
+            }
+        };
+
+        if maturity == Maturity::Design {
+            // What a design gear may say is what `gear.toml` said, plus where
+            // its SDK and documents are: everything else describes code.
+            for (present, field) in [
+                (package.is_some(), "package"),
+                (visibility.is_some(), "visibility"),
+                (extension_points.is_some(), "extension_points"),
+                (implements.is_some(), "implements"),
+                (provides.is_some(), "provides"),
+                (consumes.is_some(), "consumes"),
+                (requires.is_some(), "requires"),
+                (serves.is_some(), "serves"),
+                (cluster_plugins.is_some(), "cluster_plugins"),
+                (roles.is_some(), "roles"),
+                (config_schema.is_some(), "config_schema"),
+                (cargo_features.is_some(), "cargo_features"),
+                (runtime_caps.is_some(), "runtime_caps"),
+                (colocated_deps.is_some(), "colocated_deps"),
+                (lifecycle.is_some(), "lifecycle"),
+                (client.is_some(), "client"),
+                (cluster_providers.is_some(), "cluster_providers"),
+            ] {
+                if present {
+                    return Err(anyhow::anyhow!(
+                        "`{field}` describes code, and a design gear has none yet: remove it, \
+                         or declare `package = cargo(...)` and drop `maturity = \"design\"`"
+                    ));
+                }
+            }
+            let Some(id) = id else {
+                return Err(anyhow::anyhow!(
+                    "a design gear names its own id: write `id = \"<kebab-case>\"`. There is \
+                     no `#[toolkit::gear(name = ...)]` to project it from yet"
+                ));
+            };
+            gearbox_ir::GearId::new(id)
+                .map_err(|e| anyhow::anyhow!("`{id}` is not a valid gear id: {e}"))?;
+        }
+
         for (present, field, owner) in [
-            (id.is_some(), "id", "#[toolkit::gear(name = ...)]"),
+            (
+                id.is_some() && maturity == Maturity::Stable,
+                "id",
+                "#[toolkit::gear(name = ...)]",
+            ),
             (
                 runtime_caps.is_some(),
                 "runtime_caps",
@@ -492,21 +556,18 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             }
         }
 
-        if fills.is_some() {
-            return Err(anyhow::anyhow!(
-                "`fills` was renamed to `implements`: write `implements = \"<spec>~\"`"
-            ));
-        }
         if let Some(spec) = implements {
             check_plugin_spec("implements", spec)?;
         }
 
         sink(eval)?.set_gear(GearDecl {
+            maturity,
+            id: id.filter(|_| maturity == Maturity::Design).map(str::to_owned),
             name: name.map(str::to_owned),
             description: description.map(str::to_owned),
             category: category.map(str::to_owned),
             visibility: visibility.map(str::to_owned),
-            package: Some(package.clone()),
+            package: package.cloned(),
             sdk: sdk.cloned(),
             extension_points: extension_points
                 .map(|l| l.items.into_iter().cloned().collect())

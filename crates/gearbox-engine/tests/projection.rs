@@ -73,13 +73,14 @@ fn the_slice_loads_without_diagnostics() {
     // corpus's one role-split gear -- plus the twenty-five implemented gears
     // described once the model was proven: plugins of described hosts, the
     // license-resolver, usage-collector and bss-rate-provider families, eight
-    // plain services, chat-engine, and mini-chat's three.
+    // plain services, chat-engine, and mini-chat's three -- plus
+    // settings-service, described when `gear.toml` was retired.
     //
     // The assertion above is the one that matters -- every description and
     // not one diagnostic between them. The count is here so that a corpus
     // moving underneath the suite is found in one place rather than inferred
     // from a stranger failure elsewhere.
-    assert_eq!(catalogue.gears.len(), 44, "the slice gears");
+    assert_eq!(catalogue.gears.len(), 45, "the slice gears");
 }
 
 #[test]

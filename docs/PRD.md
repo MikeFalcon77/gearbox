@@ -516,8 +516,9 @@ omitting the type.
 The system **MUST** check a gear's `category` against the values the platform uses and **MUST** warn,
 not fail, when it is something else.
 
-- **Rationale**: The seven values come from the `gear.toml` files the platform team committed;
-  `example` is Gearbox's addition, since no `gear.toml` exists under `examples/`. Warning rather than
+- **Rationale**: The seven values come from the `gear.toml` files the platform team committed, since
+  folded into `gear.gdl`; `example` is Gearbox's addition, since no `gear.toml` existed under
+  `examples/`. Warning rather than
   refusing because the taxonomy is visibly still settling — `cluster` is filed under `serverless`,
   `account-management` under `oss` — so treating the set as closed would claim more than the evidence
   supports. What it catches is a value nothing else uses, which puts a gear in a bucket of one.

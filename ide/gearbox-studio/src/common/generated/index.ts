@@ -40,6 +40,7 @@ export * from "./CutCandidate";
 export * from "./CutSavings";
 export * from "./DeclaredRole";
 export * from "./DeploymentProfileDecl";
+export * from "./DesignGear";
 export * from "./Diagnostic";
 export * from "./DiagnosticCode";
 export * from "./Diagnostics";

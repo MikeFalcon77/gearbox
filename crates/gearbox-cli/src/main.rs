@@ -867,6 +867,12 @@ fn print_summary(scan: &gearbox_engine::CatalogueScan) {
         scan.files.len(),
         catalogue.contracts.len()
     );
+    if !catalogue.designs.is_empty() {
+        println!(
+            "  plus {} gear(s) at design maturity, listed last",
+            catalogue.designs.len()
+        );
+    }
     // What the load actually cost. Worth showing because it is the number the
     // incremental-loading work is about: crates parsed is the expensive stage,
     // and the gap against requests is the sharing a single load already gets.
@@ -916,6 +922,15 @@ fn print_summary(scan: &gearbox_engine::CatalogueScan) {
                     caps.join(", ")
                 );
             }
+        }
+    }
+
+    // Apart from the gears above, because none of them can be used yet: a
+    // product naming one is refused with GBX0321.
+    if !catalogue.designs.is_empty() {
+        println!("\n  design (described, no code yet):");
+        for design in catalogue.designs.values() {
+            println!("    {}  {}", design.id, design.gdl_path);
         }
     }
 }

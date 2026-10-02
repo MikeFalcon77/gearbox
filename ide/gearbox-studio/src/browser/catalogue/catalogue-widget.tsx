@@ -296,6 +296,8 @@ export class CatalogueWidget extends ReactWidget {
       <div
         key={key}
         className={`gbx-row ${row.kind === "pending" ? "gbx-pending" : ""} ${
+          row.kind === "design" ? "gbx-design-row" : ""
+        } ${
           selected ? "gbx-selected" : ""
         } ${stalled ? "gbx-stalled" : ""}`}
         // Operable from the keyboard, because a panel in an IDE that only
@@ -353,6 +355,18 @@ export class CatalogueWidget extends ReactWidget {
                   {cap}
                 </span>
               ))}
+            </>
+          ) : row.kind === "design" ? (
+            // Finished, not waiting: the badge says what it is, where a pending
+            // row says what it is still doing.
+            <>
+              <span className="gbx-id">{row.gear.id}</span>
+              <span
+                className="gbx-badge gbx-design"
+                title="Described at design maturity: no crate yet, so it cannot be added to a product"
+              >
+                design
+              </span>
             </>
           ) : (
             // No id and no badges, because neither exists yet. Saying so beats an
@@ -508,7 +522,7 @@ function matches(row: Row, filter: string): boolean {
   if (needle.length === 0) return true;
   const haystack = [
     row.kind === "pending" ? (row.gear.display_name ?? "") : row.gear.display_name,
-    row.kind === "projected" ? row.gear.id : "",
+    row.kind === "pending" ? "" : row.gear.id,
     row.gear.category ?? "",
     row.gear.gdl_path,
   ];

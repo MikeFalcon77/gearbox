@@ -3476,8 +3476,13 @@ fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> 
 
     let mut last_progress = std::time::Instant::now();
     let mut pending = Vec::new();
+    let mut designs = Vec::new();
     let mut total = 0_u32;
     let mut completed = 0_u32;
+    // Whether a progress line has gone out yet. Not `completed == 1`: design
+    // gears are counted during the first pass, so the first projection need
+    // not be the first completion.
+    let mut progressed = false;
     let mut answered = false;
     // How many diagnostics went out with the response, so the follow-up sends
     // the rest and not all of them again.
@@ -3490,6 +3495,13 @@ fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> 
                 total = u32::try_from(n).unwrap_or(u32::MAX);
             }
             LoadEvent::Declared(entry) => pending.push(entry.clone()),
+            // Counted as done: `total` counts every description, and a design
+            // one is complete when declared. Leaving it out held the bar short
+            // of its denominator for the whole load.
+            LoadEvent::Design(design) => {
+                completed += 1;
+                designs.push(design.clone());
+            }
             LoadEvent::DeclarationComplete { diagnostics, .. } => {
                 // The tree has its whole shape and none of its badges: answer.
                 // The declaration diagnostics go with it -- an evaluation
@@ -3499,6 +3511,7 @@ fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> 
                 let result = CatalogueLoadResult {
                     total,
                     pending: std::mem::take(&mut pending),
+                    designs: std::mem::take(&mut designs),
                     diagnostics: diagnostics.to_vec(),
                 };
                 // `answered` only when the send succeeded. Setting it
@@ -3547,7 +3560,8 @@ fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> 
                 // cannot render that often anyway. The first one goes out
                 // immediately so a bar appears at once, and `done: true` below is
                 // unconditional, which is the message a client waits on.
-                if completed == 1 || last_progress.elapsed() >= PROGRESS_STEP {
+                if !progressed || last_progress.elapsed() >= PROGRESS_STEP {
+                    progressed = true;
                     last_progress = std::time::Instant::now();
                     disconnected |= !notify(
                         connection,
@@ -3652,6 +3666,7 @@ fn catalogue_load(connection: &Connection, state: &mut State, id: RequestId) -> 
         &CatalogueLoadResult {
             total,
             pending: Vec::new(),
+            designs: Vec::new(),
             diagnostics,
         },
     ))
