@@ -27,6 +27,12 @@ import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
+import { requireNodeFromNvmrc } from "./require-node.mjs";
+
+// First, before anything is spawned: on the wrong Node the backend segfaults
+// silently, and every symptom after that points somewhere else.
+requireNodeFromNvmrc();
+
 const here = dirname(fileURLToPath(import.meta.url));
 const ide = resolve(here, "..");
 const repo = resolve(ide, "..");

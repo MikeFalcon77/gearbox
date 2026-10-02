@@ -28,6 +28,12 @@ import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+
+import { requireNodeFromNvmrc } from "./require-node.mjs";
+
+// First, before anything is spawned: on the wrong Node the backend segfaults
+// silently, and every symptom after that points somewhere else.
+requireNodeFromNvmrc();
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
