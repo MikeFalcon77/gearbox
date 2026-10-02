@@ -117,7 +117,7 @@ pub fn public_traits(files: &[RustFile]) -> BTreeSet<String> {
 
 /// The traits a crate implements outside test code, by last path segment.
 ///
-/// Evidence for a declared `fills`, never the source of it. **Test code does not
+/// Evidence for a declared `implements`, never the source of it. **Test code does not
 /// count**: a host's own tests implement its plugin trait with mocks --
 /// usage-collector, license-resolver and credstore all do -- so a file compiled
 /// only under `cfg(test)`, or an impl gated that way, is skipped.

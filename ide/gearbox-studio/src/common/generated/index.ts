@@ -84,7 +84,7 @@ export * from "./NodeId";
 export * from "./NodeKind";
 export * from "./Ownership";
 export * from "./PendingGear";
-export * from "./PluginFill";
+export * from "./PluginImpl";
 export * from "./PluginScaffold";
 export * from "./PluginSelection";
 export * from "./PluginTarget";

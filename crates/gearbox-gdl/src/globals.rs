@@ -437,7 +437,11 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         // The plugin role, declared on both sides and keyed by GTS spec. See
         // `ExtensionPointRecord` for why this is no longer read from the code.
         #[starlark(require = named)] extension_points: Option<UnpackList<&'v ExtensionPointRecord>>,
-        #[starlark(require = named)] fills: Option<&str>,
+        #[starlark(require = named)] implements: Option<&str>,
+        // The keyword before 2026-10-02. Accepted only to say what it became:
+        // `implements` read as a verb about data, and a plugin *implements* its
+        // host's extension point -- the word eCos CDL uses for the same role.
+        #[starlark(require = named)] fills: Option<starlark::values::Value<'v>>,
         #[starlark(require = named)] docs: Option<&'v DocsRecord>,
         #[starlark(require = named)] provides: Option<UnpackList<&'v ProvideRecord>>,
         #[starlark(require = named)] consumes: Option<UnpackList<&'v ConsumeRecord>>,
@@ -488,8 +492,13 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             }
         }
 
-        if let Some(spec) = fills {
-            check_plugin_spec("fills", spec)?;
+        if fills.is_some() {
+            return Err(anyhow::anyhow!(
+                "`fills` was renamed to `implements`: write `implements = \"<spec>~\"`"
+            ));
+        }
+        if let Some(spec) = implements {
+            check_plugin_spec("implements", spec)?;
         }
 
         sink(eval)?.set_gear(GearDecl {
@@ -502,7 +511,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             extension_points: extension_points
                 .map(|l| l.items.into_iter().cloned().collect())
                 .unwrap_or_default(),
-            fills: fills.map(str::to_owned),
+            implements: implements.map(str::to_owned),
             docs: docs.cloned(),
             provides: provides
                 .map(|l| l.items.into_iter().cloned().collect())

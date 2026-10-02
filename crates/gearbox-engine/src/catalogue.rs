@@ -90,7 +90,7 @@ pub enum LoadEvent<'a> {
 
     /// A gear already sent as `Projected` changed once every gear was known.
     ///
-    /// A plugin's `fills` names only a spec; the point it joins is its host's
+    /// A plugin's `implements` names only a spec; the point it joins is its host's
     /// declaration, and the host may be described later in discovery order. So
     /// the join runs after the last projection, and the plugins it completes
     /// are sent again. Not counted as progress: the gear was counted once.
@@ -143,7 +143,7 @@ pub fn load_catalogue_staged(
     let mut catalogue = Catalogue::default();
     let mut contracts = ContractMerge::default();
     // What each gear's crate implements, kept aside for the plugin join below:
-    // evidence a declared `fills` is checked against, not part of the descriptor.
+    // evidence a declared `implements` is checked against, not part of the descriptor.
     let mut implemented: BTreeMap<gearbox_ir::GearId, std::collections::BTreeSet<String>> =
         BTreeMap::new();
     let mut diagnostics = Diagnostics::new();
@@ -761,20 +761,20 @@ fn point_sdks<'d>(
         .collect()
 }
 
-/// Join every plugin's declared `fills` to the host that declares its spec.
+/// Join every plugin's declared `implements` to the host that declares its spec.
 ///
 /// Run once the whole gear set is known, because discovery order says nothing
 /// about hosts coming first. A plugin names only the spec; the trait and SDK are
-/// the host's to state, so `fills.point` is copied from the host's declaration.
+/// the host's to state, so `implements.point` is copied from the host's declaration.
 ///
 /// - no described gear declares the spec: GBX0519;
-/// - two gears declare it: which one a plugin fills has no answer, so the
+/// - two gears declare it: which one a plugin implements has no answer, so the
 ///   second is refused (`GdlCardinality`) and the first is used;
 /// - the plugin's crate implements none of the point's trait: GBX0526, a
 ///   warning -- the impl is evidence, and it can hide behind a wrapper this
 ///   reader does not follow.
 ///
-/// Returns the plugins whose `fills.point` it set, so a streaming consumer that
+/// Returns the plugins whose `implements.point` it set, so a streaming consumer that
 /// saw them before the join can be sent them again.
 fn join_plugin_points(
     catalogue: &mut Catalogue,
@@ -793,7 +793,7 @@ fn join_plugin_points(
                     DiagnosticCode::GdlCardinality,
                     format!(
                         "extension point `{}` is declared by both `{first}` and `{id}`; a plugin \
-                         that fills it would have two hosts",
+                         that implements it would have two hosts",
                         point.spec
                     ),
                     "one host declares a spec; remove the other `extension_point(...)`",
@@ -809,7 +809,7 @@ fn join_plugin_points(
     }
 
     for (id, gear) in &mut catalogue.gears {
-        let Some(fill) = gear.fills.as_mut() else {
+        let Some(fill) = gear.implements.as_mut() else {
             continue;
         };
         let at = |gear: &GearDescriptor| {
@@ -827,11 +827,11 @@ fn join_plugin_points(
                 let mut diagnostic = Diagnostic::error(
                     DiagnosticCode::PluginSpecUndeclared,
                     format!(
-                        "`{id}` fills `{own}`, which no described gear declares as an extension \
+                        "`{id}` implements `{own}`, which no described gear declares as an extension \
                          point"
                     ),
                     "the host declares `extension_points = [extension_point(\"...\", trait = \
-                     \"...\")]`; describe it, or fix the spec in `fills`",
+                     \"...\")]`; describe it, or fix the spec in `implements`",
                 );
                 if let Some(location) = at(gear) {
                     diagnostic = diagnostic.at(location);
@@ -848,12 +848,12 @@ fn join_plugin_points(
                     let mut diagnostic = Diagnostic::new(
                         DiagnosticCode::PluginImplMissing,
                         format!(
-                            "`{id}` fills `{host}`'s point, and its crate implements no `{}`",
+                            "`{id}` implements `{host}`'s point, and its crate implements no `{}`",
                             point.qualified()
                         ),
                     )
                     .with_help(
-                        "check the spec in `fills`; if the impl is behind a wrapper this is \
+                        "check the spec in `implements`; if the impl is behind a wrapper this is \
                          only a note",
                     );
                     if let Some(location) = at(gear) {

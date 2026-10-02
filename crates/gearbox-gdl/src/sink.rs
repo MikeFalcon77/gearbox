@@ -47,8 +47,8 @@ pub struct GearDecl {
     pub sdk: Option<crate::records::CargoRecord>,
     /// The points this gear lets plugins fill, keyed by GTS spec segment.
     pub extension_points: Vec<crate::records::ExtensionPointRecord>,
-    /// The spec segment of the point this gear fills, when it is a plugin.
-    pub fills: Option<String>,
+    /// The spec segment of the point this gear implements, when it is a plugin.
+    pub implements: Option<String>,
     /// Overrides the convention-based search for this gear's documents.
     pub docs: Option<crate::records::DocsRecord>,
     pub provides: Vec<ProvideRecord>,

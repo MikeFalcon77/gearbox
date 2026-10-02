@@ -14,7 +14,7 @@ export type ExtensionPointDecl = {
 /**
  * The full GTS type id of the plugin spec, e.g.
  * `cf.toolkit.plugins.plugin.v1~cf.core.authn_resolver.plugin.v1~`. The
- * join key: a plugin's [`PluginFill::spec`] matches this.
+ * join key: a plugin's [`PluginImpl::spec`] matches this.
  */
 spec: string, 
 /**

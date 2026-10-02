@@ -69,7 +69,7 @@ fn record(root: &SourceRoot) -> (Vec<Seen>, gearbox_engine::CatalogueScan) {
 fn a_streaming_consumer_ends_with_every_plugin_joined() {
     // **What the Studio actually receives**, which is not the returned scan. It
     // keeps the last copy of each gear it is sent, and a plugin is projected
-    // before its host may have been: `fills` names only a spec, and the point
+    // before its host may have been: `implements` names only a spec, and the point
     // is the host's declaration. The first conformance run after roles became
     // declared showed oidc-authn-plugin as "no described host declares it" --
     // true of the copy sent during projection, false of the catalogue.
@@ -100,12 +100,12 @@ fn a_streaming_consumer_ends_with_every_plugin_joined() {
         "every Joined comes after the last Projected"
     );
     let plugins: Vec<&gearbox_ir::GearDescriptor> =
-        last.values().filter(|g| g.fills.is_some()).collect();
+        last.values().filter(|g| g.implements.is_some()).collect();
     assert!(!plugins.is_empty(), "the corpus has plugins");
     for plugin in plugins {
         assert!(
             plugin
-                .fills
+                .implements
                 .as_ref()
                 .and_then(|f| f.point.as_ref())
                 .is_some(),

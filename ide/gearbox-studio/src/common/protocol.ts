@@ -376,7 +376,7 @@ export interface GearboxService {
     /** Which shape to write; the engine defaults to `minimal` when absent. */
     kind?: GearKind;
     /**
-     * What a `plugin` scaffold fills, when a host has been chosen.
+     * What a `plugin` scaffold implements, when a host has been chosen.
      *
      * Absent keeps the engine's commented locator, which exists because an `sdk`
      * pointing nowhere makes the gear fail to load. Present means the host came

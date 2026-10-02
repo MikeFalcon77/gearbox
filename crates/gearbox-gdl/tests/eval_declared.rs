@@ -282,3 +282,31 @@ fn every_diagnostic_satisfies_the_prd_invariants() {
         }
     }
 }
+
+#[test]
+fn a_plugin_implements_its_hosts_point() {
+    let (decl, codes) = eval(
+        r#"gear(package = cargo(crate_name = "p", lib = "p"), implements = "cf.core.authn_resolver.plugin.v1~")"#,
+    );
+    assert!(codes.is_empty(), "{codes:?}");
+    assert_eq!(
+        decl.expect("evaluates").implements.as_deref(),
+        Some("cf.core.authn_resolver.plugin.v1~")
+    );
+}
+
+#[test]
+fn the_old_fills_keyword_names_what_it_became() {
+    // Renamed without an alias, so a description written before the rename
+    // fails -- and the message is the whole migration.
+    let out = GdlEngine::new().eval_gear(
+        &identity(),
+        r#"gear(package = cargo(crate_name = "p", lib = "p"), fills = "cf.core.authn_resolver.plugin.v1~")"#,
+    );
+    assert!(out.value.is_none());
+    let message = &out.diagnostics.as_slice()[0].message;
+    assert!(
+        message.contains("`fills` was renamed to `implements`"),
+        "got: {message}"
+    );
+}

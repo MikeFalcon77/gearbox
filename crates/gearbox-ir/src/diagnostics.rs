@@ -1076,14 +1076,14 @@ diagnostic_codes! {
     /// Found by a UX pass rather than by a resolution, which is the useful part:
     /// the Add Gear panel offered the choice because nothing refused it, and a
     /// client is not a boundary (`cpt-gearbox-fr-rpc-writes-opt-in`).
-    PluginPointNotDeclared = "GBX0518", Cluster, Error, false, "plugin fills a point its host does not declare";
+    PluginPointNotDeclared = "GBX0518", Cluster, Error, false, "plugin implements a point its host does not declare";
 
-    /// A plugin fills a spec no described gear declares as an extension point.
+    /// A plugin implements a spec no described gear declares as an extension point.
     ///
     /// The plugin names only the spec; which trait and which SDK are the host's
     /// to say. With no host describing it, the fill has nothing to join to, so
     /// it is reported rather than left to look connected.
-    PluginSpecUndeclared = "GBX0519", Cluster, Error, false, "plugin fills a point no described gear declares";
+    PluginSpecUndeclared = "GBX0519", Cluster, Error, false, "plugin implements a point no described gear declares";
 
     /// A cluster backend decides a capability at run time, so none is claimed
     /// for it at composition time.
@@ -1158,12 +1158,12 @@ diagnostic_codes! {
     /// whole point: the feature is selected two lines away, in the same file.
     ClusterProviderNeedsFeature = "GBX0525", Cluster, Error, true, "a cluster provider is not in this build";
 
-    /// A gear declares it fills a point, and its crate implements none of that
+    /// A gear declares it implements a point, and its crate implements none of that
     /// point's trait.
     ///
     /// A warning, because the implementation is evidence and not the source of
     /// the role: an impl can sit in a generic wrapper or a macro this reader
-    /// cannot see. But the ordinary cause is a `fills` naming the wrong spec,
+    /// cannot see. But the ordinary cause is an `implements` naming the wrong spec,
     /// and that one is worth a line.
     PluginImplMissing = "GBX0526", Cluster, Warning, false, "a plugin implements none of its point's trait";
 
