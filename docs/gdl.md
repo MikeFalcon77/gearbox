@@ -236,8 +236,8 @@ Positional. States that this description is invalid. Not a branch.
 
 ```
 gear(
+  maturity,                         # required, no default -- see below
   package,                          # cargo, required unless maturity = "design"
-  maturity?,                        # "stable" (default) or "design"
   name?, description?, category?, visibility?,
   sdk?,                             # cargo, where this gear's own SDK crate lives
   extension_points = [],            # extension_point(...), points plugins fill
@@ -275,6 +275,28 @@ These fields are accepted only to be refused by name (**GBX0210**). They live in
 | `cluster_providers` | `ClusterGear::provider_registry()` |
 
 `lifecycle(...)` exists as a constructor (`entry?`, `stop_timeout?`, `await_ready = False`) so a restatement can be named. Passing it to `gear()` is still **GBX0210**.
+
+### `maturity`: how much a gear promises
+
+Required on every `gear(...)`, with **no default**. A default of `stable` would turn a forgotten
+field into a promise nobody made, and any lower default into an accusation, so the author says
+which. Missing or misspelt, the description does not evaluate.
+
+| `maturity` | Means | In the catalogue | In a product |
+|---|---|---|---|
+| `"design"` | documents (perhaps an SDK), no crate yet | `Catalogue.designs` | **GBX0321**, error |
+| `"experimental"` | code exists; API and behaviour may change freely | `gears` | **GBX0322**, warning |
+| `"preview"` | usable, not declared stable | `gears` | **GBX0323**, info |
+| `"stable"` | supported for ordinary production use | `gears` | nothing |
+| `"deprecated"` | still available, not for new products | `gears` | **GBX0324**, warning |
+
+A product is told about every gear it links below `stable`, including the ones it did not choose:
+a co-located dependency or a plugin is in the same binary, and the message says what pulled it in.
+`validate` reports the selections only, since it does not resolve. None of the four blocks a lock
+or generation; `design` does, because there is nothing to link.
+
+A newly scaffolded gear is `"experimental"`. There is no second axis for "how much code exists":
+a gear with only an SDK is `"design"` with `sdk = cargo(...)`.
 
 ### `maturity = "design"`: a gear with no code yet
 
@@ -506,6 +528,7 @@ PAYMENT_SDK = cargo(
 
 gear(
     name = "Payments Audit",
+    maturity = "experimental",
     category = "example",
     visibility = "public",
     package = cargo(crate_name = "cf-gears-payments-audit", lib = "payments_audit", path = "."),

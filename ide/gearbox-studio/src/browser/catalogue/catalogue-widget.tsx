@@ -27,6 +27,7 @@ import { ProductStore } from "../product-store";
 import { RevealService } from "../reveal-service";
 import { ADD_GEAR, SHOW_PRODUCT } from "../shell/session-command-ids";
 import { GEARBOX_DRAG_MIME } from "../ai/gearbox-context";
+import { MaturityBadge } from "../gear/gear-facts";
 
 @injectable()
 export class CatalogueWidget extends ReactWidget {
@@ -297,7 +298,7 @@ export class CatalogueWidget extends ReactWidget {
         key={key}
         className={`gbx-row ${row.kind === "pending" ? "gbx-pending" : ""} ${
           row.kind === "design" ? "gbx-design-row" : ""
-        } ${
+        } ${row.kind === "projected" && row.gear.maturity === "deprecated" ? "gbx-deprecated-row" : ""} ${
           selected ? "gbx-selected" : ""
         } ${stalled ? "gbx-stalled" : ""}`}
         // Operable from the keyboard, because a panel in an IDE that only
@@ -350,6 +351,7 @@ export class CatalogueWidget extends ReactWidget {
           {row.kind === "projected" ? (
             <>
               <span className="gbx-id">{row.gear.id}</span>
+              <MaturityBadge maturity={row.gear.maturity} />
               {(row.gear.runtime_caps ?? []).map((cap) => (
                 <span className="gbx-badge" key={cap}>
                   {cap}

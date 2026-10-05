@@ -2152,6 +2152,9 @@ fn scaffold_gear_files(
 
 gear(
     name = {name},
+    # New code makes no promise yet. Raise it -- preview, then stable -- when
+    # the gear has earned it; there is no default because `stable` would be one.
+    maturity = "experimental",
     package = cargo(
         crate_name = {crate_quoted},
         lib = {lib_quoted},

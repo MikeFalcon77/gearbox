@@ -481,7 +481,7 @@ fn gear_rs(id: &str, extra: &str) -> String {
 
 fn gear_gdl(crate_name: &str, lib: &str, body: &str) -> String {
     format!(
-        "gear(\n    name = \"{crate_name}\",\n    description = \"d\",\n    category = \"core-functionality\",\n    visibility = \"internal\",\n    package = cargo(crate_name = \"{crate_name}\", lib = \"{lib}\", path = \".\"),\n{body}\n)\n"
+        "gear(\n    maturity = \"stable\",\n    name = \"{crate_name}\",\n    description = \"d\",\n    category = \"core-functionality\",\n    visibility = \"internal\",\n    package = cargo(crate_name = \"{crate_name}\", lib = \"{lib}\", path = \".\"),\n{body}\n)\n"
     )
 }
 

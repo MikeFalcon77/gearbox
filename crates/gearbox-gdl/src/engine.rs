@@ -104,7 +104,7 @@ impl GdlEngine {
 
         // A design gear has no crate by definition; `gear()` refused a
         // `package` on one, so only a stable gear can be missing it.
-        if decl.package.is_none() && decl.maturity == crate::Maturity::Stable {
+        if decl.package.is_none() && decl.maturity != Some(crate::Maturity::Design) {
             diagnostics.push(
                 Diagnostic::error(
                     DiagnosticCode::GdlEval,

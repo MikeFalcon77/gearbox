@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 103, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 106, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -414,6 +414,30 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "error",
     domain: "topology",
     docs: "A product selects a gear that is described but has no code yet.\n\n`maturity = \"design\"` in its `gear.gdl`: the catalogue knows the gear's\nid, purpose and documents, and there is no crate to link. Distinct from\nGBX0301 because \"not in the catalogue\" sends the reader looking for a\ntypo or a closed source root, and neither is the problem.",
+    requiresEvidence: false,
+  },
+  GBX0322: {
+    code: "GBX0322",
+    title: "gear is experimental",
+    severity: "warning",
+    domain: "topology",
+    docs: "A product links a gear its description calls `experimental`: its API\nand behaviour may change freely. A warning, because using one is a\nchoice a product may make on purpose -- but it should be a choice.",
+    requiresEvidence: false,
+  },
+  GBX0323: {
+    code: "GBX0323",
+    title: "gear is at preview",
+    severity: "info",
+    domain: "topology",
+    docs: "A product links a gear at `preview`: usable, not declared stable.\nInformation, not a warning: most of the platform is here today, and a\nwarning on every product would be noise that hides GBX0322 and GBX0324.",
+    requiresEvidence: false,
+  },
+  GBX0324: {
+    code: "GBX0324",
+    title: "gear is deprecated",
+    severity: "warning",
+    domain: "topology",
+    docs: "A product links a gear its description calls `deprecated`: still\navailable, not for new products.",
     requiresEvidence: false,
   },
   GBX0401: {

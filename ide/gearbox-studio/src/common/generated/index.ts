@@ -81,6 +81,7 @@ export * from "./LockOnDisk";
 export * from "./LockParams";
 export * from "./LockResult";
 export * from "./LogParams";
+export * from "./Maturity";
 export * from "./NodeId";
 export * from "./NodeKind";
 export * from "./Ownership";

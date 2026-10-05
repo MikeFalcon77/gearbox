@@ -115,6 +115,40 @@ pub enum Visibility {
     Internal,
 }
 
+/// How much a gear with code promises, as its description declares it.
+///
+/// Ordered by promise, so `<` reads as "less settled than" -- except
+/// `Deprecated`, which is last because it is the end of the line, not because
+/// it promises most. A gear with no code is not here: it is `maturity =
+/// "design"`, kept in [`Catalogue::designs`].
+///
+/// No `Default`. The description must say, and a missing value is refused at
+/// evaluation: `Stable` as a default makes forgetting the field a promise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum Maturity {
+    /// Code exists; its API and behaviour may change freely.
+    Experimental,
+    /// Usable, but nobody has declared it stable.
+    Preview,
+    /// Supported for ordinary production use.
+    Stable,
+    /// Still available; not for new products.
+    Deprecated,
+}
+
+impl Maturity {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Experimental => "experimental",
+            Self::Preview => "preview",
+            Self::Stable => "stable",
+            Self::Deprecated => "deprecated",
+        }
+    }
+}
+
 /// A gear's lifecycle declaration.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct LifecycleDecl {
@@ -340,6 +374,13 @@ pub struct GearDescriptor {
 
     #[serde(default)]
     pub visibility: Visibility,
+
+    /// Declared in `gear(maturity = ...)`, and required there.
+    ///
+    /// Not carried into the lock, like `config_schema`: it is what the gear
+    /// promises, not something resolution decided. A product reports what it
+    /// uses below `stable` (GBX0322-0324) instead.
+    pub maturity: Maturity,
 
     /// Which declared source this gear was read from.
     pub source: SourceId,

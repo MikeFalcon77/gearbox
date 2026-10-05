@@ -655,6 +655,16 @@ now be described before it has code:
 The decision this amends is untouched: nothing projected is restated, and a design gear has
 nothing to project.
 
+**Revised the same week: `maturity` is required, with five levels.** The first cut had two values
+and defaulted to `stable`. That default is the dangerous one -- a description that forgot the
+field became a promise of stability nobody made -- so the field has no default, and a gear with
+code says which of `experimental`, `preview`, `stable` or `deprecated` it is. A product hears
+about what it links below `stable`: GBX0322 (experimental, warning), GBX0323 (preview, info),
+GBX0324 (deprecated, warning), for every gear in the closure, chosen or not. The platform's gears
+start at `preview`: nobody has declared any of them stable, and saying so for them would be the
+same unearned promise. A second axis for how much code exists (`implementation = none | sdk |
+partial | full`) was considered and not taken; `design` plus `sdk` covers the one case seen.
+
 ### Traceability
 
 * `crates/gearbox-gdl/src/globals.rs` -- `maturity`, the design-gear refusals, the `fills` hint.

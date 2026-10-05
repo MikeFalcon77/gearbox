@@ -119,6 +119,7 @@ const CATEGORY_MANIFEST: &str = "[package]\nname = \"demo\"\nversion = \"0.1.0\"
 /// The `gear.gdl` text for a gear declaring `category = "bogus"`.
 const UNKNOWN_CATEGORY_GEAR_GDL: &str = r#"
 gear(
+    maturity = "stable",
     name = "Demo",
     description = "d",
     category = "bogus",

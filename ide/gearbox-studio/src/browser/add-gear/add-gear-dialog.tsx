@@ -17,6 +17,7 @@ import { diffText } from "../product-edit-service";
 import { ProfileScope } from "../product/profile-scope";
 import { ProductSessionService } from "../shell/product-session-service";
 import { isSessionLost } from "../engine-failure";
+import { MaturityBadge } from "../gear/gear-facts";
 
 export interface AddGearChoice { gearId?: string; host?: string; point?: string }
 
@@ -308,7 +309,7 @@ export class AddGearDialog extends ReactDialog<boolean> {
         <label>Category<select value={this.category} onChange={e => { this.category = e.target.value; this.update(); }}><option value="">All categories</option>{[...new Set(all.map(d => d.category).filter((c): c is string => !!c))].sort().map(c => <option key={c} value={c}>{c}</option>)}</select></label></div>
       <div className="gbx-add-dialog-columns"><nav aria-label="Available gears" data-add-gear-picker>
         {filtered.map(d => <button type="button" key={`${d.source}:${d.id}`} data-add-gear-select={d.id} aria-pressed={chosen === d} className="gbx-catalogue-choice" onClick={() => { this.candidate = `${d.source}:${d.id}`; this.host = this.initial.host; this.profiles = []; this.staged = []; this.pluginPick = ""; void this.refreshPreview(); }}>
-          <strong>{d.display_name || d.id}</strong><small>{d.id} · {d.source}{this.edits.inProduct(d.id) ? " · In product" : ""}</small>
+          <strong>{d.display_name || d.id} <MaturityBadge maturity={d.maturity} /></strong><small>{d.id} · {d.source}{this.edits.inProduct(d.id) ? " · In product" : ""}</small>
         </button>)}
         {!filtered.length && <p>No matching gears. Entries still being projected become available when ready.</p>}
       </nav><section aria-label="Addition preview">

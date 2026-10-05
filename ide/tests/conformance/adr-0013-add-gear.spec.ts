@@ -82,6 +82,29 @@ test.describe("product session and Add Gear", () => {
     await expect(studio.page.locator('[data-add-gear-select="approval-service"]')).toHaveCount(0);
     await studio.page.locator("[data-add-gear-cancel]").click();
   });
+
+  test("a gear below stable says so where it is chosen [ADR-0002 Amendment 2026-10-02: maturity is required]", async ({
+    studio,
+  }) => {
+    await openProduct(studio.page, "dev");
+    await revealCatalogue(studio.page);
+    await resetCatalogueView(studio.page);
+
+    // Every gear in the corpus is `maturity = "preview"`: usable, not declared
+    // stable. The catalogue row says it, and so does the Add Gear list, where
+    // the choice is made.
+    const row = studio.page.locator(".gbx-row", { hasText: "tenant-resolver" }).first();
+    await expect(row.locator('[data-maturity="preview"]')).toHaveText("preview", {
+      timeout: 60_000,
+    });
+
+    await studio.page.locator("[data-add-gear]").click();
+    await expect(studio.page.locator("[data-add-gear-flow]")).toBeVisible({ timeout: 30_000 });
+    await expect(
+      studio.page.locator('[data-add-gear-select="tenant-resolver"] [data-maturity="preview"]'),
+    ).toBeVisible({ timeout: 30_000 });
+    await studio.page.locator("[data-add-gear-cancel]").click();
+  });
 });
 
 // Phase 5's point: the panel answers "what does this do to my product" before it

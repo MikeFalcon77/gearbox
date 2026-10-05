@@ -429,10 +429,12 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] description: Option<&str>,
         #[starlark(require = named)] category: Option<&str>,
         #[starlark(require = named)] visibility: Option<&str>,
-        // Required at `stable`, refused at `design`: it is what tells the
-        // projector which crate to scan, and a design gear has none yet.
+        // Required for a gear with code, refused at `design`: it is what tells
+        // the projector which crate to scan, and a design gear has none yet.
         #[starlark(require = named)] package: Option<&'v CargoRecord>,
-        // `"stable"` (the default) or `"design"`. See `Maturity`.
+        // Required, no default; one of `Maturity::SPELLINGS`. Taken as an
+        // option only so its absence gets a message rather than "missing
+        // argument".
         #[starlark(require = named)] maturity: Option<&str>,
         // A locator, like `cluster_plugins`: nothing in a gear's own crate says
         // where its SDK lives, and the SDK is what declares the GTS types this
@@ -475,13 +477,23 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         }
 
         let maturity = match maturity {
-            None | Some("stable") => Maturity::Stable,
-            Some("design") => Maturity::Design,
-            Some(other) => {
+            None => {
                 return Err(anyhow::anyhow!(
-                    "unknown maturity `{other}`: expected \"stable\" or \"design\""
+                    "a gear declares its maturity: `maturity = \"experimental\" | \"preview\" | \
+                     \"stable\" | \"deprecated\"`, or `\"design\"` for a gear with no code yet. \
+                     There is no default, because `stable` would be a promise nobody made"
                 ));
             }
+            Some(spelling) => Maturity::parse(spelling).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unknown maturity `{spelling}`: expected one of {}",
+                    Maturity::SPELLINGS
+                        .iter()
+                        .map(|s| format!("\"{s}\""))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })?,
         };
 
         if maturity == Maturity::Design {
@@ -525,7 +537,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
 
         for (present, field, owner) in [
             (
-                id.is_some() && maturity == Maturity::Stable,
+                id.is_some() && maturity != Maturity::Design,
                 "id",
                 "#[toolkit::gear(name = ...)]",
             ),
@@ -561,7 +573,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         }
 
         sink(eval)?.set_gear(GearDecl {
-            maturity,
+            maturity: Some(maturity),
             id: id.filter(|_| maturity == Maturity::Design).map(str::to_owned),
             name: name.map(str::to_owned),
             description: description.map(str::to_owned),

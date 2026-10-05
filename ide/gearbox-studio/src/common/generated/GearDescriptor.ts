@@ -11,6 +11,7 @@ import type { GearId } from "./GearId";
 import type { GtsTypeDecl } from "./GtsTypeDecl";
 import type { LifecycleDecl } from "./LifecycleDecl";
 import type { Location } from "./Location";
+import type { Maturity } from "./Maturity";
 import type { PluginImpl } from "./PluginImpl";
 import type { ProviderDescriptor } from "./ProviderDescriptor";
 import type { RelPath } from "./RelPath";
@@ -28,6 +29,14 @@ export type GearDescriptor = { id: GearId,
  * the entire reason it is separate from `id`.
  */
 display_name: string, description?: string | null, category?: string | null, visibility: Visibility, 
+/**
+ * Declared in `gear(maturity = ...)`, and required there.
+ *
+ * Not carried into the lock, like `config_schema`: it is what the gear
+ * promises, not something resolution decided. A product reports what it
+ * uses below `stable` (GBX0322-0324) instead.
+ */
+maturity: Maturity, 
 /**
  * Which declared source this gear was read from.
  */

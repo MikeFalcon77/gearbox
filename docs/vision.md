@@ -309,6 +309,10 @@ gear(
     # `gear()` accepts each of those names only in order to refuse it by name --
     # so the diagnostic can say which attribute owns the fact.
 
+    # Required, no default: experimental | preview | stable | deprecated, or
+    # "design" for a gear with no code yet.
+    maturity = "preview",
+
     name = "Contracts & Agreements",
 
     description = """
@@ -363,6 +367,7 @@ The display name is what `gear.gdl` adds:
 ```python
 gear(
     name = "Contracts & Agreements",
+    maturity = "preview",
 )
 ```
 
@@ -457,6 +462,7 @@ Good:
 ```python
 gear(
     name = "Event Broker",
+    maturity = "preview",
     package = cargo(crate_name = "cf-event-broker", lib = "event_broker"),
 
     requires = [

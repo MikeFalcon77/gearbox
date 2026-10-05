@@ -850,6 +850,20 @@ diagnostic_codes! {
     /// typo or a closed source root, and neither is the problem.
     TopologyDesignGear = "GBX0321", Topology, Error, false, "gear is at design maturity";
 
+    /// A product links a gear its description calls `experimental`: its API
+    /// and behaviour may change freely. A warning, because using one is a
+    /// choice a product may make on purpose -- but it should be a choice.
+    TopologyExperimentalGear = "GBX0322", Topology, Warning, false, "gear is experimental";
+
+    /// A product links a gear at `preview`: usable, not declared stable.
+    /// Information, not a warning: most of the platform is here today, and a
+    /// warning on every product would be noise that hides GBX0322 and GBX0324.
+    TopologyPreviewGear = "GBX0323", Topology, Info, false, "gear is at preview";
+
+    /// A product links a gear its description calls `deprecated`: still
+    /// available, not for new products.
+    TopologyDeprecatedGear = "GBX0324", Topology, Warning, false, "gear is deprecated";
+
     // ---------------------------------------------------------------- GBX04xx
     /// This consumer and provider could be placed in separate processes, but the
     /// dependency between them is not declared as a contract consumption.

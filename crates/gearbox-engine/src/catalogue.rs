@@ -245,7 +245,7 @@ pub fn load_catalogue_staged(
         diagnostics.extend(outcome.diagnostics);
         let Some(decl) = outcome.value else { continue };
 
-        if decl.maturity == gearbox_gdl::Maturity::Design {
+        if decl.maturity == Some(gearbox_gdl::Maturity::Design) {
             let Some(design) = design_gear(root, &identity, &decl, &mut scans, &mut diagnostics)
             else {
                 continue;

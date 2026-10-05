@@ -166,6 +166,11 @@ pub fn merge(
         // eval_gear already reported this; defensive.
         return None;
     };
+    // `gear()` refuses a description without a maturity, and a design one
+    // never reaches projection; defensive, like the package above.
+    let Some(gearbox_gdl::Maturity::Code(maturity)) = decl.maturity else {
+        return None;
+    };
     let gdl_dir = identity.gdl_path.parent();
     let package = cargo_ref(package_record, &gdl_dir, "package", uri, diagnostics);
 
@@ -329,6 +334,7 @@ pub fn merge(
         description: decl.description.clone(),
         category,
         visibility,
+        maturity,
         source: identity.source.clone(),
         gdl_path: identity.gdl_path.clone(),
         package,

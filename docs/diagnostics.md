@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **103**.
+Codes: **106**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -433,6 +433,9 @@ nothing pointing back at the description.
 | [GBX0319](#gbx0319) | error | an application names a role its anchor does not declare |
 | [GBX0320](#gbx0320) | warning | two applications register the same directory name |
 | [GBX0321](#gbx0321) | error | gear is at design maturity |
+| [GBX0322](#gbx0322) | warning | gear is experimental |
+| [GBX0323](#gbx0323) | info | gear is at preview |
+| [GBX0324](#gbx0324) | warning | gear is deprecated |
 
 ### GBX0301
 
@@ -728,6 +731,29 @@ A product selects a gear that is described but has no code yet.
 id, purpose and documents, and there is no crate to link. Distinct from
 GBX0301 because "not in the catalogue" sends the reader looking for a
 typo or a closed source root, and neither is the problem.
+
+### GBX0322
+
+**gear is experimental**
+
+A product links a gear its description calls `experimental`: its API
+and behaviour may change freely. A warning, because using one is a
+choice a product may make on purpose -- but it should be a choice.
+
+### GBX0323
+
+**gear is at preview**
+
+A product links a gear at `preview`: usable, not declared stable.
+Information, not a warning: most of the platform is here today, and a
+warning on every product would be noise that hides GBX0322 and GBX0324.
+
+### GBX0324
+
+**gear is deprecated**
+
+A product links a gear its description calls `deprecated`: still
+available, not for new products.
 
 ## `GBX04xx` — Contract bindings and severability
 

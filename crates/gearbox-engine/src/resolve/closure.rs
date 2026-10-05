@@ -220,6 +220,79 @@ pub(crate) fn at_design(catalogue: &Catalogue, gear: &GearId, at: &gearbox_ir::L
     )
 }
 
+/// GBX0322-0324: one diagnostic per gear in `members` below `stable`.
+///
+/// Every member, not only the selected ones: a co-located dependency or a
+/// plugin is linked into the same binary, and "nobody chose it" is not a
+/// reason it promises more. Each is anchored where a reader can act -- the
+/// `use_gear(...)` that selected it, or that selected its host -- and the
+/// file otherwise, with the reason it is there in the message.
+///
+/// Shared with `validate`, which passes only the selections because it does
+/// not resolve.
+pub(crate) fn maturity_diagnostics<'m>(
+    catalogue: &Catalogue,
+    members: impl IntoIterator<Item = (&'m GearId, &'m [InclusionReason])>,
+    intent: &ProductIntent,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    let selected_at = |gear: &GearId| {
+        intent
+            .selected_gears
+            .iter()
+            .find(|s| &s.gear == gear)
+            .and_then(|s| s.declared_at.clone())
+    };
+    for (gear, reasons) in members {
+        let Some(descriptor) = catalogue.gears.get(gear) else {
+            continue;
+        };
+        let (code, what, help) = match descriptor.maturity {
+            gearbox_ir::Maturity::Stable => continue,
+            gearbox_ir::Maturity::Experimental => (
+                DiagnosticCode::TopologyExperimentalGear,
+                "experimental: its API and behaviour may change freely",
+                "pin the gear's version, or wait for its owners to raise it to `preview`",
+            ),
+            gearbox_ir::Maturity::Preview => (
+                DiagnosticCode::TopologyPreviewGear,
+                "at preview: usable, but not declared stable",
+                "nothing to do for now; this says what the product depends on",
+            ),
+            gearbox_ir::Maturity::Deprecated => (
+                DiagnosticCode::TopologyDeprecatedGear,
+                "deprecated: still available, not for new products",
+                "see the gear's documents for what replaces it",
+            ),
+        };
+        let mut why = Vec::new();
+        let mut at = None;
+        for reason in reasons {
+            match reason {
+                InclusionReason::Selected => at = at.or_else(|| selected_at(gear)),
+                InclusionReason::ColocatedBy { gear: by } => {
+                    why.push(format!("co-located by `{by}`"));
+                }
+                InclusionReason::PluginOf { host, .. } => {
+                    why.push(format!("a plugin of `{host}`"));
+                    at = at.or_else(|| selected_at(host));
+                }
+            }
+        }
+        let message = if why.is_empty() {
+            format!("`{gear}` is {what}")
+        } else {
+            format!("`{gear}` ({}) is {what}", why.join(", "))
+        };
+        diagnostics.push(
+            Diagnostic::new(code, message)
+                .with_help(help)
+                .at(gearbox_ir::Location::or_file(at.as_ref(), uri)),
+        );
+    }
+}
+
 /// A plugin named under a host that the catalogue does not have.
 ///
 /// Anchored on the host's `use_gear(...)`, which is the call the `plugins = [...]`

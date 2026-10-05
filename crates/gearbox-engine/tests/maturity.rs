@@ -1,9 +1,12 @@
-//! `maturity = "design"`: a gear described before it has code.
+//! `maturity = ...`: how much a gear promises, declared and required.
 //!
-//! What replaced the platform's `gear.toml` for the gears that had only
-//! documents. The claims: such a gear is listed apart from the gears that can
-//! be used, no crate is looked for, nothing is pending on it, and naming it in
-//! a product says *why* it cannot be used (GBX0321) rather than "unknown gear".
+//! Two halves. `"design"` is a gear described before it has code -- what
+//! replaced the platform's `gear.toml` for the gears that had only documents:
+//! it is listed apart from the gears that can be used, no crate is looked for,
+//! nothing is pending on it, and naming it in a product says *why* it cannot
+//! be used (GBX0321) rather than "unknown gear". The four levels of a gear
+//! with code reach its descriptor, and a product is told what it links below
+//! `stable` (GBX0322-0324) -- including what it links without having chosen.
 
 #![allow(
     clippy::unwrap_used,
@@ -57,10 +60,37 @@ impl Tree {
         .unwrap();
         std::fs::write(
             dir.join("thing/gear.gdl"),
-            "gear(name = \"Thing\", package = cargo(crate_name = \"thing\", lib = \"thing\", path = \".\"))\n",
+            "gear(maturity = \"stable\", name = \"Thing\", package = cargo(crate_name = \"thing\", lib = \"thing\", path = \".\"))\n",
         )
         .unwrap();
         Self(dir)
+    }
+
+    /// Add a gear with code at `maturity`, co-locating `deps` (attribute idents).
+    fn gear(&self, id: &str, maturity: &str, deps: &[&str]) -> &Self {
+        let dir = self.0.join(id);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            format!("[package]\nname = \"{id}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("src/lib.rs"),
+            format!(
+                "#[toolkit::gear(name = \"{id}\", deps = [{}])]\n#[derive(Default)]\npub struct G;\n",
+                deps.join(", ")
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("gear.gdl"),
+            format!(
+                "gear(maturity = \"{maturity}\", package = cargo(crate_name = \"{id}\", lib = \"{id}\", path = \".\"))\n"
+            ),
+        )
+        .unwrap();
+        self
     }
 
     fn root(&self) -> SourceRoot {
@@ -194,4 +224,106 @@ fn selecting_a_design_gear_says_it_has_no_code_yet() {
     let codes: Vec<DiagnosticCode> = report.diagnostics.iter().map(|d| d.code).collect();
     assert!(codes.contains(&DiagnosticCode::TopologyDesignGear), "{codes:?}");
     assert!(!codes.contains(&DiagnosticCode::TopologyUnknownGear), "{codes:?}");
+}
+
+fn product_of(gears: &[&str]) -> gearbox_ir::ProductIntent {
+    let uses: Vec<String> = gears
+        .iter()
+        .map(|g| format!("use_gear(\"{g}\", source = \"fixture\")"))
+        .collect();
+    let src = format!(
+        r#"
+product(
+    id = "demo", version = "0.1.0",
+    sources = [source(id = "fixture", at = path("."))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [{}],
+)
+"#,
+        uses.join(", ")
+    );
+    let identity = FileIdentity {
+        uri: "file:///repo/product.gdl".to_owned(),
+        source: SourceId::new("product").unwrap(),
+        gdl_path: RelPath::new("product.gdl").unwrap(),
+        load_paths: None,
+    };
+    let out = GdlEngine::new().eval_product(&identity, &src);
+    out.value.unwrap_or_else(|| panic!("{:?}", out.diagnostics))
+}
+
+#[test]
+fn each_level_of_a_gear_with_code_reaches_its_descriptor() {
+    let tree = Tree::new("levels");
+    tree.gear("exp", "experimental", &[])
+        .gear("pre", "preview", &[])
+        .gear("dep", "deprecated", &[]);
+    let catalogue = load_catalogue(&[tree.root()]).catalogue;
+    assert!(catalogue.diagnostics.as_slice().is_empty(), "{:?}", catalogue.diagnostics);
+    let level = |id: &str| catalogue.gears[&GearId::new(id).unwrap()].maturity;
+    assert_eq!(level("exp"), gearbox_ir::Maturity::Experimental);
+    assert_eq!(level("pre"), gearbox_ir::Maturity::Preview);
+    assert_eq!(level("thing"), gearbox_ir::Maturity::Stable);
+    assert_eq!(level("dep"), gearbox_ir::Maturity::Deprecated);
+}
+
+#[test]
+fn a_product_is_told_what_it_links_below_stable_including_what_it_did_not_choose() {
+    let tree = Tree::new("closure");
+    // `old` is deprecated and co-locates `fresh`, which is experimental; the
+    // product names `old` and the stable `thing`, never `fresh`.
+    tree.gear("fresh", "experimental", &[]).gear("old", "deprecated", &["fresh"]);
+    let catalogue = load_catalogue(&[tree.root()]).catalogue;
+    let intent = product_of(&["old", "thing"]);
+
+    let resolution =
+        gearbox_engine::resolve::resolve(&catalogue, &intent, &ProfileId::new("dev").unwrap());
+    let maturity: Vec<(DiagnosticCode, gearbox_ir::Severity, &str)> = resolution
+        .diagnostics
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.code,
+                DiagnosticCode::TopologyExperimentalGear
+                    | DiagnosticCode::TopologyPreviewGear
+                    | DiagnosticCode::TopologyDeprecatedGear
+            )
+        })
+        .map(|d| (d.code, d.severity, d.message.as_str()))
+        .collect();
+    assert_eq!(maturity.len(), 2, "one per gear below stable, none for `thing`: {maturity:?}");
+    let (_, severity, message) = maturity
+        .iter()
+        .find(|(c, ..)| *c == DiagnosticCode::TopologyExperimentalGear)
+        .expect("the co-located experimental gear is reported");
+    assert_eq!(*severity, gearbox_ir::Severity::Warning);
+    assert!(message.contains("co-located by `old`"), "{message}");
+    let (_, severity, _) = maturity
+        .iter()
+        .find(|(c, ..)| *c == DiagnosticCode::TopologyDeprecatedGear)
+        .expect("the selected deprecated gear is reported");
+    assert_eq!(*severity, gearbox_ir::Severity::Warning);
+    // Not blocking: the levels warn, and the product still resolves.
+    assert!(
+        !resolution.diagnostics.iter().any(|d| d.is_error()),
+        "{:?}",
+        resolution.diagnostics
+    );
+}
+
+#[test]
+fn a_preview_gear_is_information_not_a_warning() {
+    let tree = Tree::new("preview");
+    tree.gear("pre", "preview", &[]);
+    let root = tree.root();
+    let intent = product_of(&["pre"]);
+    let report = gearbox_engine::validate::validate(&[root], Some(&intent));
+    let preview: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::TopologyPreviewGear)
+        .collect();
+    assert_eq!(preview.len(), 1, "{:?}", report.diagnostics);
+    assert_eq!(preview[0].severity, gearbox_ir::Severity::Info);
 }

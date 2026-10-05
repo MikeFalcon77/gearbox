@@ -883,7 +883,12 @@ fn print_summary(scan: &gearbox_engine::CatalogueScan) {
 
     for gear in catalogue.gears.values() {
         let caps: Vec<&str> = gear.runtime_caps.iter().map(|c| c.as_str()).collect();
-        println!("\n  {} [{}]", gear.id, caps.join(", "));
+        // The level only below `stable`, where it is news.
+        let maturity = match gear.maturity {
+            gearbox_ir::Maturity::Stable => String::new(),
+            level => format!(" ({})", level.as_str()),
+        };
+        println!("\n  {}{maturity} [{}]", gear.id, caps.join(", "));
         println!("    {}", gear.gdl_path);
         if !gear.colocated_deps.is_empty() {
             let deps: Vec<&str> = gear
@@ -1083,6 +1088,7 @@ mod tests {
             description: None,
             category: None,
             visibility: Visibility::Internal,
+            maturity: gearbox_ir::Maturity::Stable,
             source: SourceId::new("gears-rust").unwrap(),
             gdl_path: RelPath::new(format!("gears/{id}/gear.gdl")).unwrap(),
             package: CargoRef::new(
