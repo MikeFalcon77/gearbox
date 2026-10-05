@@ -203,12 +203,20 @@ role(name, directory_name?, labels = [])
 
 Parsed and stored. The runtime takes whatever directory name it is given; what cannot express a second role is the model here, one application per anchor gear, so a role nothing anchors has nowhere to go. That is **GBX0318** at resolution. Sharding and per-instance addressing are a separate gap, **GBX0602**. Both are warnings: the description is not wrong, it describes a shape this tool does not build yet.
 
-### `extension_point(spec, trait = ..., sdk = ...)`
+### `extension_point(spec, trait = ..., sdk = ..., selector = ...)`
 
 One point a host lets plugins fill. `spec` is positional and is the identity: the GTS spec's own
 segment, without the `cf.toolkit.plugins.plugin.v1~` base every plugin spec shares. `trait` is the
 interface plugins register under. `sdk` is written only when that trait lives outside the gear's
 own `sdk`.
+
+`selector` names the host's config field it picks a plugin by, as a dotted path: `selector =
+"idp.vendor"`. Its default is read at that path, and a product overrides it there --
+`config = {"idp": {"vendor": "keycloak"}}`. Omitted, the selector is the config's top-level
+`vendor`. Write it when the config has more than one `vendor`: account-management selects its IdP
+plugin by `idp.vendor` and registers itself as a tenant-resolver plugin under
+`tr_plugin.vendor`. A path that leads nowhere, or two points naming different selectors, is
+**GBX0516**.
 
 ```python
 extension_points = [

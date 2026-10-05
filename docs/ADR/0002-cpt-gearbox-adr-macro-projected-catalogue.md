@@ -584,7 +584,9 @@ wrong. With one gap, recorded rather than guessed around: the host's selector is
 first config type with a `vendor` default, and a host whose selector is another field reads wrong
 or not at all. account-management reads `tr_plugin.vendor` for its IdP point (its selector is
 `idp.vendor`); bss-rate-provider and bss-ledger read none. The fix is for `extension_point` to
-name its selector field, and it is not in this change.
+name its selector field, and it is not in this change. (Done 2026-10-05:
+`extension_point(selector = "idp.vendor")`. Reported on gears-rust PR #4793 as GBX0512 on every
+product using account-management.)
 
 ### What this retires
 

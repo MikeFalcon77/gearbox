@@ -803,3 +803,44 @@ fn a_resolution_reports_an_unfilled_point_for_its_own_profile() {
         "prod links oidc-authn-plugin, and dev's gap is not prod's to report"
     );
 }
+
+const AM: &str = r#"use_gear("account-management", source = "gears-rust""#;
+
+#[test]
+fn a_host_is_matched_by_the_vendor_field_its_point_names() {
+    // account-management has two `vendor` fields: `tr_plugin.vendor`
+    // ("constructorfabric"), what it registers under as a tenant-resolver
+    // plugin, and `idp.vendor` ("cf"), what it selects its IdP plugin by. The
+    // first was read as the selector, so every product with the host failed
+    // GBX0512 against `static-idp-plugin` (vendor "cf") -- which the runtime
+    // finds. Its point now says `selector = "idp.vendor"`.
+    let cat = require!();
+    let am = cat.gear(&gearbox_ir::GearId::new("account-management").unwrap()).unwrap();
+    assert_eq!(am.vendor_selector.as_deref(), Some("cf"));
+
+    let (codes, messages) = check(
+        &cat,
+        &product(
+            r#"embedded(id = "dev")"#,
+            "dev",
+            &format!(r#"{AM}, plugins = [plugin("static-idp-plugin")])"#),
+        ),
+    );
+    assert!(codes.is_empty(), "{codes:?} {messages}");
+
+    // And the product overrides it at the same path, not at a top-level `vendor`.
+    let (codes, messages) = check(
+        &cat,
+        &product(
+            r#"embedded(id = "dev")"#,
+            "dev",
+            &format!(
+                r#"{AM}, config = {{"idp": {{"vendor": "keycloak"}}}}, plugins = [plugin("static-idp-plugin")])"#
+            ),
+        ),
+    );
+    assert!(
+        codes.contains(&DiagnosticCode::PluginVendorMismatch) && messages.contains("keycloak"),
+        "{codes:?} {messages}"
+    );
+}

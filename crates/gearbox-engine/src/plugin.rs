@@ -170,6 +170,7 @@ pub fn project(
             trait_ident: ident.to_owned(),
             sdk_lib: sdk.record.lib_ident.clone(),
             sdk: sdk_ref,
+            selector: point.selector.clone(),
         });
     }
 
@@ -180,14 +181,68 @@ pub fn project(
         default_priority: own_default.priority,
     });
 
-    // A selector only on a gear that is purely a host. A gear that is both --
-    // bss-rate-provider -- has one config and two vendors in it, one it
-    // registers under and one it selects by, and nothing in the declaration yet
-    // says which field is which. Reporting the wrong one as the selector would
-    // make the vendor-match check wrong, so it reports none.
-    let vendor_selector = (!extension_points.is_empty() && fill.is_none())
-        .then(|| own_default.vendor.clone())
-        .flatten();
+    // **Declared, when the description says where it is.** A config may hold
+    // more than one `vendor`: account-management selects its IdP plugin by
+    // `idp.vendor` and registers itself as a tenant-resolver plugin under
+    // `tr_plugin.vendor`. The first `vendor` default the reader met was the
+    // second one, and every product with the host failed GBX0512 against a
+    // runtime that would have found its plugin. So `extension_point(selector =
+    // ...)` names the field, and its default is read at that path.
+    //
+    // Without one, the old rule: a selector only on a gear that is purely a
+    // host. A gear that is both -- bss-rate-provider -- has one config and two
+    // vendors in it, and reporting the wrong one would make the vendor-match
+    // check wrong, so it reports none.
+    let declared: Vec<(&str, Location)> = decl
+        .extension_points
+        .iter()
+        .filter_map(|p| {
+            p.selector
+                .as_deref()
+                .map(|s| (s, Location::or_file(p.declared_at.as_ref(), uri)))
+        })
+        .collect();
+    let vendor_selector = match declared.first() {
+        Some((path, at)) => {
+            if let Some((other, other_at)) = declared.iter().find(|(p, _)| p != path) {
+                // One selector per gear: the catalogue keeps one value, and the
+                // runtime's hosts read one field. Two would need a model this
+                // one does not have.
+                diagnostics.push(
+                    Diagnostic::error(
+                        DiagnosticCode::PluginPointUndetermined,
+                        format!(
+                            "this gear's extension points name two selectors, `{path}` and \
+                             `{other}`; a host selects all its points by one vendor field"
+                        ),
+                        "name the same `selector` on every `extension_point`, or drop it from \
+                         all but one",
+                    )
+                    .at(other_at.clone()),
+                );
+                None
+            } else {
+                match gearbox_project::project_field_str_default(files, path) {
+                    Ok(value) => value,
+                    Err(why) => {
+                        diagnostics.push(
+                            Diagnostic::error(
+                                DiagnosticCode::PluginPointUndetermined,
+                                format!("`selector = \"{path}\"` cannot be read: {why}"),
+                                "name the config field the host selects its plugin by, as a \
+                                 dotted path from the gear's config struct",
+                            )
+                            .at(at.clone()),
+                        );
+                        None
+                    }
+                }
+            }
+        }
+        None => (!extension_points.is_empty() && fill.is_none())
+            .then(|| own_default.vendor.clone())
+            .flatten(),
+    };
 
     PluginProjection {
         extension_points,

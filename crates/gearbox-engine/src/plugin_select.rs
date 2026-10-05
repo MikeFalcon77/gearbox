@@ -91,12 +91,26 @@ fn report_plugin_config_types(intent: &ProductIntent, uri: &str, diagnostics: &m
 }
 
 /// The vendor a host will search for.
+///
+/// Read from the product's config for the host at the key its extension point
+/// names -- `idp.vendor` is `config = {"idp": {"vendor": ...}}` -- or the
+/// top-level `vendor` when none is named. The default comes from the same
+/// field, projected into `vendor_selector`.
 fn host_vendor<'a>(gear: &'a GearDescriptor, intent: &'a ProductIntent) -> Option<&'a str> {
+    let key = gear
+        .extension_points
+        .iter()
+        .find_map(|p| p.selector.as_deref())
+        .unwrap_or("vendor");
     intent
         .selected_gears
         .iter()
         .find(|s| s.gear == gear.id)
-        .and_then(|s| s.config.get("vendor"))
+        .and_then(|s| {
+            let mut segments = key.split('.');
+            let first = s.config.get(segments.next()?)?;
+            segments.try_fold(first, |value, segment| value.get(segment))
+        })
         .and_then(serde_json::Value::as_str)
         .or(gear.vendor_selector.as_deref())
 }

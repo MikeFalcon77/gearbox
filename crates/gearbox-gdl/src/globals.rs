@@ -167,9 +167,31 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = pos)] spec: &str,
         #[starlark(require = named)] r#trait: &str,
         #[starlark(require = named)] sdk: Option<&'v CargoRecord>,
+        // Where in the host's config the vendor it selects by lives. Declared
+        // because nothing in Rust says which `vendor` field is the selector:
+        // account-management has two, one it selects its IdP plugin by
+        // (`idp.vendor`) and one it registers itself under as a
+        // tenant-resolver plugin (`tr_plugin.vendor`).
+        #[starlark(require = named)] selector: Option<&str>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ExtensionPointRecord> {
         check_plugin_spec("extension_point", spec)?;
+        if let Some(path) = selector {
+            let valid = !path.is_empty()
+                && path.split('.').all(|seg| {
+                    let mut chars = seg.chars();
+                    chars
+                        .next()
+                        .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
+                        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                });
+            if !valid {
+                return Err(anyhow::anyhow!(
+                    "extension_point(\"{spec}\", selector = \"{path}\"): a selector is a dotted \
+                     path of config field names, e.g. `selector = \"idp.vendor\"`"
+                ));
+            }
+        }
         if r#trait.trim().is_empty() {
             return Err(anyhow::anyhow!(
                 "extension_point(\"{spec}\", trait = \"\") names no trait; write the \
@@ -180,6 +202,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             spec: spec.to_owned(),
             trait_ident: r#trait.to_owned(),
             sdk: sdk.cloned(),
+            selector: selector.map(str::to_owned),
             declared_at: crate::declarative::call_location(eval),
         })
     }

@@ -403,3 +403,23 @@ fn every_level_of_a_gear_with_code_is_accepted() {
         );
     }
 }
+
+#[test]
+fn an_extension_point_selector_is_a_dotted_field_path() {
+    let point = |selector: &str| {
+        format!(
+            r#"gear(maturity = "stable", package = cargo(crate_name = "p", lib = "p"), sdk = cargo(crate_name = "s", lib = "s"),
+                extension_points = [extension_point("cf.core.idp.plugin.v1~", trait = "T", selector = "{selector}")])"#
+        )
+    };
+    let (decl, codes) = eval(&point("idp.vendor"));
+    assert!(codes.is_empty(), "{codes:?}");
+    assert_eq!(
+        decl.expect("evaluates").extension_points[0].selector.as_deref(),
+        Some("idp.vendor")
+    );
+    for bad in ["", "idp..vendor", "Idp.vendor", "idp.vendor!"] {
+        let message = refusal(&point(bad));
+        assert!(message.contains("dotted path of config field names"), "`{bad}`: {message}");
+    }
+}

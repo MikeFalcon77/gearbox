@@ -1129,6 +1129,7 @@ mod tests {
                 "authn_resolver_sdk",
                 RelPath::here(),
             ),
+            selector: None,
         }
     }
 
