@@ -185,14 +185,17 @@ fn the_slice_projects_cleanly() {
     // awkward seven: bss-rate-provider and its two sources, chat-engine, and
     // mini-chat's host and two co-located plugins. Then settings-service, the
     // one crate the retired `gear.toml` files knew about and no `gear.gdl` did;
-    // the other eleven of those have no code and are designs, kept apart.
+    // the other eleven of those have no code and are designs, kept apart. Then
+    // four that arrived upstream: bss-approvals and graph-storage, the
+    // clickhouse usage-collector plugin, and bss-products, which got its crate
+    // and so left the designs (ten now).
     //
     // The count is pinned on purpose. It is not what this test is about -- the
     // error list below is -- but a corpus that grows or shrinks under the suite
     // changes what every other corpus test means, and finding that out here is
     // cheaper than reading it as a failure somewhere else.
-    assert_eq!(catalogue.gears.len(), 45);
-    assert_eq!(catalogue.designs.len(), 11);
+    assert_eq!(catalogue.gears.len(), 49);
+    assert_eq!(catalogue.designs.len(), 10);
     let errors: Vec<String> = catalogue
         .diagnostics
         .iter()

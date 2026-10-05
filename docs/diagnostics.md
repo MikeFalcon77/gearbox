@@ -573,7 +573,7 @@ router and needs no `rest_host`, while it has no such second path for
 gRPC.
 
 The corpus makes this reachable rather than theoretical: `cluster` and
-`gear-orchestrator` both declare `grpc` and neither declares `deps`, so
+`service-discovery` both declare `grpc` and neither declares `deps`, so
 nothing drags a hub in beside them.
 
 *Asserts a limitation of the runtime, so every occurrence cites the source that proves it.*

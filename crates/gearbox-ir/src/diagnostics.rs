@@ -718,7 +718,7 @@ diagnostic_codes! {
     /// gRPC.
     ///
     /// The corpus makes this reachable rather than theoretical: `cluster` and
-    /// `gear-orchestrator` both declare `grpc` and neither declares `deps`, so
+    /// `service-discovery` both declare `grpc` and neither declares `deps`, so
     /// nothing drags a hub in beside them.
     TopologyGrpcWithoutHub = "GBX0314", Topology, Error, true, "gRPC gears with no gRPC hub",
         prevents = Prevents::error("cf-gears-toolkit", "RegistryError", "GrpcRequiresHub");

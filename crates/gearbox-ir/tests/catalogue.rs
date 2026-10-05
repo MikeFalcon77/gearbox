@@ -95,7 +95,7 @@ fn slice() -> Catalogue {
         gear("payments-audit", &["cluster"], &[Rest, Stateful]),
         gear("cluster", &[], &[Stateful]),
         gear("api-contracts", &[], &[Rest]),
-        gear("gear-orchestrator", &[], &[Grpc, System, Rest]),
+        gear("service-discovery", &[], &[Grpc, System, Rest]),
     ];
 
     Catalogue {

@@ -579,7 +579,7 @@ product(
     default_profile = "dev",
     gears = [
         use_gear("api-gateway", source = "gears-rust"),
-        use_gear("gear-orchestrator", source = "gears-rust"),
+        use_gear("service-discovery", source = "gears-rust"),
         use_gear("api-contracts", source = "gears-rust"),
         use_gear("api-contracts-consumer", source = "gears-rust"),
         use_gear("cluster", source = "gears-rust"),

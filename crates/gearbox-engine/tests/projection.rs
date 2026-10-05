@@ -74,13 +74,15 @@ fn the_slice_loads_without_diagnostics() {
     // described once the model was proven: plugins of described hosts, the
     // license-resolver, usage-collector and bss-rate-provider families, eight
     // plain services, chat-engine, and mini-chat's three -- plus
-    // settings-service, described when `gear.toml` was retired.
+    // settings-service, described when `gear.toml` was retired -- plus the
+    // four that arrived upstream: bss-approvals, bss-products, graph-storage
+    // and the clickhouse usage-collector plugin.
     //
     // The assertion above is the one that matters -- every description and
     // not one diagnostic between them. The count is here so that a corpus
     // moving underneath the suite is found in one place rather than inferred
     // from a stranger failure elsewhere.
-    assert_eq!(catalogue.gears.len(), 45, "the slice gears");
+    assert_eq!(catalogue.gears.len(), 49, "the slice gears");
 }
 
 #[test]
@@ -91,7 +93,7 @@ fn identity_is_projected_from_the_gear_attribute() {
     for expected in [
         "api-gateway",
         "grpc-hub",
-        "gear-orchestrator",
+        "service-discovery",
         "authn-resolver",
         "types-registry",
         "cluster",
@@ -178,7 +180,7 @@ fn the_client_trait_is_projected() {
     let catalogue = require_tree!();
     assert_eq!(
         catalogue
-            .gear(&gid("gear-orchestrator"))
+            .gear(&gid("service-discovery"))
             .unwrap()
             .client_trait
             .as_deref(),

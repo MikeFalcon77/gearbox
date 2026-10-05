@@ -65,7 +65,7 @@ const PLATFORM_CATEGORIES: &[(&str, &str)] = &[
     ("api-gateway", "api-ingress"),
     ("authn-resolver", "core-platform-integration"),
     ("cluster", "serverless"),
-    ("gear-orchestrator", "core-functionality"),
+    ("service-discovery", "core-functionality"),
     ("grpc-hub", "core-functionality"),
     ("tenant-resolver", "core-platform-integration"),
     ("types-registry", "core-functionality"),
