@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 108, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 109, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -200,6 +200,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "warning",
     domain: "gdl",
     docs: "A gear says `implementation = \"done\"` while a scenario it declares is\nnot `done`.\n\nA warning: either the list or the status is stale, and only the author\nknows which.",
+    requiresEvidence: false,
+  },
+  GBX0123: {
+    code: "GBX0123",
+    title: "unreadable or unsupported gdl_version",
+    severity: "error",
+    domain: "gdl",
+    docs: "A file's `gdl_version` is not `MAJOR.MINOR`, or names a major version\nthis Gearbox does not read.\n\nReported before evaluation: a different major may have removed or\nrenamed what this reader knows, so its errors would be the wrong ones.",
     requiresEvidence: false,
   },
   GBX0206: {

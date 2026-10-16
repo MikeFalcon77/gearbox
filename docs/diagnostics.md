@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **108**.
+Codes: **109**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -43,6 +43,7 @@ Codes: **108**.
 | [GBX0120](#gbx0120) | warning | a required config field has no value and no default |
 | [GBX0121](#gbx0121) | warning | a gear's declared git source disagrees with its checkout |
 | [GBX0122](#gbx0122) | warning | a gear is declared done with scenarios still open |
+| [GBX0123](#gbx0123) | error | unreadable or unsupported gdl_version |
 
 ### GBX0101
 
@@ -317,6 +318,16 @@ not `done`.
 
 A warning: either the list or the status is stale, and only the author
 knows which.
+
+### GBX0123
+
+**unreadable or unsupported gdl_version**
+
+A file's `gdl_version` is not `MAJOR.MINOR`, or names a major version
+this Gearbox does not read.
+
+Reported before evaluation: a different major may have removed or
+renamed what this reader knows, so its errors would be the wrong ones.
 
 ## `GBX02xx` — Cross-checking a description against Rust
 

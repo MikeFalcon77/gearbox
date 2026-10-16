@@ -191,6 +191,17 @@ fn evaluate<T>(
         return Err(diagnostics);
     }
 
+    let version = match crate::version::declared(&identity.uri, source) {
+        Ok(version) => version,
+        Err(refused) => {
+            let mut diagnostics: Diagnostics = [*refused].into_iter().collect();
+            diagnostics.finish();
+            return Err(diagnostics);
+        }
+    };
+    // A newer minor is read anyway; if it fails, that is the likely reason.
+    let newer = version.filter(|v| *v > crate::version::CURRENT);
+
     let ast = match AstModule::parse(&identity.uri, source.to_owned(), &dialect()) {
         Ok(ast) => ast,
         Err(e) => {
@@ -231,7 +242,15 @@ fn evaluate<T>(
         // A fragment that recorded its own finding is already in `diagnostics`;
         // restating it as a parent-file GBX0102 would hide the real span.
         if !is_recorded(&e) {
-            diagnostics.push(starlark_error(&identity.uri, &e, classify(&e)));
+            let mut diagnostic = starlark_error(&identity.uri, &e, classify(&e));
+            if let Some(newer) = newer {
+                diagnostic = diagnostic.with_help(format!(
+                    "this file is written for GDL {newer}, and this Gearbox reads GDL {}: \
+                     update Gearbox, or remove what the newer version added",
+                    crate::version::CURRENT
+                ));
+            }
+            diagnostics.push(diagnostic);
         }
         diagnostics.finish();
         return Err(diagnostics);

@@ -538,6 +538,13 @@ diagnostic_codes! {
     /// knows which.
     GdlOpenScenarios = "GBX0122", Gdl, Warning, false, "a gear is declared done with scenarios still open";
 
+    /// A file's `gdl_version` is not `MAJOR.MINOR`, or names a major version
+    /// this Gearbox does not read.
+    ///
+    /// Reported before evaluation: a different major may have removed or
+    /// renamed what this reader knows, so its errors would be the wrong ones.
+    GdlVersionUnsupported = "GBX0123", Gdl, Error, false, "unreadable or unsupported gdl_version";
+
     // ---------------------------------------------------------------- GBX02xx
     // GBX0201-GBX0205 are deliberately absent. They compared a `gear.gdl`
     // restatement of the gear id, co-location dependencies, runtime

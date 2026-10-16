@@ -424,6 +424,9 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
 
     /// `product(...)` -- the single top-level declaration of a `product.gdl`.
     fn product<'v>(
+        // `"MAJOR.MINOR"`; read before evaluation by `version.rs`, accepted
+        // here so that writing it is not an unknown argument.
+        #[starlark(require = named)] gdl_version: Option<&str>,
         #[starlark(require = named)] id: &str,
         #[starlark(require = named)] name: Option<&str>,
         #[starlark(require = named)] version: &str,
@@ -439,6 +442,8 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] preferences: Option<UnpackList<&'v PreferenceRecord>>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<NoneType> {
+        // Checked before evaluation; see `version.rs`.
+        let _ = gdl_version;
         // Refused here rather than lowered and reported later: `layout` names a
         // directory this build is about to write into, and one path segment is
         // the whole contract. A value with a separator in it would put the

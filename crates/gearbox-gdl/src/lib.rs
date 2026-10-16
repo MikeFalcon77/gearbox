@@ -48,6 +48,7 @@ pub(crate) mod product_intent;
 pub mod records;
 pub(crate) mod sink;
 pub(crate) mod values;
+pub mod version;
 pub mod vocabulary;
 
 pub use engine::{EvalOutcome, FileIdentity, GdlEngine};

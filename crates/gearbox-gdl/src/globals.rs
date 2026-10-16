@@ -709,6 +709,9 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         // Any locator is accepted so that a non-Cargo one gets a sentence
         // rather than a type mismatch: only Rust is projected.
         #[starlark(require = named)] package: Option<Locator<'v>>,
+        // `"MAJOR.MINOR"`; read before evaluation by `version.rs`, accepted
+        // here so that writing it is not an unknown argument.
+        #[starlark(require = named)] gdl_version: Option<&str>,
         // What the gear promises. Required, no default, except at
         // `implementation = "design"`, where it is refused; see `stage`. Taken
         // as an option only so its absence gets a message rather than
@@ -761,6 +764,8 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] cluster_providers: Option<Value<'v>>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<NoneType> {
+        // Checked before evaluation; see `version.rs`.
+        let _ = gdl_version;
         if fills.is_some() {
             return Err(anyhow::anyhow!(
                 "`fills` was renamed to `implements`: write `implements = \"<spec>~\"`"

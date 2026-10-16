@@ -817,3 +817,19 @@ fn a_checkout_can_take_its_crates_from_a_registry() {
         "{codes:?} {messages}"
     );
 }
+
+#[test]
+fn a_product_declares_its_gdl_version_too() {
+    let src = r#"
+product(
+    gdl_version = "1.0",
+    id = "demo", version = "0.1.0",
+    sources = [source(id = "s", at = path("."))],
+    profiles = [embedded(id = "dev")],
+    default_profile = "dev",
+    gears = [],
+)
+"#;
+    let (intent, codes, messages) = eval(src);
+    assert!(intent.is_some(), "{codes:?} {messages}");
+}

@@ -660,3 +660,78 @@ fn an_unknown_implementation_or_priority_is_refused() {
         "got: {message}"
     );
 }
+
+fn diagnostics_of(src: &str) -> Vec<gearbox_ir::Diagnostic> {
+    GdlEngine::new()
+        .eval_gear(&identity(), src)
+        .diagnostics
+        .as_slice()
+        .to_vec()
+}
+
+#[test]
+fn the_current_version_reads_as_written() {
+    let (decl, codes) = eval(&format!(
+        r#"gear(gdl_version = "1.0", maturity = "preview", {PKG})"#
+    ));
+    assert!(codes.is_empty(), "{codes:?}");
+    assert!(decl.is_some());
+}
+
+#[test]
+fn a_newer_minor_is_read_and_says_so_only_if_it_fails() {
+    let (decl, codes) = eval(&format!(
+        r#"gear(gdl_version = "1.7", maturity = "preview", {PKG})"#
+    ));
+    assert!(codes.is_empty(), "{codes:?}");
+    assert!(
+        decl.is_some(),
+        "a newer minor only adds; what this reader knows still reads"
+    );
+
+    // A constructor from the newer minor fails when the module compiles.
+    let diagnostics = diagnostics_of(&format!(
+        r#"gear(gdl_version = "1.7", maturity = "preview", {PKG}, sdk = pypi(name = "x"))"#
+    ));
+    let help = diagnostics[0].help.as_deref().unwrap_or_default();
+    assert!(
+        help.contains("written for GDL 1.7, and this Gearbox reads GDL 1.0"),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn another_major_is_refused_before_evaluation() {
+    // `pypi` would be an unknown name; the version is what is reported.
+    let diagnostics = diagnostics_of(r#"gear(gdl_version = "2.0", sdk = pypi(name = "x"))"#);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, DiagnosticCode::GdlVersionUnsupported);
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("written for GDL 2.0; this Gearbox reads GDL 1.x"),
+        "{diagnostics:?}"
+    );
+    assert!(diagnostics[0].location.is_some(), "points at the version");
+}
+
+#[test]
+fn a_version_is_major_and_minor() {
+    for bad in ["1", "v1.0", "1.0.0"] {
+        let diagnostics = diagnostics_of(&format!(
+            r#"gear(gdl_version = "{bad}", maturity = "preview", {PKG})"#
+        ));
+        assert_eq!(
+            diagnostics[0].code,
+            DiagnosticCode::GdlVersionUnsupported,
+            "{bad}"
+        );
+        assert!(
+            diagnostics[0]
+                .help
+                .as_deref()
+                .is_some_and(|h| h.contains("gdl_version = \"1.0\"")),
+            "{bad}: {diagnostics:?}"
+        );
+    }
+}
