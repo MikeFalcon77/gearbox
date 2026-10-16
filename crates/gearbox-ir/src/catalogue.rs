@@ -399,6 +399,14 @@ pub struct GearDescriptor {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sdks: Vec<PackageRef>,
 
+    /// Where this gear lives in a git repository, when it says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<GitOrigin>,
+
+    /// Where this gear's tests are, as declared.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tests: Vec<Located>,
+
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub runtime_caps: BTreeSet<RuntimeCap>,
 
@@ -631,6 +639,10 @@ pub struct DesignGear {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sdks: Vec<PackageRef>,
 
+    /// Where this gear will live in a git repository, when it says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<GitOrigin>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<GearDocs>,
 
@@ -662,14 +674,138 @@ pub struct GearDocs {
     /// the REST projections, and only four gears in the platform check one in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub openapi: Option<RelPath>,
+
+    /// The documents that are not on disk here, as web links.
+    ///
+    /// A document declared as a URL is one. So is a declared path that is not
+    /// in this checkout when the gear names its `source = git(...)`: the link
+    /// points at the same path in that repository. A path on disk always wins.
+    #[serde(default, skip_serializing_if = "DocUrls::is_empty")]
+    pub urls: DocUrls,
 }
 
 impl GearDocs {
     /// Whether anything was found at all, so the caller can skip an empty block.
     #[must_use]
     pub fn is_empty(&self) -> bool {
+        self.prd.is_none()
+            && self.design.is_none()
+            && self.adr.is_empty()
+            && self.openapi.is_none()
+            && self.urls.is_empty()
+    }
+}
+
+/// [`GearDocs`] as web links, for what is not on disk.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DocUrls {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prd: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adr: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openapi: Option<String>,
+}
+
+impl DocUrls {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
         self.prd.is_none() && self.design.is_none() && self.adr.is_empty() && self.openapi.is_none()
     }
+}
+
+/// Where something a description points at is: on disk, or on the web.
+///
+/// One of the two is set. `path` when the target is in this checkout, relative
+/// to the source root; `url` when it is not, either because the description
+/// wrote a URL or because the gear's `source = git(...)` says where it is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Located {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<RelPath>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// Where a gear lives in a git repository, from `source = git(...)`.
+///
+/// What a reader holding only the description follows to the code and the
+/// documents. Paths in the description are looked for on disk first; this is
+/// the fallback, and what `validate` checks a checkout against.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct GitOrigin {
+    /// The repository, as declared: `https://...` or `git@host:org/repo`.
+    pub url: String,
+
+    /// The gear's directory inside the repository; `.` for its root.
+    pub path: RelPath,
+
+    /// The tag, revision or branch, when one is declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+}
+
+impl GitOrigin {
+    /// A web link to `relative`, a path written relative to the gear's
+    /// directory, in this repository.
+    ///
+    /// `None` when the path climbs out of the repository. Hosts differ in where
+    /// the reference goes: `/blob/` for GitHub and most others, `/-/blob/` for
+    /// GitLab, `/src/` for Bitbucket. Without a reference the link follows the
+    /// default branch (`HEAD`).
+    #[must_use]
+    pub fn web_url(&self, relative: &str) -> Option<String> {
+        let target = self.path.resolve(relative).ok()?;
+        let base = web_base(&self.url);
+        let reference = self.reference.as_deref().unwrap_or("HEAD");
+        let infix = if base.contains("://gitlab.") {
+            "-/blob"
+        } else if base.contains("://bitbucket.org/") {
+            "src"
+        } else {
+            "blob"
+        };
+        Some(if target.is_here() {
+            format!("{base}/tree/{reference}")
+        } else {
+            format!("{base}/{infix}/{reference}/{target}")
+        })
+    }
+
+    /// The repository in the one spelling two remotes can be compared in:
+    /// host and path, lowercase, with no scheme, user or `.git`.
+    #[must_use]
+    pub fn normalized_url(url: &str) -> String {
+        web_base(url)
+            .split_once("://")
+            .map_or_else(|| url.to_owned(), |(_, rest)| rest.to_owned())
+            .to_lowercase()
+    }
+}
+
+/// `git@host:org/repo.git` and `https://host/org/repo.git` as `https://host/org/repo`.
+fn web_base(url: &str) -> String {
+    let url = url.trim().trim_end_matches('/');
+    let url = url.strip_suffix(".git").unwrap_or(url);
+    if let Some((scheme, rest)) = url.split_once("://") {
+        // `ssh://git@host/org/repo` and `https://user@host/...`: drop the user.
+        let rest = rest.split_once('@').map_or(rest, |(_, host)| host);
+        let scheme = if scheme.starts_with("http") {
+            scheme
+        } else {
+            "https"
+        };
+        return format!("{scheme}://{rest}");
+    }
+    // scp-like: `git@host:org/repo`.
+    let rest = url.split_once('@').map_or(url, |(_, host)| host);
+    format!("https://{}", rest.replacen(':', "/", 1))
 }
 
 /// One curated Cargo feature, and the deployment kinds it belongs to.

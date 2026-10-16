@@ -8,8 +8,10 @@ import type { EndpointDecl } from "./EndpointDecl";
 import type { ExtensionPointDecl } from "./ExtensionPointDecl";
 import type { GearDocs } from "./GearDocs";
 import type { GearId } from "./GearId";
+import type { GitOrigin } from "./GitOrigin";
 import type { GtsTypeDecl } from "./GtsTypeDecl";
 import type { LifecycleDecl } from "./LifecycleDecl";
+import type { Located } from "./Located";
 import type { Location } from "./Location";
 import type { Maturity } from "./Maturity";
 import type { PackageRef } from "./PackageRef";
@@ -54,7 +56,15 @@ gdl_path: RelPath, package: CargoRef,
  * are. At most one is Cargo; that one is also what the projector reads for
  * the traits the gear's extension points name.
  */
-sdks?: Array<PackageRef>, runtime_caps?: Array<RuntimeCap>, 
+sdks?: Array<PackageRef>, 
+/**
+ * Where this gear lives in a git repository, when it says.
+ */
+origin?: GitOrigin | null, 
+/**
+ * Where this gear's tests are, as declared.
+ */
+tests?: Array<Located>, runtime_caps?: Array<RuntimeCap>, 
 /**
  * Gears that must be in the same binary as this one.
  *

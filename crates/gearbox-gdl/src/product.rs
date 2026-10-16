@@ -159,49 +159,6 @@ fn strings(list: Option<UnpackList<String>>) -> Vec<String> {
 
 #[starlark_module]
 fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
-    /// `path("...")` -- a local directory, relative to the description.
-    ///
-    /// Positional, like the other single-argument constructors (`provider`,
-    /// `use_gear`, `application`): `path(at = "...")` would name the obvious.
-    fn path(#[starlark(require = pos)] at: &str) -> anyhow::Result<SourceAtRecord> {
-        Ok(SourceAtRecord {
-            kind: "path".to_owned(),
-            at: Some(at.to_owned()),
-            url: None,
-            tag: None,
-            rev: None,
-            branch: None,
-            prefix: None,
-        })
-    }
-
-    /// `git(url = ..., tag = ... | rev = ... | branch = ...)`
-    ///
-    ///
-    /// A branch does not pin an immutable point in history, so a lock built from
-    /// one is repeatable but not reproducible. Accepted, and recorded as such.
-    fn git(
-        #[starlark(require = named)] url: &str,
-        #[starlark(require = named)] tag: Option<&str>,
-        #[starlark(require = named)] rev: Option<&str>,
-        #[starlark(require = named)] branch: Option<&str>,
-    ) -> anyhow::Result<SourceAtRecord> {
-        if tag.is_none() && rev.is_none() && branch.is_none() {
-            return Err(anyhow::anyhow!(
-                "git(url = \"{url}\") pins nothing; give one of `tag`, `rev` or `branch`"
-            ));
-        }
-        Ok(SourceAtRecord {
-            kind: "git".to_owned(),
-            at: None,
-            url: Some(url.to_owned()),
-            tag: tag.map(str::to_owned),
-            rev: rev.map(str::to_owned),
-            branch: branch.map(str::to_owned),
-            prefix: None,
-        })
-    }
-
     /// `registry("crates.io", prefix = "cf-gears-")`
     ///
     /// **The source is the registry, not one package.** A product naming six
@@ -227,6 +184,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             rev: None,
             branch: None,
             prefix: prefix.map(str::to_owned),
+            subdir: None,
         })
     }
 
@@ -240,6 +198,23 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] crates: Option<&'v SourceAtRecord>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<SourceRecord> {
+        if at.kind == "git" {
+            let url = at.url.as_deref().unwrap_or_default();
+            // `git()` leaves the pin optional because a gear's `source` is an
+            // address, not a lock. A product's source is what a lock is built
+            // from, so it has to pin something.
+            if at.tag.is_none() && at.rev.is_none() && at.branch.is_none() {
+                return Err(anyhow::anyhow!(
+                    "git(url = \"{url}\") pins nothing; give one of `tag`, `rev` or `branch`"
+                ));
+            }
+            if let Some(subdir) = &at.subdir {
+                return Err(anyhow::anyhow!(
+                    "source(id = \"{id}\", at = git(..., path = \"{subdir}\")): a product's \
+                     source is a whole repository; `path` on `git(...)` places a gear inside one"
+                ));
+            }
+        }
         Ok(SourceRecord {
             id: id.to_owned(),
             at: at.clone(),
@@ -538,6 +513,7 @@ fn prefer_namespace(builder: &mut GlobalsBuilder) {
 /// The product mirror of `globals::gear_additions`, and factored out for the
 /// same reason: [`product_vocabulary`] applies it to an empty builder.
 fn product_additions(builder: &mut GlobalsBuilder) {
+    crate::globals::locator_vocabulary(builder);
     gdl_product_vocabulary(builder);
     for (name, namespace) in vocabulary::ALL_NAMESPACES {
         builder.set(name, *namespace);

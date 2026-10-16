@@ -39,7 +39,7 @@ use crate::edit::PROFILE_KINDS;
 use crate::records::{
     CargoRecord, ClusterPluginRecord, ClusterRequireRecord, ConfigRecord, ConsumeRecord,
     DocsRecord, EndpointRecord, ExtensionPointRecord, FeatureRecord, GrpcRecord, LifecycleRecord,
-    PackageRecord, ProvideRecord, RestRecord, RoleRecord,
+    PackageRecord, ProvideRecord, RestRecord, RoleRecord, SourceAtRecord,
 };
 use crate::sink::{GdlSink, GearDecl, Maturity};
 use crate::values::GdlEnum;
@@ -152,6 +152,69 @@ fn package_record(
         path: path.to_owned(),
         declared_at: crate::declarative::call_location(eval),
     })
+}
+
+/// `path(...)` and `git(...)`: where something lives, for both kinds of file.
+///
+/// Shared so that one spelling means one thing everywhere. What each file does
+/// with a locator differs, and is checked where it is used: a product's
+/// `source()` requires a pin, a gear's `source` does not.
+#[starlark_module]
+pub(crate) fn locator_vocabulary(builder: &mut GlobalsBuilder) {
+    /// `path("...")` -- a local directory, relative to the description.
+    ///
+    /// Positional, like the other single-argument constructors (`provider`,
+    /// `use_gear`, `application`): `path(at = "...")` would name the obvious.
+    fn path(#[starlark(require = pos)] at: &str) -> anyhow::Result<SourceAtRecord> {
+        Ok(SourceAtRecord {
+            kind: "path".to_owned(),
+            at: Some(at.to_owned()),
+            url: None,
+            tag: None,
+            rev: None,
+            branch: None,
+            prefix: None,
+            subdir: None,
+        })
+    }
+
+    /// `git(url = ..., path = ..., tag = ... | rev = ... | branch = ...)`
+    ///
+    /// `path` is a directory inside the repository: where a gear sits, for a
+    /// gear's `source`. The pin is optional here and required by a product's
+    /// `source()`, which a lock is built from. A branch does not pin an
+    /// immutable point in history, so a lock built from one is repeatable but
+    /// not reproducible. Accepted, and recorded as such.
+    fn git(
+        #[starlark(require = named)] url: &str,
+        #[starlark(require = named)] path: Option<&str>,
+        #[starlark(require = named)] tag: Option<&str>,
+        #[starlark(require = named)] rev: Option<&str>,
+        #[starlark(require = named)] branch: Option<&str>,
+    ) -> anyhow::Result<SourceAtRecord> {
+        if let Some(subdir) = path {
+            let climbs = subdir.split('/').any(|seg| seg == "..");
+            if subdir.starts_with('/') || climbs || subdir.contains('\\') {
+                return Err(anyhow::anyhow!(
+                    "git(url = \"{url}\", path = \"{subdir}\"): `path` is a directory inside the \
+                     repository, written with `/`, from its root and without `..`"
+                ));
+            }
+        }
+        Ok(SourceAtRecord {
+            kind: "git".to_owned(),
+            at: None,
+            url: Some(url.to_owned()),
+            tag: tag.map(str::to_owned),
+            rev: rev.map(str::to_owned),
+            branch: branch.map(str::to_owned),
+            prefix: None,
+            subdir: path
+                .map(|p| p.trim_end_matches('/'))
+                .filter(|p| !p.is_empty() && *p != ".")
+                .map(str::to_owned),
+        })
+    }
 }
 
 #[starlark_module]
@@ -573,6 +636,13 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         // host's extension point -- the word eCos CDL uses for the same role.
         #[starlark(require = named)] fills: Option<starlark::values::Value<'v>>,
         #[starlark(require = named)] docs: Option<&'v DocsRecord>,
+        // Where this gear sits in a git repository. Optional: paths in the file
+        // are relative to it and are looked for on disk first. This is what a
+        // reader holding the description alone -- in Studio, in a registry --
+        // follows to the code and documents.
+        #[starlark(require = named)] source: Option<&'v SourceAtRecord>,
+        // Where the gear's tests are: paths relative to the description, or URLs.
+        #[starlark(require = named)] tests: Option<UnpackList<String>>,
         #[starlark(require = named)] provides: Option<UnpackList<&'v ProvideRecord>>,
         #[starlark(require = named)] consumes: Option<UnpackList<&'v ConsumeRecord>>,
         #[starlark(require = named)] requires: Option<UnpackList<&'v ClusterRequireRecord>>,
@@ -614,6 +684,16 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             }
         };
         let (sdk, other_sdks) = split_sdks(sdk)?;
+        if let Some(at) = source
+            && at.kind != "git"
+        {
+            return Err(anyhow::anyhow!(
+                "`source = {}(...)`: a gear's source is `git(url = ..., path = ...)`, the \
+                 repository and directory it lives in. Local paths need no declaration: they \
+                 are relative to this file",
+                at.kind
+            ));
+        }
 
         let maturity = match maturity {
             None => {
@@ -651,6 +731,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
                 (roles.is_some(), "roles"),
                 (config_schema.is_some(), "config_schema"),
                 (cargo_features.is_some(), "cargo_features"),
+                (tests.is_some(), "tests"),
                 (runtime_caps.is_some(), "runtime_caps"),
                 (colocated_deps.is_some(), "colocated_deps"),
                 (lifecycle.is_some(), "lifecycle"),
@@ -728,6 +809,8 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
                 .unwrap_or_default(),
             implements: implements.map(str::to_owned),
             docs: docs.cloned(),
+            source: source.cloned(),
+            tests: tests.map(|l| l.items).unwrap_or_default(),
             provides: provides
                 .map(|l| l.items.into_iter().cloned().collect())
                 .unwrap_or_default(),
@@ -836,6 +919,7 @@ fn cluster_require(
 /// alternative, subtracting the standard set from the full one, is wrong (see
 /// [`gear_vocabulary`]).
 fn gear_additions(builder: &mut GlobalsBuilder) {
+    locator_vocabulary(builder);
     gdl_vocabulary(builder);
     for (name, namespace) in vocabulary::ALL_NAMESPACES {
         builder.set(name, *namespace);

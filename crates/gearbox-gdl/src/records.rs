@@ -421,6 +421,11 @@ gdl_record! {
         pub branch: Option<String>,
         /// Registry only: what a gear id is prefixed with to name its package.
         pub prefix: Option<String>,
+        /// Git only: the directory inside the repository, from `git(path = ...)`.
+        ///
+        /// A gear's `source` uses it to say where the gear sits; a product's
+        /// source is a whole repository and refuses it.
+        pub subdir: Option<String>,
     }
 }
 

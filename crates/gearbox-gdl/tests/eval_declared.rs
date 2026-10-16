@@ -523,3 +523,61 @@ fn a_design_gear_may_have_sdks_in_any_language() {
     assert!(codes.is_empty(), "{codes:?}");
     assert_eq!(decl.expect("evaluates").other_sdks.len(), 1);
 }
+
+#[test]
+fn a_gear_names_the_repository_and_directory_it_lives_in() {
+    let (decl, codes) = eval(&format!(
+        r#"gear(maturity = "preview", {PKG},
+                source = git(url = "https://github.com/cf/gears-rust", path = "gears/demo/"),
+                tests = ["tests", "https://ci.example.com/demo"])"#
+    ));
+    assert!(codes.is_empty(), "{codes:?}");
+    let decl = decl.expect("evaluates");
+    let source = decl.source.expect("source");
+    assert_eq!(
+        source.url.as_deref(),
+        Some("https://github.com/cf/gears-rust")
+    );
+    // The pin is optional for a gear: `source` is an address, not a lock.
+    assert!(source.tag.is_none() && source.rev.is_none() && source.branch.is_none());
+    assert_eq!(source.subdir.as_deref(), Some("gears/demo"));
+    assert_eq!(decl.tests, ["tests", "https://ci.example.com/demo"]);
+}
+
+#[test]
+fn a_local_source_is_refused_because_paths_are_already_local() {
+    let message = refusal(&format!(
+        r#"gear(maturity = "preview", {PKG}, source = path("../elsewhere"))"#
+    ));
+    assert!(
+        message.contains("`source = path(...)`") && message.contains("relative to this file"),
+        "got: {message}"
+    );
+}
+
+#[test]
+fn a_git_path_stays_inside_the_repository() {
+    for bad in ["../x", "/abs", "a/../../b"] {
+        let message = refusal(&format!(
+            r#"gear(maturity = "preview", {PKG}, source = git(url = "u", path = "{bad}"))"#
+        ));
+        assert!(
+            message.contains("a directory inside the"),
+            "`{bad}`: {message}"
+        );
+    }
+}
+
+#[test]
+fn a_design_gear_may_name_its_source_but_not_tests() {
+    let (decl, codes) = eval(
+        r#"gear(maturity = "design", id = "approval-service",
+                source = git(url = "https://github.com/cf/gears-rust", path = "gears/approval"))"#,
+    );
+    assert!(codes.is_empty(), "{codes:?}");
+    assert!(decl.expect("evaluates").source.is_some());
+
+    let message =
+        refusal(r#"gear(maturity = "design", id = "approval-service", tests = ["tests"])"#);
+    assert!(message.contains("`tests` describes code"), "got: {message}");
+}

@@ -65,6 +65,13 @@ pub struct GearDecl {
     pub implements: Option<String>,
     /// Overrides the convention-based search for this gear's documents.
     pub docs: Option<crate::records::DocsRecord>,
+    /// `source = git(...)`: the repository and directory this gear lives in.
+    ///
+    /// Locators are looked for on disk first, relative to the description;
+    /// this is where a reader goes for what is not there.
+    pub source: Option<crate::records::SourceAtRecord>,
+    /// `tests = [...]`: paths relative to the description, or URLs.
+    pub tests: Vec<String>,
     pub provides: Vec<ProvideRecord>,
     pub consumes: Vec<ConsumeRecord>,
     pub requires: Vec<crate::records::ClusterRequireRecord>,

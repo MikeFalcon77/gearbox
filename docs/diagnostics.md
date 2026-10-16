@@ -15,7 +15,7 @@ remedy at the point it is raised
 (`cpt-gearbox-nfr-actionable-diagnostics`), which is per-occurrence and
 so is not listed here.
 
-Codes: **106**.
+Codes: **107**.
 
 ## `GBX01xx` — Parsing and evaluating GDL
 
@@ -29,7 +29,7 @@ Codes: **106**.
 | [GBX0106](#gbx0106) | error | unknown GDL argument |
 | [GBX0107](#gbx0107) | warning | GDL construct accepted but not resolved |
 | [GBX0108](#gbx0108) | warning | gear category is not one the platform uses |
-| [GBX0109](#gbx0109) | error | declared documentation path does not exist |
+| [GBX0109](#gbx0109) | error | declared documentation or test path does not exist |
 | [GBX0110](#gbx0110) | error | duplicate profile-scoped declaration |
 | [GBX0111](#gbx0111) | error | unknown deployment profile |
 | [GBX0112](#gbx0112) | error | config_schema names no usable struct |
@@ -41,6 +41,7 @@ Codes: **106**.
 | [GBX0118](#gbx0118) | error | a role's directory name is not kebab-case |
 | [GBX0119](#gbx0119) | error | a role names a value the gear's config enum does not accept |
 | [GBX0120](#gbx0120) | warning | a required config field has no value and no default |
+| [GBX0121](#gbx0121) | warning | a gear's declared git source disagrees with its checkout |
 
 ### GBX0101
 
@@ -108,9 +109,10 @@ bucket of one.
 
 ### GBX0109
 
-**declared documentation path does not exist**
+**declared documentation or test path does not exist**
 
-A declared documentation or specification path does not exist.
+A declared documentation, specification or test path does not exist,
+and the gear names no `source = git(...)` to find it in.
 
 An error, unlike the absence of a file found by convention: a gear may
 genuinely have no PRD, but a path written by hand and pointing nowhere is
@@ -292,6 +294,18 @@ counted it would fire on every product in the corpus. The keys a gear's
 A warning rather than an error: a value may still arrive from a profile,
 or from an operator editing the generated file, and this cannot see
 either. What it can say is that nothing in the description supplies it.
+
+### GBX0121
+
+**a gear's declared git source disagrees with its checkout**
+
+A gear's `source = git(...)` disagrees with the checkout its
+description was read from: no remote has that url, or the gear is not
+at that `path` in it.
+
+A warning: what is on disk is used either way. But a reader holding
+the description alone follows `source`, and would land in the wrong
+repository or directory.
 
 ## `GBX02xx` — Cross-checking a description against Rust
 

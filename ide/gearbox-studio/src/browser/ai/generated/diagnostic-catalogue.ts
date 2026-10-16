@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 106, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 107, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -90,10 +90,10 @@ export const DIAGNOSTIC_CATALOGUE: {
   },
   GBX0109: {
     code: "GBX0109",
-    title: "declared documentation path does not exist",
+    title: "declared documentation or test path does not exist",
     severity: "error",
     domain: "gdl",
-    docs: "A declared documentation or specification path does not exist.\n\nAn error, unlike the absence of a file found by convention: a gear may\ngenuinely have no PRD, but a path written by hand and pointing nowhere is\na typo.",
+    docs: "A declared documentation, specification or test path does not exist,\nand the gear names no `source = git(...)` to find it in.\n\nAn error, unlike the absence of a file found by convention: a gear may\ngenuinely have no PRD, but a path written by hand and pointing nowhere is\na typo.",
     requiresEvidence: false,
   },
   GBX0110: {
@@ -184,6 +184,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "warning",
     domain: "gdl",
     docs: "A required configuration field has no value and no default.\n\n**The code the Studio's own configurator already promised.** Its\n`valueMissing` says of a required field with nothing set that \"what it\nbuys is that `required` is visible before a GBX code explains it from the\nother side of the screen\" -- and there was no such code. `required` is\nprojected from the gear's config struct and reached exactly one reader,\na marker in a panel.\n\nWhat it costs is measurable. `EventBrokerConfig.mode` is required with no\ndefault and the runtime's loader is strict, so a product selecting that\ngear without setting `mode` generates a file the gear refuses at `init`\nwith `missing field`. Nothing between the description and that failure\nsaid a word.\n\n**Derived keys are excluded, and that exclusion is load-bearing.**\n`ApiGatewayConfig.bind_addr` is required, has no default, and is written\nby the generator from the port the resolver assigned -- so a rule that\ncounted it would fire on every product in the corpus. The keys a gear's\n`serves` declares are the same set `GBX0114` already refuses a value for.\n\nA warning rather than an error: a value may still arrive from a profile,\nor from an operator editing the generated file, and this cannot see\neither. What it can say is that nothing in the description supplies it.",
+    requiresEvidence: false,
+  },
+  GBX0121: {
+    code: "GBX0121",
+    title: "a gear's declared git source disagrees with its checkout",
+    severity: "warning",
+    domain: "gdl",
+    docs: "A gear's `source = git(...)` disagrees with the checkout its\ndescription was read from: no remote has that url, or the gear is not\nat that `path` in it.\n\nA warning: what is on disk is used either way. But a reader holding\nthe description alone follows `source`, and would land in the wrong\nrepository or directory.",
     requiresEvidence: false,
   },
   GBX0206: {

@@ -1092,6 +1092,8 @@ mod tests {
             source: SourceId::new("gears-rust").unwrap(),
             gdl_path: RelPath::new(format!("gears/{id}/gear.gdl")).unwrap(),
             sdks: Vec::new(),
+            origin: None,
+            tests: Vec::new(),
             package: CargoRef::new(
                 format!("cf-gears-{id}"),
                 id.replace('-', "_"),

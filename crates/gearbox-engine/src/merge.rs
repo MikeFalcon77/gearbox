@@ -82,6 +82,10 @@ pub struct Projections<'a> {
     pub plugin: &'a crate::plugin::PluginProjection,
     pub config: Option<gearbox_ir::ConfigSchema>,
     pub docs: Option<gearbox_ir::GearDocs>,
+    /// `source = git(...)`, checked against the checkout; see `origin.rs`.
+    pub origin: Option<gearbox_ir::GitOrigin>,
+    /// `tests = [...]`, found like a declared document; see `docs.rs`.
+    pub tests: Vec<gearbox_ir::Located>,
     pub gts_types: Vec<gearbox_ir::GtsTypeDecl>,
     /// The names in the gear crate's `[features]` table.
     pub available_features: std::collections::BTreeSet<String>,
@@ -107,6 +111,8 @@ pub fn merge(
         plugin,
         config,
         docs,
+        origin,
+        tests,
         gts_types,
         available_features,
         cargo_features,
@@ -340,6 +346,8 @@ pub fn merge(
         gdl_path: identity.gdl_path.clone(),
         package,
         sdks,
+        origin,
+        tests,
         runtime_caps,
         colocated_deps,
         // Projected.
