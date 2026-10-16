@@ -118,6 +118,16 @@ gdl_record! {
 }
 
 gdl_record! {
+    /// `scenario("...", priority = "p1", done = True)` -- one thing a gear lets
+    /// its users do, and whether it is written.
+    ScenarioRecord as "gdl_scenario" {
+        pub text: String,
+        pub priority: Option<String>,
+        pub done: bool,
+    }
+}
+
+gdl_record! {
     /// `docs(prd = ..., design = ..., adr = [...], openapi = ...)`
     ///
     /// Every field is an override, not a requirement. The platform keeps these at

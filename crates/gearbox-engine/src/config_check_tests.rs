@@ -64,6 +64,8 @@ fn demo_descriptor() -> GearDescriptor {
         source: SourceId::new("s").unwrap(),
         gdl_path: gearbox_ir::RelPath::new("demo/gear.gdl").unwrap(),
         sdks: Vec::new(),
+        implementation: None,
+        scenarios: Vec::new(),
         origin: None,
         tests: Vec::new(),
         package: gearbox_ir::CargoRef {

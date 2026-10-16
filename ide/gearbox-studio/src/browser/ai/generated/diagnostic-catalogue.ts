@@ -20,7 +20,7 @@ export interface DiagnosticCodeDoc {
   readonly prevents?: string;
 }
 
-/** Every code the engine can emit: 107, ordered as the catalogue declares them. */
+/** Every code the engine can emit: 108, ordered as the catalogue declares them. */
 export const DIAGNOSTIC_CATALOGUE: {
   readonly [code: string]: DiagnosticCodeDoc;
 } = {
@@ -192,6 +192,14 @@ export const DIAGNOSTIC_CATALOGUE: {
     severity: "warning",
     domain: "gdl",
     docs: "A gear's `source = git(...)` disagrees with the checkout its\ndescription was read from: no remote has that url, or the gear is not\nat that `path` in it.\n\nA warning: what is on disk is used either way. But a reader holding\nthe description alone follows `source`, and would land in the wrong\nrepository or directory.",
+    requiresEvidence: false,
+  },
+  GBX0122: {
+    code: "GBX0122",
+    title: "a gear is declared done with scenarios still open",
+    severity: "warning",
+    domain: "gdl",
+    docs: "A gear says `implementation = \"done\"` while a scenario it declares is\nnot `done`.\n\nA warning: either the list or the status is stale, and only the author\nknows which.",
     requiresEvidence: false,
   },
   GBX0206: {
@@ -421,7 +429,7 @@ export const DIAGNOSTIC_CATALOGUE: {
     title: "gear is at design maturity",
     severity: "error",
     domain: "topology",
-    docs: "A product selects a gear that is described but has no code yet.\n\n`maturity = \"design\"` in its `gear.gdl`: the catalogue knows the gear's\nid, purpose and documents, and there is no crate to link. Distinct from\nGBX0301 because \"not in the catalogue\" sends the reader looking for a\ntypo or a closed source root, and neither is the problem.",
+    docs: "A product selects a gear that is described but has no code yet.\n\n`implementation = \"design\"` in its `gear.gdl`: the catalogue knows the gear's\nid, purpose and documents, and there is no crate to link. Distinct from\nGBX0301 because \"not in the catalogue\" sends the reader looking for a\ntypo or a closed source root, and neither is the problem.",
     requiresEvidence: false,
   },
   GBX0322: {

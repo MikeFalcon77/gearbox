@@ -325,25 +325,26 @@ fn refusal(src: &str) -> String {
 #[test]
 fn a_design_gear_names_its_id_and_has_no_package() {
     let (decl, codes) = eval(
-        r#"gear(maturity = "design", id = "approval-service", name = "Approval Service",
+        r#"gear(implementation = "design", id = "approval-service", name = "Approval Service",
                 sdk = cargo(crate_name = "approval-sdk", lib = "approval_sdk", path = "sdk"))"#,
     );
     assert!(codes.is_empty(), "{codes:?}");
     let decl = decl.expect("evaluates");
-    assert_eq!(decl.maturity, Some(gearbox_gdl::Maturity::Design));
+    assert!(decl.is_design());
+    assert_eq!(decl.maturity, None);
     assert_eq!(decl.id.as_deref(), Some("approval-service"));
     assert!(decl.package.is_none());
 }
 
 #[test]
 fn a_design_gear_without_an_id_is_refused() {
-    let message = refusal(r#"gear(maturity = "design", name = "X")"#);
+    let message = refusal(r#"gear(implementation = "design", name = "X")"#);
     assert!(message.contains("names its own id"), "got: {message}");
 }
 
 #[test]
 fn a_design_gear_id_must_be_a_gear_id() {
-    let message = refusal(r#"gear(maturity = "design", id = "Not Kebab")"#);
+    let message = refusal(r#"gear(implementation = "design", id = "Not Kebab")"#);
     assert!(message.contains("not a valid gear id"), "got: {message}");
 }
 
@@ -355,7 +356,9 @@ fn a_design_gear_refuses_what_describes_code() {
         "runtime_caps = [cap.rest]",
         r#"visibility = "public""#,
     ] {
-        let message = refusal(&format!(r#"gear(maturity = "design", id = "x", {field})"#));
+        let message = refusal(&format!(
+            r#"gear(implementation = "design", id = "x", {field})"#
+        ));
         assert!(
             message.contains("a design gear has none yet"),
             "`{field}`: got {message}"
@@ -402,10 +405,7 @@ fn every_level_of_a_gear_with_code_is_accepted() {
             r#"gear(maturity = "{spelling}", package = cargo(crate_name = "p", lib = "p"))"#
         ));
         assert!(codes.is_empty(), "{spelling}: {codes:?}");
-        assert_eq!(
-            decl.expect("evaluates").maturity,
-            Some(gearbox_gdl::Maturity::Code(level))
-        );
+        assert_eq!(decl.expect("evaluates").maturity, Some(level));
     }
 }
 
@@ -517,7 +517,7 @@ fn a_package_with_no_name_is_refused() {
 #[test]
 fn a_design_gear_may_have_sdks_in_any_language() {
     let (decl, codes) = eval(
-        r#"gear(maturity = "design", id = "approval-service",
+        r#"gear(implementation = "design", id = "approval-service",
                 sdk = [nuget(id = "Cf.Approval.Sdk")])"#,
     );
     assert!(codes.is_empty(), "{codes:?}");
@@ -571,13 +571,92 @@ fn a_git_path_stays_inside_the_repository() {
 #[test]
 fn a_design_gear_may_name_its_source_but_not_tests() {
     let (decl, codes) = eval(
-        r#"gear(maturity = "design", id = "approval-service",
+        r#"gear(implementation = "design", id = "approval-service",
                 source = git(url = "https://github.com/cf/gears-rust", path = "gears/approval"))"#,
     );
     assert!(codes.is_empty(), "{codes:?}");
     assert!(decl.expect("evaluates").source.is_some());
 
     let message =
-        refusal(r#"gear(maturity = "design", id = "approval-service", tests = ["tests"])"#);
+        refusal(r#"gear(implementation = "design", id = "approval-service", tests = ["tests"])"#);
     assert!(message.contains("`tests` describes code"), "got: {message}");
+}
+
+#[test]
+fn the_old_design_maturity_names_what_it_became() {
+    let message = refusal(r#"gear(maturity = "design", id = "approval-service")"#);
+    assert!(
+        message.contains("is now `implementation = \"design\"`, with no maturity"),
+        "got: {message}"
+    );
+}
+
+#[test]
+fn a_design_gear_promises_nothing() {
+    let message = refusal(
+        r#"gear(implementation = "design", maturity = "preview", id = "approval-service")"#,
+    );
+    assert!(message.contains("remove `maturity`"), "got: {message}");
+}
+
+#[test]
+fn implementation_is_a_second_axis_beside_maturity() {
+    let (decl, codes) = eval(&format!(
+        r#"gear(maturity = "stable", implementation = "in-progress", {PKG}, scenarios = [
+            scenario("enqueue and execute jobs", priority = "p1", done = True),
+            scenario("retry with backoff", priority = "p2"),
+            scenario("cron triggers"),
+        ])"#
+    ));
+    assert!(codes.is_empty(), "{codes:?}");
+    let decl = decl.expect("evaluates");
+    assert_eq!(decl.maturity, Some(gearbox_ir::Maturity::Stable));
+    assert_eq!(
+        decl.implementation,
+        Some(gearbox_ir::Implementation::InProgress)
+    );
+    let scenarios: Vec<_> = decl
+        .scenarios
+        .iter()
+        .map(|s| (s.text.as_str(), s.priority.as_deref(), s.done))
+        .collect();
+    assert_eq!(
+        scenarios,
+        [
+            ("enqueue and execute jobs", Some("p1"), true),
+            ("retry with backoff", Some("p2"), false),
+            ("cron triggers", None, false),
+        ]
+    );
+}
+
+#[test]
+fn implementation_is_optional_and_maturity_is_not() {
+    let (decl, codes) = eval(&format!(r#"gear(maturity = "preview", {PKG})"#));
+    assert!(codes.is_empty(), "{codes:?}");
+    assert_eq!(decl.expect("evaluates").implementation, None);
+
+    let message = refusal(&format!(r#"gear(implementation = "done", {PKG})"#));
+    assert!(
+        message.contains("a gear declares its maturity"),
+        "got: {message}"
+    );
+}
+
+#[test]
+fn an_unknown_implementation_or_priority_is_refused() {
+    let message = refusal(&format!(
+        r#"gear(maturity = "preview", implementation = "finished", {PKG})"#
+    ));
+    assert!(
+        message.contains(r#"expected one of "design", "in-progress", "done""#),
+        "got: {message}"
+    );
+    let message = refusal(&format!(
+        r#"gear(maturity = "preview", {PKG}, scenarios = [scenario("x", priority = "high")])"#
+    ));
+    assert!(
+        message.contains("\"p1\" (first) to \"p5\""),
+        "got: {message}"
+    );
 }

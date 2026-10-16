@@ -28,6 +28,7 @@ export const GEAR_FUNCTIONS: readonly string[] = [
   "provide",
   "rest",
   "role",
+  "scenario",
 ];
 
 /** The callable vocabulary of a `product.gdl`. */

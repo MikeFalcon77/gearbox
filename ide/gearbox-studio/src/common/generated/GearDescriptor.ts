@@ -10,6 +10,7 @@ import type { GearDocs } from "./GearDocs";
 import type { GearId } from "./GearId";
 import type { GitOrigin } from "./GitOrigin";
 import type { GtsTypeDecl } from "./GtsTypeDecl";
+import type { Implementation } from "./Implementation";
 import type { LifecycleDecl } from "./LifecycleDecl";
 import type { Located } from "./Located";
 import type { Location } from "./Location";
@@ -20,6 +21,7 @@ import type { ProviderDescriptor } from "./ProviderDescriptor";
 import type { RelPath } from "./RelPath";
 import type { Requirement } from "./Requirement";
 import type { RuntimeCap } from "./RuntimeCap";
+import type { Scenario } from "./Scenario";
 import type { SourceId } from "./SourceId";
 import type { Visibility } from "./Visibility";
 
@@ -40,6 +42,15 @@ display_name: string, description?: string | null, category?: string | null, vis
  * uses below `stable` (GBX0322-0324) instead.
  */
 maturity: Maturity, 
+/**
+ * How much of the gear is written, when the description says. Never
+ * `Design`: a gear with no code is a [`DesignGear`].
+ */
+implementation?: Implementation | null, 
+/**
+ * What the gear lets its users do, in the order declared.
+ */
+scenarios?: Array<Scenario>, 
 /**
  * Which declared source this gear was read from.
  */

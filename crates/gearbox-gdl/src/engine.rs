@@ -104,14 +104,14 @@ impl GdlEngine {
 
         // A design gear has no crate by definition; `gear()` refused a
         // `package` on one, so only a stable gear can be missing it.
-        if decl.package.is_none() && decl.maturity != Some(crate::Maturity::Design) {
+        if decl.package.is_none() && !decl.is_design() {
             diagnostics.push(
                 Diagnostic::error(
                     DiagnosticCode::GdlEval,
                     "gear has no `package = cargo(...)`",
                     "declare the crate: `package = cargo(crate_name = \"...\", lib = \"...\")`. \
                      It is what tells the projector which crate to scan. A gear with no code \
-                     yet is `maturity = \"design\"` and names its `id` instead.",
+                     yet is `implementation = \"design\"` and names its `id` instead.",
                 )
                 .at(Location::file(identity.uri.clone())),
             );

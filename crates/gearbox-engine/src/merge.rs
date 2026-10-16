@@ -174,9 +174,9 @@ pub fn merge(
     };
     // `gear()` refuses a description without a maturity, and a design one
     // never reaches projection; defensive, like the package above.
-    let Some(gearbox_gdl::Maturity::Code(maturity)) = decl.maturity else {
-        return None;
-    };
+    let maturity = decl.maturity?;
+    let scenarios = scenarios(decl);
+    report_open_scenarios(uri, &id_hint(decl), decl, &scenarios, diagnostics);
     let gdl_dir = identity.gdl_path.parent();
     let package = cargo_ref(package_record, &gdl_dir, "package", uri, diagnostics);
     let sdks = sdk_refs(decl, &gdl_dir, uri, diagnostics);
@@ -342,6 +342,8 @@ pub fn merge(
         category,
         visibility,
         maturity,
+        implementation: decl.implementation,
+        scenarios,
         source: identity.source.clone(),
         gdl_path: identity.gdl_path.clone(),
         package,
@@ -519,6 +521,67 @@ pub(crate) fn cargo_ref(
             record.link.clone()
         },
     }
+}
+
+/// The declared scenarios, as the catalogue keeps them.
+pub(crate) fn scenarios(decl: &GearDecl) -> Vec<gearbox_ir::Scenario> {
+    decl.scenarios
+        .iter()
+        .map(|s| gearbox_ir::Scenario {
+            text: s.text.clone(),
+            priority: s.priority.clone(),
+            done: s.done,
+        })
+        .collect()
+}
+
+/// GBX0122: `implementation = "done"` while a declared scenario is not.
+///
+/// A warning, because either may be the stale one: the gear may be done and
+/// the list not updated, or the status raised too early.
+fn report_open_scenarios(
+    uri: &str,
+    gear: &str,
+    decl: &GearDecl,
+    scenarios: &[gearbox_ir::Scenario],
+    diagnostics: &mut Diagnostics,
+) {
+    if decl.implementation != Some(gearbox_ir::Implementation::Done) {
+        return;
+    }
+    let open: Vec<&str> = scenarios
+        .iter()
+        .filter(|s| !s.done)
+        .map(|s| s.text.as_str())
+        .collect();
+    if open.is_empty() {
+        return;
+    }
+    diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::GdlOpenScenarios,
+            format!(
+                "{gear} says `implementation = \"done\"`, but {} of its scenarios {} not: {}",
+                open.len(),
+                if open.len() == 1 { "is" } else { "are" },
+                open.iter()
+                    .map(|t| format!("\"{t}\""))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )
+        .at(Location::or_file(decl.declared_at.as_ref(), uri))
+        .with_help(
+            "mark the written scenarios `done = True`, or say `implementation = \"in-progress\"`",
+        ),
+    );
+}
+
+/// How a diagnostic names a gear before its id is projected.
+fn id_hint(decl: &GearDecl) -> String {
+    decl.name
+        .as_deref()
+        .map_or_else(|| "this gear".to_owned(), |name| format!("`{name}`"))
 }
 
 /// Every SDK a description declares, as catalogue references: the Rust SDK

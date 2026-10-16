@@ -33,9 +33,14 @@ use crate::records::{ConsumeRecord, ProvideRecord, RoleRecord};
 /// [`crate::engine`] converts.
 #[derive(Debug, Clone, Default)]
 pub struct GearDecl {
-    /// How far the gear has got. `gear()` refuses a description without one,
-    /// so `None` appears only on a `GearDecl` built by hand.
-    pub maturity: Option<Maturity>,
+    /// What the gear promises. `gear()` requires it unless the gear is a
+    /// design, and refuses it on one: a gear with no code promises nothing.
+    pub maturity: Option<gearbox_ir::Maturity>,
+    /// How much of the gear is written, when the description says.
+    /// `Some(Design)` is a gear with no code yet.
+    pub implementation: Option<gearbox_ir::Implementation>,
+    /// What the gear lets its users do, in the order declared.
+    pub scenarios: Vec<crate::records::ScenarioRecord>,
     /// The id, written only by a design gear.
     ///
     /// A gear with code has its id projected from `#[toolkit::gear(name =
@@ -97,37 +102,11 @@ pub struct GearDecl {
     pub declared_at: Option<gearbox_ir::Location>,
 }
 
-/// `maturity = "..."` on a `gear(...)`. Required, with no default.
-///
-/// **No default, because the safe one does not exist.** `stable` as a default
-/// turns a description that forgot the field into a promise nobody made;
-/// anything lower turns it into an accusation. So the author says which.
-///
-/// `Design` is a gear described before it has code: it names an id, says what
-/// the gear is for and where its documents are, and stops there. It has no
-/// `package`, so nothing is projected and nothing can be resolved into a
-/// product; the catalogue lists it apart from the gears that can be used.
-/// The other four describe code, and are what [`gearbox_ir::Maturity`] keeps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Maturity {
-    Design,
-    Code(gearbox_ir::Maturity),
-}
-
-impl Maturity {
-    /// The spellings `maturity = ...` accepts, in order of increasing promise.
-    pub const SPELLINGS: &[&str] = &["design", "experimental", "preview", "stable", "deprecated"];
-
+impl GearDecl {
+    /// Whether this is a gear described before it has code.
     #[must_use]
-    pub fn parse(spelling: &str) -> Option<Self> {
-        Some(match spelling {
-            "design" => Self::Design,
-            "experimental" => Self::Code(gearbox_ir::Maturity::Experimental),
-            "preview" => Self::Code(gearbox_ir::Maturity::Preview),
-            "stable" => Self::Code(gearbox_ir::Maturity::Stable),
-            "deprecated" => Self::Code(gearbox_ir::Maturity::Deprecated),
-            _ => return None,
-        })
+    pub fn is_design(&self) -> bool {
+        self.implementation == Some(gearbox_ir::Implementation::Design)
     }
 }
 

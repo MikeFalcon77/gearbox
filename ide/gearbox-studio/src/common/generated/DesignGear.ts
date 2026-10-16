@@ -5,10 +5,11 @@ import type { GitOrigin } from "./GitOrigin";
 import type { Location } from "./Location";
 import type { PackageRef } from "./PackageRef";
 import type { RelPath } from "./RelPath";
+import type { Scenario } from "./Scenario";
 import type { SourceId } from "./SourceId";
 
 /**
- * A gear described before it has code: `maturity = "design"` in its `gear.gdl`.
+ * A gear described before it has code: `implementation = "design"` in its `gear.gdl`.
  *
  * **A separate collection, not a state of [`GearDescriptor`].** A descriptor's
  * facts are projected from a crate -- its package, capabilities, contracts --
@@ -37,4 +38,8 @@ sdks?: Array<PackageRef>,
 /**
  * Where this gear will live in a git repository, when it says.
  */
-origin?: GitOrigin | null, docs?: GearDocs | null, declared_at?: Location | null, };
+origin?: GitOrigin | null, 
+/**
+ * What the gear will let its users do, in the order declared.
+ */
+scenarios?: Array<Scenario>, docs?: GearDocs | null, declared_at?: Location | null, };

@@ -56,6 +56,8 @@ fn gear(id: &str, deps: &[&str], caps: &[RuntimeCap]) -> GearDescriptor {
         source: source_id(),
         gdl_path: RelPath::new(format!("gears/{id}/gear.gdl")).unwrap(),
         sdks: Vec::new(),
+        implementation: None,
+        scenarios: Vec::new(),
         origin: None,
         tests: Vec::new(),
         package: CargoRef::new(format!("cf-gears-{id}"), ident, RelPath::here()),

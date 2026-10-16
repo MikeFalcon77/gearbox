@@ -531,6 +531,13 @@ diagnostic_codes! {
     /// repository or directory.
     GdlSourceMismatch = "GBX0121", Gdl, Warning, false, "a gear's declared git source disagrees with its checkout";
 
+    /// A gear says `implementation = "done"` while a scenario it declares is
+    /// not `done`.
+    ///
+    /// A warning: either the list or the status is stale, and only the author
+    /// knows which.
+    GdlOpenScenarios = "GBX0122", Gdl, Warning, false, "a gear is declared done with scenarios still open";
+
     // ---------------------------------------------------------------- GBX02xx
     // GBX0201-GBX0205 are deliberately absent. They compared a `gear.gdl`
     // restatement of the gear id, co-location dependencies, runtime
@@ -854,7 +861,7 @@ diagnostic_codes! {
 
     /// A product selects a gear that is described but has no code yet.
     ///
-    /// `maturity = "design"` in its `gear.gdl`: the catalogue knows the gear's
+    /// `implementation = "design"` in its `gear.gdl`: the catalogue knows the gear's
     /// id, purpose and documents, and there is no crate to link. Distinct from
     /// GBX0301 because "not in the catalogue" sends the reader looking for a
     /// typo or a closed source root, and neither is the problem.

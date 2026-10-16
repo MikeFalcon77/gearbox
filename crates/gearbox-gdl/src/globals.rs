@@ -39,9 +39,9 @@ use crate::edit::PROFILE_KINDS;
 use crate::records::{
     CargoRecord, ClusterPluginRecord, ClusterRequireRecord, ConfigRecord, ConsumeRecord,
     DocsRecord, EndpointRecord, ExtensionPointRecord, FeatureRecord, GrpcRecord, LifecycleRecord,
-    PackageRecord, ProvideRecord, RestRecord, RoleRecord, SourceAtRecord,
+    PackageRecord, ProvideRecord, RestRecord, RoleRecord, ScenarioRecord, SourceAtRecord,
 };
-use crate::sink::{GdlSink, GearDecl, Maturity};
+use crate::sink::{GdlSink, GearDecl};
 use crate::values::GdlEnum;
 use crate::vocabulary;
 
@@ -130,6 +130,68 @@ fn split_sdks(
         }
     }
     Ok((cargo, others))
+}
+
+/// `maturity` and `implementation`, the two axes of a gear's status, checked
+/// together.
+///
+/// `maturity` is required, with no default, because `stable` would be a promise
+/// nobody made and anything lower an accusation -- except at `implementation =
+/// "design"`, where it is refused: a gear with no code promises nothing.
+/// `implementation` is optional; absent says nothing either way.
+fn stage(
+    maturity: Option<&str>,
+    implementation: Option<&str>,
+) -> anyhow::Result<(
+    Option<gearbox_ir::Maturity>,
+    Option<gearbox_ir::Implementation>,
+)> {
+    use gearbox_ir::{Implementation, Maturity};
+    let spellings = |all: &[&str]| {
+        all.iter()
+            .map(|s| format!("\"{s}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if maturity == Some("design") {
+        return Err(anyhow::anyhow!(
+            "`maturity = \"design\"` is now `implementation = \"design\"`, with no maturity: \
+             maturity is what a gear promises, implementation is how much of it is written"
+        ));
+    }
+    let implementation = implementation
+        .map(|spelling| {
+            Implementation::parse(spelling).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unknown implementation `{spelling}`: expected one of {}",
+                    spellings(&Implementation::ALL.map(Implementation::as_str))
+                )
+            })
+        })
+        .transpose()?;
+    let maturity = maturity
+        .map(|spelling| {
+            Maturity::parse(spelling).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unknown maturity `{spelling}`: expected one of {}",
+                    spellings(&Maturity::ALL.map(Maturity::as_str))
+                )
+            })
+        })
+        .transpose()?;
+    match (implementation, maturity) {
+        (Some(Implementation::Design), Some(level)) => Err(anyhow::anyhow!(
+            "`maturity = \"{}\"` on a gear with `implementation = \"design\"`: a gear with \
+             no code promises nothing yet; remove `maturity`",
+            level.as_str()
+        )),
+        (Some(Implementation::Design), None) | (_, Some(_)) => Ok((maturity, implementation)),
+        (_, None) => Err(anyhow::anyhow!(
+            "a gear declares its maturity: `maturity = \"experimental\" | \"preview\" | \
+             \"stable\" | \"deprecated\"`, or `implementation = \"design\"` for a gear with no \
+             code yet. There is no default, because `stable` would be a promise nobody made"
+        )),
+    }
 }
 
 /// A non-Cargo package, refusing an empty name.
@@ -281,6 +343,35 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<PackageRecord> {
         package_record(gearbox_ir::Ecosystem::Go, "module", module, path, eval)
+    }
+
+    /// `scenario("...", priority = "p1", done = True)` -- one thing a gear lets
+    /// its users do, and whether it is written.
+    ///
+    /// What a `GEARS.md` line holds. `priority` is `p1` (first) to `p5`;
+    /// `done` is `False` until the scenario is written.
+    fn scenario(
+        #[starlark(require = pos)] text: &str,
+        #[starlark(require = named)] priority: Option<&str>,
+        #[starlark(require = named, default = false)] done: bool,
+    ) -> anyhow::Result<ScenarioRecord> {
+        if text.trim().is_empty() {
+            return Err(anyhow::anyhow!(
+                "scenario(\"\") says nothing; write what a user can do"
+            ));
+        }
+        if let Some(p) = priority
+            && !matches!(p, "p1" | "p2" | "p3" | "p4" | "p5")
+        {
+            return Err(anyhow::anyhow!(
+                "scenario(\"{text}\", priority = \"{p}\"): a priority is \"p1\" (first) to \"p5\""
+            ));
+        }
+        Ok(ScenarioRecord {
+            text: text.to_owned(),
+            priority: priority.map(str::to_owned),
+            done,
+        })
     }
 
     /// `docs(...)` -- override where this gear's documents live.
@@ -618,10 +709,16 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         // Any locator is accepted so that a non-Cargo one gets a sentence
         // rather than a type mismatch: only Rust is projected.
         #[starlark(require = named)] package: Option<Locator<'v>>,
-        // Required, no default; one of `Maturity::SPELLINGS`. Taken as an
-        // option only so its absence gets a message rather than "missing
-        // argument".
+        // What the gear promises. Required, no default, except at
+        // `implementation = "design"`, where it is refused; see `stage`. Taken
+        // as an option only so its absence gets a message rather than
+        // "missing argument".
         #[starlark(require = named)] maturity: Option<&str>,
+        // How much of the gear is written: "design", "in-progress" or "done".
+        // Optional; absent says nothing either way.
+        #[starlark(require = named)] implementation: Option<&str>,
+        // What the gear lets its users do, as `GEARS.md` lists it.
+        #[starlark(require = named)] scenarios: Option<UnpackList<&'v ScenarioRecord>>,
         // A locator, like `cluster_plugins`: nothing in a gear's own crate says
         // where its SDK lives, and the SDK is what declares the GTS types this
         // gear exposes and the traits its extension points name. One locator
@@ -695,27 +792,10 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             ));
         }
 
-        let maturity = match maturity {
-            None => {
-                return Err(anyhow::anyhow!(
-                    "a gear declares its maturity: `maturity = \"experimental\" | \"preview\" | \
-                     \"stable\" | \"deprecated\"`, or `\"design\"` for a gear with no code yet. \
-                     There is no default, because `stable` would be a promise nobody made"
-                ));
-            }
-            Some(spelling) => Maturity::parse(spelling).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "unknown maturity `{spelling}`: expected one of {}",
-                    Maturity::SPELLINGS
-                        .iter()
-                        .map(|s| format!("\"{s}\""))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            })?,
-        };
+        let (maturity, implementation) = stage(maturity, implementation)?;
+        let design = implementation == Some(gearbox_ir::Implementation::Design);
 
-        if maturity == Maturity::Design {
+        if design {
             // What a design gear may say is what `gear.toml` said, plus where
             // its SDK and documents are: everything else describes code.
             for (present, field) in [
@@ -741,7 +821,8 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
                 if present {
                     return Err(anyhow::anyhow!(
                         "`{field}` describes code, and a design gear has none yet: remove it, \
-                         or declare `package = cargo(...)` and drop `maturity = \"design\"`"
+                         or declare `package = cargo(...)` and a `maturity`, and drop \
+                         `implementation = \"design\"`"
                     ));
                 }
             }
@@ -757,7 +838,7 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
 
         for (present, field, owner) in [
             (
-                id.is_some() && maturity != Maturity::Design,
+                id.is_some() && !design,
                 "id",
                 "#[toolkit::gear(name = ...)]",
             ),
@@ -793,10 +874,12 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         }
 
         sink(eval)?.set_gear(GearDecl {
-            maturity: Some(maturity),
-            id: id
-                .filter(|_| maturity == Maturity::Design)
-                .map(str::to_owned),
+            maturity,
+            implementation,
+            scenarios: scenarios
+                .map(|l| l.items.into_iter().cloned().collect())
+                .unwrap_or_default(),
+            id: id.filter(|_| design).map(str::to_owned),
             name: name.map(str::to_owned),
             description: description.map(str::to_owned),
             category: category.map(str::to_owned),

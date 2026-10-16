@@ -219,7 +219,7 @@ pub fn load_catalogue_staged(
         diagnostics.extend(outcome.diagnostics);
         let Some(decl) = outcome.value else { continue };
 
-        if decl.maturity == Some(gearbox_gdl::Maturity::Design) {
+        if decl.is_design() {
             let admitted = admit_design(
                 root,
                 &identity,
@@ -560,6 +560,7 @@ fn design_gear(
         gdl_path: identity.gdl_path.clone(),
         sdks: crate::merge::sdk_refs(decl, &gdl_dir, uri, diagnostics),
         origin,
+        scenarios: crate::merge::scenarios(decl),
         docs,
         declared_at: decl.declared_at.clone(),
     })

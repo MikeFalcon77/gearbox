@@ -119,8 +119,11 @@ pub enum Visibility {
 ///
 /// Ordered by promise, so `<` reads as "less settled than" -- except
 /// `Deprecated`, which is last because it is the end of the line, not because
-/// it promises most. A gear with no code is not here: it is `maturity =
-/// "design"`, kept in [`Catalogue::designs`].
+/// it promises most. A gear with no code is not here: it is `implementation =
+/// "design"`, has no maturity, and is kept in [`Catalogue::designs`].
+///
+/// One of two axes. This one is what a gear promises its users; how much of
+/// it is written is [`Implementation`].
 ///
 /// No `Default`. The description must say, and a missing value is refused at
 /// evaluation: `Stable` as a default makes forgetting the field a promise.
@@ -138,6 +141,14 @@ pub enum Maturity {
 }
 
 impl Maturity {
+    /// Every level, in order of increasing promise.
+    pub const ALL: [Self; 4] = [
+        Self::Experimental,
+        Self::Preview,
+        Self::Stable,
+        Self::Deprecated,
+    ];
+
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -147,6 +158,66 @@ impl Maturity {
             Self::Deprecated => "deprecated",
         }
     }
+
+    /// The level a description spells, if it is one.
+    #[must_use]
+    pub fn parse(spelling: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|m| m.as_str() == spelling)
+    }
+}
+
+/// How much of a gear is written: the status `GEARS.md` marks with `[ ]` and
+/// `[x]`, for the whole gear.
+///
+/// The other axis from [`Maturity`]. A `stable` gear may still have work
+/// planned; an `experimental` one may be complete. Absent means the
+/// description does not say, which is not a claim either way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum Implementation {
+    /// Documents, perhaps an SDK; no crate yet. Such a gear is in
+    /// [`Catalogue::designs`], not [`Catalogue::gears`].
+    Design,
+    /// Code exists and work on it continues.
+    InProgress,
+    /// Everything the gear sets out to do is written.
+    Done,
+}
+
+impl Implementation {
+    /// Every value, in order of progress.
+    pub const ALL: [Self; 3] = [Self::Design, Self::InProgress, Self::Done];
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Design => "design",
+            Self::InProgress => "in-progress",
+            Self::Done => "done",
+        }
+    }
+
+    /// The value a description spells, if it is one.
+    #[must_use]
+    pub fn parse(spelling: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|i| i.as_str() == spelling)
+    }
+}
+
+/// One thing a gear lets its users do, and whether it is written yet.
+///
+/// What a `GEARS.md` line holds: `- [x] p1 - enqueue and execute jobs`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Scenario {
+    pub text: String,
+
+    /// `p1` (first) to `p5`, when the description gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<String>,
+
+    /// Whether it is written.
+    #[serde(default)]
+    pub done: bool,
 }
 
 /// A gear's lifecycle declaration.
@@ -382,6 +453,15 @@ pub struct GearDescriptor {
     /// uses below `stable` (GBX0322-0324) instead.
     pub maturity: Maturity,
 
+    /// How much of the gear is written, when the description says. Never
+    /// `Design`: a gear with no code is a [`DesignGear`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implementation: Option<Implementation>,
+
+    /// What the gear lets its users do, in the order declared.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scenarios: Vec<Scenario>,
+
     /// Which declared source this gear was read from.
     pub source: SourceId,
 
@@ -602,7 +682,7 @@ pub struct PendingGear {
     pub category: Option<String>,
 }
 
-/// A gear described before it has code: `maturity = "design"` in its `gear.gdl`.
+/// A gear described before it has code: `implementation = "design"` in its `gear.gdl`.
 ///
 /// **A separate collection, not a state of [`GearDescriptor`].** A descriptor's
 /// facts are projected from a crate -- its package, capabilities, contracts --
@@ -642,6 +722,10 @@ pub struct DesignGear {
     /// Where this gear will live in a git repository, when it says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<GitOrigin>,
+
+    /// What the gear will let its users do, in the order declared.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scenarios: Vec<Scenario>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<GearDocs>,
