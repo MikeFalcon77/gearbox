@@ -55,6 +55,7 @@ fn gear(id: &str, deps: &[&str], caps: &[RuntimeCap]) -> GearDescriptor {
         visibility: Visibility::Internal,
         source: source_id(),
         gdl_path: RelPath::new(format!("gears/{id}/gear.gdl")).unwrap(),
+        sdks: Vec::new(),
         package: CargoRef::new(format!("cf-gears-{id}"), ident, RelPath::here()),
         runtime_caps: caps.iter().copied().collect(),
         colocated_deps: deps.iter().map(|d| gid(d)).collect(),

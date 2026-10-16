@@ -54,6 +54,11 @@ pub struct GearDecl {
     /// gear's own crate says where that SDK is. A plugin does not write one:
     /// the host's SDK is the host's.
     pub sdk: Option<crate::records::CargoRecord>,
+    /// This gear's SDKs in other languages, in the order declared.
+    ///
+    /// Located only. They sit beside `sdk` rather than replacing it because
+    /// the Rust one is the one the projector reads.
+    pub other_sdks: Vec<crate::records::PackageRecord>,
     /// The points this gear lets plugins fill, keyed by GTS spec segment.
     pub extension_points: Vec<crate::records::ExtensionPointRecord>,
     /// The spec segment of the point this gear implements, when it is a plugin.

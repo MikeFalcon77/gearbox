@@ -433,3 +433,93 @@ fn an_extension_point_selector_is_a_dotted_field_path() {
         );
     }
 }
+
+const PKG: &str = r#"package = cargo(crate_name = "cf-demo", lib = "demo")"#;
+
+#[test]
+fn sdks_in_other_languages_sit_beside_the_rust_one() {
+    let (decl, codes) = eval(&format!(
+        r#"gear(maturity = "preview", {PKG}, sdk = [
+            npm(name = "@cf/demo-sdk", path = "sdk/ts"),
+            cargo(crate_name = "cf-demo-sdk", lib = "demo_sdk", path = "sdk/rust"),
+            nuget(id = "Cf.Demo.Sdk"),
+            go(module = "github.com/cf/demo-sdk-go", path = "sdk/go"),
+        ])"#
+    ));
+    assert!(codes.is_empty(), "{codes:?}");
+    let decl = decl.expect("evaluates");
+    assert_eq!(decl.sdk.expect("the Rust SDK").crate_name, "cf-demo-sdk");
+    let others: Vec<_> = decl
+        .other_sdks
+        .iter()
+        .map(|p| (p.ecosystem, p.name.as_str(), p.path.as_str()))
+        .collect();
+    assert_eq!(
+        others,
+        [
+            (gearbox_ir::Ecosystem::Npm, "@cf/demo-sdk", "sdk/ts"),
+            (gearbox_ir::Ecosystem::Nuget, "Cf.Demo.Sdk", "."),
+            (
+                gearbox_ir::Ecosystem::Go,
+                "github.com/cf/demo-sdk-go",
+                "sdk/go"
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_single_sdk_needs_no_list() {
+    let (decl, codes) = eval(&format!(
+        r#"gear(maturity = "preview", {PKG}, sdk = npm(name = "@cf/demo-sdk"))"#
+    ));
+    assert!(codes.is_empty(), "{codes:?}");
+    let decl = decl.expect("evaluates");
+    assert!(decl.sdk.is_none());
+    assert_eq!(decl.other_sdks.len(), 1);
+}
+
+#[test]
+fn a_gear_has_one_rust_sdk() {
+    let message = refusal(&format!(
+        r#"gear(maturity = "preview", {PKG}, sdk = [
+            cargo(crate_name = "a-sdk", lib = "a_sdk"),
+            cargo(crate_name = "b-sdk", lib = "b_sdk"),
+        ])"#
+    ));
+    assert!(
+        message.contains("two `cargo(...)` packages, `a-sdk` and `b-sdk`"),
+        "got: {message}"
+    );
+}
+
+#[test]
+fn a_package_in_another_language_is_refused_with_where_it_goes() {
+    let message = refusal(r#"gear(maturity = "preview", package = npm(name = "demo"))"#);
+    assert!(
+        message.contains("`package = npm(...)`")
+            && message.contains("sdk = [cargo(...), npm(...)]"),
+        "got: {message}"
+    );
+}
+
+#[test]
+fn a_package_with_no_name_is_refused() {
+    let message = refusal(&format!(
+        r#"gear(maturity = "preview", {PKG}, sdk = go(module = " "))"#
+    ));
+    assert!(
+        message.contains("go(module = \"\") names no package"),
+        "got: {message}"
+    );
+}
+
+#[test]
+fn a_design_gear_may_have_sdks_in_any_language() {
+    let (decl, codes) = eval(
+        r#"gear(maturity = "design", id = "approval-service",
+                sdk = [nuget(id = "Cf.Approval.Sdk")])"#,
+    );
+    assert!(codes.is_empty(), "{codes:?}");
+    assert_eq!(decl.expect("evaluates").other_sdks.len(), 1);
+}

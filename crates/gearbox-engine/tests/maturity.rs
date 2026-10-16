@@ -362,3 +362,43 @@ fn a_preview_gear_is_information_not_a_warning() {
     assert_eq!(preview.len(), 1, "{:?}", report.diagnostics);
     assert_eq!(preview[0].severity, gearbox_ir::Severity::Info);
 }
+
+#[test]
+fn sdks_in_any_language_reach_the_catalogue_resolved_against_the_source_root() {
+    let tree = Tree::new("sdks");
+    std::fs::write(
+        tree.0.join("thing/gear.gdl"),
+        r#"gear(maturity = "stable", name = "Thing",
+                package = cargo(crate_name = "thing", lib = "thing", path = "."),
+                sdk = [npm(name = "@cf/thing", path = "../sdk-ts"), go(module = "example.com/thing")])"#,
+    )
+    .unwrap();
+    std::fs::write(
+        tree.0.join("approval-service/gear.gdl"),
+        r#"gear(maturity = "design", id = "approval-service",
+                sdk = nuget(id = "Cf.Approval", path = "dotnet"))"#,
+    )
+    .unwrap();
+    let catalogue = load_catalogue(&[tree.root()]).catalogue;
+    assert!(
+        catalogue.diagnostics.as_slice().is_empty(),
+        "{:?}",
+        catalogue.diagnostics
+    );
+
+    let spelled = |sdks: &[gearbox_ir::PackageRef]| -> Vec<String> {
+        sdks.iter()
+            .map(|p| format!("{:?} {} {}", p.ecosystem, p.name, p.path.as_str()))
+            .collect()
+    };
+    let thing = &catalogue.gears[&GearId::new("thing").unwrap()];
+    assert_eq!(
+        spelled(&thing.sdks),
+        ["Npm @cf/thing sdk-ts", "Go example.com/thing thing"]
+    );
+    let design = &catalogue.designs[&GearId::new("approval-service").unwrap()];
+    assert_eq!(
+        spelled(&design.sdks),
+        ["Nuget Cf.Approval approval-service/dotnet"]
+    );
+}

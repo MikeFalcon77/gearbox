@@ -22,9 +22,9 @@ pub use catalogue::{
     SourceKind, Visibility,
 };
 pub use contract::{
-    CargoRef, ContractDescriptor, ContractKind, ContractVersion, GrpcProjection,
-    ProviderDescriptor, RestProjection, RestVisibility, Transport, strip_version_suffix,
-    version_marker,
+    CargoRef, ContractDescriptor, ContractKind, ContractVersion, Ecosystem, GrpcProjection,
+    PackageRef, ProviderDescriptor, RestProjection, RestVisibility, Transport,
+    strip_version_suffix, version_marker,
 };
 pub use diagnostics::{
     CanonicalErrorId, Diagnostic, DiagnosticCode, DiagnosticDomain, Diagnostics, Location,

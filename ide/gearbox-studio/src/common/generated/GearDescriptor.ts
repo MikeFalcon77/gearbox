@@ -12,6 +12,7 @@ import type { GtsTypeDecl } from "./GtsTypeDecl";
 import type { LifecycleDecl } from "./LifecycleDecl";
 import type { Location } from "./Location";
 import type { Maturity } from "./Maturity";
+import type { PackageRef } from "./PackageRef";
 import type { PluginImpl } from "./PluginImpl";
 import type { ProviderDescriptor } from "./ProviderDescriptor";
 import type { RelPath } from "./RelPath";
@@ -44,7 +45,16 @@ source: SourceId,
 /**
  * Where its description lives, relative to that source's root.
  */
-gdl_path: RelPath, package: CargoRef, runtime_caps?: Array<RuntimeCap>, 
+gdl_path: RelPath, package: CargoRef, 
+/**
+ * This gear's SDKs, in every language it has one: the Rust SDK first, then
+ * the others in the order declared.
+ *
+ * Located, not projected: nothing in the gear's crate says where its SDKs
+ * are. At most one is Cargo; that one is also what the projector reads for
+ * the traits the gear's extension points name.
+ */
+sdks?: Array<PackageRef>, runtime_caps?: Array<RuntimeCap>, 
 /**
  * Gears that must be in the same binary as this one.
  *

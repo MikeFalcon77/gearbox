@@ -519,10 +519,7 @@ fn design_gear(
         category: decl.category.clone(),
         source: root.id.clone(),
         gdl_path: identity.gdl_path.clone(),
-        sdk: decl
-            .sdk
-            .as_ref()
-            .map(|r| crate::merge::cargo_ref(r, &gdl_dir, "sdk", uri, diagnostics)),
+        sdks: crate::merge::sdk_refs(decl, &gdl_dir, uri, diagnostics),
         docs,
         declared_at: decl.declared_at.clone(),
     })

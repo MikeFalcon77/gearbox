@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::contract::{CargoRef, ContractDescriptor, ProviderDescriptor};
+use crate::contract::{CargoRef, ContractDescriptor, PackageRef, ProviderDescriptor};
 use crate::diagnostics::Diagnostics;
 use crate::ids::{ContractId, GearId, RelPath, SourceId};
 use crate::requirement::{ClusterProviderDecl, Requirement};
@@ -390,6 +390,15 @@ pub struct GearDescriptor {
 
     pub package: CargoRef,
 
+    /// This gear's SDKs, in every language it has one: the Rust SDK first, then
+    /// the others in the order declared.
+    ///
+    /// Located, not projected: nothing in the gear's crate says where its SDKs
+    /// are. At most one is Cargo; that one is also what the projector reads for
+    /// the traits the gear's extension points name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sdks: Vec<PackageRef>,
+
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub runtime_caps: BTreeSet<RuntimeCap>,
 
@@ -616,10 +625,11 @@ pub struct DesignGear {
 
     pub gdl_path: RelPath,
 
-    /// The SDK crate, when one exists ahead of the gear -- `llm-gateway` and
-    /// `model-registry` publish their SDKs first.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sdk: Option<CargoRef>,
+    /// The SDKs that exist ahead of the gear, in any language, ordered as on
+    /// [`GearDescriptor::sdks`] -- `llm-gateway` and `model-registry` publish
+    /// their Rust SDKs first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sdks: Vec<PackageRef>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<GearDocs>,

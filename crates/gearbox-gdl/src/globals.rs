@@ -26,6 +26,7 @@
     reason = "artifacts of #[starlark_module] expansion, not of hand-written code"
 )]
 
+use either::Either;
 use gearbox_ir::ClusterPrimitive;
 use starlark::environment::{Globals, GlobalsBuilder};
 use starlark::eval::Evaluator;
@@ -38,7 +39,7 @@ use crate::edit::PROFILE_KINDS;
 use crate::records::{
     CargoRecord, ClusterPluginRecord, ClusterRequireRecord, ConfigRecord, ConsumeRecord,
     DocsRecord, EndpointRecord, ExtensionPointRecord, FeatureRecord, GrpcRecord, LifecycleRecord,
-    ProvideRecord, RestRecord, RoleRecord,
+    PackageRecord, ProvideRecord, RestRecord, RoleRecord,
 };
 use crate::sink::{GdlSink, GearDecl, Maturity};
 use crate::values::GdlEnum;
@@ -92,6 +93,67 @@ fn restated(field: &str, owner: &str) -> anyhow::Error {
     )
 }
 
+/// A package as `package` and `sdk` accept it: `cargo(...)`, or a package in
+/// another ecosystem.
+type Locator<'v> = Either<&'v CargoRecord, &'v PackageRecord>;
+
+/// Split `sdk = ...` into the one Cargo SDK the projector reads and the rest.
+///
+/// One locator or a list of them, so a gear with only a Rust SDK keeps writing
+/// `sdk = cargo(...)`. Two Cargo SDKs are refused: the Rust SDK is where the
+/// traits a gear's extension points name are looked for, and two would make
+/// that search ambiguous.
+fn split_sdks(
+    sdk: Option<Either<Locator<'_>, UnpackList<Locator<'_>>>>,
+) -> anyhow::Result<(Option<CargoRecord>, Vec<PackageRecord>)> {
+    let locators = match sdk {
+        None => Vec::new(),
+        Some(Either::Left(one)) => vec![one],
+        Some(Either::Right(list)) => list.items,
+    };
+    let mut cargo: Option<CargoRecord> = None;
+    let mut others = Vec::new();
+    for locator in locators {
+        match locator {
+            Either::Left(record) => {
+                if let Some(first) = &cargo {
+                    return Err(anyhow::anyhow!(
+                        "`sdk` names two `cargo(...)` packages, `{}` and `{}`: a gear has one \
+                         Rust SDK, the crate its extension points' traits are read from",
+                        first.crate_name,
+                        record.crate_name
+                    ));
+                }
+                cargo = Some(record.clone());
+            }
+            Either::Right(record) => others.push(record.clone()),
+        }
+    }
+    Ok((cargo, others))
+}
+
+/// A non-Cargo package, refusing an empty name.
+fn package_record(
+    ecosystem: gearbox_ir::Ecosystem,
+    field: &str,
+    name: &str,
+    path: &str,
+    eval: &Evaluator<'_, '_, '_>,
+) -> anyhow::Result<PackageRecord> {
+    if name.trim().is_empty() {
+        return Err(anyhow::anyhow!(
+            "{}({field} = \"\") names no package",
+            ecosystem.constructor()
+        ));
+    }
+    Ok(PackageRecord {
+        ecosystem,
+        name: name.to_owned(),
+        path: path.to_owned(),
+        declared_at: crate::declarative::call_location(eval),
+    })
+}
+
 #[starlark_module]
 fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     /// `cargo(...)` -- where a gear's or SDK's crate lives.
@@ -120,6 +182,42 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             attr: attr.map(str::to_owned),
             declared_at: crate::declarative::call_location(eval),
         })
+    }
+
+    /// `npm(name = ..., path = ...)` -- an npm package, e.g. a TypeScript SDK.
+    ///
+    /// Located, not read: `name` is the package name, `path` is where it lives,
+    /// relative to this description.
+    fn npm<'v>(
+        #[starlark(require = named)] name: &str,
+        #[starlark(require = named, default = ".")] path: &str,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<PackageRecord> {
+        package_record(gearbox_ir::Ecosystem::Npm, "name", name, path, eval)
+    }
+
+    /// `nuget(id = ..., path = ...)` -- a package on nuget.org, e.g. a C# SDK.
+    ///
+    /// Located, not read: `id` is the package id, `path` is where it lives,
+    /// relative to this description.
+    fn nuget<'v>(
+        #[starlark(require = named)] id: &str,
+        #[starlark(require = named, default = ".")] path: &str,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<PackageRecord> {
+        package_record(gearbox_ir::Ecosystem::Nuget, "id", id, path, eval)
+    }
+
+    /// `go(module = ..., path = ...)` -- a Go module, e.g. a Go SDK.
+    ///
+    /// Located, not read: `module` is the module path, `path` is where it
+    /// lives, relative to this description.
+    fn go<'v>(
+        #[starlark(require = named)] module: &str,
+        #[starlark(require = named, default = ".")] path: &str,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<PackageRecord> {
+        package_record(gearbox_ir::Ecosystem::Go, "module", module, path, eval)
     }
 
     /// `docs(...)` -- override where this gear's documents live.
@@ -454,15 +552,18 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] visibility: Option<&str>,
         // Required for a gear with code, refused at `design`: it is what tells
         // the projector which crate to scan, and a design gear has none yet.
-        #[starlark(require = named)] package: Option<&'v CargoRecord>,
+        // Any locator is accepted so that a non-Cargo one gets a sentence
+        // rather than a type mismatch: only Rust is projected.
+        #[starlark(require = named)] package: Option<Locator<'v>>,
         // Required, no default; one of `Maturity::SPELLINGS`. Taken as an
         // option only so its absence gets a message rather than "missing
         // argument".
         #[starlark(require = named)] maturity: Option<&str>,
         // A locator, like `cluster_plugins`: nothing in a gear's own crate says
         // where its SDK lives, and the SDK is what declares the GTS types this
-        // gear exposes and the traits its extension points name.
-        #[starlark(require = named)] sdk: Option<&'v CargoRecord>,
+        // gear exposes and the traits its extension points name. One locator
+        // or a list, in any ecosystem; at most one is `cargo(...)`.
+        #[starlark(require = named)] sdk: Option<Either<Locator<'v>, UnpackList<Locator<'v>>>>,
         // The plugin role, declared on both sides and keyed by GTS spec. See
         // `ExtensionPointRecord` for why this is no longer read from the code.
         #[starlark(require = named)] extension_points: Option<UnpackList<&'v ExtensionPointRecord>>,
@@ -498,6 +599,21 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
                 "`fills` was renamed to `implements`: write `implements = \"<spec>~\"`"
             ));
         }
+
+        let package = match package {
+            None => None,
+            Some(Either::Left(cargo)) => Some(cargo.clone()),
+            Some(Either::Right(other)) => {
+                return Err(anyhow::anyhow!(
+                    "`package = {}(...)`: Gearbox reads a gear's code only from Rust, so \
+                     `package` is `cargo(...)`. An SDK in another language goes in \
+                     `sdk = [cargo(...), {}(...)]`",
+                    other.ecosystem.constructor(),
+                    other.ecosystem.constructor()
+                ));
+            }
+        };
+        let (sdk, other_sdks) = split_sdks(sdk)?;
 
         let maturity = match maturity {
             None => {
@@ -604,8 +720,9 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
             description: description.map(str::to_owned),
             category: category.map(str::to_owned),
             visibility: visibility.map(str::to_owned),
-            package: package.cloned(),
-            sdk: sdk.cloned(),
+            package,
+            sdk,
+            other_sdks,
             extension_points: extension_points
                 .map(|l| l.items.into_iter().cloned().collect())
                 .unwrap_or_default(),

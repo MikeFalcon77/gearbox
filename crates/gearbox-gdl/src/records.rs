@@ -100,6 +100,24 @@ gdl_record! {
 }
 
 gdl_record! {
+    /// `npm(...)`, `nuget(...)`, `go(...)` -- a package in an ecosystem Gearbox
+    /// locates but does not project.
+    ///
+    /// One record for all of them: past its name and path, nothing about a
+    /// non-Cargo package is read. `cargo(...)` stays separate because a build
+    /// needs its `lib`, features and link set.
+    PackageRecord as "gdl_package" {
+        #[allocative(skip)]
+        pub ecosystem: gearbox_ir::Ecosystem,
+        pub name: String,
+        pub path: String,
+        /// Where the constructor was written.
+        #[allocative(skip)]
+        pub declared_at: Option<gearbox_ir::Location>,
+    }
+}
+
+gdl_record! {
     /// `docs(prd = ..., design = ..., adr = [...], openapi = ...)`
     ///
     /// Every field is an override, not a requirement. The platform keeps these at

@@ -21,8 +21,8 @@ use gearbox_ir::requirement::ClusterPrimitive;
 use gearbox_ir::{
     CapabilityId, CargoRef, ContractDescriptor, ContractId, ContractVersion, DeclaredRole,
     Diagnostic, DiagnosticCode, Diagnostics, EndpointDecl, GearDescriptor, GearId, LifecycleDecl,
-    Location, ProviderDescriptor, RelPath, Requirement, RequirementId, RequirementKind, RuntimeCap,
-    Transport, Visibility,
+    Location, PackageRef, ProviderDescriptor, RelPath, Requirement, RequirementId, RequirementKind,
+    RuntimeCap, Transport, Visibility,
 };
 use gearbox_project::{ProjectedContract, ProjectedGear};
 
@@ -173,6 +173,7 @@ pub fn merge(
     };
     let gdl_dir = identity.gdl_path.parent();
     let package = cargo_ref(package_record, &gdl_dir, "package", uri, diagnostics);
+    let sdks = sdk_refs(decl, &gdl_dir, uri, diagnostics);
 
     // Projected: the closed set of seven, parsed through the IR's own parser so
     // the spellings cannot drift from the macro's.
@@ -338,6 +339,7 @@ pub fn merge(
         source: identity.source.clone(),
         gdl_path: identity.gdl_path.clone(),
         package,
+        sdks,
         runtime_caps,
         colocated_deps,
         // Projected.
@@ -509,6 +511,42 @@ pub(crate) fn cargo_ref(
             record.link.clone()
         },
     }
+}
+
+/// Every SDK a description declares, as catalogue references: the Rust SDK
+/// first, then the others in the order declared.
+///
+/// A non-Cargo path is resolved exactly like a crate's, and a bad one is
+/// reported the same way: it is the same kind of locator.
+pub(crate) fn sdk_refs(
+    decl: &gearbox_gdl::GearDecl,
+    gdl_dir: &RelPath,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) -> Vec<PackageRef> {
+    let mut sdks: Vec<PackageRef> = decl
+        .sdk
+        .iter()
+        .map(|record| PackageRef::from(&cargo_ref(record, gdl_dir, "sdk", uri, diagnostics)))
+        .collect();
+    for record in &decl.other_sdks {
+        let path = gdl_dir.resolve(&record.path).unwrap_or_else(|e| {
+            diagnostics.push(bad_crate_path(
+                uri,
+                "sdk",
+                &record.path,
+                &e,
+                record.declared_at.as_ref(),
+            ));
+            gdl_dir.clone()
+        });
+        sdks.push(PackageRef {
+            ecosystem: record.ecosystem,
+            name: record.name.clone(),
+            path,
+        });
+    }
+    sdks
 }
 
 /// Build the contract id from the projected identity.
