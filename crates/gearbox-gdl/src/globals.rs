@@ -247,6 +247,15 @@ pub(crate) fn locator_vocabulary(builder: &mut GlobalsBuilder) {
     /// `source()`, which a lock is built from. A branch does not pin an
     /// immutable point in history, so a lock built from one is repeatable but
     /// not reproducible. Accepted, and recorded as such.
+    ///
+    /// # Arguments
+    /// * `url`: The repository: `https://...` or `git@host:org/repo`.
+    /// * `path`: A directory inside the repository, from its root, without `..`. A gear's `source`
+    ///   uses it to say where the gear is. A product source refuses it.
+    /// * `tag`: The tag to use. Give one of `tag`, `rev` and `branch`.
+    /// * `rev`: The commit to use. Give one of `tag`, `rev` and `branch`.
+    /// * `branch`: The branch to use. A branch moves, so a lock built from it is repeatable but not
+    ///   reproducible.
     fn git(
         #[starlark(require = named)] url: &str,
         #[starlark(require = named)] path: Option<&str>,
@@ -287,6 +296,17 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     /// name is the Rust identifier and `r#crate` is not a legal raw identifier.
     /// Unambiguous next to `lib` regardless: one is the package, one is the
     /// library target.
+    ///
+    /// # Arguments
+    /// * `crate_name`: The package name in `Cargo.toml`, e.g. `cf-gears-payments`.
+    /// * `lib`: The library identifier in Rust paths, e.g. `payments`. Write it: it is not always
+    ///   the package name with `_` for `-`.
+    /// * `path`: The crate directory, relative to this file. The default is this file's directory.
+    /// * `features`: The Cargo features to turn on when a product links this crate.
+    /// * `default_features`: Whether the crate's default features are on. The default is `True`.
+    /// * `link`: The identifiers to keep linked with `use ... as _;`. Empty means `lib` only.
+    /// * `attr`: The file with `#[toolkit::gear]`, relative to the crate root, e.g. `src/gear.rs`.
+    ///   Write it only when the crate declares more than one gear.
     fn cargo<'v>(
         #[starlark(require = named)] crate_name: &str,
         #[starlark(require = named)] lib: &str,
@@ -313,6 +333,11 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     ///
     /// Located, not read: `name` is the package name, `path` is where it lives,
     /// relative to this description.
+    ///
+    /// # Arguments
+    /// * `name`: The npm package name, e.g. `@cf/payments-sdk`.
+    /// * `path`: The package directory, relative to this file. The default is this file's
+    ///   directory.
     fn npm<'v>(
         #[starlark(require = named)] name: &str,
         #[starlark(require = named, default = ".")] path: &str,
@@ -325,6 +350,11 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     ///
     /// Located, not read: `id` is the package id, `path` is where it lives,
     /// relative to this description.
+    ///
+    /// # Arguments
+    /// * `id`: The package id on nuget.org, e.g. `Cf.Payments.Sdk`.
+    /// * `path`: The package directory, relative to this file. The default is this file's
+    ///   directory.
     fn nuget<'v>(
         #[starlark(require = named)] id: &str,
         #[starlark(require = named, default = ".")] path: &str,
@@ -337,6 +367,10 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     ///
     /// Located, not read: `module` is the module path, `path` is where it
     /// lives, relative to this description.
+    ///
+    /// # Arguments
+    /// * `module`: The Go module path, e.g. `github.com/cf/payments-sdk-go`.
+    /// * `path`: The module directory, relative to this file. The default is this file's directory.
     fn go<'v>(
         #[starlark(require = named)] module: &str,
         #[starlark(require = named, default = ".")] path: &str,
@@ -350,6 +384,11 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     ///
     /// What a `GEARS.md` line holds. `priority` is `p1` (first) to `p5`;
     /// `done` is `False` until the scenario is written.
+    ///
+    /// # Arguments
+    /// * `text`: What a user can do, in one sentence.
+    /// * `priority`: `"p1"` (first) to `"p5"`.
+    /// * `done`: Whether it is written. The default is `False`.
     fn scenario(
         #[starlark(require = pos)] text: &str,
         #[starlark(require = named)] priority: Option<&str>,
@@ -377,6 +416,15 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     /// `docs(...)` -- override where this gear's documents live.
     ///
     /// Only needed when they are not at `docs/` beside the gear or one level up.
+    ///
+    /// # Arguments
+    /// * `prd`: The PRD: a path relative to this file, or a URL. Write it only when it is not
+    ///   `docs/PRD.md` beside the gear or one level up.
+    /// * `design`: The design document: a path relative to this file, or a URL. Write it only when
+    ///   it is not `docs/DESIGN.md` beside the gear or one level up.
+    /// * `adr`: The ADRs: paths relative to this file, or URLs. Without it, every `*.md` in
+    ///   `docs/ADR/` is found.
+    /// * `openapi`: The `OpenAPI` document: a path relative to this file, or a URL.
     fn docs<'v>(
         #[starlark(require = named)] prd: Option<&str>,
         #[starlark(require = named)] design: Option<&str>,
@@ -397,6 +445,11 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     ///
     /// See [`ConfigRecord`] for why the locator and the curation belong
     /// together and why neither restates the other.
+    ///
+    /// # Arguments
+    /// * `rust`: The path of the struct the gear reads its configuration into. Write it only when
+    ///   the `ctx.config*()` call in `impl Gear::init` does not identify it.
+    /// * `exposes`: The fields of that struct to show an integrator, in order.
     fn config<'v>(
         #[starlark(require = named)] rust: Option<&str>,
         #[starlark(require = named)] exposes: Option<UnpackList<String>>,
@@ -415,6 +468,13 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     /// The spec is positional because it is the identity: it is what instances
     /// register under and what the host selects by. `trait` and `sdk` are what
     /// a person needs to write a plugin for it.
+    ///
+    /// # Arguments
+    /// * `trait`: The trait plugins register under, e.g. `AuthNResolverPluginClient`.
+    /// * `sdk`: The crate that declares `trait`, as `cargo(...)`. Write it only when it is not the
+    ///   gear's own Rust `sdk`.
+    /// * `selector`: The dotted path of the config field the host selects a plugin by, e.g.
+    ///   `idp.vendor`. The default is the top-level `vendor`.
     fn extension_point<'v>(
         #[starlark(require = pos)] spec: &str,
         #[starlark(require = named)] r#trait: &str,
@@ -463,6 +523,10 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     ///
     /// The name is positional because it is the whole subject; `kinds` is the
     /// exception rather than the rule and reads better named.
+    ///
+    /// # Arguments
+    /// * `kinds`: The deployment kinds the feature is for: `embedded`, `self_hosted`, `kubernetes`.
+    ///   Empty means every kind. A non-empty list refuses the others.
     fn feature<'v>(
         #[starlark(require = pos)] name: &str,
         #[starlark(require = named)] kinds: Option<UnpackList<String>>,
@@ -490,6 +554,11 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     }
 
     /// `lifecycle(...)` -- start/stop behaviour, mirroring the gear macro's clause.
+    ///
+    /// # Arguments
+    /// * `entry`: The method the runtime calls to start background work.
+    /// * `stop_timeout`: How long a graceful stop may take, as the runtime spells it.
+    /// * `await_ready`: Whether startup waits until the gear reports ready.
     fn lifecycle(
         #[starlark(require = named)] entry: Option<&str>,
         #[starlark(require = named)] stop_timeout: Option<&str>,
@@ -503,6 +572,13 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     }
 
     /// `endpoint(...)` -- something the gear listens on, or is mounted on.
+    ///
+    /// # Arguments
+    /// * `name`: The endpoint's name.
+    /// * `config_key`: The config field the gear reads its listen address from, e.g. `bind_addr`.
+    ///   Generation writes the resolved address there.
+    /// * `default_port`: The port, 0 to 65535, when the configuration does not set one.
+    /// * `via`: The host the gear is mounted on, e.g. `rest_host`, when it does not listen itself.
     fn endpoint(
         #[starlark(require = named)] name: &str,
         #[starlark(require = named)] config_key: Option<&str>,
@@ -524,6 +600,12 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     }
 
     /// `rest(...)` -- a contract's REST projection.
+    ///
+    /// # Arguments
+    /// * `base_path`: The route prefix, e.g. `/api/v1/payments`.
+    /// * `require_full_coverage`: Whether the projection must cover every method of the base trait.
+    ///   The default is `False`.
+    /// * `visibility`: `"exposed"` or `"internal"`. The default is exposed.
     fn rest(
         #[starlark(require = named)] base_path: &str,
         #[starlark(require = named, default = false)] require_full_coverage: bool,
@@ -543,6 +625,11 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     }
 
     /// `grpc(...)` -- a contract's gRPC projection.
+    ///
+    /// # Arguments
+    /// * `package`: The protobuf package.
+    /// * `service`: The gRPC service name.
+    /// * `stubs_module`: The Rust module with the generated stubs.
     fn grpc(
         #[starlark(require = named)] package: &str,
         #[starlark(require = named)] service: &str,
@@ -556,6 +643,16 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     }
 
     /// `provide(...)` -- a contract this gear provides.
+    ///
+    /// # Arguments
+    /// * `contract`: The contract trait's name, e.g. `PaymentApi`. It joins this declaration to its
+    ///   `#[toolkit::contract]`.
+    /// * `rust`: The Rust path of the versioned trait, e.g. `payments_sdk::PaymentApiV1`.
+    /// * `sdk`: The crate that declares the contract, as `cargo(...)`.
+    /// * `local`: The associated function that builds the in-process implementation.
+    /// * `rest`: The contract's REST projection, as `rest(...)`.
+    /// * `grpc`: The contract's gRPC projection, as `grpc(...)`.
+    /// * `policies`: The policy names attached to this provider.
     fn provide<'v>(
         #[starlark(require = named)] contract: &str,
         #[starlark(require = named)] rust: &str,
@@ -599,6 +696,16 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
 
     /// `consume(...)` -- a declared contract edge, and the only kind of edge
     /// the resolver may ever place across a process boundary.
+    ///
+    /// # Arguments
+    /// * `contract`: The contract trait's name, e.g. `TenantApi`. It joins this declaration to its
+    ///   `#[toolkit::contract]`.
+    /// * `rust`: The Rust path of the versioned trait the gear calls.
+    /// * `sdk`: The crate that declares the contract, as `cargo(...)`.
+    /// * `critical`: Whether the gear is not ready until this contract is available. The default is
+    ///   `False`.
+    /// * `resolving_client`: The resolving client's name, when the generated default does not
+    ///   apply.
     fn consume<'v>(
         #[starlark(require = named)] contract: &str,
         #[starlark(require = named)] rust: &str,
@@ -647,6 +754,19 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     /// argument as `process_local`, one level down.
     ///
     /// Omitted, the options stay the untyped bag they are today.
+    ///
+    /// # Arguments
+    /// * `package`: The backend plugin crate, as `cargo(...)`.
+    /// * `process_local`: Whether the backend keeps its state inside one process. Rust does not
+    ///   state it. The default is `False`.
+    /// * `needs_credentials`: Whether the backend needs a credential before it connects. The
+    ///   default is `False`.
+    /// * `backend`: The backend impl's path, relative to the plugin crate. Write it only when the
+    ///   crate has two impls of one backend trait.
+    /// * `cache_options`: The struct the cache's options are read into.
+    /// * `leader_election_options`: The struct the leader election's options are read into.
+    /// * `lock_options`: The struct the lock's options are read into.
+    /// * `credential_option`: The option that carries the credential.
     fn cluster_plugin<'v>(
         #[starlark(require = named)] package: &'v CargoRecord,
         #[starlark(require = named, default = false)] process_local: bool,
@@ -684,6 +804,12 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     /// a value is per-instance and belongs to the deployment, which the runtime
     /// sources from configuration or the environment. A key is a fact about the
     /// gear.
+    ///
+    /// # Arguments
+    /// * `name`: The value the gear's own mode selector accepts.
+    /// * `directory_name`: What an instance of this role registers under. The default is `<gear-
+    ///   id>-<name>`.
+    /// * `labels`: The label keys an instance registers under. Values belong to the deployment.
     fn role<'v>(
         #[starlark(require = named)] name: &str,
         #[starlark(require = named)] directory_name: Option<&str>,
@@ -699,6 +825,41 @@ fn gdl_vocabulary(builder: &mut GlobalsBuilder) {
     }
 
     /// `gear(...)` -- the one declaration a `gear.gdl` makes.
+    ///
+    /// # Arguments
+    /// * `gdl_version`: The GDL this file is written in, `"MAJOR.MINOR"`. The default is `"1.0"`.
+    /// * `name`: The display name. The default is the gear's id.
+    /// * `description`: What the gear does, in one sentence.
+    /// * `category`: The catalogue group, e.g. `core-platform-integration`. An unknown one is a
+    ///   warning (GBX0108).
+    /// * `visibility`: `"public"` or `"internal"`. Only a public gear is selectable by a product.
+    ///   The default is internal.
+    /// * `package`: The gear's crate, as `cargo(...)`. Required for a gear with code.
+    /// * `maturity`: What the gear promises: `experimental`, `preview`, `stable` or `deprecated`.
+    ///   Required for a gear with code. There is no default.
+    /// * `implementation`: How much is written: `design` (no code yet), `in-progress` or `done`.
+    ///   Optional.
+    /// * `scenarios`: What the gear lets its users do, as `scenario(...)`.
+    /// * `sdk`: The gear's SDKs, in any language: `cargo(...)`, `npm(...)`, `nuget(...)`,
+    ///   `go(...)`, or a list. At most one `cargo(...)`. A plugin has none.
+    /// * `extension_points`: The points plugins can implement, as `extension_point(...)`.
+    /// * `implements`: The extension point this plugin implements, as its spec segment, e.g.
+    ///   `cf.core.authn_resolver.plugin.v1~`. It makes the gear a plugin.
+    /// * `docs`: Where the documents are, as `docs(...)`, when not at `docs/`.
+    /// * `source`: The repository and directory the gear is in, as `git(url = ..., path = ...)`.
+    ///   Paths in this file are looked for on disk first.
+    /// * `tests`: Where the tests are: paths relative to this file, or URLs.
+    /// * `provides`: The contracts the gear provides, as `provide(...)`.
+    /// * `consumes`: The contracts the gear calls, as `consume(...)`.
+    /// * `requires`: The cluster primitives the gear needs, as `cluster.*(...)`.
+    /// * `serves`: What the gear listens on, as `endpoint(...)`.
+    /// * `cluster_plugins`: Where cluster backend plugin crates are, as `cluster_plugin(...)`.
+    /// * `roles`: The shapes the gear runs in, as `role(...)`.
+    /// * `config_schema`: The configuration to show an integrator, as `config(...)`.
+    /// * `cargo_features`: The Cargo features offered to a product, as `feature(...)`. Absent means
+    ///   not curated; `[]` offers none.
+    /// * `id`: The gear's id, for `implementation = "design"` only. A gear with code takes it from
+    ///   `#[toolkit::gear(name = ...)]`.
     fn gear<'v>(
         #[starlark(require = named)] name: Option<&str>,
         #[starlark(require = named)] description: Option<&str>,

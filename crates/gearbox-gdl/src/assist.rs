@@ -264,8 +264,8 @@ pub fn parameters(docs: &DocModule, call: &str, already: &[String]) -> Vec<Sugge
 /// Offering them in completion invites exactly the mistake they catch. `id`
 /// is not here: an `implementation = "design"` gear writes it.
 fn refused_only(call: &str, param: &str) -> bool {
-    call == "gear"
-        && matches!(
+    match call {
+        "gear" => matches!(
             param,
             "fills"
                 | "runtime_caps"
@@ -273,7 +273,11 @@ fn refused_only(call: &str, param: &str) -> bool {
                 | "lifecycle"
                 | "client"
                 | "cluster_providers"
-        )
+        ),
+        "provide" => matches!(param, "version" | "transports" | "kind"),
+        "consume" => matches!(param, "from_" | "version" | "kind"),
+        _ => false,
+    }
 }
 
 /// The documentation for one name, as the interpreter carries it.
