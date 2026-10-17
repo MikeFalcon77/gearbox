@@ -4,7 +4,8 @@
 //! Locators in a description are looked for on disk first, relative to the
 //! description; `source` is where a reader goes for what is not there. So the
 //! two must describe the same place, and when the description is read from a
-//! checkout that can be checked: one of its remotes has the declared url, and
+//! checkout that can be checked: one of its remotes is the declared repository
+//! or a fork of it (same host and name, another owner), and
 //! the gear sits at the declared `path` in it (GBX0121). A tree with no `.git`
 //! -- an unpacked archive, a registry download -- has nothing to check against
 //! and is not reported.
@@ -61,12 +62,11 @@ fn check(gdl_dir: &Path, origin: &GitOrigin, at: &Location, diagnostics: &mut Di
         return;
     };
 
-    let wanted = GitOrigin::normalized_url(&origin.url);
     if !checkout.remotes.is_empty()
         && !checkout
             .remotes
             .iter()
-            .any(|remote| GitOrigin::normalized_url(remote) == wanted)
+            .any(|remote| origin.same_or_fork(remote))
     {
         diagnostics.push(
             Diagnostic::new(
@@ -80,8 +80,8 @@ fn check(gdl_dir: &Path, origin: &GitOrigin, at: &Location, diagnostics: &mut Di
             )
             .at(at.clone())
             .with_help(
-                "correct the url, or add the repository as a remote; a reader holding only the \
-                 description follows `source` to the code",
+                "correct the url; a checkout of a fork matches, one of another repository \
+                 does not. A reader holding only the description follows `source` to the code",
             ),
         );
     }

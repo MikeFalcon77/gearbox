@@ -694,8 +694,10 @@ are, so a locator is not a copy of a Rust fact. This is the same argument as for
   path is not on disk, Gearbox makes a link to the same path in `source`. If neither finds it,
   the result is GBX0109, as before.
 * `docs(...)` accepts a URL. `tests = [...]` tells where the tests are.
-* When the description is in a git checkout, `source` must agree with it: a remote has the url,
-  and the description is at the path. A difference is GBX0121, a warning.
+* When the description is in a git checkout, `source` must agree with it: a remote is the
+  repository or a fork of it (same host and name), and the description is at the path. A
+  difference is GBX0121, a warning. A fork matches, because `source` names the canonical
+  repository and a contributor works in a fork.
 
 `source = path(...)` is refused. Paths are already relative to the description, and a checkout
 in a different directory is different on each computer. Studio maps a repository to a local

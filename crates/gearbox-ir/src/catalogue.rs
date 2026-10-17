@@ -862,6 +862,24 @@ impl GitOrigin {
         })
     }
 
+    /// Whether `remote` is this repository or a fork of it.
+    ///
+    /// A fork keeps the host and the repository's name and changes the owner:
+    /// a checkout of `me/gears-rust` is a checkout of `org/gears-rust` for the
+    /// purpose of finding a path in it. A different name is a different
+    /// repository.
+    #[must_use]
+    pub fn same_or_fork(&self, remote: &str) -> bool {
+        let host_and_name = |url: &str| {
+            let normalized = Self::normalized_url(url);
+            let mut segments = normalized.split('/');
+            let host = segments.next().unwrap_or_default().to_owned();
+            let name = segments.next_back().unwrap_or_default().to_owned();
+            (host, name)
+        };
+        host_and_name(&self.url) == host_and_name(remote)
+    }
+
     /// The repository in the one spelling two remotes can be compared in:
     /// host and path, lowercase, with no scheme, user or `.git`.
     #[must_use]

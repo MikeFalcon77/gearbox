@@ -194,3 +194,12 @@ fn a_source_that_agrees_with_the_checkout_is_silent() {
     ));
     assert!(codes(&catalogue).is_empty(), "{:?}", catalogue.diagnostics);
 }
+
+#[test]
+fn a_checkout_of_a_fork_matches_the_canonical_source() {
+    let checkout = Checkout::new("fork", "git@github.com:someone/gears-rust.git");
+    let catalogue = checkout.describe(&format!(
+        r#"source = git(url = "{REPO}", path = "gears/demo")"#
+    ));
+    assert!(codes(&catalogue).is_empty(), "{:?}", catalogue.diagnostics);
+}
