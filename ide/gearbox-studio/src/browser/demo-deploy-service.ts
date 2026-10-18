@@ -4,7 +4,7 @@ import {
   injectable,
   postConstruct,
 } from "@theia/core/shared/inversify";
-import { DemoDeployService, type DemoDeployState } from "../common/demo-deploy";
+import { DemoDeployService, acceptDemoState, type DemoDeployState } from "../common/demo-deploy";
 const KEY = "gearbox.familyLabs.deployment";
 @injectable()
 export class DemoDeployFrontend {
@@ -12,6 +12,7 @@ export class DemoDeployFrontend {
   private readonly changed = new Emitter<void>();
   readonly onChanged = this.changed.event;
   state: DemoDeployState = {
+    epoch: "",
     revision: 0,
     status: "idle",
     stage: "prepared",
@@ -25,22 +26,19 @@ export class DemoDeployFrontend {
     if (id) void this.refresh(id);
   }
   receive = (state: DemoDeployState) => {
-    if (
-      state.operationId === this.state.operationId &&
-      state.revision < this.state.revision
-    )
-      return;
+    if (!acceptDemoState(this.state, state)) return;
     this.state = state;
     this.changed.fire();
   };
   async start(productPath: string, profile: string): Promise<void> {
     if (this.busy || this.state.status === "running") return;
-    this.busy = true;
     const id = crypto.randomUUID();
+    this.busy = true;
     sessionStorage.setItem(KEY, id);
     this.receive({
       ...this.state,
       operationId: id,
+      revision: 0,
       status: "running",
       stage: "validate",
       message: "Starting prepared deployment…",

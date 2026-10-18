@@ -862,3 +862,114 @@ Reconnect UI restored HTTP service without a deployment. This exposed a stale
 error message after successful reconnect; the host now clears it on connection
 readiness, covered by the fifth deployment-service test. Final rebuilt-host
 reconnection verification and Claude review remain before closing phase 6.
+
+
+### Phase-6 review and final recovery checks
+
+The last 69e1ac7 preparation passed (Helm revision 29). The rebuilt Studio
+host's actual lost-forward/reconnect check cleared the previous error and
+restored Open UI (`.gearbox/phase6-reconnect-final.png`). A subsequent probe
+through nginx received topology/heartbeats but not the old event. The same
+failure reproduces on a fresh direct Gateway forward, including a new consumer
+group. Read-only inspection confirms both SQLite stores pass integrity_check;
+the original root event is still sequence 2 in the retained event log. This is
+an unresolved delivery/read regression, not a demonstrated data loss. Do not
+claim post-restart SSE acceptance until it is fixed and rerun.
+
+Claude completed a source-only review of 30a7a1a..69e1ac7 on actual
+claude-opus-5-5/high (`.gearbox/phase6-claude-review-opus55-high.txt`). Follow-up
+changes make fingerprints content-based using a private Git index, distinguish
+Studio host epochs, retain live forward state during historical receipt lookup,
+preserve deployment errors when a forward closes, pin generator copies, take
+inputs before generation, check rendered image references and exact npm lock
+bytes, and replace stale PID-file locking with an OS-owned loopback mutex.
+Eight deployment tests passed before the additional epoch-identity case.
+The auto-build path now remains incremental but rebuilds on each prepare;
+explicit operator-supplied binaries are pinned without claiming a source build.
+
+The first WSL native-Git fingerprint attempt omitted WSLENV for its temporary
+index. It staged only this task's known edits in both repositories. That specific
+preparation tree was stopped, those task edits were unstaged, and no working
+files were reverted. WSLENV now exports the private index path and literal-path
+setting. An actual WSL -> Windows Git regression verified stable digests and
+byte-identical real indices in both checkouts. Real user staging must remain
+untouched by subsequent preparation.
+
+
+The delivery failure was narrowed to scheduler starvation, with retained data
+intact. Per-fetch trace showed every fetch at offset 40 and none at offset 0
+while a new replay subscription reported topology offset 0. Three older live
+readers at an empty tail accumulated starvation credit on every scan, including
+scans that selected their empty fetch. A later replay reader gained credit at
+the same rate and could never outrank them. This can occur with client
+checkpoints after restart, or with any late replay consumer.
+
+Regression `empty_popular_tail_does_not_starve_a_late_replay_reader` first failed
+against the original scheduler. The fix resets the selected position's waiting
+credit when its fetch is selected (including empty speculative fetches), while
+unselected readers keep accumulating credit. The fixed regression and complete
+EB library suite pass: 608 passed, 7 existing named-group tests ignored, 0 failed.
+Actual image redeployment/SSE replay and Clippy are still pending at this point.
+The lightweight offset/count/error traces are disabled at the normal log level;
+temporary runtime trace settings must be removed by final preparation.
+
+Additional readiness recovery: after a Gateway replacement, a live worker may
+not yet have sent its next Directory heartbeat. Smoke now bounds the wait for
+that re-registration instead of requiring it immediately. The updated prepare
+passed after that change. Harness replay no longer re-registers declarations,
+SEEK echoes the actual topology version, and identity checks now use the
+filtered registry adapters while requiring raw registry access to be denied.
+These updated identity cases still need the final runtime pass.
+
+An attempted extra source-only Claude diagnosis of the unfinished EB failure
+was rejected by automatic approval review: authorization covered completed-phase
+reviews, not exporting this unfinished diagnostic packet. No packet was sent;
+local source/runtime diagnosis continued. The completed phase-6 review above
+remains the actual review receipt.
+
+
+### Phase 6 — implementation and Windows/WSL acceptance passed
+
+EB fix is committed in gears-rust as `440ee2d0e`; Clippy with `-D warnings`
+passed after the 608/7 library result. Full preparation of that source passed,
+then the original sequence-2 event was re-read through localhost:8080/nginx in
+under a second without re-registering declarations. Dasha true/Ilya false,
+original consumer group and producer cursor were preserved. The actual remote
+Settings/outbox event was also replayed (`01a14f09-8ff9-7203-860d-5babb8597346`)
+and its temporary laboratory-message change was restored through the API.
+The updated technical identity check passed, including denied worker access to
+Directory/raw and filtered registry diagnostics. Updated real-user harness cases
+remain distinct from the already verified signed-in product sessions.
+
+Final Studio operation `3df4bcc8-d5d2-4323-b5b1-db76506cf92e` completed all six
+progress stages, readiness and the managed Open UI connection. No image or Rust
+build ran during it. Screenshot: `.gearbox/phase6-final-deploy-ready.png`.
+Nine deployment-host tests, ten bundle/host/mutex tests, TypeScript and the full
+Theia browser/backend build pass. The generated npm-lock byte comparison and
+rendered Helm image allowlist passed during actual preparation/deployment.
+Source fingerprinting now preserves the user's real Git index in both native
+Windows and actual WSL-to-Windows Git probes.
+
+Backend-restart limitation remains explicit. Deliberately stopping the Studio
+wrapper during operation `3a929c18-de7b-4419-b973-3c751d320e49` at validation
+also ended its runner in this WSL launch environment despite detached spawn.
+The receipt stayed nonterminal, Helm remained deployed at revision 32 and no
+second operation was started automatically. After reconnecting/reloading Studio,
+the panel correctly reported the previous host session ended. Only after checking
+the cluster was a new operation started explicitly; it is the successful final
+operation above. Frontend reload survival is proven by the earlier mid-Deploy
+check; backend restart during Deploy is not supported/claimed. Reload the
+frontend after restarting the backend; do not restart the host during a talk.
+
+Completed-phase Claude review findings P1/P3/P4/P5/P6/P7 and image/npm-lock
+verification have bounded fixes and checks. P2's input scope excludes Studio,
+README and verification/test helpers. C1 uses an OS-owned local mutex rather
+than PID-file takeover. Docker memory now requires 6 GiB. Registry adapter
+routes remain read-only at the handler layer; the all-method policy prevents
+non-GET requests falling through to demo:user. Broad cache-directory orphan
+exemptions and uncommon WSL BasePath prefix forms are low-risk limitations of
+this bounded setup, not new acceptance claims.
+
+The portable commands are implemented; no actual Mac rehearsal is claimed.
+The phase-7 maintenance implementation and English runbook are being completed;
+backup/restore/offline acceptance and presentation-device checks are still open.

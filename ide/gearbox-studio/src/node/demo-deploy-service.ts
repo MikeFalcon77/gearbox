@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { injectable } from "@theia/core/shared/inversify";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -17,6 +18,7 @@ export class DemoDeployServiceImpl implements DemoDeployService {
   private readonly repo = findRepoRoot(__dirname);
   private readonly clients = new Set<DemoDeployClient>();
   private operation: DemoDeployState = {
+    epoch: randomUUID(),
     revision: 0,
     status: "idle",
     stage: "prepared",
@@ -78,6 +80,12 @@ export class DemoDeployServiceImpl implements DemoDeployService {
       message: "Validating the prepared bundle…",
       events: [],
     });
+    // A Service forward binds one pod. Retire it before the next upgrade can
+    // replace that pod; completion opens a fresh forward to the new workload.
+    const previousForward = this.forward;
+    this.forward = undefined;
+    previousForward?.stdin?.end();
+    this.update({ui: {status: "disconnected"}});
     const child = this.launch(
       ["deploy", "--operation", operationId],
       (event) => {
@@ -144,6 +152,7 @@ export class DemoDeployServiceImpl implements DemoDeployService {
           ? "error"
           : "unknown";
     const recovered: DemoDeployState = {
+      epoch: this.operation.epoch,
       revision: this.operation.revision,
       operationId,
       status,
@@ -153,7 +162,7 @@ export class DemoDeployServiceImpl implements DemoDeployService {
           ? "The previous host session ended. Check the cluster before starting another operation."
           : receipt.message,
       events: [receipt],
-      ui: { status: "disconnected" },
+      ui: this.operation.ui,
     };
     // Reading a historical receipt must not replace the job receiving progress.
     if (!this.operation.operationId && !this.job) {
@@ -185,7 +194,8 @@ export class DemoDeployServiceImpl implements DemoDeployService {
         this.forward = undefined;
         this.update({
           ui: { status: "lost" },
-          message: "UI connection lost. Reconnect UI to restore it.",
+          ...(this.operation.status === "ready"
+            ? {message: "UI connection lost. Reconnect UI to restore it."} : {}),
         });
       }
     };
@@ -209,7 +219,7 @@ export class DemoDeployServiceImpl implements DemoDeployService {
         ),
         ...args,
       ],
-      { cwd: this.repo, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] },
+      { cwd: this.repo, windowsHide: true, detached: args[0] === "deploy", stdio: ["pipe", "pipe", "pipe"] },
     );
     let pending = "";
     child.stdout?.on("data", (bytes: Buffer) => {

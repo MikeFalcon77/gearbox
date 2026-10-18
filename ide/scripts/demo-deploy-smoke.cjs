@@ -139,3 +139,40 @@ test("a restored UI forward clears its lost message while retaining deployment r
   assert.equal(state.ui.status, "ready");
   assert.equal(state.message, "Deployment is ready.");
 });
+const {acceptDemoState} = require('../gearbox-studio/lib/common/demo-deploy');
+test('a new backend epoch resets revisions while reordered updates in one epoch are rejected', () => {
+  const current = {epoch: 'old-host', operationId: 'operation', revision: 50};
+  assert.equal(acceptDemoState(current, {...current, revision: 49}), false);
+  assert.equal(acceptDemoState(current, {...current, epoch: 'new-host', revision: 1}), true);
+  assert.equal(acceptDemoState(current, {...current, operationId: 'next-operation', revision: 1}), true);
+});
+test('receipt dedupe preserves a connected forward after host recovery without launching another deploy', async () => {
+  const fs = require('node:fs');
+  const service = new DemoDeployServiceImpl(), process = fake(service), id = crypto.randomUUID();
+  const file = path.resolve(__dirname, '../../.gearbox/settings-community-demo/operations', id+'.json');
+  fs.mkdirSync(path.dirname(file), {recursive: true});
+  fs.writeFileSync(file, JSON.stringify({stage:'ready',status:'ready',message:'Saved deployment'}), {flag:'wx'});
+  try {
+    await service.connectUi();
+    process.child.progress({stage:'open-ui',status:'ready',message:'UI ready'});
+    const result = await service.start(product,'minikube',id);
+    assert.equal(result.ui.status,'ready');
+    assert.equal(result.operationId,id);
+    assert.equal(process.starts,1); // only forward, no deployment
+    assert.equal((await service.connectUi()).ui.status,'ready');
+  } finally {fs.unlinkSync(file);}
+});
+test('a lost forward cannot hide a deployment error', async () => {
+  const service = new DemoDeployServiceImpl(), process = fake(service);
+  await service.start(product,'minikube',crypto.randomUUID());
+  process.child.progress({stage:'error',status:'error',message:'Actual failure reason'});
+  process.child.emit('close',1);
+  await service.connectUi();
+  process.child.emit('close',1);
+  assert.equal((await service.getState()).message,'Actual failure reason');
+});
+
+test('successive host instances have different revision epochs', async () => {
+  const first = new DemoDeployServiceImpl(), next = new DemoDeployServiceImpl();
+  assert.notEqual((await first.getState()).epoch, (await next.getState()).epoch);
+});

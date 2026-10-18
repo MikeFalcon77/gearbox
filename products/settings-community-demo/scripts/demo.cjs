@@ -18,6 +18,9 @@ let machine,
   operationId,
   pinnedPostgres;
 const invocation = crypto.randomUUID();
+// Backend restarts may close the observer pipe; operation receipts remain the
+// source of truth while a detached deployment finishes.
+process.stdout.on("error", error => { if (error.code !== "EPIPE") throw error; });
 function stage(name, message, status = "running", extra = {}) {
   const event = { stage: name, status, message, ...extra };
   console.log("@@demo " + JSON.stringify(event));
@@ -168,10 +171,10 @@ async function dockerInfo() {
   if (
     info.OSType !== "linux" ||
     info.NCPU < 3 ||
-    info.MemTotal < 4500 * 1024 * 1024
+    info.MemTotal < 6 * 1024 ** 3
   )
     throw Error(
-      "Docker needs Linux containers, at least 3 CPUs and 4500 MiB RAM",
+      "Docker needs Linux containers, at least 3 CPUs and 6 GiB RAM",
     );
   return info;
 }
@@ -251,7 +254,7 @@ async function engine() {
   if (machine.engine) {
     if (!fs.existsSync(machine.engine))
       throw Error("Configured generator binary is missing");
-    return machine.engine;
+    return pinEngine(machine.engine);
   }
   stage("generator", "Building the local Gearbox generator");
   await run(
@@ -262,13 +265,20 @@ async function engine() {
       path.join(repo, "Cargo.toml"),
       "-p",
       "gearbox-cli",
+      "--locked",
     ],
     "generator-build",
   );
-  return path.join(
-    repo,
-    "target/debug/gearbox" + (process.platform === "win32" ? ".exe" : ""),
-  );
+  return pinEngine(path.join(repo, "target/debug/gearbox" + (process.platform === "win32" ? ".exe" : "")));
+}
+function pinEngine(source) {
+  const directory = path.join(work, "bin");
+  fs.mkdirSync(directory, {recursive: true, mode: 0o700});
+  const file = path.join(directory, "gearbox-" + state.fileDigest(source) + (process.platform === "win32" ? ".exe" : ""));
+  if (!fs.existsSync(file)) fs.copyFileSync(source, file, fs.constants.COPYFILE_EXCL);
+  if (state.fileDigest(file) !== state.fileDigest(source)) throw Error("Pinned generator hash mismatch");
+  fs.chmodSync(file, 0o700);
+  return file;
 }
 async function idleHelm() {
   const helm = (await shCapture("ensure-helm.sh", "helm")).trim();
@@ -394,10 +404,11 @@ async function prepare() {
   )
     throw Error("Minikube needs at least 8 GiB available disk space");
   const generator = await engine();
-  machine.engine = generator;
+  machine.preparedEngine = generator;
   fs.writeFileSync(machineFile, JSON.stringify(machine, null, 2) + "\n", {
     mode: 0o600,
   });
+  const before = state.inputs(repo, machine.sourceRoot, generator, work);
   stage("generate", "Resolving and generating the prepared GDL product");
   await run(
     generator,
@@ -427,7 +438,6 @@ async function prepare() {
     "chart-inputs",
   );
   stage("build", "Building the two backend applications and the UI");
-  const before = state.inputs(repo, machine.sourceRoot, generator, work);
   await run("sh", [path.join(work, "minikube/docker/build.sh")], "build");
   await run(
     "docker",
@@ -599,7 +609,7 @@ async function validate(allowUnverified = false) {
     throw Error("Unsupported demo bundle");
   state.checkInputs(
     bundle.inputs,
-    state.inputs(repo, machine.sourceRoot, machine.engine, work),
+    state.inputs(repo, machine.sourceRoot, machine.preparedEngine, work),
   );
   state.verifyArtifacts(path.join(work, "minikube"), bundle.artifacts, true);
   state.verifyArtifacts(work, bundle.sidecars);
@@ -618,6 +628,17 @@ async function validate(allowUnverified = false) {
     if (actual.Id !== image.id || actual.Architecture !== target.architecture)
       throw Error("Prepared image missing or changed: " + image.ref);
   }
+  if (!fs.readFileSync(path.join(work, "minikube/ui/package-lock.json")).equals(
+    fs.readFileSync(path.join(repo, "products/settings-community-demo/ui-package-lock.json"))))
+    throw Error("Generated npm lock bytes changed; prepare again");
+  const helm = (await shCapture("ensure-helm.sh", "helm")).trim();
+  const rendered = await run(helm, ["template", "settings-community-demo",
+    path.join(work, "minikube/helm/settings-community-demo"), "--namespace", namespace,
+    "-f", path.join(work, "deploy.values.yaml"), "-f", path.join(work, "private/values.private.json"),
+    "-f", path.join(work, "images.values.json")], "verify-image-allowlist", true);
+  const references = [...rendered.matchAll(/^\s*image:\s*["']?([^"'\s]+)/gm)].map(match => match[1]);
+  if (!references.length || references.some(ref => !bundle.images.some(image => image.ref === ref)))
+    throw Error("Rendered workload references an unprepared image; prepare again");
   stage(
     "validate",
     "Prepared source, configuration, artifacts, cluster and images match",
@@ -704,7 +725,7 @@ async function deploy(allowUnverified = false) {
   // A long deployment must not certify inputs changed while Helm was waiting.
   state.checkInputs(
     bundle.inputs,
-    state.inputs(repo, machine.sourceRoot, machine.engine, work),
+    state.inputs(repo, machine.sourceRoot, machine.preparedEngine, work),
   );
   state.verifyArtifacts(path.join(work, "minikube"), bundle.artifacts, true);
   state.verifyArtifacts(work, bundle.sidecars);
@@ -748,7 +769,7 @@ async function smoke() {
   const secrets = JSON.parse(
     fs.readFileSync(path.join(work, "private/runtime-secrets.json"), "utf8"),
   );
-  const probe = `let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',async()=>{try{const {token}=JSON.parse(input);const base='http://demo-gateway.gearbox-demo.svc.cluster.local:8087';const get=async(route,body)=>{const r=await fetch(base+route,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('API readiness failed: '+r.status);return r.json()};const directory=await get('/service-discovery/v1/gears');if(!directory.some(g=>g.name==='settings-service'&&g.instances.some(i=>['ready','healthy'].includes(i.state))))throw Error('Worker not registered');const value=await get('/family-labs/v1/effective:read',{key:'gts.cf.core.settings.setting_type.v1~cf.family_labs.lab.ice_cream_approved.v1~',scope:'/tenants/d0000000-0000-4000-8000-000000000002'});if(typeof value.value!=='boolean')throw Error('Effective setting unavailable');const types=await get('/family-labs/v1/registry/settings');if(types.entities.filter(e=>e.gts_id.includes('cf.family_labs.')).length!==3)throw Error('Settings registrations missing');const keys=await fetch('https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com',{signal:AbortSignal.timeout(15000)});if(!keys.ok||!Object.keys(await keys.json()).length)throw Error('Google verifier keys unreachable');console.log('Remote Settings, Directory, V1 registrations and Google connectivity passed.')}catch(e){console.error(e.message);process.exitCode=1}});`;
+  const probe = `let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',async()=>{try{const {token}=JSON.parse(input);const base='http://demo-gateway.gearbox-demo.svc.cluster.local:8087';const get=async(route,body)=>{const r=await fetch(base+route,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('API readiness failed: '+r.status);return r.json()};let registered=false;for(let attempt=0;attempt<65;attempt++){const directory=await get('/service-discovery/v1/gears');if(directory.some(g=>g.name==='settings-service'&&g.instances.some(i=>['ready','healthy'].includes(i.state)))){registered=true;break;}await new Promise(resolve=>setTimeout(resolve,1000));}if(!registered)throw Error('Worker did not re-register with Directory within 65 seconds');const value=await get('/family-labs/v1/effective:read',{key:'gts.cf.core.settings.setting_type.v1~cf.family_labs.lab.ice_cream_approved.v1~',scope:'/tenants/d0000000-0000-4000-8000-000000000002'});if(typeof value.value!=='boolean')throw Error('Effective setting unavailable');const types=await get('/family-labs/v1/registry/settings');if(types.entities.filter(e=>e.gts_id.includes('cf.family_labs.')).length!==3)throw Error('Settings registrations missing');const keys=await fetch('https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com',{signal:AbortSignal.timeout(15000)});if(!keys.ok||!Object.keys(await keys.json()).length)throw Error('Google verifier keys unreachable');console.log('Remote Settings, Directory, V1 registrations and Google connectivity passed.')}catch(e){console.error(e.message);process.exitCode=1}});`;
   await run(
     "kubectl",
     [
@@ -893,27 +914,10 @@ async function main() {
   }
   if (machine.nativeWindowsGit)
     process.env.DEMO_NATIVE_WINDOWS_GIT = machine.nativeWindowsGit;
-  const locked = ["prepare", "deploy"].includes(command),
-    lockFile = path.join(work, "operation.lock");
-  let lock;
-  if (locked) {
-    try {
-      lock = fs.openSync(lockFile, "wx", 0o600);
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-      let owner;
-      try {
-        owner = JSON.parse(fs.readFileSync(lockFile, "utf8"));
-        process.kill(owner.pid, 0);
-        throw Error("A demo operation is already running; check its status");
-      } catch (cause) {
-        if (cause.code !== "ESRCH") throw cause;
-      }
-      fs.unlinkSync(lockFile);
-      lock = fs.openSync(lockFile, "wx", 0o600);
-    }
-    fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, invocation }));
-  }
+  const locked = ["prepare", "deploy"].includes(command);
+  // The OS releases this loopback mutex on exit/reboot. A leftover receipt file
+  // or a reused PID can never prevent recovery or steal another active lock.
+  const lock = locked ? await require("./operation-lock.cjs").acquire() : undefined;
   try {
     if (command === "prepare") {
       fs.writeFileSync(machineFile, JSON.stringify(machine, null, 2) + "\n", {
@@ -926,11 +930,7 @@ async function main() {
     else if (command === "smoke") await smoke();
     else throw Error("Use prepare, validate, deploy, forward or smoke");
   } finally {
-    if (lock !== undefined) {
-      fs.closeSync(lock);
-      const owner = JSON.parse(fs.readFileSync(lockFile, "utf8"));
-      if (owner.invocation === invocation) fs.unlinkSync(lockFile);
-    }
+    if (lock) await lock.close();
   }
 }
 if (require.main === module)

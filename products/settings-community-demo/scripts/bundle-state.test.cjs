@@ -148,3 +148,25 @@ test("an added deployment artifact cannot bypass the prepared manifest", (t) => 
     /artifact set changed/,
   );
 });
+
+test("committing identical prepared content preserves its digest and user index", (t) => {
+  const root = temp(t);
+  git(root, ["init", "--quiet"]);
+  fs.mkdirSync(path.join(root, "libs"));
+  fs.writeFileSync(path.join(root, "libs/reader.rs"), "baseline\n");
+  git(root, ["add", "."]);
+  const commit = () => git(root, ["-c", "user.name=DemoTest", "-c", "user.email=demo@example.invalid", "commit", "--quiet", "-m", "test"]);
+  commit();
+  fs.writeFileSync(path.join(root, "libs/reader.rs"), "changed\n");
+  fs.writeFileSync(path.join(root, "libs/new.rs"), "new\n");
+  const beforeIndex = fs.readFileSync(path.join(root, ".git/index"));
+  const prepared = sourceState(root, ["libs"]);
+  assert.deepEqual(fs.readFileSync(path.join(root, ".git/index")), beforeIndex);
+  git(root, ["add", "libs"]); commit();
+  assert.equal(sourceState(root, ["libs"]).digest, prepared.digest);
+  fs.writeFileSync(path.join(root, "unrelated.txt"), "not an input");
+  git(root, ["add", "unrelated.txt"]); commit();
+  assert.equal(sourceState(root, ["libs"]).digest, prepared.digest);
+  fs.unlinkSync(path.join(root, "libs/new.rs"));
+  assert.notEqual(sourceState(root, ["libs"]).digest, prepared.digest);
+});

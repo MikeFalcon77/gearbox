@@ -5,7 +5,7 @@ const fs = require("node:fs"),
   cp = require("node:child_process");
 const digest = (bytes) =>
   crypto.createHash("sha256").update(bytes).digest("hex");
-function git(root, args) {
+function git(root, args, extraEnv = {}, input) {
   // WSL Git on a Windows checkout can spend minutes issuing 9P stat calls.
   // Use the explicitly configured local Windows Git for mounted-drive roots.
   const mounted = root.match(/^\/mnt\/([a-z])\/(.*)$/);
@@ -14,8 +14,15 @@ function git(root, args) {
   const directory = native
     ? mounted[1].toUpperCase() + ":/" + mounted[2]
     : root;
+  const inherited = {...process.env, ...extraEnv};
+  if (native) inherited.WSLENV = [...new Set([
+    ...(inherited.WSLENV || "").split(":").filter(Boolean),
+    ...Object.keys(extraEnv),
+  ])].join(":");
   const result = cp.spawnSync(executable, ["-C", directory, ...args], {
     encoding: null,
+    input,
+    env: inherited,
     maxBuffer: 64 * 1024 * 1024,
     windowsHide: true,
   });
@@ -23,48 +30,27 @@ function git(root, args) {
   return result.stdout;
 }
 function sourceState(root, paths) {
-  const hash = crypto.createHash("sha256");
-  hash.update(git(root, ["ls-tree", "-r", "-z", "HEAD", "--", ...paths]));
-  hash.update(
-    git(root, [
-      "diff",
-      "--no-ext-diff",
-      "--no-textconv",
-      "--binary",
-      "HEAD",
-      "--",
-      ...paths,
-    ]),
-  );
-  const untracked = git(root, [
-    "ls-files",
-    "--others",
-    "--exclude-standard",
-    "-z",
-    "--",
-    ...paths,
-  ])
-    .toString()
-    .split("\0")
-    .filter(Boolean)
-    .sort();
-  for (const name of untracked) {
-    const file = path.join(root, name),
-      stat = fs.lstatSync(file);
-    if (!stat.isFile() && !stat.isSymbolicLink()) continue;
-    hash.update(JSON.stringify(name));
-    hash.update(
-      digest(
-        stat.isSymbolicLink()
-          ? Buffer.from(fs.readlinkSync(file))
-          : fs.readFileSync(file),
-      ),
-    );
+  // Hash a private index of the current content. Real user staging is untouched,
+  // and committing the same files cannot invalidate a prepared deployment.
+  const directory = path.join(root, ".gearbox", "fingerprint-" + crypto.randomUUID());
+  fs.mkdirSync(directory, {recursive: true});
+  const file = path.join(directory, "index");
+  const mounted = file.match(/^\/mnt\/([a-z])\/(.*)$/);
+  const index = process.env.DEMO_NATIVE_WINDOWS_GIT && mounted
+    ? mounted[1].toUpperCase() + ":/" + mounted[2] : file;
+  const environment = {GIT_INDEX_FILE: index};
+  try {
+    git(root, ["read-tree", "HEAD"], environment);
+    const included = git(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", ...paths]);
+    if (included.length) git(root, ["add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"], {...environment, GIT_LITERAL_PATHSPECS: "1"}, included);
+    return {
+      revision: git(root, ["rev-parse", "HEAD"]).toString().trim(),
+      digest: digest(git(root, ["ls-files", "--stage", "-z", "--", ...paths], environment)),
+    };
+  } finally {
+    for (const name of [file, file + ".lock"]) if (fs.existsSync(name)) fs.unlinkSync(name);
+    fs.rmdirSync(directory);
   }
-  return {
-    revision: git(root, ["rev-parse", "HEAD"]).toString().trim(),
-    digest: hash.digest("hex"),
-  };
 }
 function fileDigest(file) {
   if (!fs.statSync(file).isFile()) throw Error("Missing input file: " + file);
@@ -75,8 +61,13 @@ function inputs(repo, source, engine, work) {
     "Cargo.toml",
     "Cargo.lock",
     "crates",
-    "products/settings-community-demo",
-    "ide/gearbox-studio/src",
+    "products/settings-community-demo/*.gdl",
+    "products/settings-community-demo/ui-package-lock.json",
+    "products/settings-community-demo/deploy",
+    "products/settings-community-demo/scripts/*.cjs",
+    "products/settings-community-demo/scripts/*.sh",
+    ":(exclude)products/settings-community-demo/scripts/*.test.cjs",
+    ":(exclude)products/settings-community-demo/scripts/verify-*",
   ]);
   const gears = sourceState(source, [
     "Cargo.toml",

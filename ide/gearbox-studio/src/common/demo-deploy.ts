@@ -7,6 +7,7 @@ export interface DemoProgress {
   message: string;
 }
 export interface DemoDeployState {
+  epoch: string;
   revision: number;
   operationId?: string;
   status: "idle" | "running" | "ready" | "error" | "unknown";
@@ -29,4 +30,8 @@ export interface DemoDeployService {
 }
 export interface DemoDeployClient {
   onChanged(state: DemoDeployState): void;
+}
+
+export function acceptDemoState(current: DemoDeployState, incoming: DemoDeployState): boolean {
+  return incoming.epoch !== current.epoch || incoming.operationId !== current.operationId || incoming.revision >= current.revision;
 }
