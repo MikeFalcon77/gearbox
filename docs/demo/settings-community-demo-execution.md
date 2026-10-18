@@ -781,3 +781,26 @@ https://learn.microsoft.com/en-us/windows/wsl/disk-space#how-to-repair-a-vhd-mou
 Claude review and runtime acceptance resume after WSL recovery; do not re-run
 Firebase setup. The product panel's dirty-editor gate now observes model dirty
 and disposal events, including editors opened after the panel.
+
+
+### WSL recovery after host disk exhaustion
+
+The user freed over 100 GB on D: and authorized restarting Ubuntu. Terminating
+Ubuntu succeeded, but its first start returned code 6/failure step 2. A complete
+WSL shutdown then allowed Ubuntu to boot with a writable ext4 root. An actual
+temporary-file write/read/remove probe passed. No fsck, forced rw remount,
+namespace/PVC deletion or database reset was required or attempted.
+
+The prior isolated Docker service was transient. It is now a persistent enabled
+`gearbox-demo-docker.service`, using the same `/var/lib/gearbox-demo/daemon.json`,
+Docker data root and socket. Its owned start script recreates only the private
+`gbxdemo0` bridge at 172.30.0.1/24 and refuses a conflicting bridge address.
+Docker identity remains `84b883e2-c501-4735-98e1-f72c5df0c621`.
+The owned Postgres volume label survived and pg_isready accepts connections.
+Application data and SQLite integrity still require the resumed runtime checks.
+
+The host-volume probe now explicitly exports the distro name via WSLENV when
+Linux invokes Windows PowerShell. Its real WSL-to-Windows check passes against
+the freed D: volume, as do all eight bundle/host regressions. The current Studio
+TypeScript and browser/backend builds pass after recovery. The previous bundle
+is still unverified/stale and must be prepared again before Studio Deploy.

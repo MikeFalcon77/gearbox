@@ -42,6 +42,17 @@ function checkWslHost(machine, command) {
       env: {
         ...process.env,
         GEARBOX_DEMO_WSL_DISTRIBUTION: machine.distribution || "Ubuntu",
+        // Linux env vars reach Windows executables only when listed in WSLENV.
+        WSLENV: [
+          ...(process.env.WSLENV || "")
+            .split(":")
+            .filter(
+              (entry) =>
+                entry &&
+                entry.split("/")[0] !== "GEARBOX_DEMO_WSL_DISTRIBUTION",
+            ),
+          "GEARBOX_DEMO_WSL_DISTRIBUTION",
+        ].join(":"),
       },
       encoding: "utf8",
       timeout: 15000,
@@ -50,7 +61,7 @@ function checkWslHost(machine, command) {
   );
   if (result.status !== 0)
     throw Error(
-      "Cannot check physical Windows disk space for WSL; restore the host before deploying",
+      "Cannot check physical Windows disk space for WSL; check distro registration and Windows interop",
     );
   checkVolume(JSON.parse(result.stdout.trim().replace(/^\uFEFF/, "")), command);
 }
