@@ -1,0 +1,104 @@
+# Prepared community product. Build and deploy before presenting; no AI chat or
+# manual gear composition is required. Private configuration stays in .gearbox/.
+load("auth.gdl", "OFFLINE_AUTHENTICATION", "AUTHORIZATION", "GATEWAY_POLICIES")
+product(
+    gdl_version = "1.2",
+    ui = ui_product(
+        source = "gears-rust",
+        npm_lock = path("ui-package-lock.json"),
+        shell = path("ui/product-shell"),
+        sdk = path("ui/ui-sdk"),
+        modules = ["settings-service", "event-broker", "service-discovery", "types-registry"],
+    ),
+    id = "settings-community-demo",
+    name = "Family Labs — Offline Static Demo",
+    version = "0.1.0",
+    sources = [source(id = "gears-rust", at = path("../../.gearbox/settings-community-demo/offline/source/gears-rust"))],
+    profiles = [
+        kubernetes(
+            id = "minikube-offline", discovery = "static", namespace = "gearbox-demo",
+            database = postgres(
+                host = "external-postgres.gearbox-demo.svc.cluster.local", port = 5432, user = "gearbox_demo",
+                password = "${GEARS_PG_PASSWORD}", existing_secret = "gearbox-demo-runtime",
+                params = {"sslmode": "disable"},
+            ),
+            sqlite_databases = {"event-broker": "metadata.sqlite3"},
+        ),
+    ],
+    default_profile = "minikube-offline",
+    gears = [
+        use_gear("api-gateway", source = "gears-rust", config = {
+            "auth_disabled": False,
+            "route_policies": GATEWAY_POLICIES,
+            "advertise_uri": "http://demo-gateway.gearbox-demo.svc.cluster.local:8087",
+            "gateway_proxy": {
+                "enabled": True,
+                "directory_endpoint": "http://demo-gateway.gearbox-demo.svc.cluster.local:50051",
+                "sync_interval_secs": 2,
+            },
+            # Secret values are injected through AppConfig APP__ overrides.
+            # An absent Secret fails startup; a ${VAR} string is never a token.
+            # This demo has one remote registrar. Directory permits only its
+            # own gear name; no cross-gear trusted registrar is enabled.
+            "internal_auth": {"provider": "shared_secret", "secret": "", "peer_name": "settings-service"},
+        }),
+        use_gear("service-discovery", source = "gears-rust"),
+        use_gear("types-registry", source = "gears-rust"),
+        use_gear("demo-catalogue", source = "gears-rust"),
+        use_gear("family-labs-api", source = "gears-rust"),
+        use_gear("family-labs-bootstrap", source = "gears-rust", config = {
+            "bootstrap_token": "${DEMO_BOOTSTRAP_TOKEN}",
+        }),
+        use_gear("event-broker", source = "gears-rust", config = {
+            "mode": "standalone",
+            "default_storage_backend": "gts.cf.core.events.backend.v1~cf.core.backend.sqlite.v1~",
+            "topics": {
+                "gts.cf.core.events.topic.v1~cf.demo.settings.changed.v1": {
+                    "partitions": 1,
+                    "backend": {
+                        "type": "gts.cf.core.events.backend.v1~cf.core.backend.sqlite.v1~",
+                        "path": "/var/lib/gearbox/event-broker/events.sqlite3",
+                    },
+                },
+            },
+        }),
+        use_gear("settings-service", source = "gears-rust", config = {
+            "community_events": {
+                "broker_url": "http://demo-gateway.gearbox-demo.svc.cluster.local:8087",
+                "bearer_env": "DEMO_WORKER_TOKEN",
+                "tenants": ["d0000000-0000-4000-8000-000000000002", "a0000000-0000-4000-8000-000000000003"],
+            },
+        }),
+        use_gear("oagw", source = "gears-rust", config = {
+            "allow_http_upstream": True,
+            "ssrf_policy": {"allow_hostnames": ["demo-echo.gearbox-demo.svc.cluster.local"]},
+        }),
+        use_gear("authn-resolver", source = "gears-rust", plugins = OFFLINE_AUTHENTICATION),
+        use_gear("authz-resolver", source = "gears-rust", plugins = AUTHORIZATION),
+        use_gear("tenant-resolver", source = "gears-rust", plugins = [
+            plugin("static-tr-plugin", config = {"tenants": [
+                {"id": "f0000000-0000-4000-8000-000000000001", "name": "Family"},
+                {"id": "d0000000-0000-4000-8000-000000000002", "name": "Dasha's Lab", "parent_id": "f0000000-0000-4000-8000-000000000001"},
+                {"id": "a0000000-0000-4000-8000-000000000003", "name": "Ilya's Lab", "parent_id": "f0000000-0000-4000-8000-000000000001"},
+            ]}),
+        ]),
+        use_gear("credstore", source = "gears-rust", plugins = [plugin("static-credstore-plugin")]),
+    ],
+    cluster_profiles = [cluster_profile(
+        name = "event-broker",
+        cache = provider(
+            "postgres", secret_ref = "existingSecret:gearbox-demo-runtime",
+            connection_string = "postgres://gearbox_demo:${GEARS_PG_PASSWORD}@external-postgres.gearbox-demo.svc.cluster.local:5432/gearbox_demo_cluster",
+            schema = "demo_cluster", pool_max_size = 4,
+        ),
+        lock = provider(
+            "postgres", secret_ref = "existingSecret:gearbox-demo-runtime",
+            connection_string = "postgres://gearbox_demo:${GEARS_PG_PASSWORD}@external-postgres.gearbox-demo.svc.cluster.local:5432/gearbox_demo_cluster",
+            schema = "demo_cluster", pool_max_size = 4,
+        ),
+    )],
+    applications = [
+        application("demo-gateway", anchor = "api-gateway", include = ["demo-catalogue", "family-labs-api"], replicas = 1),
+        application("demo-settings-worker", anchor = "settings-service", include = ["authn-resolver", "family-labs-bootstrap"], replicas = 1),
+    ],
+)

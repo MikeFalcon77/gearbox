@@ -973,3 +973,67 @@ this bounded setup, not new acceptance claims.
 The portable commands are implemented; no actual Mac rehearsal is claimed.
 The phase-7 maintenance implementation and English runbook are being completed;
 backup/restore/offline acceptance and presentation-device checks are still open.
+
+
+### Phase 7 — maintenance and reserve implemented; available-host acceptance passed
+
+Explicit offline product/profile uses strict static authentication with two
+separate laboratory credentials. The shell marks Offline Demo / Static identity
+and keeps its lab token only in memory. It never launches Google login in that
+mode; normal Firebase configuration and saved sessions remain intact. Backend
+images are reused only after normal input/image validation and exact generated
+Rust/normalized Cargo composition comparison. Normal/offline UI images were
+scanned inside network-disabled read-only containers: none of the six private
+runtime credentials appeared in static assets. No credentials or portraits are
+tracked. Generated UI TypeScript and 23 UI tests passed; 12 bundle/mutex/archive
+checks passed in the final maintenance pass.
+
+Actual offline scene: event `01a14f3e-2e03-7026-847a-4b9fb2f2859c` reached both
+Dasha clients, each reread effective Settings and celebrated once. Ilya remained
+false with zero celebrations. Proof: `.gearbox/phase7-offline-scene-proof.json`
+and `.gearbox/phase7-offline-scene.png`. Returning with normal Deploy restored
+all three existing Google browser sessions without another manual login.
+
+Controlled backup/restore passed with private snapshot
+`offline/backups/20261018T133617Z-fc54e752`: quiesced both writers, saved both EB
+SQLite stores and four dedicated external Postgres DBs, then reset both approval
+values through APIs and restored the snapshot. Dasha true/Ilya false returned,
+as did the original sequence-2 event `32496472-c28c-4069-a21f-52fa24181e6f`,
+original consumer group and producer cursor. No business seed registration ran
+during replay. Proof: `.gearbox/phase7-backup-restore-proof.json`. An inspector
+checkpoint beyond the restored log correctly reported checkpoint_unavailable;
+Start live and baseline reload recovered it. This must be done in each affected
+tab. Static reload requires its lab token again.
+
+Cleanup removed 36 old anonymous Browser-UUID groups in the two lab tenants,
+only after confirming no remaining subscriptions. Active groups and the original
+business fixture were retained. This is explicit maintenance, not a broker TTL.
+
+The existing gearbox-demo profile was stopped/started with minikube, keeping the
+same namespace/PVC/PV UIDs, Postgres container ID, named data volume and fixed
+network address. After cluster DNS warmed nginx recovered from host-not-found
+startup retries; a first rollout status had reflected stale readiness, so actual
+HTTP/API/SSE checks were required. All four pods became Ready. Original event,
+group, cursor and Dasha true/Ilya false passed again through nginx. Proofs:
+`.gearbox/phase7-stop-start-proof.json` and
+`.gearbox/phase7-stop-start-persistence-proof.json`. This is stop/start of the
+existing profile, never delete/recreate or a disk-loss claim.
+
+After restart the real Firebase scene passed again with event
+`01a14f43-2839-75fe-b51b-3abf9601b457`: same event in both Dasha clients, one
+celebration each, Ilya false/zero. An editor intentionally left open across an
+operator reset correctly preserved its draft and required Reload current value
+on the ETag conflict; fresh tabs must be loaded after reset before presenting.
+Proof: `.gearbox/phase7-firebase-scene-proof.json` and its screenshot.
+Gearbox Reconnect UI restored Open UI without another deployment.
+
+The English runbook is `docs/demo/settings-community-demo-runbook.md`. It covers
+the presentation steps, exact private config/handoff paths, explicit mode/reset,
+backup/restore, checkpoint and deployment recovery, and storage loss boundaries.
+The approved plan file has not been edited.
+
+External presentation acceptance remains explicit: no actual Mac, independent
+browser contexts, presenter hotspot or complete rehearsal video were available
+for verification here. Browser evidence uses separate session-persistent tabs
+in one Chrome profile. These are preparation/rehearsal items for the actual
+presentation environment, not claimed completed by these Windows/WSL checks.

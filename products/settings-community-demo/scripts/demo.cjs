@@ -7,8 +7,10 @@ const fs = require("node:fs"),
   cp = require("node:child_process"),
   crypto = require("node:crypto");
 const state = require("./bundle-state.cjs");
+const offline = /^(prepare|deploy|validate|forward|smoke|reset|backup|restore|cleanup)-offline$/.test(process.argv[2] || "");
 const repo = path.resolve(__dirname, "../../.."),
-  work = path.join(repo, ".gearbox/settings-community-demo"),
+  baseWork = path.join(repo, ".gearbox/settings-community-demo"),
+  work = offline ? path.join(baseWork, "offline") : baseWork,
   profile = "gearbox-demo",
   namespace = "gearbox-demo";
 const machineFile = path.join(work, "machine.json"),
@@ -18,8 +20,8 @@ let machine,
   operationId,
   pinnedPostgres;
 const invocation = crypto.randomUUID();
-// Backend restarts may close the observer pipe; operation receipts remain the
-// source of truth while a detached deployment finishes.
+// A disconnected observer may close its output pipe. Keep writing the private
+// receipt; this does not guarantee survival of a host/process-tree shutdown.
 process.stdout.on("error", error => { if (error.code !== "EPIPE") throw error; });
 function stage(name, message, status = "running", extra = {}) {
   const event = { stage: name, status, message, ...extra };
@@ -42,8 +44,9 @@ function stage(name, message, status = "running", extra = {}) {
   }
 }
 function loadMachine() {
-  const config = fs.existsSync(machineFile)
-    ? JSON.parse(fs.readFileSync(machineFile, "utf8"))
+  const file = fs.existsSync(machineFile) ? machineFile : offline ? path.join(baseWork, "machine.json") : machineFile;
+  const config = fs.existsSync(file)
+    ? JSON.parse(fs.readFileSync(file, "utf8"))
     : {};
   if (
     config.dockerHost &&
@@ -61,6 +64,7 @@ function env() {
     DEMO_MINIKUBE_PROFILE: profile,
     DEMO_KUBE_CONTEXT: profile,
     DEMO_WORK_DIR: work,
+    DEMO_OFFLINE: offline ? "1" : "0",
     DEMO_FIREBASE_HANDOFF: path.join(repo, ".gearbox/firebase-preflight"),
     ...(pinnedPostgres ? { DEMO_POSTGRES_IMAGE: pinnedPostgres } : {}),
   };
@@ -312,7 +316,42 @@ async function idleHelm() {
     );
   return helm;
 }
+function prepareOfflinePrivateInputs() {
+  for (const relative of ["private/runtime-secrets.json", "private-assets/portraits/manifest.json", "private-assets/portraits/dasha.webp", "private-assets/portraits/ilya.webp"]) {
+    const source = path.join(baseWork, relative), destination = path.join(work, relative);
+    if (!fs.existsSync(source)) throw Error("Prepare the normal product and private inputs before the reserve profile");
+    if (!fs.existsSync(destination)) {
+      fs.mkdirSync(path.dirname(destination), {recursive: true, mode: 0o700});
+      fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
+      fs.chmodSync(destination, 0o600);
+    }
+  }
+}
+async function reusePreparedBackends() {
+  const normal = JSON.parse(fs.readFileSync(path.join(baseWork, "bundle.json"), "utf8"));
+  if (normal.verified !== true || normal.mode !== "firebase") throw Error("Prepare the normal Firebase bundle before the offline reserve");
+  state.checkInputs(normal.inputs, state.inputs(repo, machine.sourceRoot, machine.preparedEngine, baseWork));
+  const normalRoot = path.join(baseWork, "minikube"), offlineRoot = path.join(work, "minikube");
+  state.verifyArtifacts(normalRoot, normal.artifacts, true);
+  const normalize = (file, root) => fs.readFileSync(file, "utf8").replace(/path\s*=\s*"([^"\n]+)"/g, (_match, relative) => {
+    const absolute = fs.realpathSync(path.resolve(path.dirname(file), relative));
+    const inside = path.relative(root, absolute);
+    return 'path = "' + (inside && !inside.startsWith("..") && !path.isAbsolute(inside) ? "<generated>/" + inside : absolute).replaceAll("\\", "/") + '"';
+  });
+  for (const item of normal.artifacts.filter(item => item.path.endsWith(".rs") || item.path.endsWith("Cargo.toml"))) {
+    if (normalize(path.join(normalRoot, item.path), normalRoot) !== normalize(path.join(offlineRoot, item.path), offlineRoot))
+      throw Error("Offline compiled composition differs from the prepared backend: " + item.path);
+  }
+  for (const name of ["gateway", "settings"]) {
+    const image = normal.images.find(image => image.name === name);
+    const actual = JSON.parse(await run("docker", ["image", "inspect", image.ref], "offline-backend-image", true))[0];
+    if (actual.Id !== image.id) throw Error("Prepared backend image changed");
+    await run("docker", ["tag", image.ref, "gbx-demo-" + name + ":0.1.0"], "reuse-backend-image");
+  }
+  stage("build", "Reusing the verified identical backend composition; building the offline UI configuration");
+}
 async function prepare() {
+  if (offline) prepareOfflinePrivateInputs();
   stage(
     "preflight",
     "Checking the existing Firebase handoff, private portraits and local tools",
@@ -419,9 +458,9 @@ async function prepare() {
       "--source-id",
       "gears-rust",
       "--product",
-      path.join(repo, "products/settings-community-demo/product.gdl"),
+      path.join(repo, offline ? "products/settings-community-demo/product.offline.gdl" : "products/settings-community-demo/product.gdl"),
       "--profile",
-      "minikube",
+      offline ? "minikube-offline" : "minikube",
       "--out",
       path.join(work, "minikube"),
     ],
@@ -437,8 +476,9 @@ async function prepare() {
     [path.join(__dirname, "prepare-chart.cjs")],
     "chart-inputs",
   );
-  stage("build", "Building the two backend applications and the UI");
-  await run("sh", [path.join(work, "minikube/docker/build.sh")], "build");
+  stage("build", offline ? "Preparing the explicit offline UI and verified backend reuse" : "Building the two backend applications and the UI");
+  if (offline) await reusePreparedBackends();
+  else await run("sh", [path.join(work, "minikube/docker/build.sh")], "build");
   await run(
     "docker",
     [
@@ -543,6 +583,7 @@ async function prepare() {
   );
   const bundle = {
     version: 1,
+    mode: offline ? "static-demo" : "firebase",
     profile,
     namespace,
     preparedAt: new Date().toISOString(),
@@ -607,6 +648,7 @@ async function validate(allowUnverified = false) {
     bundle.namespace !== namespace
   )
     throw Error("Unsupported demo bundle");
+  if (bundle.mode !== (offline ? "static-demo" : "firebase")) throw Error("Prepared authentication mode changed; prepare the requested mode again");
   state.checkInputs(
     bundle.inputs,
     state.inputs(repo, machine.sourceRoot, machine.preparedEngine, work),
@@ -719,7 +761,7 @@ async function deploy(allowUnverified = false) {
   );
   stage(
     "readiness",
-    "Checking the running deployments, storage, worker API and Google connectivity",
+    offline ? "Checking deployments, storage, remote APIs and offline static identities" : "Checking the running deployments, storage, worker API and Google connectivity",
   );
   await smoke();
   // A long deployment must not certify inputs changed while Helm was waiting.
@@ -766,10 +808,15 @@ async function smoke() {
   );
   if (pv.spec.persistentVolumeReclaimPolicy !== "Retain")
     throw Error("Actual PV does not retain data");
+  const expectedEcho = JSON.parse(fs.readFileSync(manifestFile, "utf8")).images.find(image => image.name === "echo");
+  const echo = JSON.parse(await k(["get", "deployment", "demo-echo", "-o", "json"], "smoke-echo-owner", true));
+  if (echo.metadata.annotations?.["meta.helm.sh/release-name"] !== "settings-community-demo" ||
+      !echo.spec.template.spec.containers.some(container => container.image === expectedEcho.ref))
+    throw Error("Refusing to send smoke credentials to an unowned or changed echo workload");
   const secrets = JSON.parse(
     fs.readFileSync(path.join(work, "private/runtime-secrets.json"), "utf8"),
   );
-  const probe = `let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',async()=>{try{const {token}=JSON.parse(input);const base='http://demo-gateway.gearbox-demo.svc.cluster.local:8087';const get=async(route,body)=>{const r=await fetch(base+route,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('API readiness failed: '+r.status);return r.json()};let registered=false;for(let attempt=0;attempt<65;attempt++){const directory=await get('/service-discovery/v1/gears');if(directory.some(g=>g.name==='settings-service'&&g.instances.some(i=>['ready','healthy'].includes(i.state)))){registered=true;break;}await new Promise(resolve=>setTimeout(resolve,1000));}if(!registered)throw Error('Worker did not re-register with Directory within 65 seconds');const value=await get('/family-labs/v1/effective:read',{key:'gts.cf.core.settings.setting_type.v1~cf.family_labs.lab.ice_cream_approved.v1~',scope:'/tenants/d0000000-0000-4000-8000-000000000002'});if(typeof value.value!=='boolean')throw Error('Effective setting unavailable');const types=await get('/family-labs/v1/registry/settings');if(types.entities.filter(e=>e.gts_id.includes('cf.family_labs.')).length!==3)throw Error('Settings registrations missing');const keys=await fetch('https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com',{signal:AbortSignal.timeout(15000)});if(!keys.ok||!Object.keys(await keys.json()).length)throw Error('Google verifier keys unreachable');console.log('Remote Settings, Directory, V1 registrations and Google connectivity passed.')}catch(e){console.error(e.message);process.exitCode=1}});`;
+  const probe = `let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',async()=>{try{const {token,offline,offlineUsers}=JSON.parse(input);const base='http://demo-gateway.gearbox-demo.svc.cluster.local:8087';const get=async(route,body)=>{const r=await fetch(base+route,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('API readiness failed: '+r.status);return r.json()};let registered=false;for(let attempt=0;attempt<65;attempt++){const directory=await get('/service-discovery/v1/gears');if(directory.some(g=>g.name==='settings-service'&&g.instances.some(i=>['ready','healthy'].includes(i.state)))){registered=true;break;}await new Promise(resolve=>setTimeout(resolve,1000));}if(!registered)throw Error('Worker did not re-register with Directory within 65 seconds');const value=await get('/family-labs/v1/effective:read',{key:'gts.cf.core.settings.setting_type.v1~cf.family_labs.lab.ice_cream_approved.v1~',scope:'/tenants/d0000000-0000-4000-8000-000000000002'});if(typeof value.value!=='boolean')throw Error('Effective setting unavailable');const types=await get('/family-labs/v1/registry/settings');if(types.entities.filter(e=>e.gts_id.includes('cf.family_labs.')).length!==3)throw Error('Settings registrations missing');if(!offline){const keys=await fetch('https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com',{signal:AbortSignal.timeout(15000)});if(!keys.ok||!Object.keys(await keys.json()).length)throw Error('Google verifier keys unreachable');}else{for(const user of offlineUsers){const r=await fetch(base+'/family-labs/v1/me',{headers:{Authorization:'Bearer '+user.token},signal:AbortSignal.timeout(15000)});if(!r.ok||(await r.json()).tenant_id!==user.tenant)throw Error('Offline identity mapping failed');const other=user.tenant===offlineUsers[0].tenant?offlineUsers[1].tenant:offlineUsers[0].tenant;const denied=await fetch(base+'/settings-service/v1/settings/'+encodeURIComponent('gts.cf.core.settings.setting_type.v1~cf.family_labs.lab.ice_cream_approved.v1~')+'?tenant='+other,{headers:{Authorization:'Bearer '+user.token},signal:AbortSignal.timeout(15000)});if(denied.status!==403)throw Error('Offline sibling isolation failed');}}console.log(offline?'Remote APIs and both restricted offline identities passed.':'Remote Settings, Directory, V1 registrations and Google connectivity passed.');}catch(e){console.error(e.message);process.exitCode=1}});`;
   await run(
     "kubectl",
     [
@@ -787,7 +834,11 @@ async function smoke() {
     ],
     "api-smoke",
     true,
-    JSON.stringify({ token: secrets.DEMO_BOOTSTRAP_TOKEN }),
+    JSON.stringify({ token: secrets.DEMO_BOOTSTRAP_TOKEN, offline,
+      offlineUsers: offline ? [
+        {token: secrets.DEMO_OFFLINE_DASHA_TOKEN, tenant: "d0000000-0000-4000-8000-000000000002"},
+        {token: secrets.DEMO_OFFLINE_ILYA_TOKEN, tenant: "a0000000-0000-4000-8000-000000000003"},
+      ] : [] }),
   );
 }
 async function forward() {
@@ -858,7 +909,8 @@ async function main() {
   fs.mkdirSync(work, { recursive: true, mode: 0o700 });
   machine = loadMachine();
   const args = process.argv.slice(2),
-    command = args.shift() || "status";
+    commandName = args.shift() || "status",
+    command = commandName.replace(/-offline$/, "");
   for (let i = 0; i < args.length; i += 2) {
     const names = {
       "--source-root": "sourceRoot",
@@ -867,7 +919,7 @@ async function main() {
       "--docker-host": "dockerHost",
     };
     if (names[args[i]]) machine[names[args[i]]] = args[i + 1];
-    else if (args[i] !== "--operation")
+    else if (!["--operation", "--backup"].includes(args[i]))
       throw Error("Unknown demo option: " + args[i]);
   }
   machine.kubeconfig ??= path.join(
@@ -903,7 +955,7 @@ async function main() {
             ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
           node,
           translate(__filename),
-          command,
+          commandName,
           ...args,
         ],
         { stdio: ["pipe", "inherit", "inherit"], windowsHide: true },
@@ -914,7 +966,7 @@ async function main() {
   }
   if (machine.nativeWindowsGit)
     process.env.DEMO_NATIVE_WINDOWS_GIT = machine.nativeWindowsGit;
-  const locked = ["prepare", "deploy"].includes(command);
+  const locked = ["prepare", "deploy", "reset", "backup", "restore", "cleanup"].includes(command);
   // The OS releases this loopback mutex on exit/reboot. A leftover receipt file
   // or a reused PID can never prevent recovery or steal another active lock.
   const lock = locked ? await require("./operation-lock.cjs").acquire() : undefined;
@@ -928,7 +980,13 @@ async function main() {
     else if (command === "deploy") await deploy();
     else if (command === "forward") await forward();
     else if (command === "smoke") await smoke();
-    else throw Error("Use prepare, validate, deploy, forward or smoke");
+    else if (["reset", "backup", "restore", "cleanup"].includes(command)) {
+      const backupIndex = args.indexOf("--backup");
+      await require("./maintenance.cjs").maintenance(command,
+        {repo, work, env, run, k, stage, validate, smoke},
+        backupIndex < 0 ? undefined : args[backupIndex + 1]);
+    }
+    else throw Error("Use prepare, validate, deploy, forward, smoke, reset, backup, restore or cleanup (append -offline for the explicit static profile)");
   } finally {
     if (lock) await lock.close();
   }

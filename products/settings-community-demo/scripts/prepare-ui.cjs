@@ -8,8 +8,9 @@ const work = path.resolve(process.env.DEMO_WORK_DIR || path.join(repo, '.gearbox
 const ui = path.join(work, 'minikube/ui');
 if (!fs.existsSync(path.join(ui, 'package.json'))) throw new Error('Generate the product UI first.');
 const firebase = JSON.parse(fs.readFileSync(path.join(repo, '.gearbox/firebase-preflight/firebase-web-config.json'), 'utf8'));
+const offline = process.env.DEMO_OFFLINE === '1';
 const web = {};
-for (const key of ['apiKey', 'appId', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId']) {
+for (const key of offline ? [] : ['apiKey', 'appId', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId']) {
   if (typeof firebase[key] !== 'string' || !firebase[key]) throw new Error(`Missing public Firebase field: ${key}`);
   web[key] = firebase[key];
 }
@@ -30,7 +31,7 @@ for (const lab of ['dasha', 'ilya']) {
 }
 const prefix = 'gts.cf.core.settings.setting_type.v1~cf.family_labs.lab.';
 const approvalKey = prefix + 'ice_cream_approved.v1~';
-const config = {apiBase:'/api',productName:'Family Labs',firebase:web,identityPath:'/family-labs/v1/me',
+const config = {apiBase:'/api',productName:offline?'Family Labs · Offline Demo':'Family Labs',authenticationMode:offline?'static-demo':'firebase',firebase:web,identityPath:'/family-labs/v1/me',
   tenants:{
     'd0000000-0000-4000-8000-000000000002':{name:"Dasha’s Lab",character:'Dasha',role:'Chief Ice Cream Officer',portrait:portraits.dasha,portraitPosition:"82% 43%",portraitZoom:2},
     'a0000000-0000-4000-8000-000000000003':{name:"Ilya’s Lab",character:'Ilya',role:'Head of Quality Assurance',portrait:portraits.ilya,portraitPosition:"50% 40%",portraitZoom:1}
@@ -43,4 +44,4 @@ const config = {apiBase:'/api',productName:'Family Labs',firebase:web,identityPa
   ]}
 };
 fs.writeFileSync(path.join(ui,'public/runtime-config.json'),JSON.stringify(config,null,2)+'\n');
-console.log('Prepared product UI with the existing public Firebase Web SDK configuration.');
+console.log(offline ? 'Prepared explicit offline static UI; no browser credentials are embedded.' : 'Prepared product UI with the existing public Firebase Web SDK configuration.');

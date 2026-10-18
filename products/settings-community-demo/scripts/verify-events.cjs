@@ -54,7 +54,7 @@ async function replay() {
       interests: [{topic, tenant_id: tenant, max_depth: 0, types: [eventType]}],
     }, {}, [201])).body;
     await api(gateway, `/event-broker/v1/subscriptions/${subscription.id}:seek`, 'POST', {
-      topology_version: 1, positions: {[topic]: [{partition: 0, value: 'earliest'}]},
+      topology_version: subscription.topology_version, positions: {[topic]: [{partition: 0, value: 'earliest'}]},
     });
     const response = await fetch(gateway + '/event-broker/v1/events:sse?subscription_id=' + encodeURIComponent(subscription.id), {
       headers: {Authorization: `Bearer ${token}`}, signal: controller.signal,

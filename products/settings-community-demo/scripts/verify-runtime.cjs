@@ -62,7 +62,9 @@ async function main() {
   await api('/settings-service/v1/declarations', 'GET', undefined, [401], false);
   await api('/settings-service/v1/declarations');
   console.log('Authorized Gateway-to-worker proxy call succeeds; anonymous call is rejected.');
-  await registerDeclarations();
+  // Replay must prove startup registrations; it must never repair them.
+  if (mode === 'seed') await registerDeclarations();
+  else assert(JSON.stringify(await api('/event-broker/v1/topics')).includes(topic), 'Startup topic registration missing');
   if (mode === 'seed') {
     const producer = await api('/event-broker/v1/producers', 'POST', {mode: 'monotonic', client_agent: 'gearbox-runtime-smoke'}, [201]);
     const group = await api('/event-broker/v1/consumer-groups', 'POST', {client_agent: 'gearbox-runtime-smoke', description: 'Persistence verification'}, [201]);
@@ -86,7 +88,7 @@ async function main() {
     consumer_group: state.groupId, client_agent: 'gearbox-runtime-smoke', interests: [{topic, tenant_id: tenant, max_depth: 0, types: [eventType]}],
   }, [201]);
   await api(`/event-broker/v1/subscriptions/${subscription.id}:seek`, 'POST', {
-    topology_version: 1, positions: {[topic]: [{partition: 0, value: 'earliest'}]},
+    topology_version: subscription.topology_version, positions: {[topic]: [{partition: 0, value: 'earliest'}]},
   });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);

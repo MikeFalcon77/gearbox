@@ -72,3 +72,26 @@ GATEWAY_POLICIES = {
         {"path": "/**", "required_scopes": ["demo:bootstrap"]},
     ],
 }
+
+# Reserve profile: keep the compiled gear graph identical, but the resolver
+# selects strict static_tokens (priority 0). Firebase/demo verifiers are idle;
+# JWTs cannot fall through to another provider. Credentials stay in Secrets.
+OFFLINE_AUTHENTICATION = [
+    plugin("demo-authn-plugin", config = {"priority": 1000}),
+    plugin("firebase-authn-plugin", config = {
+        "priority": 2000, "project_id": "${DEMO_FIREBASE_PROJECT_ID}",
+        "identities": [
+            {"uid": "${DEMO_DASHA_FIREBASE_UID}", "email": "${DEMO_DASHA_FIREBASE_EMAIL}", "tenant_id": DASHA, "token_scopes": ["demo:user", "demo:diagnostics"]},
+            {"uid": "${DEMO_ILYA_FIREBASE_UID}", "email": "${DEMO_ILYA_FIREBASE_EMAIL}", "tenant_id": ILYA, "token_scopes": ["demo:user", "demo:diagnostics"]},
+        ],
+    }),
+    plugin("static-authn-plugin", config = {
+        "priority": 0, "mode": "static_tokens",
+        "tokens": [
+            {"token": "${DEMO_BOOTSTRAP_TOKEN}", "identity": {"subject_id": BOOTSTRAP_SUBJECT, "subject_tenant_id": ROOT, "subject_type": "service", "token_scopes": ["demo:bootstrap"]}},
+            {"token": "${DEMO_WORKER_TOKEN}", "identity": {"subject_id": WORKER_SUBJECT, "subject_tenant_id": ROOT, "subject_type": "service", "token_scopes": ["demo:worker"]}},
+            {"token": "${DEMO_OFFLINE_DASHA_TOKEN}", "identity": {"subject_id": "d0000000-0000-4000-8000-000000000101", "subject_tenant_id": DASHA, "subject_type": "user", "token_scopes": ["demo:user", "demo:diagnostics"]}},
+            {"token": "${DEMO_OFFLINE_ILYA_TOKEN}", "identity": {"subject_id": "a0000000-0000-4000-8000-000000000103", "subject_tenant_id": ILYA, "subject_type": "user", "token_scopes": ["demo:user", "demo:diagnostics"]}},
+        ],
+    }),
+]

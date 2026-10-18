@@ -57,10 +57,12 @@ async function verifyUser(lab, token) {
   await api(token, setting + '/value', {method: 'PUT', body: {value: read.body.value}, headers: {'If-Match': read.headers.get('etag')}});
   checks.push('Own-tenant Settings write accepted without changing the value.');
   await api(token, '/service-discovery/v1/gears');
-  await api(token, '/types-registry/v1/entities');
+  await api(token, '/types-registry/v1/entities', {statuses: [403]});
+  await api(token, '/family-labs/v1/registry/gateway');
+  await api(token, '/family-labs/v1/registry/settings');
   await api(token, '/types-registry/v1/entities', {method: 'POST', body: {entities: []}, statuses: [403]});
   await api(token, '/event-broker/v1/producers', {method: 'POST', body: {mode: 'monotonic'}, statuses: [403]});
-  checks.push('Read-only diagnostics accepted; schema writes and producer management rejected.');
+  checks.push('Filtered read-only registry diagnostics accepted; raw registry, schema writes and producer management rejected.');
   const group = (await api(token, '/event-broker/v1/consumer-groups', {
     method: 'POST', body: {client_agent: 'gearbox-identity-check', description: 'Disposable identity check'}, statuses: [201],
   })).body;
@@ -87,6 +89,7 @@ async function verifyTechnical() {
   await api('unknown-technical-token', '/event-broker/v1/topics', {statuses: [401]});
   await api('invalid.jwt.credential', '/event-broker/v1/topics', {statuses: [401]});
   await api(worker, '/settings-service/v1/declarations', {statuses: [403]});
+  for (const route of ['/service-discovery/v1/gears', '/types-registry/v1/entities', '/family-labs/v1/registry/gateway', '/family-labs/v1/registry/settings']) await api(worker, route, {statuses: [403]});
   await api(worker, '/types-registry/v1/entities', {method: 'POST', body: {entities: []}, statuses: [403]});
   const producer = (await api(worker, '/event-broker/v1/producers', {method: 'POST', body: {mode: 'monotonic', client_agent: 'gearbox-worker-check'}, statuses: [201]})).body;
   const event = tenant => ({id: randomUUID(), type: eventType, tenant_id: tenant, source: 'gearbox-worker-check', subject: 'credential-check', subject_type: subjectType,

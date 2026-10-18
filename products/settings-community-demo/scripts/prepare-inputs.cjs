@@ -17,9 +17,10 @@ const credentials = existing
 const oldSchema = credentials.schemaVersion;
 if (![1, 2].includes(oldSchema)) throw new Error('Unsupported private runtime credentials schema.');
 const names = ['GEARS_PG_PASSWORD', 'DEMO_INTERNAL_TOKEN', 'DEMO_BOOTSTRAP_TOKEN', 'DEMO_WORKER_TOKEN'];
+if (process.env.DEMO_OFFLINE === '1') names.push('DEMO_OFFLINE_DASHA_TOKEN', 'DEMO_OFFLINE_ILYA_TOKEN');
 for (const name of names) {
   const addedInV2 = name === 'DEMO_WORKER_TOKEN' && oldSchema === 1;
-  if (credentials[name] === undefined && (!existing || addedInV2)) credentials[name] = crypto.randomBytes(32).toString('hex');
+  if (credentials[name] === undefined && (!existing || addedInV2 || name.startsWith('DEMO_OFFLINE_'))) credentials[name] = crypto.randomBytes(32).toString('hex');
   if (!/^[a-f0-9]{64}$/.test(credentials[name])) {
     throw new Error(`Invalid ${name} in the private handoff; refusing to rotate existing credentials.`);
   }
@@ -63,7 +64,7 @@ const secretFile = writePrivate('kubernetes-secret.json', JSON.stringify({
 const revision = crypto.createHash('sha256').update(serialized).update(JSON.stringify(firebaseVariables)).digest('hex');
 const privateValuesFile = writePrivate('values.private.json', JSON.stringify(Object.fromEntries(
   ['demo-gateway', 'demo-settings-worker'].map(name => [name, {
-    podAnnotations: { 'demo.gearbox.dev/credential-revision': revision },
+    podAnnotations: { 'demo.gearbox.dev/credential-revision': revision, 'demo.gearbox.dev/auth-mode': process.env.DEMO_OFFLINE === '1' ? 'static-demo' : 'firebase' },
   }]),
 ), null, 2) + '\n');
 console.log(JSON.stringify({ work, credentialsFile, postgresEnvFile, secretFile, privateValuesFile }, null, 2));

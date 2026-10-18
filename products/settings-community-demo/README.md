@@ -10,8 +10,10 @@ Deploy → Open UI**. AI chat and manual gear composition are optional.
 The backend composition runs in minikube: Gateway, Event Broker, Discovery,
 Types Registry V1, OAGW and a separate Settings worker with its own AuthN stack.
 Its real routing and EB persistence checks pass across pod recreation, repeated
-Deploy and minikube stop/start. The UI and final Deploy integration are added
-in subsequent phases. Firebase integration is configured in `auth.gdl`.
+Deploy and the available Windows/WSL minikube stop/start. The four UI modules and
+prepared Studio Deploy are implemented. Target-machine rehearsal and current
+acceptance outcomes are recorded in the execution notes. Firebase integration
+is configured in `auth.gdl`.
 
 ## Storage and authentication
 
@@ -155,3 +157,48 @@ volume holding the registered Ubuntu VHD in addition to free space reported by
 Linux/Docker. Keep at least 20 GiB free there before preparation (4 GiB for a
 prepared deployment). A read-only WSL root stops the runner. The runner does not
 restart or repair the user's distribution automatically.
+
+
+## Maintenance and explicit offline reserve
+
+The English [presentation runbook](../../docs/demo/settings-community-demo-runbook.md)
+contains the expected result of each on-stage step, recovery boundaries and
+private backup handling. From the repository root:
+
+```sh
+node products/settings-community-demo/scripts/demo.cjs reset
+node products/settings-community-demo/scripts/demo.cjs backup
+node products/settings-community-demo/scripts/demo.cjs restore --backup EXACT_BACKUP_ID
+node products/settings-community-demo/scripts/demo.cjs cleanup
+```
+
+Reset changes only `Ice cream approved` in the two demo labs through Settings
+APIs. Backup quiesces both writers and saves both SQLite stores, dedicated
+Postgres databases and an allowlist of private inputs. Restore is limited to a
+verified private snapshot and compatible source/configuration. Cleanup removes
+only old anonymous groups bearing this UI's Browser UUID description, in the
+two lab tenants, with no remaining subscription. It retains active and business
+groups. The broker API has no automatic consumer-group TTL.
+
+The reserve product is `product.offline.gdl`, profile `minikube-offline`:
+
+```sh
+node products/settings-community-demo/scripts/demo.cjs prepare-offline
+node products/settings-community-demo/scripts/demo.cjs deploy-offline
+node products/settings-community-demo/scripts/demo.cjs forward-offline
+```
+
+Prepare the normal bundle first. Offline preparation checks that generated Rust
+sources and normalized Cargo manifests are identical, then reuses the verified
+backend images and builds the explicit offline UI configuration. Both modes
+have separate private bundle directories and use the same bounded demo target;
+they cannot run writer/deploy maintenance operations concurrently.
+
+The offline resolver selects strict static authentication. Existing Firebase
+code remains compiled but idle. Two separate laboratory tokens live only in
+`.gearbox/settings-community-demo/offline/private/runtime-secrets.json`; enter
+the appropriate lab token before presenting. They are never embedded in public
+UI configuration or persisted by the shell. Use laboratory credentials in the
+browser, never bootstrap/worker credentials. The product visibly says Offline
+Demo. It does not silently fall back from Google or change cloud configuration.
+Use normal `deploy` to return to the prepared Firebase product, then reload UI.
