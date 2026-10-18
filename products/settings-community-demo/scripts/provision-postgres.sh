@@ -6,7 +6,7 @@ work=${DEMO_WORK_DIR:-$repo/.gearbox/settings-community-demo}
 container=gearbox-demo-postgres
 volume=gearbox-demo-postgres-data
 owner=settings-community-demo
-image=postgres:17-bookworm
+image=${DEMO_POSTGRES_IMAGE:-postgres:17-bookworm}
 network=${DEMO_MINIKUBE_PROFILE:-gearbox-demo}
 docker network inspect "$network" >/dev/null
 
@@ -27,7 +27,8 @@ if docker container inspect "$container" >/dev/null 2>&1; then
   }
   docker start "$container" >/dev/null
 else
-  docker run -d --name "$container" --restart unless-stopped \
+  docker image inspect "$image" >/dev/null
+  docker run --pull never -d --name "$container" --restart unless-stopped \
     --label "app.kubernetes.io/part-of=$owner" \
     --env-file "$work/private/postgres.env" \
     --network "$network" \

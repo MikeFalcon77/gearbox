@@ -23,6 +23,8 @@ pub struct ProductUi {
     pub modules: BTreeSet<GearId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<SourceId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub npm_lock: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -40,4 +42,6 @@ pub struct ResolvedUi {
     pub modules: BTreeMap<GearId, ResolvedUiModule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<SourceId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub npm_lock: Option<String>,
 }

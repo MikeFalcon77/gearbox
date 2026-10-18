@@ -7,4 +7,4 @@ import type { SourceId } from "./SourceId";
  * Locators are part of product.lock. Generation projects package.json without
  * executing JavaScript and records identities, exports and hashes in ui.lock.json.
  */
-export type ResolvedUi = { shell: string, sdk: string, modules: { [key in GearId]: ResolvedUiModule }, source?: SourceId | null, };
+export type ResolvedUi = { shell: string, sdk: string, modules: { [key in GearId]: ResolvedUiModule }, source?: SourceId | null, npm_lock?: string | null, };

@@ -1,3 +1,9 @@
+import {
+  DEMO_DEPLOY_PATH,
+  DemoDeployService,
+  type DemoDeployClient,
+} from "../common/demo-deploy";
+import { DemoDeployFrontend } from "./demo-deploy-service";
 // Frontend wiring: the views, two stores, one proxied service.
 
 import {
@@ -331,6 +337,16 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
   bind(ToolbarContribution).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(ToolbarContribution);
 
+  bind(DemoDeployFrontend).toSelf().inSingletonScope();
+  bind(DemoDeployService)
+    .toDynamicValue(({ container }) => {
+      const provider = container.get(WebSocketConnectionProvider);
+      const client: DemoDeployClient = {
+        onChanged: (state) => container.get(DemoDeployFrontend).receive(state),
+      };
+      return provider.createProxy<DemoDeployService>(DEMO_DEPLOY_PATH, client);
+    })
+    .inSingletonScope();
   bind(GearboxService)
     .toDynamicValue(({ container }) => {
       const provider = container.get(WebSocketConnectionProvider);

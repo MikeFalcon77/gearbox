@@ -57,7 +57,7 @@ GATEWAY_POLICIES = {
         {"path": "/types-registry/v1/entities", "method": "GET", "required_scopes": ["demo:bootstrap"]},
         {"path": "/types-registry/**", "required_scopes": ["demo:bootstrap"]},
         {"path": "/service-discovery/**", "method": "GET", "required_scopes": ["demo:diagnostics", "demo:bootstrap"]},
-        {"path": "/family-labs/v1/registry/**", "method": "GET", "required_scopes": ["demo:diagnostics", "demo:bootstrap"]},
+        {"path": "/family-labs/v1/registry/**", "required_scopes": ["demo:diagnostics", "demo:bootstrap"]},
         {"path": "/family-labs/**", "required_scopes": ["demo:user", "demo:diagnostics", "demo:bootstrap"]},
         {"path": "/settings-service/**", "required_scopes": ["demo:user", "demo:bootstrap"]},
         {"path": "/event-broker/v1/events", "method": "POST", "required_scopes": ["demo:worker", "demo:bootstrap"]},

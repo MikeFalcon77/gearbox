@@ -1407,3 +1407,8 @@
 .gbx-generate-tree .gbx-row-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gbx-generate-tree .gbx-badge { flex: 0 0 auto; }
 .gbx-generate-tree .gbx-generate-dir-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.gbx-demo-deploy { margin: 14px 0; padding: 14px; border: 1px solid var(--theia-panel-border); border-radius: 8px; background: var(--theia-editorWidget-background); }
+.gbx-demo-deploy > p { margin: 10px 0; }
+.gbx-demo-deploy ol { max-height: 180px; overflow: auto; padding-left: 22px; font-size: 11px; }
+.gbx-demo-deploy li { margin: 5px 0; overflow-wrap: anywhere; }

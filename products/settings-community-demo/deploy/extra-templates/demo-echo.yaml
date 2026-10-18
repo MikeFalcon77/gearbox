@@ -46,7 +46,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: echo
-          image: node:24.21.0-alpine
+          image: {{ default "node:24.21.0-alpine" .Values.demoEchoImage | quote }}
           imagePullPolicy: Never
           command: [node, /app/server.cjs]
           ports: [{name: http, containerPort: 8080}]

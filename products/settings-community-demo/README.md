@@ -98,3 +98,60 @@ saved. The technical check verifies the restricted worker credential, allowed
 demo publications and denied root/unknown tenants and foreign event types.
 
 This is a development integration harness, separate from the final product UI.
+
+
+## Prepared local deployment
+
+The product is opened from `products/settings-community-demo/product.gdl`.
+Its source locator uses the private alias created by preparation; checkout
+folder names do not have to match this machine. All application copy is English.
+
+Before preparing another machine, privately transfer the existing Firebase
+handoff into `.gearbox/firebase-preflight/` and the verified portraits directory
+into `.gearbox/settings-community-demo/private-assets/portraits/`. Keep existing
+runtime credentials with the external Postgres data volume. Preparation reuses
+the existing Google provider and identities; it never runs Firebase CLI login
+or creates a cloud project.
+
+With Docker, minikube, kubectl, Node 24 and Cargo available on the presentation
+Mac, run from the Gearbox checkout:
+
+```sh
+node products/settings-community-demo/scripts/demo.cjs prepare --source-root /path/to/gears-rust
+```
+
+The command records private machine paths, checks the local Docker resources,
+starts only the `gearbox-demo` profile, builds the generator, generates the
+product, builds/pins all images, provisions the owned Docker Postgres volume
+and retained PVC, deploys, and checks readiness/remote APIs/Google connectivity.
+Helm is installed into a private tool cache with checksum verification.
+`machine.json` may name a previously built native generator explicitly.
+The Windows launcher can delegate to the configured WSL distribution/Node;
+these machine-specific paths remain in the ignored work folder.
+
+The tracked UI npm lock is declared through `ui_product(npm_lock=...)`; a fresh
+UI generation can run `npm ci` without resolving dependency ranges again.
+The generated `ui.lock.json` includes the npm-lock hash. The prepared bundle
+also records source revisions/dirty-input digests, the generator binary hash,
+private-input digest, generated file hashes, exact image IDs/architectures,
+cluster identity and readiness receipt. Source, private asset, artifact, image
+or target drift makes Deploy fail with a reason to prepare again.
+
+Open the product in Gearbox and press **Deploy**, then **Open UI**. Deploy uses
+prepared images and preserves the existing databases/PVC. It does not build,
+rotate credentials, delete namespaces/volumes/profiles or change Firebase setup.
+Progress streams to the product panel. A lost RPC acknowledgement requires
+**Check status**; it never automatically starts a second operation. **Reconnect
+UI** restores the managed loopback-only port-forward on port 8080 independently
+of deployment. A stopped cluster must be warmed through preparation first.
+
+The UI images contain the private family portraits. Keep them local: this
+runner accepts local Docker endpoints and has no image-push or public-ingress
+operation. It serves UI only through a ClusterIP service and loopback forwarding.
+The portraits are presentation assets, not tenant-private backend records.
+
+For the optional Windows-to-WSL launcher, preflight checks the physical Windows
+volume holding the registered Ubuntu VHD in addition to free space reported by
+Linux/Docker. Keep at least 20 GiB free there before preparation (4 GiB for a
+prepared deployment). A read-only WSL root stops the runner. The runner does not
+restart or repair the user's distribution automatically.

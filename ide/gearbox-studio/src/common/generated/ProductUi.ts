@@ -9,4 +9,4 @@ export type ProductUi = {
 /**
  * Package directories relative to the selected source, or product description.
  */
-shell: string, sdk: string, modules: Array<GearId>, source?: SourceId | null, };
+shell: string, sdk: string, modules: Array<GearId>, source?: SourceId | null, npm_lock?: string | null, };

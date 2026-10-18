@@ -90,6 +90,12 @@ fn ui_is_composed_from_package_exports_with_stream_safe_nginx() {
     );
     let ui_lock: serde_json::Value = serde_json::from_str(text(&files, "ui/ui.lock.json")).unwrap();
     assert_eq!(ui_lock["productLockHash"], lock.product.lock_hash);
+    assert_eq!(ui_lock["npmLock"]["blake3"].as_str().unwrap().len(), 64);
+    assert!(
+        files
+            .get(&RelPath::new("ui/package-lock.json").unwrap())
+            .is_some()
+    );
     assert_eq!(ui_lock["packages"].as_array().unwrap().len(), 6);
     let nginx = text(&files, "ui/nginx.conf");
     assert!(nginx.contains("demo-gateway:8087"));

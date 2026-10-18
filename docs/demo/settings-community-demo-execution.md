@@ -729,3 +729,55 @@ writes and subscriptions; the review packet did not contain those earlier
 receipts. Anonymous browser groups can remain when cleanup overlaps a broker
 outage (the API has no TTL); phase-7 cleanup will target only identified stale
 demo groups. No claim of automatic server TTL or REST ACK is made.
+
+
+## Phase 6 — implementation and acceptance in progress
+
+The prepared runner now performs preflight, generation, cached image builds,
+content-addressed local image pinning, persistent infrastructure, Helm and API
+smoke checks. Its private machine configuration is
+`.gearbox/settings-community-demo/machine.json`; the verified output will be
+`.gearbox/settings-community-demo/bundle.json`. The original Firebase handoff
+remains `.gearbox/firebase-preflight/`; preparation reuses it without cloud login.
+The UI npm lock is tracked and declared in GDL. Input fingerprints include the
+shared UI SDK/shell as well as Rust dependencies and product configuration.
+
+Studio runs natively in WSL on Node 24.21.0. Its native keytar module loaded and
+node-pty executed a real shell command. TypeScript and Theia browser/backend
+bundles build successfully. The separate Studio test profile opens the prepared
+product and resolves minikube with zero errors. No AI chat calls are required.
+Windows native npm build remains dependent on its missing VS Spectre libraries;
+this environment uses the working WSL backend instead of changing that setup.
+
+The host deployment service retains jobs across frontend disconnects, uses a
+stable operation ID and Check status, and only accepts the fixed product/profile.
+Four bounded service tests pass, including historical-status lookup while another
+operation is active and refusal to treat process exit alone as readiness.
+Five bundle-state tests pass, including shared UI source drift. Fifty-five
+writer/generation integration tests and affected Clippy checks pass. Repeated
+generation skips dependency/build caches and operator symlinks when auditing
+orphan files; actual generated orphans are still reported.
+
+The complete prepare/deploy and real Studio button acceptance are still running.
+No Mac rehearsal, backup/restore or phase-7 completion is claimed here.
+
+
+Phase-6 runtime attempt reached generated/build/pinned/loaded images and started
+Helm, but did not produce a successful Helm/readiness receipt. Ubuntu's ext4 root
+and the owned Docker data root remounted read-only; new executables returned I/O
+errors. Registry inspection located the distro at `D:\WSL\Ubuntu\ext4.vhdx`
+(656,211,443,712 bytes). Windows D: had only 15,265,792 bytes free while Linux df
+had advertised room inside its sparse VHD. C: still had over 500 GiB, but not
+enough for a full copy of this VHD. No repair, forced rw remount, WSL shutdown,
+user-file deletion or automatic data reset was attempted.
+
+The bundle remains unverified; phase 6 is NOT complete. A new physical-host-volume
+preflight now rejects this actual environment before launching WSL. Two resource
+regressions plus six bundle checks pass. Added Helm artifacts are rejected as
+well as modified files, and input/artifact checks run again before readiness is
+certified after a long deployment. Host recovery needs disk space and
+approval to interrupt other Ubuntu processes. Guidance consulted:
+https://learn.microsoft.com/en-us/windows/wsl/disk-space#how-to-repair-a-vhd-mounting-error.
+Claude review and runtime acceptance resume after WSL recovery; do not re-run
+Firebase setup. The product panel's dirty-editor gate now observes model dirty
+and disposal events, including editors opened after the panel.

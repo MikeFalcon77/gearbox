@@ -85,6 +85,7 @@ gdl_record! {
         pub modules: Vec<String>,
         #[allocative(skip)]
         pub source: Option<gearbox_ir::SourceId>,
+        pub npm_lock: Option<String>,
     }
 }
 

@@ -582,20 +582,26 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     /// * `sdk`: The shared UI SDK package directory, as path(...).
     /// * `modules`: Gear ids with UI contributions included in this product.
     /// * `source`: Optional source id; shell and SDK paths are relative to this root.
+    /// * `npm_lock`: Optional path to a tracked npm lock beside the product.
     fn ui_product<'v>(
         #[starlark(require = named)] shell: &'v SourceAtRecord,
         #[starlark(require = named)] sdk: &'v SourceAtRecord,
         #[starlark(require = named)] modules: UnpackList<String>,
         #[starlark(require = named)] source: Option<String>,
+        #[starlark(require = named)] npm_lock: Option<&'v SourceAtRecord>,
     ) -> anyhow::Result<crate::records::UiProductRecord> {
         if shell.kind != "path" || sdk.kind != "path" {
             return Err(anyhow::anyhow!("UI shell and SDK require path(...)"));
+        }
+        if npm_lock.is_some_and(|lock| lock.kind != "path") {
+            return Err(anyhow::anyhow!("npm_lock requires path(...)"));
         }
         Ok(crate::records::UiProductRecord {
             shell: shell.at.clone().unwrap_or_default(),
             sdk: sdk.at.clone().unwrap_or_default(),
             modules: modules.items,
             source: source.map(gearbox_ir::SourceId::new).transpose()?,
+            npm_lock: npm_lock.and_then(|lock| lock.at.clone()),
         })
     }
 

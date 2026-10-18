@@ -22,6 +22,7 @@ fn ui_requires_its_declared_backends_in_the_selected_profile() {
         shell: "ui/shell".into(),
         sdk: "ui/sdk".into(),
         source: None,
+        npm_lock: None,
         modules: BTreeSet::from([fixtures::gid("front")]),
     });
     let result = gearbox_engine::resolve::resolve(&catalogue, &intent, &intent.default_profile);

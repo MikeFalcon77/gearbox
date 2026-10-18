@@ -80,6 +80,7 @@ A product explicitly selects modules and locates its shell and shared SDK:
 ```python
 ui = ui_product(
     source = "gears-rust",
+    npm_lock = path("ui-package-lock.json"),
     shell = path("ui/product-shell"),
     sdk = path("ui/ui-sdk"),
     modules = ["settings-service"],
@@ -101,7 +102,9 @@ workspace, module registry, nginx, Dockerfile and
 Kubernetes UI resources. `product.lock` schema 3 records the UI composition;
 `ui/ui.lock.json` records projected package identities, exports and content
 hashes beside the parent product lock hash. npm's generated `package-lock.json`
-pins third-party dependencies for `npm ci` in the prepared bundle. Product preparation
+pins third-party dependencies for `npm ci` in the prepared bundle. Optional
+`npm_lock = path(...)` copies a tracked lock from within the product directory,
+validates its root dependencies and records its content hash in `ui.lock.json`. Product preparation
 supplies `public/runtime-config.json`; generation does not overwrite it. Products
 without UI declarations continue to generate only their existing backend
 artifacts. Resolve older locks again to write schema 3.

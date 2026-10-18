@@ -19,3 +19,8 @@ for (const name of fs.readdirSync(source).sort()) {
   fs.writeFileSync(destination, content);
 }
 console.log('Prepared product-owned chart extensions.');
+
+const schemaPath=path.join(chart,'values.schema.json');
+const schema=JSON.parse(fs.readFileSync(schemaPath,'utf8'));
+schema.properties.demoEchoImage={type:'string',minLength:1};
+fs.writeFileSync(schemaPath,JSON.stringify(schema,null,2)+'\n');

@@ -1,3 +1,6 @@
+import type { MonacoEditorModel } from "@theia/monaco/lib/browser/monaco-editor-model";
+import { MonacoTextModelService } from "@theia/monaco/lib/browser/monaco-text-model-service";
+import { DemoDeployFrontend } from "../demo-deploy-service";
 // One product, resolved for one profile.
 //
 // The clause this answers is "edits and resolves a product across profiles"
@@ -86,6 +89,8 @@ export class ProductWidget extends ReactWidget {
   // Read only. Overview reports whether a plan exists; it never asks for one --
   // see `renderGenerationStatus`.
   @inject(GenerateService) protected readonly generate!: GenerateService;
+  @inject(DemoDeployFrontend) protected readonly demoDeploy!: DemoDeployFrontend;
+  @inject(MonacoTextModelService) protected readonly demoModels!: MonacoTextModelService;
   // For the `explain` control on a diagnostic row: `Diagnostic.subject` names a
   // graph node so that a client can select it, and the Inspector is what answers
   // about a selection.
@@ -187,6 +192,18 @@ export class ProductWidget extends ReactWidget {
     // dropped as stale. Subscribing rather than polling, and reading rather than
     // asking: see `renderGenerationStatus`.
     this.toDispose.push(this.generate.onChanged(() => this.update()));
+    this.toDispose.push(this.demoDeploy.onChanged(() => this.update()));
+    const watchDemoEditor = (model: MonacoEditorModel) => {
+      this.toDispose.push(model.onDirtyChanged(() => this.update()));
+      this.toDispose.push(model.onDispose(() => queueMicrotask(() => {
+        if (!this.isDisposed) this.update();
+      })));
+    };
+    this.demoModels.models.forEach(watchDemoEditor);
+    this.toDispose.push(this.demoModels.onDidCreate(model => {
+      watchDemoEditor(model);
+      this.update();
+    }));
     // An open takes two engine spawns; without this the panel renders its
     // "choose a product" list for three seconds while one is already opening.
     this.toDispose.push(this.session.onDidChangeOpening(() => this.update()));
@@ -460,6 +477,38 @@ export class ProductWidget extends ReactWidget {
             Create Gear
           </button>
         </div>
+
+        {intent?.id === "settings-community-demo" && (
+          <section className="gbx-demo-deploy" aria-label="Prepared deployment">
+            <div className="gbx-product-actions">
+              <button
+                className="gbx-start-primary"
+                data-demo-deploy
+                disabled={state.stale !== undefined || state.profile !== "minikube" ||
+                  this.demoDeploy.state.status === "running" || this.edits.hasDraft() ||
+                  this.demoModels.models.some(model => model.dirty)}
+                title={this.demoModels.models.some(model => model.dirty)
+                  ? "Save open editors before deploying the prepared bundle." : undefined}
+                onClick={() => void this.demoDeploy.start(state.open!.path, state.profile!)}
+              >Deploy</button>
+              <button onClick={() => void this.demoDeploy.refresh()}>Check status</button>
+              {this.demoDeploy.state.ui.status === "ready" ? (
+                <button data-demo-open-ui onClick={() => this.demoDeploy.openUi()}>Open UI</button>
+              ) : (
+                <button disabled={this.demoDeploy.state.ui.status === "connecting"}
+                  onClick={() => void this.demoDeploy.reconnectUi()}>
+                  {this.demoDeploy.state.ui.status === "connecting" ? "Connecting UI…" : "Reconnect UI"}
+                </button>
+              )}
+            </div>
+            <p role="status" data-demo-status={this.demoDeploy.state.status}>{this.demoDeploy.state.message}</p>
+            <ol aria-label="Deployment progress">
+              {this.demoDeploy.state.events.map((event, index) => (
+                <li key={`${index}-${event.stage}`}>{event.stage}: {event.message}</li>
+              ))}
+            </ol>
+          </section>
+        )}
 
         {/* The stages, and a link to the fifth. `role="tablist"` with the same
             keyboard behaviour as the Graph's view switch, because two panels in

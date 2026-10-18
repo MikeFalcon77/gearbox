@@ -5,6 +5,7 @@ product(
     gdl_version = "1.2",
     ui = ui_product(
         source = "gears-rust",
+        npm_lock = path("ui-package-lock.json"),
         shell = path("ui/product-shell"),
         sdk = path("ui/ui-sdk"),
         modules = ["settings-service", "event-broker", "service-discovery", "types-registry"],
@@ -12,7 +13,7 @@ product(
     id = "settings-community-demo",
     name = "Family Labs — Settings Community Demo",
     version = "0.1.0",
-    sources = [source(id = "gears-rust", at = path("../../../gears-rust-mikefalcon77"))],
+    sources = [source(id = "gears-rust", at = path("../../.gearbox/settings-community-demo/source/gears-rust"))],
     profiles = [
         kubernetes(
             id = "minikube", discovery = "static", namespace = "gearbox-demo",

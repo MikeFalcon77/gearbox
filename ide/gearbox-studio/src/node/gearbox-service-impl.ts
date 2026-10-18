@@ -133,7 +133,7 @@ export function productTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
  * counted path works by coincidence -- and would break the moment either layout
  * moved. Searching for a marker cannot drift that way.
  */
-function findRepoRoot(start: string): string {
+export function findRepoRoot(start: string): string {
   let dir = start;
   for (;;) {
     const manifest = path.join(dir, "Cargo.toml");
