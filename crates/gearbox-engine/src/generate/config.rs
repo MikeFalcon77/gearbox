@@ -352,10 +352,16 @@ fn write_consumer_wiring(
             .entry("consumer_wiring".to_owned())
             .or_insert_with(|| Value::Object(Map::new()));
         if let Some(map) = wiring.as_object_mut() {
-            map.insert(
-                binding.provider.to_string(),
-                Value::String(endpoint.clone()),
-            );
+            // Toolkit reads ConsumerWiring as an object with an endpoint plus
+            // optional flattened client policies. Keep configured policies
+            // when adding the resolved static endpoint.
+            let provider = binding.provider.to_string();
+            let mut options = map
+                .remove(&provider)
+                .and_then(|value| value.as_object().cloned())
+                .unwrap_or_default();
+            options.insert("endpoint".to_owned(), Value::String(endpoint.clone()));
+            map.insert(provider, Value::Object(options));
         }
     }
 }

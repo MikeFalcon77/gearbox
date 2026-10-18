@@ -373,3 +373,95 @@ The failed rollout exposed a final-preparation requirement: immutable image tags
 derived from image content must accompany the phase-6 fingerprint. Reusing one
 mutable tag allows a Helm rollback to pair an older config with a newer binary.
 Record and retain prior prepared image identities for reproducible rollback.
+
+## Phase 3 — in progress
+
+The new authorized `SettingsReadApi v1` and its generated REST projection reuse
+the established effective-value DTOs. The trusted embedded reader remains
+compatible. Remote reads enforce PDP, the caller's tenant subtree, administrative
+visibility and public classification; secret/PII values are hidden. Bulk reads
+have a 500-key bound and independent canonical per-key failures, with request
+authorization even for an empty list.
+
+`family-labs-api` consumes this contract from Gateway using the generated REST
+client and the worker's Kubernetes Service DNS. It also registers per-laboratory
+OAGW echo upstream/route declarations through the Types SDK before OAGW's
+post-init materialization. This keeps the normal proxy owner-tenant checks and
+the configured exact-host SSRF allowlist. Outbound headers exclude credentials.
+
+The optional Settings community event integration uses the existing
+`DbProducer`, `ProducerOutbox`, managed producer registration and `RestBroker`.
+Schema preparation and authenticated producer registration happen before
+readiness. Mutation, audit and enqueue share the same transaction. Wake handles
+are fired after commit. Notification payloads carry coordinates and request IDs,
+without setting values. The outbox and producer state live in the Settings
+Postgres database; EB metadata and event log remain on the retained SQLite PVC.
+
+The EB delivery notifier now waits for the remaining shared deadline when a
+prefix watch fails or closes; warnings are throttled. A later runtime audit
+confirmed that this retained notifier port is not called by the current stream
+implementation. Active delivery uses the partition loader's bounded tail polling
+and local readiness notifications. PostgreSQL prefix watch is unsupported and is
+not presented as the mechanism behind the live browser updates.
+
+Verified locally so far:
+
+- Settings: all 772 library tests pass, including three remote authorization
+  tests and a real SQLite transaction rollback when producer enqueue fails.
+- Existing Settings SDK: 85 tests pass; three prior documentation examples remain
+  ignored as before.
+- EB storage facade: all 12 tests pass, including failed/closed-watch polling
+  deadlines and immediate wake on a real watch notification.
+- All four touched crates pass library Clippy with warnings denied and formatting.
+- Real-corpus product generation and five community composition tests pass. The
+  new binding is remote REST from Gateway to Settings worker, with a concrete
+  static Service DNS endpoint. Both backend images build successfully.
+- Real Helm rendering and unsafe SQLite override rejection pass.
+
+Runtime checks exposed and fixed three additional integration defects:
+
+- Gearbox emitted the legacy bare-string `consumer_wiring` form. It now emits
+  an object with `endpoint` and preserves existing client policy options. The
+  regression uses the actual prepared product. Community (6), consumer wiring
+  (3) and generation (53) tests pass.
+- SDK managed-producer timestamps were Rust strings against Postgres
+  `TIMESTAMPTZ` columns. They now use native UTC timestamp types. All 34 producer
+  integration tests pass, including SQLite persistence and builder compile
+  checks. The deployed Postgres registration has generation 1 and native
+  timestamp-with-time-zone columns.
+- A failed Settings lifecycle could leave the HTTP worker advertising Ready.
+  Settings now contributes lifecycle readiness, retries transient broker startup
+  failures with throttled logs, and cancels startup cooperatively.
+
+Real runtime evidence:
+
+- The generated Gateway-to-worker contract forwards the bearer and target scope.
+- A Settings change produces an event through the real remote EB; the event has
+  a stable ID, tenant, key, change-set ID and request correlation, and no value.
+  The subsequent remote Settings reread sees the committed value; Ilya's value
+  remains unchanged. The temporary value is restored through the scoped API.
+- With Gateway/EB fully stopped, a write commits through the direct worker
+  endpoint. After worker restart the value remains durable and worker readiness
+  is 503. Restoring Gateway/EB makes the worker ready and delivers the pending
+  event through real SSE (`phase3-offline-restart-proof.log`,
+  `phase3-recovered-event-proof.log`).
+- The original phase-1 event, metadata and producer cursor still replay from the
+  same retained PVC after these restarts. No data resources were removed.
+- OAGW restores both child-tenant echo upstreams and routes from SDK declarations.
+- Real JOIN/SSE activity creates two live Postgres routing markers. Successful
+  ingest also updates a live `evbk/notif/.../0` key in `demo_cluster.cluster_cache`
+  (`phase3-postgres-cluster-proof.log`, `phase3-cluster-notification-proof.log`).
+  These are actual provider writes; the current loader, rather than prefix watch,
+  performs the delivery rechecks. No new invalidation mechanism is added for show.
+
+The early browser vertical and real-user OAGW call are still pending.
+The temporary `verify-events.cjs` and loopback-only `verify-vertical.cjs` helpers
+exercise these before the modular UI is introduced. Phase 3 is not complete yet.
+
+The verified backend checkpoint is committed in gears-rust as `1a03e7aa7`.
+Release 17 is deployed; the final worker image includes the native timestamp,
+startup retry and readiness fixes. Browser verification is waiting for ordinary
+Google sign-in at `http://localhost:4175/?lab=dasha` and
+`http://localhost:4175/?lab=ilya&observe=1`. This is a temporary backend proof,
+not the final product UI. Firebase cloud configuration remains unchanged.
+UI SDK implementation has not started before this phase's browser exit check.

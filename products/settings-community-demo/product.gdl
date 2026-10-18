@@ -37,6 +37,7 @@ product(
         use_gear("service-discovery", source = "gears-rust"),
         use_gear("types-registry", source = "gears-rust"),
         use_gear("demo-catalogue", source = "gears-rust"),
+        use_gear("family-labs-api", source = "gears-rust"),
         use_gear("family-labs-bootstrap", source = "gears-rust", config = {
             "bootstrap_token": "${DEMO_BOOTSTRAP_TOKEN}",
         }),
@@ -53,7 +54,13 @@ product(
                 },
             },
         }),
-        use_gear("settings-service", source = "gears-rust"),
+        use_gear("settings-service", source = "gears-rust", config = {
+            "community_events": {
+                "broker_url": "http://demo-gateway.gearbox-demo.svc.cluster.local:8087",
+                "bearer_env": "DEMO_WORKER_TOKEN",
+                "tenants": ["d0000000-0000-4000-8000-000000000002", "a0000000-0000-4000-8000-000000000003"],
+            },
+        }),
         use_gear("oagw", source = "gears-rust", config = {
             "allow_http_upstream": True,
             "ssrf_policy": {"allow_hostnames": ["demo-echo.gearbox-demo.svc.cluster.local"]},
@@ -83,7 +90,7 @@ product(
         ),
     )],
     applications = [
-        application("demo-gateway", anchor = "api-gateway", include = ["demo-catalogue"], replicas = 1),
+        application("demo-gateway", anchor = "api-gateway", include = ["demo-catalogue", "family-labs-api"], replicas = 1),
         application("demo-settings-worker", anchor = "settings-service", include = ["authn-resolver", "family-labs-bootstrap"], replicas = 1),
     ],
 )

@@ -212,3 +212,36 @@ fn event_broker_has_an_actual_postgres_cluster_cache_binding() {
         && binding.primitive == gearbox_ir::ClusterPrimitive::Cache
         && matches!(&binding.resolved, gearbox_ir::ClusterResolution::Provider { name } if name == "postgres")), "{:?}", lock.cluster);
 }
+
+#[test]
+fn gateway_consumes_the_remote_settings_contract_with_object_wiring() {
+    let Some((lock, files)) = resolved() else {
+        return;
+    };
+    let binding = lock
+        .bindings
+        .iter()
+        .find(|binding| {
+            binding.consumer.as_str() == "family-labs-api"
+                && binding.provider.as_str() == "settings-service"
+        })
+        .expect("the widget adapter must consume the Settings contract");
+    assert!(binding.is_remote());
+    assert_eq!(binding.consumer_application.as_str(), "demo-gateway");
+    assert_eq!(
+        binding.provider_application.as_str(),
+        "demo-settings-worker"
+    );
+    let gateway: serde_json::Value =
+        serde_saphyr::from_str(text(&files, "config/demo-gateway.yaml")).unwrap();
+    let wiring =
+        &gateway["gears"]["family-labs-api"]["config"]["consumer_wiring"]["settings-service"];
+    assert!(
+        wiring.is_object(),
+        "Toolkit rejects the legacy bare-string form"
+    );
+    assert_eq!(
+        wiring["endpoint"],
+        "http://demo-settings-worker.gearbox-demo.svc.cluster.local:8090"
+    );
+}
