@@ -16,12 +16,13 @@ const product = path.resolve(
 function fake(service) {
   let starts = 0,
     child;
-  service.launch = () => {
+  service.launch = (_args, progress) => {
     starts++;
     child = new EventEmitter();
     child.stdin = new PassThrough();
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
+    child.progress = progress;
     return child;
   };
   return {
@@ -104,4 +105,37 @@ test("looking up a historical receipt cannot replace the active operation", asyn
   } finally {
     fs.unlinkSync(file);
   }
+});
+
+test("a restored UI forward clears its lost message while retaining deployment readiness", async () => {
+  const service = new DemoDeployServiceImpl(),
+    process = fake(service),
+    id = crypto.randomUUID();
+  await service.start(product, "minikube", id);
+  process.child.progress({
+    stage: "ready",
+    status: "ready",
+    message: "Family Labs is ready",
+  });
+  process.child.emit("close", 0);
+  process.child.progress({
+    stage: "open-ui",
+    status: "ready",
+    message: "UI ready",
+  });
+  process.child.emit("close", 1);
+  assert.equal((await service.getState()).ui.status, "lost");
+  assert.match((await service.getState()).message, /connection lost/);
+  await service.connectUi();
+  assert.equal((await service.getState()).message, "Connecting UI…");
+  process.child.progress({
+    stage: "open-ui",
+    status: "ready",
+    message: "UI ready",
+  });
+  const state = await service.getState();
+  assert.equal(state.status, "ready");
+  assert.equal(state.operationId, id);
+  assert.equal(state.ui.status, "ready");
+  assert.equal(state.message, "Deployment is ready.");
 });

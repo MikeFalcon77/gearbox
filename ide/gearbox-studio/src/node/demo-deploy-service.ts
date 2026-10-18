@@ -164,10 +164,20 @@ export class DemoDeployServiceImpl implements DemoDeployService {
   }
   async connectUi(): Promise<DemoDeployState> {
     if (this.forward) return this.operation;
-    this.update({ ui: { status: "connecting" } });
+    this.update({
+      ui: { status: "connecting" },
+      ...(this.operation.status === "ready"
+        ? { message: "Connecting UI…" }
+        : {}),
+    });
     const child = this.launch(["forward"], (event) => {
       if (event.stage === "open-ui" && event.status === "ready")
-        this.update({ ui: { status: "ready", url: UI_URL } });
+        this.update({
+          ui: { status: "ready", url: UI_URL },
+          ...(this.operation.status === "ready"
+            ? { message: "Deployment is ready." }
+            : {}),
+        });
     });
     this.forward = child;
     const lost = () => {

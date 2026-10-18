@@ -831,3 +831,34 @@ rules; the existing minikube container restarted and its real TCP connection to
 Postgres at 192.168.58.10:5432 passed. No manual firewall bypass or removal of
 Docker network metadata was used. The waiting first rollback client was stopped
 and recovery was retried after network restoration.
+
+
+Resumed full preparation passed generation, cached builds, immutable image checks,
+Helm revision 27, readiness, remote Settings, Directory, worker V1 registrations,
+actual PV Retain and Google verifier connectivity. The bundle was certified.
+A real Studio Deploy then produced only operation
+`1fe2b726-85c7-4132-b228-18fe9b401357` and Helm revision 28. Reloading the frontend
+while it was running retained the host job; reopening the product restored its
+six progress stages, ready state and Open UI. No build ran in that deployment.
+The managed localhost:8080 UI returned 200 and opened the real Google sign-in UI.
+
+Existing real-account product sessions at 4175 authenticated against the new
+backend. Gateway V1 registry returned 47 visible entities; Settings showed all
+three Family Labs schemas. A new false/true Settings transition produced event
+`01a14ef8-9bb2-70dd-bba3-4b867457ae3f` in the inspector and both Dasha widgets;
+both reread Settings and recorded one celebration. Ilya retained false, no event
+ID and zero celebrations. Initial true after reload did not celebrate.
+Evidence: `phase6-scene-proof.json`, `phase6-live-scene.png` (ignored artifacts).
+
+The original phase-1 event `32496472-c28c-4069-a21f-52fa24181e6f` was actually
+re-read through SSE after recovery, along with original consumer group and
+producer cursors; Dasha true/Ilya false survived. This probe deliberately did
+not re-register declarations. Receipt: `phase6-recovery-persistence-proof.json`.
+An added unverified Helm template was rejected by actual CLI validation and the
+clean bundle validated after removing that probe (`phase6-stale-artifact-proof.json`).
+
+Killing only the managed 8080 forward produced the lost-connection state and
+Reconnect UI restored HTTP service without a deployment. This exposed a stale
+error message after successful reconnect; the host now clears it on connection
+readiness, covered by the fifth deployment-service test. Final rebuilt-host
+reconnection verification and Claude review remain before closing phase 6.
