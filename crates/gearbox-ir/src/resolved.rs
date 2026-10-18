@@ -899,6 +899,9 @@ pub struct SelfHostedSettings {
 /// two runs over the same inputs serialize identically.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ResolvedProduct {
+    /// Explicit per-gear SQLite choices; these gears are excluded from Postgres.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sqlite_databases: BTreeMap<GearId, crate::SqliteDatabase>,
     /// Complete external database configuration, including resolved per-gear names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database: Option<crate::PostgresDatabase>,
@@ -951,12 +954,30 @@ impl ResolvedProduct {
     /// # Errors
     /// Returns a reason if a DB gear lacks a resolved name or a connection is unsafe.
     pub fn validate_database(&self) -> Result<(), String> {
-        let expected: BTreeSet<_> = self
+        let mut expected: BTreeSet<_> = self
             .gears
             .iter()
             .filter(|(_, gear)| gear.runtime_caps.contains(&RuntimeCap::Db))
             .map(|(id, _)| id)
             .collect();
+        for (id, sqlite) in &self.sqlite_databases {
+            sqlite.validate()?;
+            if !expected.remove(id) {
+                return Err(format!(
+                    "SQLite override `{id}` is not a resolved database gear"
+                ));
+            }
+            let placements: Vec<_> = self
+                .applications
+                .iter()
+                .filter(|app| app.gears.contains(id))
+                .collect();
+            if placements.len() != 1 || placements.iter().any(|app| app.replicas != 1) {
+                return Err(format!(
+                    "SQLite gear `{id}` requires exactly one application with one replica"
+                ));
+            }
+        }
         let Some(db) = &self.database else {
             if expected.is_empty() {
                 return Ok(());
@@ -964,7 +985,7 @@ impl ResolvedProduct {
             return Err("database-backed gears have no database; configure the profile and run gearbox resolve".to_owned());
         };
         db.validate()?;
-        if self.kubernetes.is_some() && db.existing_secret.is_none() {
+        if !expected.is_empty() && self.kubernetes.is_some() && db.existing_secret.is_none() {
             return Err("Kubernetes postgres requires existing_secret".to_owned());
         }
         if db.database_names.keys().collect::<BTreeSet<_>>() != expected {

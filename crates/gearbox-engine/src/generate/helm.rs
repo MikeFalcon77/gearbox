@@ -90,6 +90,7 @@ fn database_secret(
             .gears
             .get(id)
             .is_some_and(|gear| gear.runtime_caps.contains(&gearbox_ir::RuntimeCap::Db))
+            && !input.lock.sqlite_databases.contains_key(id)
     }) {
         return Ok(None);
     }
@@ -112,6 +113,32 @@ fn database_secret(
             })?
             .to_owned(),
     }))
+}
+
+fn uses_sqlite(application: &ResolvedApplication, input: &GenerateInput<'_>) -> bool {
+    application
+        .gears
+        .iter()
+        .any(|id| input.lock.sqlite_databases.contains_key(id))
+}
+
+fn directory_endpoint(input: &GenerateInput<'_>) -> Option<String> {
+    let settings = input.lock.kubernetes.as_ref()?;
+    let host = input.lock.applications.iter().find(|app| {
+        app.gears
+            .iter()
+            .any(|id| id.as_str() == "service-discovery")
+    })?;
+    let grpc = host
+        .listens
+        .iter()
+        .find(|endpoint| endpoint.gear.as_str() == "grpc-hub")?;
+    let port: u16 = grpc.address.rsplit(':').next()?.parse().ok()?;
+    Some(format!(
+        "http://{}.{}.svc.cluster.local:{port}",
+        subchart_name(host),
+        settings.namespace.as_deref().unwrap_or("default")
+    ))
 }
 
 fn subchart_name(application: &ResolvedApplication) -> &str {
@@ -214,6 +241,7 @@ fn umbrella_values(
     let mut blocks = BTreeMap::new();
     for application in &input.lock.applications {
         let image = image_values(application, input);
+        let sqlite = uses_sqlite(application, input);
         let config_rel = paths::rel(&["config", &format!("{}.yaml", application.name)])?;
         let mut keys = files
             .get(&config_rel)
@@ -260,12 +288,16 @@ fn umbrella_values(
                     session_affinity: None,
                 },
                 home_volume: HomeVolumeValues {
-                    kind: HomeVolumeKind::EmptyDir,
+                    kind: if sqlite {
+                        HomeVolumeKind::PersistentVolumeClaim
+                    } else {
+                        HomeVolumeKind::EmptyDir
+                    },
                     size_limit: None,
                     claim_name: None,
                 },
                 automount_service_account_token: false,
-                strategy: None,
+                strategy: sqlite.then(|| serde_json::json!({"type": "Recreate"})),
                 termination_grace_period_seconds: None,
                 priority_class_name: None,
                 topology_spread_constraints: None,
@@ -331,7 +363,23 @@ fn values_schema(input: &GenerateInput<'_>) -> Result<FileEntry, GenerateError> 
     let mut required = Vec::new();
     for application in &input.lock.applications {
         let name = subchart_name(application);
-        properties.insert(name.to_owned(), subchart.clone());
+        let schema = if uses_sqlite(application, input) {
+            serde_json::json!({"allOf": [subchart, {
+                "type": "object",
+                "required": ["homeVolume", "strategy"],
+                "properties": {
+                    "replicaCount": {"const": 1},
+                    "strategy": {"type": "object", "required": ["type"], "properties": {"type": {"const": "Recreate"}}},
+                    "homeVolume": {
+                        "type": "object", "required": ["type", "claimName"],
+                        "properties": {"type": {"const": "persistentVolumeClaim"}, "claimName": {"type": "string", "minLength": 1}}
+                    }
+                }
+            }]})
+        } else {
+            subchart.clone()
+        };
+        properties.insert(name.to_owned(), schema);
         required.push(serde_json::Value::String(name.to_owned()));
     }
     let schema = serde_json::json!({
@@ -687,11 +735,6 @@ struct HomeVolumeValues {
     claim_name: Option<String>,
 }
 
-#[allow(
-    dead_code,
-    reason = "`PersistentVolumeClaim` is written by operators in values.yaml, never by us; \
-              it exists so the schema offers the choice and rejects a third spelling"
-)]
 #[derive(serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 enum HomeVolumeKind {
@@ -883,6 +926,9 @@ fn subchart_templates(
         .or_else(|| ports.first().map(|p| p.port))
         .unwrap_or(80);
     let prefix = rest_prefix(input, application)?;
+    let directory = matches!(application.kind, ApplicationKind::Worker)
+        .then(|| directory_endpoint(input))
+        .flatten();
     let liveness_path = probe_path(&prefix, "/healthz");
     helm_safe("liveness probe path", &liveness_path)?;
     let readiness_path = probe_path(&prefix, "/readyz");
@@ -909,11 +955,13 @@ fn subchart_templates(
             name => name,
             application => application.name.as_str(),
             config_filename => config_filename.as_str(),
+            bin_name => application.bin_name.as_str(),
             http_port => http_port,
             liveness_path => liveness_path.as_str(),
             readiness_path => readiness_path.as_str(),
             home_dir => K8S_HOME_DIR,
             container_ports => &ports,
+            directory_endpoint => directory,
         },
     )?;
     let service = templates::render_helm(

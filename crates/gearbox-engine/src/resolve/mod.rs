@@ -50,6 +50,8 @@ fn unknown_profile(intent: &ProductIntent, profile: &ProfileId, uri: &str) -> Di
 /// Everything one resolution produced.
 pub struct Resolution {
     pub database: Option<gearbox_ir::PostgresDatabase>,
+    pub sqlite_databases:
+        std::collections::BTreeMap<gearbox_ir::GearId, gearbox_ir::SqliteDatabase>,
     /// Which profile this is for.
     pub profile: ProfileId,
     /// The closure of gears, with why each is present.
@@ -212,6 +214,7 @@ pub fn resolve_at(
         );
         // Step 5 -- what the runtime will refuse, said before a binary exists.
         structural::check(catalogue, &partition, declaration, &uri, &mut diagnostics);
+        database::check_sqlite_placement(&partition, declaration, &uri, &mut diagnostics);
         partition
     } else {
         diagnostics.push(unknown_profile(intent, profile, &uri));
@@ -250,6 +253,11 @@ pub fn resolve_at(
     diagnostics.finish();
     Resolution {
         database,
+        sqlite_databases: intent
+            .profiles
+            .get(profile)
+            .map(|decl| decl.sqlite_databases().clone())
+            .unwrap_or_default(),
         profile: profile.clone(),
         closure,
         cuts,

@@ -451,6 +451,8 @@ gdl_record! {
     /// `embedded(...)`, `self_hosted(...)` or `kubernetes(...)`.
     ProfileRecord as "gdl_profile" {
         pub database: Option<PostgresRecord>,
+        #[allocative(skip)]
+        pub sqlite_databases: std::collections::BTreeMap<gearbox_ir::GearId, gearbox_ir::SqliteDatabase>,
         /// `embedded`, `self-hosted` or `kubernetes`.
         pub kind: String,
         pub id: String,
@@ -546,6 +548,7 @@ gdl_record! {
     ApplicationRecord as "gdl_application" {
         pub name: String,
         pub anchor: String,
+        pub include: Vec<String>,
         /// Which of the anchor's declared roles this application runs as.
         ///
         /// The product's half of the join: the gear says which roles exist, the

@@ -39,6 +39,7 @@ pub fn assemble(
     let declaration = intent.profiles.get(&resolution.profile);
 
     let mut product = ResolvedProduct {
+        sqlite_databases: resolution.sqlite_databases.clone(),
         database: resolution.database.clone(),
         schema_version: LOCK_SCHEMA_VERSION,
         product: ResolvedProductHeader {

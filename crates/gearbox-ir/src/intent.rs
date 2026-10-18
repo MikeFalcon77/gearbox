@@ -159,6 +159,9 @@ pub enum DeploymentProfileDecl {
         id: ProfileId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         database: Option<crate::PostgresDatabase>,
+        /// Explicit per-gear SQLite files relative to the gear home.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        sqlite_databases: BTreeMap<GearId, crate::SqliteDatabase>,
         /// Where `embedded(...)` was written in the product description.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         declared_at: Option<Location>,
@@ -172,6 +175,9 @@ pub enum DeploymentProfileDecl {
         id: ProfileId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         database: Option<crate::PostgresDatabase>,
+        /// Explicit per-gear SQLite files relative to the gear home.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        sqlite_databases: BTreeMap<GearId, crate::SqliteDatabase>,
         /// Which application is the host.
         host: ApplicationId,
         discovery: Discovery,
@@ -195,6 +201,9 @@ pub enum DeploymentProfileDecl {
         id: ProfileId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         database: Option<crate::PostgresDatabase>,
+        /// Explicit per-gear SQLite files relative to the gear home.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        sqlite_databases: BTreeMap<GearId, crate::SqliteDatabase>,
         discovery: Discovery,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         namespace: Option<String>,
@@ -207,6 +216,22 @@ pub enum DeploymentProfileDecl {
 }
 
 impl DeploymentProfileDecl {
+    /// SQLite overrides selected by this deployment profile.
+    #[must_use]
+    pub const fn sqlite_databases(&self) -> &BTreeMap<GearId, crate::SqliteDatabase> {
+        match self {
+            Self::Embedded {
+                sqlite_databases, ..
+            }
+            | Self::SelfHosted {
+                sqlite_databases, ..
+            }
+            | Self::Kubernetes {
+                sqlite_databases, ..
+            } => sqlite_databases,
+        }
+    }
+
     /// The external database selected by this deployment profile.
     #[must_use]
     pub const fn database(&self) -> Option<&crate::PostgresDatabase> {
@@ -569,14 +594,19 @@ impl ClusterScopeIntent {
 
 /// An explicitly requested application.
 ///
-/// Only needed to name or replicate an application; the resolver derives the partition
-/// on its own otherwise.
+/// Names, replicates or adds process-local services to an application; the
+/// resolver derives the partition on its own otherwise.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ApplicationPin {
     pub name: ApplicationId,
 
     /// The gear whose co-location closure this application is built from.
     pub anchor: GearId,
+
+    /// Additional gears from the product closure to co-locate in this process.
+    /// Their dependencies and selected plugins are included as well.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub include: BTreeSet<GearId>,
 
     /// Which of the anchor's declared roles this application runs as.
     ///

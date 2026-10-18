@@ -148,6 +148,7 @@ export * from "./SourceDecl";
 export * from "./SourceId";
 export * from "./SourceKind";
 export * from "./SpawnSpec";
+export * from "./SqliteDatabase";
 export * from "./Transport";
 export * from "./ValidateParams";
 export * from "./ValidateResult";

@@ -1,8 +1,36 @@
-//! External PostgreSQL intent and resolved connection settings. No credential values.
+//! Database intent and resolved connection settings. No credential values.
 use crate::GearId;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use ts_rs::TS;
+
+/// A file below the runtime's `home_dir/<gear-id>/` directory.
+///
+/// This selects SQLite independently of the profile's Postgres connection.
+/// Relative files keep the product portable across operating systems.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SqliteDatabase {
+    pub file: String,
+}
+
+impl SqliteDatabase {
+    /// Refuse memory databases, absolute paths and escapes from the gear home.
+    ///
+    /// # Errors
+    /// Returns an actionable reason when a file cannot represent durable storage.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.file.is_empty()
+            || self.file.contains(['\\', ':', '\0', '$', '?', '#'])
+            || self
+                .file
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == "..")
+        {
+            return Err("SQLite file must be a nonempty relative slash-separated path below the gear home, without traversal, a DSN or an environment reference".to_owned());
+        }
+        Ok(())
+    }
+}
 
 /// One externally managed Postgres server for a deployment profile.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]

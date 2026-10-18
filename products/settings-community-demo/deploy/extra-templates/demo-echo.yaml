@@ -1,0 +1,71 @@
+# Product extension owned by settings-community-demo.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-echo-code
+  labels:
+    app.kubernetes.io/part-of: settings-community-demo
+data:
+  server.cjs: |
+    'use strict';
+    const http = require('node:http');
+    const { randomUUID } = require('node:crypto');
+    http.createServer((request, response) => {
+      const requestId = request.headers['x-request-id'] || request.headers['x-correlation-id'] || randomUUID();
+      response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      response.end(JSON.stringify({
+        service: 'demo-echo',
+        message: 'Hello from the private echo service.',
+        method: request.method,
+        path: request.url,
+        requestId,
+      }));
+    }).listen(8080, '0.0.0.0');
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-echo
+  labels:
+    app.kubernetes.io/part-of: settings-community-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: demo-echo}
+  template:
+    metadata:
+      labels: {app: demo-echo, app.kubernetes.io/part-of: settings-community-demo}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: echo
+          image: node:24.21.0-alpine
+          imagePullPolicy: Never
+          command: [node, /app/server.cjs]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 3}
+          livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10}
+          volumeMounts: [{name: code, mountPath: /app, readOnly: true}]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 96Mi}
+      volumes:
+        - name: code
+          configMap: {name: demo-echo-code}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-echo
+  labels:
+    app.kubernetes.io/part-of: settings-community-demo
+spec:
+  selector: {app: demo-echo}
+  ports: [{name: http, port: 8080, targetPort: http}]

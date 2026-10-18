@@ -18,7 +18,7 @@
 use std::path::PathBuf;
 
 use gearbox_engine::{SourceRoot, load_catalogue};
-use gearbox_ir::{Catalogue, DiagnosticCode, GearId, RuntimeCap, SourceId};
+use gearbox_ir::{Catalogue, DiagnosticCode, GearId, RuntimeCap, Severity, SourceId};
 
 #[path = "common/corpus.rs"]
 mod corpus_support;
@@ -51,7 +51,7 @@ fn gid(s: &str) -> GearId {
 }
 
 #[test]
-fn the_slice_loads_without_diagnostics() {
+fn the_slice_loads_without_unexpected_diagnostics() {
     let catalogue = require_tree!();
     let problems: Vec<String> = catalogue
         .diagnostics
@@ -59,6 +59,9 @@ fn the_slice_loads_without_diagnostics() {
         // A local fork legitimately has a different remote URL. This test checks
         // projection, while the source-origin diagnostic remains visible in CLI.
         .filter(|d| d.code != DiagnosticCode::GdlSourceMismatch)
+        // Runtime-gap hints (such as EB's deliberate local Cluster dependency)
+        // describe deployment choices rather than malformed source projection.
+        .filter(|d| d.severity != Severity::Hint)
         .map(|d| format!("[{}] {}", d.code, d.message))
         .collect();
     assert!(

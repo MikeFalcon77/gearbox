@@ -182,8 +182,9 @@ fn a_rest_host_in_a_worker_is_refused() {
     // it serves through its own out-of-process router rather than the composed
     // gateway. Silent success is why this is an error.
     let cat = support::catalogue_of(vec![
-        support::gear_with_caps("host", &[], &[]),
-        support::gear_with_caps("moved", &[RuntimeCap::RestHost], &[]),
+        support::gear_with_caps("host", &[RuntimeCap::RestHost], &[]),
+        support::gear_with_caps("moved", &[RuntimeCap::Rest], &["embedded-host"]),
+        support::gear_with_caps("embedded-host", &[RuntimeCap::RestHost], &[]),
     ]);
     let mut intent = support::self_hosted(&["host", "moved"], Discovery::Static, Some("target"));
     support::pin(&mut intent, "worker", "moved", 1);

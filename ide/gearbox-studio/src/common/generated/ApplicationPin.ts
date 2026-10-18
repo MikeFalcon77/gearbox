@@ -16,6 +16,11 @@ export type ApplicationPin = { name: ApplicationId,
  */
 anchor: GearId, 
 /**
+ * Additional gears from the product closure to co-locate in this process.
+ * Their dependencies and selected plugins are included as well.
+ */
+include?: Array<GearId>, 
+/**
  * Which of the anchor's declared roles this application runs as.
  *
  * Not a `GearId`: a role's *name* is the value the gear's own mode

@@ -50,7 +50,7 @@
 //! - `docker/dockerignore`: `header`, `source_dirs`, `output_dir`, `secret_dirs`
 //! - `helm/helpers.tpl`: `name`, `process`
 //! - `helm/deployment.yaml`: `name`, `process`, `config_filename`, `http_port`,
-//!   `liveness_path`, `readiness_path`, `home_dir`, `container_ports`
+//!   `liveness_path`, `readiness_path`, `home_dir`, `container_ports`, `directory_endpoint`, `bin_name`
 //! - `helm/service.yaml`: `name`, `service_name`, `ports`, `cluster_service`,
 //!   `cluster_port`
 //! - `helm/configmap.yaml`: `name`, `config_filename`
@@ -87,6 +87,8 @@ const HELM_CONTEXT_DOC: &[(&str, &[&str])] = &[
             "readiness_path",
             "home_dir",
             "container_ports",
+            "directory_endpoint",
+            "bin_name",
         ],
     ),
     (

@@ -10,7 +10,10 @@ use std::path::PathBuf;
 #[path = "support/resolve_fixtures.rs"]
 mod fixtures;
 
-fn intent(profile: &str, database: &str) -> gearbox_ir::ProductIntent {
+fn eval_intent(
+    profile: &str,
+    database: &str,
+) -> gearbox_gdl::engine::EvalOutcome<gearbox_ir::ProductIntent> {
     let applications = if profile.starts_with("self_hosted") {
         r#"applications = [application("two", anchor = "store-two")],"#
     } else if profile.starts_with("kubernetes") {
@@ -24,7 +27,7 @@ fn intent(profile: &str, database: &str) -> gearbox_ir::ProductIntent {
         gears = [use_gear("store-one", source = "fixture"), use_gear("store-two", source = "fixture")],
         {applications}
     )"#).replace("DATABASE", database);
-    let evaluated = gearbox_gdl::GdlEngine::new().eval_product(
+    gearbox_gdl::GdlEngine::new().eval_product(
         &gearbox_gdl::FileIdentity {
             uri: "file:///product.gdl".to_owned(),
             source: fixtures::source(),
@@ -32,7 +35,11 @@ fn intent(profile: &str, database: &str) -> gearbox_ir::ProductIntent {
             load_paths: None,
         },
         &text,
-    );
+    )
+}
+
+fn intent(profile: &str, database: &str) -> gearbox_ir::ProductIntent {
+    let evaluated = eval_intent(profile, database);
     assert!(
         !evaluated.diagnostics.has_errors(),
         "{:?}",
@@ -43,6 +50,186 @@ fn intent(profile: &str, database: &str) -> gearbox_ir::ProductIntent {
 
 const DB: &str = r#"postgres(host = "localhost", user = "app", password = "${GEARS_PG_PASSWORD}",
     params = {"sslmode": "require"}, database_names = {"store-one": "one"}, existing_secret = "app-db")"#;
+
+#[test]
+fn sqlite_override_roundtrips_without_inheriting_postgres_fields() {
+    let target = if cfg!(windows) {
+        "C:/workspace/target"
+    } else {
+        "/workspace/target"
+    };
+    let hosted = format!(
+        r#"self_hosted(id = "dev", host = "one", worker_discovery = "static", target_dir = "{target}", database = DATABASE, sqlite_databases = {{"store-two": "metadata.sqlite3"}})"#
+    );
+    for profile in [
+        r#"embedded(id = "dev", database = DATABASE, sqlite_databases = {"store-two": "metadata.sqlite3"})"#,
+        r#"kubernetes(id = "dev", discovery = "static", database = DATABASE, sqlite_databases = {"store-two": "metadata.sqlite3"})"#,
+        &hosted,
+    ] {
+        let lock = resolve(profile, DB);
+        let sqlite_gear = fixtures::gid("store-two");
+        assert_eq!(lock.sqlite_databases[&sqlite_gear].file, "metadata.sqlite3");
+        assert!(
+            !lock
+                .database
+                .as_ref()
+                .unwrap()
+                .database_names
+                .contains_key(&sqlite_gear)
+        );
+        lock.validate_database().unwrap();
+        let restored = gearbox_lock::read(&gearbox_lock::write_canonical(&lock).unwrap()).unwrap();
+        assert_eq!(restored.sqlite_databases, lock.sqlite_databases);
+        let files = generated(&lock);
+        for app in lock
+            .applications
+            .iter()
+            .filter(|app| app.gears.contains(&sqlite_gear))
+        {
+            let config: serde_json::Value =
+                serde_saphyr::from_str(text(&files, &format!("config/{}.yaml", app.name))).unwrap();
+            assert_eq!(
+                config["gears"]["store-two"]["database"],
+                serde_json::json!({"engine": "sqlite", "file": "metadata.sqlite3"})
+            );
+            assert!(text(&files, &format!("apps/{}/Cargo.toml", app.name)).contains("\"sqlite\""));
+        }
+    }
+}
+
+#[test]
+fn sqlite_only_needs_no_postgres_server_driver_or_password_secret() {
+    for profile in [
+        r#"embedded(id = "dev", sqlite_databases = {"store-one": "metadata.sqlite3", "store-two": "metadata.sqlite3"})"#,
+        r#"kubernetes(id = "dev", discovery = "static", sqlite_databases = {"store-one": "metadata.sqlite3", "store-two": "metadata.sqlite3"})"#,
+    ] {
+        let lock = resolve(profile, "");
+        assert!(lock.database.is_none());
+        lock.validate_database().unwrap();
+        let files = generated(&lock);
+        for app in &lock.applications {
+            let config: serde_json::Value =
+                serde_saphyr::from_str(text(&files, &format!("config/{}.yaml", app.name))).unwrap();
+            assert!(config.get("database").is_none());
+            let manifest = text(&files, &format!("apps/{}/Cargo.toml", app.name));
+            assert!(manifest.contains("features = [\"sqlite\"]"), "{manifest}");
+            assert!(!manifest.contains("\"pg\""), "{manifest}");
+        }
+        if lock.kubernetes.is_some() {
+            let values: serde_json::Value =
+                serde_saphyr::from_str(text(&files, "helm/db-test/values.yaml")).unwrap();
+            for app in &lock.applications {
+                let app_values = &values[app.name.as_str()];
+                assert!(app_values.get("database").is_none());
+                assert!(app_values.get("existingSecret").is_none());
+                assert_eq!(app_values["homeVolume"]["type"], "persistentVolumeClaim");
+                assert_eq!(app_values["strategy"]["type"], "Recreate");
+            }
+        }
+    }
+}
+
+#[test]
+fn sqlite_paths_are_durable_and_confined_before_resolution() {
+    for file in [
+        "",
+        ":memory:",
+        "/tmp/db",
+        "../escape.sqlite3",
+        "a/../db",
+        "a//db",
+        "./db",
+        "C:/db",
+        r"a\db",
+        "${DB_FILE}",
+        "sqlite://db",
+    ] {
+        let profile = format!(
+            r#"embedded(id = "dev", database = DATABASE, sqlite_databases = {{"store-two": {}}})"#,
+            serde_json::to_string(file).unwrap()
+        );
+        let outcome = eval_intent(&profile, DB);
+        assert!(outcome.value.is_none(), "{file}");
+        assert!(outcome.diagnostics.has_errors(), "{file}");
+    }
+}
+
+#[test]
+fn unknown_sqlite_gears_and_conflicting_postgres_names_are_rejected() {
+    for id in ["absent", "store-one"] {
+        let profile = format!(
+            r#"embedded(id = "dev", database = DATABASE, sqlite_databases = {{"{id}": "metadata.sqlite3"}})"#
+        );
+        let intent = intent(&profile, DB);
+        let resolution = gearbox_engine::resolve::resolve(
+            &catalogue(),
+            &intent,
+            &ProfileId::new("dev").unwrap(),
+        );
+        assert!(resolution.has_errors(), "{id}");
+        assert!(
+            resolution
+                .diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::TopologyDbWithoutDatabase
+                    && d.message.contains(id))
+        );
+    }
+}
+
+#[test]
+fn sqlite_refuses_multiple_writers_in_intent_and_in_locks() {
+    let profile = r#"kubernetes(id = "dev", discovery = "static", database = DATABASE, sqlite_databases = {"store-two": "metadata.sqlite3"})"#;
+    let mut intent = intent(profile, DB);
+    intent
+        .application_pins
+        .iter_mut()
+        .find(|pin| pin.name.as_str() == "two")
+        .unwrap()
+        .replicas = 2;
+    let resolution =
+        gearbox_engine::resolve::resolve(&catalogue(), &intent, &ProfileId::new("dev").unwrap());
+    assert!(resolution.diagnostics.iter().any(|d| {
+        d.message
+            .contains("SQLite gear `store-two` requires exactly one")
+    }));
+    let mut lock = resolve(profile, DB);
+    lock.applications
+        .iter_mut()
+        .find(|app| app.name.as_str() == "two")
+        .unwrap()
+        .replicas = 2;
+    assert!(lock.validate_database().is_err());
+    assert!(gearbox_lock::read(&gearbox_lock::write_canonical(&lock).unwrap()).is_err());
+}
+
+#[test]
+fn sqlite_changes_affect_lock_hash_diff_and_reader_validation() {
+    let before = resolve(
+        r#"embedded(id = "dev", database = DATABASE, sqlite_databases = {"store-two": "metadata.sqlite3"})"#,
+        DB,
+    );
+    let mut after = before.clone();
+    after
+        .sqlite_databases
+        .get_mut(&fixtures::gid("store-two"))
+        .unwrap()
+        .file = "other.sqlite3".to_owned();
+    assert_ne!(
+        gearbox_lock::compute_hash(&before).unwrap(),
+        gearbox_lock::compute_hash(&after).unwrap()
+    );
+    assert!(
+        format!("{:?}", gearbox_lock::diff(&before, &after))
+            .contains("sqlite_databases.store-two.file")
+    );
+    after
+        .sqlite_databases
+        .get_mut(&fixtures::gid("store-two"))
+        .unwrap()
+        .file = ":memory:".to_owned();
+    assert!(gearbox_lock::write_canonical(&after).is_err());
+}
 fn catalogue() -> Catalogue {
     let mut catalogue = Catalogue::default();
     for name in ["store-one", "store-two"] {

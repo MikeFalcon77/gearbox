@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use gearbox_engine::{SourceRoot, validate::validate};
-use gearbox_ir::{DiagnosticCode, SourceId};
+use gearbox_ir::{DiagnosticCode, Severity, SourceId};
 
 #[path = "common/corpus.rs"]
 mod corpus_support;
@@ -118,7 +118,7 @@ mod tempdir {
 }
 
 #[test]
-fn the_real_tree_validates_clean() {
+fn the_real_tree_has_no_unexpected_diagnostics() {
     require_tree!(roots);
     let report = validate(&roots, None);
     let problems: Vec<String> = report
@@ -126,6 +126,7 @@ fn the_real_tree_validates_clean() {
         .iter()
         // The local corpus may be a fork; the CLI still reports its remote URL.
         .filter(|d| d.code != DiagnosticCode::GdlSourceMismatch)
+        .filter(|d| d.severity != Severity::Hint)
         .map(|d| format!("[{}] {}", d.code, d.message))
         .collect();
     assert!(problems.is_empty(), "{problems:#?}");

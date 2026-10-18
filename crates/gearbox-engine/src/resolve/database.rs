@@ -13,7 +13,7 @@ pub fn resolve(
     uri: &str,
     diagnostics: &mut Diagnostics,
 ) -> Option<PostgresDatabase> {
-    let gears: BTreeSet<_> = closure
+    let mut gears: BTreeSet<_> = closure
         .members
         .keys()
         .filter(|id| {
@@ -24,6 +24,19 @@ pub fn resolve(
         })
         .cloned()
         .collect();
+    for (id, sqlite) in profile.sqlite_databases() {
+        if let Err(reason) = sqlite.validate() {
+            report(profile, uri, diagnostics, reason);
+        }
+        if !gears.remove(id) {
+            report(
+                profile,
+                uri,
+                diagnostics,
+                format!("SQLite override `{id}` is not a selected database gear"),
+            );
+        }
+    }
     let Some(mut db) = profile.database().cloned() else {
         for gear in gears {
             report(
@@ -41,7 +54,10 @@ pub fn resolve(
     if let Err(reason) = db.validate() {
         report(profile, uri, diagnostics, reason);
     }
-    if matches!(profile, DeploymentProfileDecl::Kubernetes { .. }) && db.existing_secret.is_none() {
+    if !gears.is_empty()
+        && matches!(profile, DeploymentProfileDecl::Kubernetes { .. })
+        && db.existing_secret.is_none()
+    {
         report(
             profile,
             uri,
@@ -78,6 +94,29 @@ pub fn resolve(
     Some(db)
 }
 
+pub fn check_sqlite_placement(
+    partition: &super::partition::Partition,
+    profile: &DeploymentProfileDecl,
+    uri: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    for id in profile.sqlite_databases().keys() {
+        let placements: Vec<_> = partition
+            .applications
+            .iter()
+            .filter(|app| app.gears.contains(id))
+            .collect();
+        if placements.len() != 1 || placements.iter().any(|app| app.replicas != 1) {
+            report(
+                profile,
+                uri,
+                diagnostics,
+                format!("SQLite gear `{id}` requires exactly one application with one replica"),
+            );
+        }
+    }
+}
+
 fn report(
     profile: &DeploymentProfileDecl,
     uri: &str,
@@ -85,6 +124,6 @@ fn report(
     message: String,
 ) {
     diagnostics.push(Diagnostic::error(DiagnosticCode::TopologyDbWithoutDatabase, message,
-        r#"configure database = postgres(host = ..., user = ..., password = "${GEARS_PG_PASSWORD}") on this profile; create the server and each named database before startup"#)
+        r#"configure database = postgres(...) and/or sqlite_databases = {"gear-id": "metadata.sqlite3"} on this profile; each SQLite gear needs one writer and a persistent home volume"#)
         .at(Location::or_file(profile.declared_at(), uri)));
 }

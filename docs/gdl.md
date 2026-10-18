@@ -110,6 +110,41 @@ of cluster-provider `existingSecret`/`secretKeys`. Generated files contain only
 references. The operator provisions Postgres, each named database and the Secret;
 Gearbox creates none of them and bundles no database chart.
 
+### Per-gear SQLite platform databases
+
+Every profile also accepts `sqlite_databases`, mapping selected DB-gear ids to
+relative files. This explicitly selects SQLite for those gears; remaining DB
+gears use the profile's Postgres connection. A SQLite-only product needs no
+Postgres declaration.
+
+```python
+kubernetes(
+    id = "demo", discovery = "static", namespace = "gearbox-demo",
+    database = postgres(
+        host = "host.minikube.internal", user = "demo",
+        password = "${GEARS_PG_PASSWORD}", existing_secret = "demo-db",
+    ),
+    sqlite_databases = {"event-broker": "metadata.sqlite3"},
+)
+```
+
+The file lives below `server.home_dir/<gear-id>/`: in this example,
+`/var/lib/gearbox/event-broker/metadata.sqlite3` in Kubernetes. Absolute paths,
+parent traversal, DSNs, environment references and `:memory:` are refused.
+The gear's generated database section contains only `engine: sqlite` and `file`;
+it inherits no Postgres connection fields. SQLite gears are excluded from
+`database_names` and Postgres password injection. Explicitly naming the same
+gear in both mappings is an error. Cargo enables the drivers actually used by
+each application. IR, canonical locks, lock diffs and generated TypeScript
+record the SQLite selection. Empty mappings are omitted, preserving old locks.
+
+A SQLite gear must have exactly one application and one replica. Its Helm
+values default to `Recreate` and `homeVolume.type: persistentVolumeClaim`.
+Set `homeVolume.claimName` to an existing claim before rendering or deployment.
+The generated values schema rejects `emptyDir`, a missing claim, multiple
+replicas and a rolling update strategy for that application. The operator
+provisions and retains the PVC; Gearbox never removes it on regeneration.
+
 This extends GDL 1.0 additively: older descriptions still parse; DB-backed products
 must add a connection before they can resolve successfully. Generated locks use
 schema 2. Schema-1 locks are refused with instructions to run `gearbox resolve`;
@@ -636,6 +671,10 @@ Only the gear id is positional: `use_gear("api-gateway", source = "gears-rust")`
 
 `plugin` names an implementing gear. Which extension point it fills comes from the catalogue. The same implementation twice for one host in one profile is **GBX0110**.
 
+Selected plugins follow their host into every application that contains that
+host, including hosts pulled in as dependencies. Attachment determines process
+membership; initialization order still follows the gears' actual dependencies.
+
 ### Bindings
 
 ```
@@ -656,13 +695,23 @@ cluster_profile(name, cache, leader_election?, lock?, profiles = [])
 ### Topology and preferences
 
 ```
-application("name", anchor, role?, replicas = 1, profiles = [])
+application("name", anchor, include = [], role?, replicas = 1, profiles = [])
 prefer.existing_infrastructure()
 prefer.fewer_applications()
 prefer.isolate(gear = "api-gateway")
 ```
 
 Only the application name is positional: `application("audit", anchor = "api-contracts-consumer")`. `anchor` is a kebab gear id. `role` names one of the anchor gear's `role(...)` declarations; omit it for the gear's default shape. `replicas` must be ≥ 1.
+
+For a REST host anchor, a pin without `role` names and configures the host
+application itself. It does not create a second worker containing that host.
+
+`include` co-locates additional gears already present in the product closure,
+including their dependencies and selected plugins. For example,
+`application("settings-worker", anchor = "settings-service", include = ["authn-resolver"])`
+gives the worker its own authentication stack for bearer re-validation. This
+does not add a lifecycle dependency to the Settings gear. An unknown or
+unselected included gear is refused before generation.
 
 ### `product(...)`
 

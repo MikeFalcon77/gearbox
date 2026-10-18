@@ -13,6 +13,7 @@ import type { ResolvedProductHeader } from "./ResolvedProductHeader";
 import type { ResolvedSource } from "./ResolvedSource";
 import type { SelfHostedSettings } from "./SelfHostedSettings";
 import type { SourceId } from "./SourceId";
+import type { SqliteDatabase } from "./SqliteDatabase";
 
 /**
  * The resolved product. Serialized as `product.lock`.
@@ -21,6 +22,10 @@ import type { SourceId } from "./SourceId";
  * two runs over the same inputs serialize identically.
  */
 export type ResolvedProduct = { 
+/**
+ * Explicit per-gear SQLite choices; these gears are excluded from Postgres.
+ */
+sqlite_databases?: { [key in GearId]: SqliteDatabase }, 
 /**
  * Complete external database configuration, including resolved per-gear names.
  */

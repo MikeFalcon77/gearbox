@@ -1,0 +1,55 @@
+demo-gateway:
+  # SQL client only: wait for cluster DNS and the external server before DB
+  # migrations. This container never starts a PostgreSQL server.
+  initContainers: &databaseReadiness
+    - name: wait-for-external-database
+      image: postgres:17-bookworm
+      imagePullPolicy: Never
+      command: ["sh", "-ec"]
+      args:
+        - |
+          for attempt in $(seq 1 60); do
+            if pg_isready -h external-postgres.gearbox-demo.svc.cluster.local -p 5432 -U gearbox_demo -d postgres -t 1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'External database did not become ready.' >&2
+          exit 1
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+  image:
+    pullPolicy: Never
+  homeVolume:
+    type: persistentVolumeClaim
+    claimName: gearbox-demo-gateway-data
+  replicaCount: 1
+  strategy:
+    type: Recreate
+  extraEnv:
+    - name: APP__GEARS__API_GATEWAY__CONFIG__INTERNAL_AUTH__SECRET
+      valueFrom:
+        secretKeyRef:
+          name: gearbox-demo-runtime
+          key: DEMO_INTERNAL_TOKEN
+    - name: APP__GEARS__GRPC_HUB__CONFIG__INTERNAL_AUTH__SECRET
+      valueFrom:
+        secretKeyRef:
+          name: gearbox-demo-runtime
+          key: DEMO_INTERNAL_TOKEN
+demo-settings-worker:
+  initContainers: *databaseReadiness
+  existingSecret: gearbox-demo-runtime
+  image:
+    pullPolicy: Never
+  extraEnv:
+    - name: APP__OOP_HTTP__INTERNAL_AUTH__SECRET
+      valueFrom:
+        secretKeyRef:
+          name: gearbox-demo-runtime
+          key: DEMO_INTERNAL_TOKEN

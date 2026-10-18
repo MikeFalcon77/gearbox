@@ -54,6 +54,8 @@ struct OopHttpSection {
     /// The runtime defaults this to `false` and refuses to start when the
     /// advertised host is loopback without it.
     allow_loopback_advertise: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    internal_auth: Option<Value>,
 }
 
 #[derive(Serialize)]
@@ -110,9 +112,16 @@ struct PostgresServerSection {
     params: BTreeMap<String, String>,
 }
 #[derive(Serialize)]
-struct GearDatabaseSection {
-    server: &'static str,
-    dbname: String,
+#[serde(untagged)]
+enum GearDatabaseSection {
+    Postgres {
+        server: &'static str,
+        dbname: String,
+    },
+    Sqlite {
+        engine: &'static str,
+        file: String,
+    },
 }
 
 fn write_database(
@@ -130,6 +139,16 @@ fn write_database(
         {
             continue;
         }
+        if let Some(sqlite) = input.lock.sqlite_databases.get(id) {
+            sqlite.validate().map_err(GenerateError::Database)?;
+            if let Some(gear) = gears.get_mut(id.as_str()) {
+                gear.database = Some(GearDatabaseSection::Sqlite {
+                    engine: "sqlite",
+                    file: sqlite.file.clone(),
+                });
+            }
+            continue;
+        }
         let db = input.lock.database.as_ref().ok_or_else(|| {
             GenerateError::Database(format!(
                 "gear `{id}` needs a database; re-resolve with database = postgres(...)"
@@ -142,7 +161,7 @@ fn write_database(
             ))
         })?;
         if let Some(gear) = gears.get_mut(id.as_str()) {
-            gear.database = Some(GearDatabaseSection {
+            gear.database = Some(GearDatabaseSection::Postgres {
                 server: "pg",
                 dbname: name.clone(),
             });
@@ -216,6 +235,23 @@ pub fn app_config(
     write_cluster(input, &mut gears);
     write_spawns(input, application, &mut gears);
 
+    // One platform-plane provider for the embedded host and its workers. The
+    // product supplies secret values through AppConfig's APP__ environment
+    // overrides; no credential value is needed during generation.
+    let internal_auth = input
+        .lock
+        .gears
+        .iter()
+        .find(|(id, _)| id.as_str() == "api-gateway")
+        .and_then(|(_, host)| host.config.get("internal_auth"))
+        .filter(|value| !value.is_null())
+        .cloned();
+    if let (Some(auth), Some(grpc)) = (&internal_auth, gears.get_mut("grpc-hub")) {
+        grpc.config
+            .entry("internal_auth")
+            .or_insert_with(|| auth.clone());
+    }
+
     let home_dir = if input.lock.kubernetes.is_some() {
         // `readOnlyRootFilesystem` makes `~` unwritable; the chart mounts an
         // emptyDir here. The path is a generator fact, not a lock one: the
@@ -234,6 +270,7 @@ pub fn app_config(
             listen_addr: serve.listen_addr.clone(),
             advertise_uri: serve.advertise_uri.clone(),
             allow_loopback_advertise: serve.allow_loopback_advertise,
+            internal_auth: internal_auth.clone(),
         }),
         gears,
     };

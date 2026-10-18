@@ -94,6 +94,7 @@ pub fn intent(gears: &[&str]) -> ProductIntent {
             dev.clone(),
             gearbox_ir::DeploymentProfileDecl::Embedded {
                 database: None,
+                sqlite_databases: BTreeMap::new(),
                 id: dev.clone(),
                 declared_at: None,
             },
@@ -330,6 +331,7 @@ pub fn self_hosted_intent(gears: &[&str]) -> ProductIntent {
         local.clone(),
         gearbox_ir::DeploymentProfileDecl::SelfHosted {
             database: None,
+            sqlite_databases: BTreeMap::new(),
             id: local,
             host: gearbox_ir::ApplicationId::new("gateway").unwrap(),
             discovery: gearbox_ir::Discovery::Static,
@@ -374,6 +376,7 @@ pub fn self_hosted(
         local.clone(),
         gearbox_ir::DeploymentProfileDecl::SelfHosted {
             database: None,
+            sqlite_databases: BTreeMap::new(),
             id: local,
             host: gearbox_ir::ApplicationId::new("host").unwrap(),
             discovery,
@@ -393,6 +396,7 @@ pub fn kubernetes(gears: &[&str], discovery: gearbox_ir::Discovery) -> ProductIn
         prod.clone(),
         gearbox_ir::DeploymentProfileDecl::Kubernetes {
             database: None,
+            sqlite_databases: BTreeMap::new(),
             id: prod,
             discovery,
             namespace: None,
@@ -433,6 +437,7 @@ pub fn pin_role(
     intent.application_pins.push(gearbox_ir::ApplicationPin {
         name: gearbox_ir::ApplicationId::new(name).unwrap(),
         anchor: gid(anchor),
+        include: BTreeSet::new(),
         role: role.map(str::to_owned),
         replicas,
         profiles: BTreeSet::new(),

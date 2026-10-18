@@ -168,6 +168,19 @@ fn string_map(
         .collect()
 }
 
+fn sqlite_map(
+    value: Option<Value<'_>>,
+) -> anyhow::Result<std::collections::BTreeMap<gearbox_ir::GearId, gearbox_ir::SqliteDatabase>> {
+    string_map("sqlite_databases", value)?
+        .into_iter()
+        .map(|(id, file)| {
+            let db = gearbox_ir::SqliteDatabase { file };
+            db.validate().map_err(anyhow::Error::msg)?;
+            Ok((gearbox_ir::GearId::new(id)?, db))
+        })
+        .collect()
+}
+
 fn strings(list: Option<UnpackList<String>>) -> Vec<String> {
     list.map(|l| l.items).unwrap_or_default()
 }
@@ -290,13 +303,16 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     /// # Arguments
     /// * `id`: The profile's id, kebab-case.
     /// * `database`: Optional external `postgres(...)` configuration for DB-backed gears.
+    /// * `sqlite_databases`: Gear ids mapped to relative SQLite files below each gear home.
     fn embedded<'v>(
         #[starlark(require = named)] id: &str,
         #[starlark(require = named)] database: Option<&crate::records::PostgresRecord>,
+        #[starlark(require = named)] sqlite_databases: Option<Value<'_>>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ProfileRecord> {
         Ok(ProfileRecord {
             database: database.cloned(),
+            sqlite_databases: sqlite_map(sqlite_databases)?,
             kind: "embedded".to_owned(),
             id: id.to_owned(),
             host: None,
@@ -314,6 +330,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     /// # Arguments
     /// * `id`: The profile's id, kebab-case.
     /// * `database`: Optional external `postgres(...)` configuration for DB-backed gears.
+    /// * `sqlite_databases`: Gear ids mapped to relative SQLite files below each gear home.
     /// * `host`: The application that hosts the workers.
     /// * `worker_discovery`: `"static"` or `"directory"`.
     /// * `target_dir`: The Cargo target directory the host starts workers from, relative to this
@@ -326,10 +343,12 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] target_dir: Option<&str>,
         #[starlark(require = named)] cargo_profile: Option<&str>,
         #[starlark(require = named)] database: Option<&crate::records::PostgresRecord>,
+        #[starlark(require = named)] sqlite_databases: Option<Value<'_>>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ProfileRecord> {
         Ok(ProfileRecord {
             database: database.cloned(),
+            sqlite_databases: sqlite_map(sqlite_databases)?,
             kind: "self-hosted".to_owned(),
             id: id.to_owned(),
             host: Some(host.to_owned()),
@@ -347,6 +366,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     /// # Arguments
     /// * `id`: The profile's id, kebab-case.
     /// * `database`: Optional external `postgres(...)` configuration for DB-backed gears.
+    /// * `sqlite_databases`: Gear ids mapped to relative SQLite files below each gear home.
     /// * `discovery`: `"static"` or `"directory"`.
     /// * `namespace`: The namespace the chart deploys to.
     /// * `image_registry`: The registry images are pulled from.
@@ -356,10 +376,12 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] namespace: Option<&str>,
         #[starlark(require = named)] image_registry: Option<&str>,
         #[starlark(require = named)] database: Option<&crate::records::PostgresRecord>,
+        #[starlark(require = named)] sqlite_databases: Option<Value<'_>>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ProfileRecord> {
         Ok(ProfileRecord {
             database: database.cloned(),
+            sqlite_databases: sqlite_map(sqlite_databases)?,
             kind: "kubernetes".to_owned(),
             id: id.to_owned(),
             host: None,
@@ -524,12 +546,14 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     ///
     /// # Arguments
     /// * `anchor`: The gear the application is built around.
+    /// * `include`: Additional product gears to co-locate, including their dependencies and plugins.
     /// * `role`: One of the anchor gear's `role(...)` names. The default is its default shape.
     /// * `replicas`: How many instances run, 1 or more. The default is 1.
     /// * `profiles`: The profiles it applies to. Empty means all.
     fn application<'v>(
         #[starlark(require = pos)] name: &str,
         #[starlark(require = named)] anchor: &str,
+        #[starlark(require = named)] include: Option<UnpackList<String>>,
         #[starlark(require = named)] role: Option<&str>,
         #[starlark(require = named, default = 1)] replicas: u32,
         #[starlark(require = named)] profiles: Option<UnpackList<String>>,
@@ -543,6 +567,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         Ok(ApplicationRecord {
             name: name.to_owned(),
             anchor: anchor.to_owned(),
+            include: strings(include),
             role: role.map(str::to_owned),
             replicas,
             profiles: strings(profiles),

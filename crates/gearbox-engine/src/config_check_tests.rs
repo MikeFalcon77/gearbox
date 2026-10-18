@@ -124,6 +124,7 @@ fn intent(key: &str, value: serde_json::Value) -> ProductIntent {
             dev.clone(),
             gearbox_ir::DeploymentProfileDecl::Embedded {
                 database: None,
+                sqlite_databases: BTreeMap::new(),
                 id: dev.clone(),
                 declared_at: None,
             },

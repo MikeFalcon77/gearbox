@@ -1,7 +1,7 @@
 {{ header }}
 FROM rust:{{ rust_channel }}-bookworm AS build
 RUN apt-get update \
- && apt-get install -y --no-install-recommends protobuf-compiler libprotobuf-dev \
+ && apt-get install -y --no-install-recommends protobuf-compiler libprotobuf-dev cmake \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .

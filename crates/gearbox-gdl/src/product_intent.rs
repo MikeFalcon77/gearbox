@@ -594,6 +594,19 @@ fn build_application_pins(
             declared_at: record.declared_at.clone(),
             name,
             anchor,
+            include: record
+                .include
+                .iter()
+                .filter_map(|id| {
+                    gear_id(
+                        record.declared_at.as_ref(),
+                        uri,
+                        id,
+                        "application.include",
+                        diagnostics,
+                    )
+                })
+                .collect(),
             // Not checked here: whether the anchor declares this role is a
             // question for the catalogue, which this layer does not have.
             role: record.role.clone(),
@@ -804,6 +817,7 @@ fn deployment_profile(
         "embedded" => Some(DeploymentProfileDecl::Embedded {
             id: id.clone(),
             database: record.database.as_ref().map(|db| db.settings.clone()),
+            sqlite_databases: record.sqlite_databases.clone(),
             declared_at: record.declared_at.clone(),
         }),
         "self-hosted" => {
@@ -835,6 +849,7 @@ fn deployment_profile(
             Some(DeploymentProfileDecl::SelfHosted {
                 id: id.clone(),
                 database: record.database.as_ref().map(|db| db.settings.clone()),
+                sqlite_databases: record.sqlite_databases.clone(),
                 host,
                 discovery: discovery(
                     uri,
@@ -851,6 +866,7 @@ fn deployment_profile(
         "kubernetes" => Some(DeploymentProfileDecl::Kubernetes {
             id: id.clone(),
             database: record.database.as_ref().map(|db| db.settings.clone()),
+            sqlite_databases: record.sqlite_databases.clone(),
             discovery: discovery(
                 uri,
                 id,

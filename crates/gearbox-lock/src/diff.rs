@@ -300,6 +300,7 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
     // "unchanged". Collections and diagnostics have their own lists; profile
     // is `profile_changed`.
     let gearbox_ir::ResolvedProduct {
+        sqlite_databases: before_sqlite,
         database: before_db,
         schema_version: before_schema,
         product: before_header,
@@ -315,6 +316,7 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
         diagnostics: _,
     } = before;
     let gearbox_ir::ResolvedProduct {
+        sqlite_databases: after_sqlite,
         database: after_db,
         schema_version: after_schema,
         product: after_header,
@@ -330,8 +332,18 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
         diagnostics: _,
     } = after;
 
-    let before_database = database_fields(before_db.as_ref());
-    let after_database = database_fields(after_db.as_ref());
+    let mut before_database = database_fields(before_db.as_ref());
+    let mut after_database = database_fields(after_db.as_ref());
+    for (fields, sqlite) in [
+        (&mut before_database, before_sqlite),
+        (&mut after_database, after_sqlite),
+    ] {
+        fields.extend(
+            sqlite
+                .iter()
+                .map(|(id, db)| (format!("sqlite_databases.{id}.file"), db.file.clone())),
+        );
+    }
     let mut database_keys = std::collections::BTreeSet::new();
     database_keys.extend(before_database.keys());
     database_keys.extend(after_database.keys());

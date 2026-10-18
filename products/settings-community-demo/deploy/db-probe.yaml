@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gearbox-demo-db-probe
+  namespace: gearbox-demo
+  labels:
+    app.kubernetes.io/part-of: settings-community-demo
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 60
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: settings-community-demo
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+        - name: client
+          image: postgres:17-bookworm
+          imagePullPolicy: Never
+          command: [sh, -ec]
+          args:
+            - |
+              for database in credstore settings_service types_registry gearbox_demo_cluster; do
+                psql -X -v ON_ERROR_STOP=1 -d "$database" -tAc 'SELECT 1'
+                printf 'Connected to %s through the external database Service.\n' "$database"
+              done
+          env:
+            - {name: PGHOST, value: external-postgres.gearbox-demo.svc.cluster.local}
+            - {name: PGPORT, value: "5432"}
+            - {name: PGUSER, value: gearbox_demo}
+            - {name: PGSSLMODE, value: disable}
+            - {name: PGCONNECT_TIMEOUT, value: "5"}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: {name: gearbox-demo-runtime, key: GEARS_PG_PASSWORD}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
