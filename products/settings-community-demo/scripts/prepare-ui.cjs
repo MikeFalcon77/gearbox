@@ -35,8 +35,8 @@ const config = {apiBase:'/api',productName:'Family Labs',firebase:web,identityPa
     'd0000000-0000-4000-8000-000000000002':{name:"Dasha’s Lab",character:'Dasha',role:'Chief Ice Cream Officer',portrait:portraits.dasha,portraitPosition:"82% 43%",portraitZoom:2},
     'a0000000-0000-4000-8000-000000000003':{name:"Ilya’s Lab",character:'Ilya',role:'Head of Quality Assurance',portrait:portraits.ilya,portraitPosition:"50% 40%",portraitZoom:1}
   },
-  events:{topic:'gts.cf.core.events.topic.v1~cf.demo.settings.changed.v1',type:'gts.cf.core.events.event.v1~cf.demo.settings.changed.v1~'},
-  settings:{effectivePath:'/family-labs/v1/effective:read',approvalKey,fields:[
+  events:{topic:'gts.cf.core.events.topic.v1~cf.demo.settings.changed.v1',type:'gts.cf.core.events.event.v1~cf.demo.settings.changed.v1~',requiresProcessor:true},
+  settings:{effectivePath:'/family-labs/v1/effective:read',echoPath:'/oagw/v1/proxy/demo-echo.gearbox-demo.svc.cluster.local:8080/echo',approvalKey,fields:[
     {key:approvalKey,label:'Ice cream approved',kind:'boolean'},
     {key:prefix+'lab_message.v1~',label:'Lab message',kind:'string'},
     {key:prefix+'scoops_per_person.v1~',label:'Scoops per person',kind:'number'}

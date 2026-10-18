@@ -54,7 +54,7 @@ AUTHORIZATION = [
 GATEWAY_POLICIES = {
     "enabled": True,
     "rules": [
-        {"path": "/types-registry/v1/entities", "method": "GET", "required_scopes": ["demo:diagnostics", "demo:bootstrap"]},
+        {"path": "/types-registry/v1/entities", "method": "GET", "required_scopes": ["demo:bootstrap"]},
         {"path": "/types-registry/**", "required_scopes": ["demo:bootstrap"]},
         {"path": "/service-discovery/**", "method": "GET", "required_scopes": ["demo:diagnostics", "demo:bootstrap"]},
         {"path": "/family-labs/v1/registry/**", "method": "GET", "required_scopes": ["demo:diagnostics", "demo:bootstrap"]},

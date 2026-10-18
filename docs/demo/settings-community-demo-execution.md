@@ -628,7 +628,7 @@ Its source-allowlist and sibling-instance filtering tests pass.
 SDK streaming tests cover fragmented UTF-8/SSE, actual control-frame shapes,
 checkpoint scope, EOF/JOIN/SEEK recovery, event-ID deduplication, failed effective
 read without advancing a checkpoint, foreign-tenant fail-closed handling and
-bounded cleanup. Fifteen UI tests pass; production builds split module pages
+bounded cleanup. The final sixteen baseline UI tests pass; production builds split module pages
 and the widget into lazy chunks. Geist/Geist Mono and their licenses are local.
 
 Portrait preparation applied orientation, removed EXIF/GPS/ICC/XMP, verified
@@ -642,8 +642,8 @@ Release 21 is deployed with content-derived image tags. Initial full-path scene
 and second-tab card; that card reread Settings and recorded one celebration.
 Ilya remained false, recorded zero celebrations and zero foreign-tenant frames,
 and never displayed that event. Screenshot `.gearbox/phase5-family-scene.png`.
-Additional UI conflict, registry, reconnect/replay and scalar checks are still
-being completed; this is not yet phase-5 acceptance.
+Additional UI conflict, registry, reconnect/replay and scalar checks completed
+successfully in the final phase-5 acceptance below.
 
 
 Phase-5 acceptance completed on the real minikube deployment. Final images:
@@ -692,3 +692,40 @@ phase 6. Windows npm installation found the standalone SDK but node-gyp did not
 recognize it as a Visual Studio component; no Studio-build success is claimed
 yet. Binary file plans have a matching plaintext fallback in Studio's type map;
 their actual text preview remains unavailable.
+
+
+## Phase 5 — Claude Opus 5.5 high review follow-up
+
+Review: `.gearbox/phase5-claude-review-opus55-high.txt`, confirmed actual model
+`claude-opus-5-5`, high effort, source-only packet for commits 6505528/1c2046fd6.
+The reviewer found no proven break in the demonstrated scene. Its raw-registry
+bypass condition is confirmed from the V1 SDK contract (instance listing is
+explicitly unscoped). Gateway diagnostics now read that SDK locally and filter
+before returning; the public raw GET route is bootstrap-only. Settings registry
+reads remain through the fixed private worker Service, with caller identity and
+the same own-tenant/public-schema response filter.
+
+Processor errors are now wrapped separately from stream authentication errors;
+401/403 during Settings processing retry without advancing the checkpoint or
+falsely asking for an EB login. The demo waits for its required event processor
+before streaming, resumes after persisted pagehide/pageshow, bounds effective
+reads, and avoids resetting retry backoff merely because SSE headers arrived.
+OAGW is now an explicit UI backend requirement and its echo path is product
+configuration. The worker registry target uses namespace-local Service DNS.
+Twenty-three UI tests currently pass, including terminal/topology, heartbeat
+timeout, expired-checkpoint/Start-live and back/forward-cache restoration cases.
+The registry adapter tests and Clippy also pass. Runtime acceptance of this
+follow-up is included in the next prepared-bundle deployment.
+
+Review L5 is not a defect: toolkit-http HttpResponse::json already checks HTTP
+status via checked_body_impl (libs/toolkit-http/src/response.rs). Known binary
+extensions now remain Binary even for UTF-8-compatible bytes, and writer plans
+explicitly suppress their text preview. The UI images are local-only private
+artifacts; no image push or public ingress is part of the runner. ICC-to-sRGB
+conversion is optional because the prepared photos passed visual inspection.
+
+Existing phase-2/3 browser negative checks already rejected sibling reads,
+writes and subscriptions; the review packet did not contain those earlier
+receipts. Anonymous browser groups can remain when cleanup overlaps a broker
+outage (the API has no TTL); phase-7 cleanup will target only identified stale
+demo groups. No claim of automatic server TTL or REST ACK is made.
