@@ -79,13 +79,16 @@ A product explicitly selects modules and locates its shell and shared SDK:
 
 ```python
 ui = ui_product(
-    shell = path("../../ui/product-shell"),
-    sdk = path("../../ui/ui-sdk"),
+    source = "gears-rust",
+    shell = path("ui/product-shell"),
+    sdk = path("ui/ui-sdk"),
     modules = ["settings-service"],
 )
 ```
 
-These are directory locators. npm names, versions and exports come from each
+With `source`, package paths resolve through the supplied source root, so checkout
+folder names do not enter UI locators. Without `source`, paths are relative to
+the product description. These are directory locators. npm names, versions and exports come from each
 `package.json`. Packages declare `gearsUi.apiVersion = 1` and kind `sdk`, `shell`
 or `module`. Modules export `./plugin` from a file under `src/`; SDK and shell
 export `.`. Shell and modules declare a compatible SDK peer (`^1.0.0` for SDK
@@ -94,11 +97,12 @@ versions and string exports. Runtime module federation is not used.
 
 The resolver rejects missing backend gears. Generation validates package
 metadata and export files without executing JavaScript, then emits the frontend
-workspace, module registry, runtime configuration, nginx, Dockerfile and
+workspace, module registry, nginx, Dockerfile and
 Kubernetes UI resources. `product.lock` schema 3 records the UI composition;
 `ui/ui.lock.json` records projected package identities, exports and content
 hashes beside the parent product lock hash. npm's generated `package-lock.json`
-pins third-party dependencies for `npm ci` in the prepared bundle. Products
+pins third-party dependencies for `npm ci` in the prepared bundle. Product preparation
+supplies `public/runtime-config.json`; generation does not overwrite it. Products
 without UI declarations continue to generate only their existing backend
 artifacts. Resolve older locks again to write schema 3.
 

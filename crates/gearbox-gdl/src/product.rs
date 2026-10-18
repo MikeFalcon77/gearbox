@@ -581,10 +581,12 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     /// * `shell`: The shell package directory, as path(...), relative to product.gdl.
     /// * `sdk`: The shared UI SDK package directory, as path(...).
     /// * `modules`: Gear ids with UI contributions included in this product.
+    /// * `source`: Optional source id; shell and SDK paths are relative to this root.
     fn ui_product<'v>(
         #[starlark(require = named)] shell: &'v SourceAtRecord,
         #[starlark(require = named)] sdk: &'v SourceAtRecord,
         #[starlark(require = named)] modules: UnpackList<String>,
+        #[starlark(require = named)] source: Option<String>,
     ) -> anyhow::Result<crate::records::UiProductRecord> {
         if shell.kind != "path" || sdk.kind != "path" {
             return Err(anyhow::anyhow!("UI shell and SDK require path(...)"));
@@ -593,6 +595,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             shell: shell.at.clone().unwrap_or_default(),
             sdk: sdk.at.clone().unwrap_or_default(),
             modules: modules.items,
+            source: source.map(gearbox_ir::SourceId::new).transpose()?,
         })
     }
 

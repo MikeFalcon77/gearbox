@@ -4,9 +4,10 @@ load("auth.gdl", "AUTHENTICATION", "AUTHORIZATION", "GATEWAY_POLICIES")
 product(
     gdl_version = "1.2",
     ui = ui_product(
-        shell = path("../../../gears-rust-mikefalcon77/ui/product-shell"),
-        sdk = path("../../../gears-rust-mikefalcon77/ui/ui-sdk"),
-        modules = ["settings-service"],
+        source = "gears-rust",
+        shell = path("ui/product-shell"),
+        sdk = path("ui/ui-sdk"),
+        modules = ["settings-service", "event-broker", "service-discovery", "types-registry"],
     ),
     id = "settings-community-demo",
     name = "Family Labs — Settings Community Demo",

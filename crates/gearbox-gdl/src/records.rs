@@ -83,6 +83,8 @@ gdl_record! {
         pub shell: String,
         pub sdk: String,
         pub modules: Vec<String>,
+        #[allocative(skip)]
+        pub source: Option<gearbox_ir::SourceId>,
     }
 }
 

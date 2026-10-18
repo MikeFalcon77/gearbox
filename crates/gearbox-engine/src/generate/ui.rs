@@ -11,10 +11,16 @@ fn invalid(message: impl Into<String>) -> GenerateError {
 }
 
 fn file(path: &str, bytes: impl Into<Vec<u8>>) -> Result<FileEntry, GenerateError> {
+    let bytes = bytes.into();
+    let kind = if std::str::from_utf8(&bytes).is_ok() {
+        FileKind::Text
+    } else {
+        FileKind::Binary
+    };
     Ok(FileEntry {
         path: RelPath::new(path).map_err(|e| invalid(e.to_string()))?,
-        bytes: bytes.into(),
-        kind: FileKind::Text,
+        bytes,
+        kind,
         ownership: Ownership::Generated,
     })
 }
@@ -59,9 +65,12 @@ fn package(directory: &Path, folder: &str, role: &str) -> Result<Package, Genera
         .as_str()
         .ok_or_else(|| invalid(format!("{name} needs version")))?;
     if version.split('.').count() != 3
-        || !version
-            .split('.')
-            .all(|n| n.parse::<u32>().is_ok() && (n == "0" || !n.starts_with('0')))
+        || !version.split('.').all(|n| {
+            !n.is_empty()
+                && n.bytes().all(|b| b.is_ascii_digit())
+                && n.parse::<u32>().is_ok()
+                && (n == "0" || !n.starts_with('0'))
+        })
     {
         return Err(invalid(format!(
             "{name}: use a numeric major.minor.patch package version"
@@ -72,20 +81,34 @@ fn package(directory: &Path, folder: &str, role: &str) -> Result<Package, Genera
             "{name}: expected GearUiPlugin API 1 and kind {role}"
         )));
     }
-    let export = if role == "module" { "./plugin" } else { "." };
-    let entry = manifest["exports"][export]
-        .as_str()
-        .ok_or_else(|| invalid(format!("{name}: missing string export {export}")))?;
-    let entry_path = entry
-        .strip_prefix("./")
-        .and_then(|s| RelPath::new(s).ok())
-        .ok_or_else(|| invalid(format!("{name}: export must be a package-relative file")))?;
-    let actual_entry = directory
-        .join(entry_path.as_str())
-        .canonicalize()
-        .map_err(|e| invalid(format!("{name} export: {e}")))?;
-    if !actual_entry.starts_with(&directory) || !actual_entry.is_file() {
-        return Err(invalid(format!("{name}: export escapes its package")));
+    let exports = manifest["exports"]
+        .as_object()
+        .ok_or_else(|| invalid(format!("{name}: string exports required")))?;
+    let primary = if role == "module" { "./plugin" } else { "." };
+    if !exports.contains_key(primary) || (role == "shell" && !exports.contains_key("./theme.css")) {
+        return Err(invalid(format!("{name}: missing required exports")));
+    }
+    let mut entry_paths = Vec::new();
+    for (key, value) in exports {
+        if key != "." && !key.starts_with("./") {
+            return Err(invalid(format!("{name}: invalid export name")));
+        }
+        let entry = value
+            .as_str()
+            .ok_or_else(|| invalid(format!("{name}: export must be a string")))?;
+        let entry_path = entry
+            .strip_prefix("./")
+            .and_then(|s| RelPath::new(s).ok())
+            .filter(|p| p.as_str().starts_with("src/"))
+            .ok_or_else(|| invalid(format!("{name}: export must point into src/")))?;
+        let actual = directory
+            .join(entry_path.as_str())
+            .canonicalize()
+            .map_err(|e| invalid(format!("{name} export: {e}")))?;
+        if !actual.starts_with(&directory) || !actual.is_file() {
+            return Err(invalid(format!("{name}: export escapes its package")));
+        }
+        entry_paths.push(entry_path);
     }
     let mut files = Vec::new();
     let mut hasher = blake3::Hasher::new();
@@ -125,20 +148,21 @@ fn package(directory: &Path, folder: &str, role: &str) -> Result<Package, Genera
         }
     }
     paths.sort();
-    if !paths
-        .iter()
-        .any(|(relative, _)| relative == entry_path.as_str())
-    {
+    if entry_paths.iter().any(|entry_path| {
+        !paths
+            .iter()
+            .any(|(relative, _)| relative == entry_path.as_str())
+    }) {
         return Err(invalid(format!(
             "{name}: UI exports must point into the copied src/ tree"
         )));
     }
     for (relative, path) in paths {
         let bytes = std::fs::read(path).map_err(|e| invalid(e.to_string()))?;
+        hasher.update(&(relative.len() as u64).to_le_bytes());
         hasher.update(relative.as_bytes());
-        hasher.update(&[0]);
+        hasher.update(&(bytes.len() as u64).to_le_bytes());
         hasher.update(&bytes);
-        hasher.update(&[0]);
         files.push(file(&format!("ui/packages/{folder}/{relative}"), bytes)?);
     }
     Ok(Package {
@@ -153,9 +177,20 @@ pub(super) fn files(input: &GenerateInput<'_>) -> Result<Vec<FileEntry>, Generat
     let Some(ui) = &input.lock.ui else {
         return Ok(Vec::new());
     };
-    let base = input
-        .product_dir
-        .ok_or_else(|| invalid("UI generation needs the product description directory"))?;
+    let base = if let Some(source) = &ui.source {
+        let root = input
+            .source_roots
+            .get(source)
+            .ok_or_else(|| invalid(format!("UI package source {source} is unavailable")))?;
+        for path in [&ui.sdk, &ui.shell] {
+            RelPath::new(path).map_err(|e| invalid(e.to_string()))?;
+        }
+        root.as_path()
+    } else {
+        input
+            .product_dir
+            .ok_or_else(|| invalid("UI generation needs the product description directory"))?
+    };
     let mut packages = vec![
         package(&base.join(&ui.sdk), "sdk", "sdk")?,
         package(&base.join(&ui.shell), "shell", "shell")?,
@@ -166,6 +201,9 @@ pub(super) fn files(input: &GenerateInput<'_>) -> Result<Vec<FileEntry>, Generat
         .and_then(|v| v.split('.').next())
         .unwrap_or("")
         .to_owned();
+    if sdk_major == "0" {
+        return Err(invalid("UI SDK major version must be at least 1"));
+    }
     let shell_name = packages[1].name.clone();
     let mut imports = Vec::new();
     for (index, (id, module)) in ui.modules.iter().enumerate() {
@@ -230,30 +268,29 @@ pub(super) fn files(input: &GenerateInput<'_>) -> Result<Vec<FileEntry>, Generat
     let mut out = vec![file("ui/package.json",serde_json::to_vec_pretty(&root).map_err(|e|invalid(e.to_string()))?)?,
         file("ui/ui.lock.json",serde_json::to_vec_pretty(&lock).map_err(|e|invalid(e.to_string()))?)?,
         file("ui/src/module-registry.ts",registry.into_bytes())?,file("ui/src/main.tsx",main.into_bytes())?,
-        file("ui/index.html",br#"<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Family Labs</title></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>"#.to_vec())?,
+        file("ui/index.html",String::from_utf8_lossy(br#"<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Family Labs</title></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>"#).replace("Family Labs", &input.lock.product.id).into_bytes())?,
         file("ui/tsconfig.json",br#"{"compilerOptions":{"target":"ES2022","lib":["ES2022","DOM","DOM.Iterable"],"module":"ESNext","moduleResolution":"Bundler","jsx":"react-jsx","strict":true,"skipLibCheck":true,"noEmit":true,"esModuleInterop":true,"allowImportingTsExtensions":true},"include":["src","packages"]}"#.to_vec())?,
         file("ui/vite.config.ts",b"import {defineConfig} from 'vite';import react from '@vitejs/plugin-react';import tailwindcss from '@tailwindcss/vite';export default defineConfig({plugins:[react(),tailwindcss()],server:{strictPort:true,proxy:{'/api':{target:'http://127.0.0.1:18087',rewrite:p=>p.slice(4)}}}});\n".to_vec())?,
-        file("ui/public/runtime-config.json",br#"{"apiBase":"/api","productName":"Family Labs","firebase":{}}"#.to_vec())?,
         file("ui/.dockerignore",b"node_modules\ndist\n.git\n.env*\n".to_vec())?,
         file("ui/Dockerfile",b"FROM node:24.21.0-alpine AS build\nWORKDIR /app\nCOPY . .\nRUN npm ci && npm run build\nFROM nginxinc/nginx-unprivileged:1.28-alpine\nCOPY --from=build /app/dist /usr/share/nginx/html\nCOPY nginx.conf /etc/nginx/nginx.conf\nUSER 65532:65532\nEXPOSE 8080\n".to_vec())?];
+    for package in packages {
+        out.extend(package.files);
+    }
+    if input.lock.kubernetes.is_none() {
+        return Ok(out);
+    }
     let gateway = input
         .lock
         .applications
         .iter()
         .find(|a| a.gears.iter().any(|id| id.as_str() == "api-gateway"))
         .ok_or_else(|| invalid("UI requires an API Gateway application"))?;
-    let namespace = input
-        .lock
-        .kubernetes
-        .as_ref()
-        .and_then(|k| k.namespace.as_deref())
-        .unwrap_or("default");
     let port = gateway
         .service_port
         .ok_or_else(|| invalid("UI Gateway has no service port"))?;
     let nginx = format!(
-        "pid /tmp/nginx.pid;\nerror_log /dev/stderr;\nevents {{ worker_connections 1024; }}\nhttp {{ include /etc/nginx/mime.types; access_log /dev/stdout; client_body_temp_path /tmp/client_body; proxy_temp_path /tmp/proxy; fastcgi_temp_path /tmp/fastcgi; uwsgi_temp_path /tmp/uwsgi; scgi_temp_path /tmp/scgi; server {{ listen 8080; root /usr/share/nginx/html; location = /runtime-config.json {{ add_header Cache-Control no-store; }} location /api/ {{ proxy_pass http://{}.{}.svc.cluster.local:{port}/; proxy_http_version 1.1; proxy_buffering off; proxy_cache off; proxy_read_timeout 3600s; proxy_set_header Connection ''; add_header X-Accel-Buffering no always; }} location / {{ try_files $uri /index.html; }} }} }}\n",
-        gateway.name, namespace
+        "pid /tmp/nginx.pid;\nerror_log /dev/stderr;\nevents {{ worker_connections 1024; }}\nhttp {{ include /etc/nginx/mime.types; access_log /dev/stdout; client_body_temp_path /tmp/client_body; proxy_temp_path /tmp/proxy; fastcgi_temp_path /tmp/fastcgi; uwsgi_temp_path /tmp/uwsgi; scgi_temp_path /tmp/scgi; server {{ listen 8080; root /usr/share/nginx/html; location = /runtime-config.json {{ add_header Cache-Control no-store; }} location /api/ {{ proxy_pass http://{}:{port}/; proxy_http_version 1.1; proxy_buffering off; proxy_cache off; proxy_read_timeout 3600s; proxy_set_header Connection ''; add_header X-Accel-Buffering no always; }} location / {{ try_files $uri /index.html; }} }} }}\n",
+        gateway.name
     );
     out.push(file("ui/nginx.conf", nginx.into_bytes())?);
     if input.lock.kubernetes.is_some() {
@@ -261,9 +298,6 @@ pub(super) fn files(input: &GenerateInput<'_>) -> Result<Vec<FileEntry>, Generat
             &format!("helm/{}/templates/demo-ui.yaml", input.lock.product.id),
             helm(input).into_bytes(),
         )?);
-    }
-    for package in packages {
-        out.extend(package.files);
     }
     Ok(out)
 }
@@ -282,6 +316,7 @@ spec:
     metadata:
       labels: {{app: demo-ui}}
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -385,6 +420,28 @@ mod tests {
                 ),
                 "{export}"
             );
+        }
+    }
+
+    #[test]
+    fn secondary_exports_and_non_numeric_versions_are_rejected() {
+        let dir = TestPackage::new();
+        for (version, extra) in [
+            ("1.0.0", json!({"browser":"./src/index.ts"})),
+            ("+1.0.0", json!("./src/index.ts")),
+            ("1.0.0", json!("./../private.ts")),
+        ] {
+            dir.write(1, "./src/index.ts");
+            let path = dir.0.join("package.json");
+            let mut manifest: Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            manifest["version"] = json!(version);
+            manifest["exports"]["./secondary"] = extra;
+            std::fs::write(path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+            assert!(matches!(
+                package(&dir.0, "test-ui", "module"),
+                Err(GenerateError::Ui(_))
+            ));
         }
     }
 

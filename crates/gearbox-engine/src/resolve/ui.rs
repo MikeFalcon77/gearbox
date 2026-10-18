@@ -54,6 +54,7 @@ pub(super) fn resolve(
     Some(ResolvedUi {
         shell: requested.shell.clone(),
         sdk: requested.sdk.clone(),
+        source: requested.source.clone(),
         modules,
     })
 }

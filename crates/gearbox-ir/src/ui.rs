@@ -17,10 +17,12 @@ pub struct GearUi {
 /// A product explicitly chooses its shell, SDK and included gear modules.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ProductUi {
-    /// Package directories relative to the product description.
+    /// Package directories relative to the selected source, or product description.
     pub shell: String,
     pub sdk: String,
     pub modules: BTreeSet<GearId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -36,4 +38,6 @@ pub struct ResolvedUi {
     pub shell: String,
     pub sdk: String,
     pub modules: BTreeMap<GearId, ResolvedUiModule>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceId>,
 }

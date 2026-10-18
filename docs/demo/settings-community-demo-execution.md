@@ -587,3 +587,108 @@ from the next product image build.
 
 Four full UI modules, photos and live confetti remain phase 5; the prepared
 one-click Deploy path remains phase 6. The approved plan itself is unchanged.
+
+
+## Phase 4 — Claude Opus 5.5 high follow-up
+
+The requested reviewer ran as `claude-opus-5-5 --effort high` with tools disabled,
+against the two committed phase-4 diff packets. Report (private ignored work
+folder): `.gearbox/phase4-claude-review-opus55-high.txt`. Recommendations were
+checked against source rather than treated as verified runtime failures.
+
+Confirmed and addressed in phase 5: token refresh no longer tears down the
+session (`onAuthStateChanged`, per-request credentials, one forced retry on
+401); laboratory presentation and setting keys move into product runtime
+configuration; UI shell/SDK paths can resolve through a named source root;
+UI gear declarations use GDL 1.2; all string exports are validated and the
+shell CSS export is required; package hashes use length framing; opaque assets
+have `FileKind::Binary`; encoded traversal/control-character routes are rejected;
+Google explicitly offers account selection; generation no longer overwrites
+prepared runtime configuration; nginx uses the namespace-local Service name;
+the UI pod does not mount a service-account token. Non-Kubernetes UI generation
+returns before requiring a Kubernetes Gateway port. Generic HTML title uses
+the product ID (the resolved header has no display-name field).
+
+The reviewer suggested a tracked npm lock tied to prepared inputs. This remains
+part of phase 6 bundle preparation, together with retaining content-derived
+backend image tags for rollback. The existing corpus helper already fails when
+`GEARBOX_CORPUS_REQUIRED` is set; mandatory checks continue to set it explicitly.
+The optional SDK source format deliberately accepts stable numeric major >= 1;
+pre-1.0 SDK compatibility ranges are rejected rather than guessed.
+
+## Phase 5 — complete
+
+All four module packages now build from GDL: Settings (bool/string/number forms,
+ETag conflict UI, history, OAGW), Event Broker live inspector, Discovery and
+Types Registry V1 with explicit Gateway/Settings sources. The demo-owned
+registry adapter forwards caller credentials only to fixed endpoints, limits
+responses, disables redirects and filters out other/unscoped tenant instances.
+Its source-allowlist and sibling-instance filtering tests pass.
+
+SDK streaming tests cover fragmented UTF-8/SSE, actual control-frame shapes,
+checkpoint scope, EOF/JOIN/SEEK recovery, event-ID deduplication, failed effective
+read without advancing a checkpoint, foreign-tenant fail-closed handling and
+bounded cleanup. Fifteen UI tests pass; production builds split module pages
+and the widget into lazy chunks. Geist/Geist Mono and their licenses are local.
+
+Portrait preparation applied orientation, removed EXIF/GPS/ICC/XMP, verified
+metadata absence and recorded SHA-256. Both outputs were inspected visually.
+They are only in `.gearbox/settings-community-demo/private-assets/portraits`
+and prepared ignored UI output. No child photographs are tracked.
+
+Release 21 is deployed with content-derived image tags. Initial full-path scene
+(browser -> UI nginx -> Gateway -> EB, and remote Settings read) passed:
+`01a14e72-1a97-71ba-a67a-42696d44b1fb`, sequence 27, appeared in Dasha's inspector
+and second-tab card; that card reread Settings and recorded one celebration.
+Ilya remained false, recorded zero celebrations and zero foreign-tenant frames,
+and never displayed that event. Screenshot `.gearbox/phase5-family-scene.png`.
+Additional UI conflict, registry, reconnect/replay and scalar checks are still
+being completed; this is not yet phase-5 acceptance.
+
+
+Phase-5 acceptance completed on the real minikube deployment. Final images:
+Gateway `sha256:5872ec82c6deaf4d8ef6fccfba61321ab97cd4827128308a3df9361ff8f64bfe`,
+Settings `sha256:51f64e074f88d669d99cf428c36f022436b1a38023f7b76982f254c09cb68cdc`,
+UI `sha256:a000255e6ce92f2cc49f993a25b099cd7f930548ae9beabe957a03302f9cbedd`.
+Release 23 is ready. The earlier producer cursors/consumer group survived and
+the topic and Directory registration were restored by startup, verified without
+re-registering test declarations (`phase5-persistence-proof.json`).
+
+The final widget logic serializes initial/reconnect/event reads. Scene event
+`01a14e7a-177e-7333-9f2d-be85b5fb161e` (sequence 35) appears in both Dasha cards
+and the inspector; each card rereads effective Settings and celebrates once.
+Ilya stays false with no Dasha event or celebration. Evidence:
+`phase5-final-scene-proof.json`, `phase5-family-scene-final.png`. A further
+live transition explicitly produced 32 displayed confetti particles
+(`phase5-confetti-dom-proof.json`); initial true and replay are excluded by
+state/timestamp checks and event-ID deduplication. Reduced motion disables the
+animation. Browser reload with existing true recorded zero celebrations.
+
+A real pod upgrade interrupted the stream; it automatically rejoined/resumed
+and returned connected after four transient attempts, with no replay celebration
+(`phase5-reconnect-proof.json`). Manual reconnect retained one copy of each
+rendered event. SDK fault tests additionally verify SEEK positions, duplicate
+replay suppression and failed processing without checkpoint advancement.
+
+Gateway registry showed 47 visible entities; the Settings source showed all
+three Family Labs schemas, including JSON for approval. Discovery showed the
+Settings OOP instance at version 0.1.0. Both real accounts called OAGW and got
+their own upstream/owner-tenant markers and the matching request ID. History
+showed the actual string mutation and its change-set/request ID. Empty number
+input was rejected; 3.5 and a changed string were saved and restored. A stale
+second editor received the conflict message, retained its draft, disabled Save
+and recovered only after explicit Reload (`phase5-etag-conflict.png`).
+
+Current verification: 16 UI tests, UI production build/Docker build, 80 engine
+library tests, 7 actual-corpus community tests, UI backend-closure test, full
+GDL/IR/lock suites, TypeScript export/determinism, strict Helm checks and Clippy
+for the affected engine and demo adapters. Private-input scan covered 56 changed
+or new source files and found no private identity/credential values or portraits.
+Responsive styles include a narrow-screen navigation/layout; visual acceptance
+here used the available desktop browser. Mac rehearsal remains phase 7.
+
+The full Studio build needs its native npm prerequisites, now being prepared for
+phase 6. Windows npm installation found the standalone SDK but node-gyp did not
+recognize it as a Visual Studio component; no Studio-build success is claimed
+yet. Binary file plans have a matching plaintext fallback in Studio's type map;
+their actual text preview remains unavailable.

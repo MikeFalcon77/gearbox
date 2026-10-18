@@ -70,6 +70,13 @@ fn ui_is_composed_from_package_exports_with_stream_safe_nginx() {
         return;
     };
     let ui = lock.ui.as_ref().expect("explicit product UI");
+    assert_eq!(ui.source.as_ref().unwrap().as_str(), "gears-rust");
+    assert_eq!(ui.shell, "ui/product-shell");
+    let font = files
+        .get(&RelPath::new("ui/packages/shell/src/fonts/geist.woff2").unwrap())
+        .unwrap();
+    assert_eq!(font.kind, gearbox_ir::FileKind::Binary);
+    assert!(font.bytes.starts_with(b"wOF2"));
     assert!(
         ui.modules
             .keys()
@@ -83,9 +90,9 @@ fn ui_is_composed_from_package_exports_with_stream_safe_nginx() {
     );
     let ui_lock: serde_json::Value = serde_json::from_str(text(&files, "ui/ui.lock.json")).unwrap();
     assert_eq!(ui_lock["productLockHash"], lock.product.lock_hash);
-    assert_eq!(ui_lock["packages"].as_array().unwrap().len(), 3);
+    assert_eq!(ui_lock["packages"].as_array().unwrap().len(), 6);
     let nginx = text(&files, "ui/nginx.conf");
-    assert!(nginx.contains("demo-gateway.gearbox-demo.svc.cluster.local:8087"));
+    assert!(nginx.contains("demo-gateway:8087"));
     let schema: serde_json::Value = serde_json::from_str(text(
         &files,
         "helm/settings-community-demo/values.schema.json",

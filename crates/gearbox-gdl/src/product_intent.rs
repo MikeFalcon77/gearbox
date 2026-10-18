@@ -125,6 +125,7 @@ pub fn build(
             Ok(modules) => Some(gearbox_ir::ui::ProductUi {
                 shell: ui.shell.clone(),
                 sdk: ui.sdk.clone(),
+                source: ui.source.clone(),
                 modules,
             }),
             Err(error) => {
