@@ -391,6 +391,7 @@ fn diagnostics() -> Diagnostics {
 #[must_use]
 pub fn fixture() -> ResolvedProduct {
     ResolvedProduct {
+        ui: None,
         database: None,
         sqlite_databases: BTreeMap::new(),
         // The fixture models a `self_hosted` product -- it has a spawn -- so it

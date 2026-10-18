@@ -7,6 +7,7 @@ helm=$(sh "$script_dir/ensure-helm.sh")
 chart="$work/minikube/helm/settings-community-demo"
 render() { "$helm" template settings-community-demo "$chart" --namespace gearbox-demo -f "$script_dir/../deploy/values.yaml" "$@"; }
 render > "$work/rendered.yaml"
+"$helm" lint "$chart" --strict -f "$script_dir/../deploy/values.yaml" >/dev/null
 for change in \
   'demo-gateway.homeVolume.type=emptyDir' \
   'demo-gateway.replicaCount=2' \

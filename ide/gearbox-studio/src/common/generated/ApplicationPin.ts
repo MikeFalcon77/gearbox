@@ -7,8 +7,8 @@ import type { ProfileId } from "./ProfileId";
 /**
  * An explicitly requested application.
  *
- * Only needed to name or replicate an application; the resolver derives the partition
- * on its own otherwise.
+ * Names, replicates or adds process-local services to an application; the
+ * resolver derives the partition on its own otherwise.
  */
 export type ApplicationPin = { name: ApplicationId, 
 /**

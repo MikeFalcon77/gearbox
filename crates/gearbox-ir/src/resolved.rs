@@ -27,7 +27,7 @@ use crate::requirement::ClusterPrimitive;
 ///
 /// A reader that meets an unknown version must refuse rather than guess: a lock
 /// half-understood is worse than one not read at all.
-pub const LOCK_SCHEMA_VERSION: u32 = 2;
+pub const LOCK_SCHEMA_VERSION: u32 = 3;
 
 /// What was asked for.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -941,6 +941,8 @@ pub struct ResolvedProduct {
 
     #[serde(default, skip_serializing_if = "Diagnostics::is_empty")]
     pub diagnostics: Diagnostics,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui: Option<crate::ui::ResolvedUi>,
 }
 
 impl ResolvedProduct {

@@ -70,6 +70,23 @@ macro_rules! gdl_record {
 }
 
 gdl_record! {
+    /// `ui_module(package = path(...), requires = [...])`
+    UiModuleRecord as "gdl_ui_module" {
+        pub package: String,
+        pub requires: Vec<String>,
+    }
+}
+
+gdl_record! {
+    /// `ui_product(shell = path(...), sdk = path(...), modules = [...])`
+    UiProductRecord as "gdl_ui_product" {
+        pub shell: String,
+        pub sdk: String,
+        pub modules: Vec<String>,
+    }
+}
+
+gdl_record! {
     /// `cargo(crate = ..., lib = ..., path = ..., features = [...], link = [...])`
     ///
     /// `lib` is mandatory rather than derived from `crate`: a crate with no

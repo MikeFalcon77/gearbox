@@ -63,6 +63,49 @@ Not refused, but outside the grammar above: arithmetic (`"a" + "b"`, `8000 + 80`
 
 ---
 
+## UI composition (GDL 1.2)
+
+UI composition is optional and available in GDL 1.2. A gear locates its UI
+source package and states the backends it needs:
+
+```python
+gear(
+    # Existing Rust package and other declarations...
+    ui = ui_module(package = path("../ui"), requires = ["settings-service"]),
+)
+```
+
+A product explicitly selects modules and locates its shell and shared SDK:
+
+```python
+ui = ui_product(
+    shell = path("../../ui/product-shell"),
+    sdk = path("../../ui/ui-sdk"),
+    modules = ["settings-service"],
+)
+```
+
+These are directory locators. npm names, versions and exports come from each
+`package.json`. Packages declare `gearsUi.apiVersion = 1` and kind `sdk`, `shell`
+or `module`. Modules export `./plugin` from a file under `src/`; SDK and shell
+export `.`. Shell and modules declare a compatible SDK peer (`^1.0.0` for SDK
+1.x). The current source-package format accepts numeric `major.minor.patch`
+versions and string exports. Runtime module federation is not used.
+
+The resolver rejects missing backend gears. Generation validates package
+metadata and export files without executing JavaScript, then emits the frontend
+workspace, module registry, runtime configuration, nginx, Dockerfile and
+Kubernetes UI resources. `product.lock` schema 3 records the UI composition;
+`ui/ui.lock.json` records projected package identities, exports and content
+hashes beside the parent product lock hash. npm's generated `package-lock.json`
+pins third-party dependencies for `npm ci` in the prepared bundle. Products
+without UI declarations continue to generate only their existing backend
+artifacts. Resolve older locks again to write schema 3.
+
+Firebase Web SDK configuration belongs in the prepared product's public runtime
+configuration. User mappings, bearer tokens and private assets do not belong in
+GDL or UI source packages.
+
 ## External database (GDL 1.1)
 
 Each `embedded`, `self_hosted` and `kubernetes` profile accepts an optional

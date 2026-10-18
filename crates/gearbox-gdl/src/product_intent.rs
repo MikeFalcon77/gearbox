@@ -115,6 +115,28 @@ pub fn build(
 
     let sources = build_sources(uri, decl, diagnostics);
 
+    let ui = decl.ui.as_ref().and_then(|ui| {
+        let modules: Result<std::collections::BTreeSet<_>, _> = ui
+            .modules
+            .iter()
+            .map(|id| GearId::new(id.clone()))
+            .collect();
+        match modules {
+            Ok(modules) => Some(gearbox_ir::ui::ProductUi {
+                shell: ui.shell.clone(),
+                sdk: ui.sdk.clone(),
+                modules,
+            }),
+            Err(error) => {
+                diagnostics.push(Diagnostic::error(
+                    DiagnosticCode::GdlEval,
+                    format!("invalid UI module id: {error}"),
+                    "use gear ids in ui_product(modules = [...])",
+                ));
+                None
+            }
+        }
+    });
     Some(ProductIntent {
         id: decl.id.clone(),
         display_name: decl.display_name.clone(),
@@ -130,6 +152,7 @@ pub fn build(
         sources,
         profiles,
         default_profile,
+        ui,
     })
 }
 

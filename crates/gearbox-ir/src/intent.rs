@@ -707,6 +707,8 @@ pub struct ProductIntent {
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preferences: Vec<Preference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui: Option<crate::ui::ProductUi>,
 }
 
 impl ProductIntent {

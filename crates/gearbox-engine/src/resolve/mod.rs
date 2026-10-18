@@ -20,6 +20,7 @@ pub mod partition;
 pub mod product;
 pub mod profile;
 pub mod structural;
+mod ui;
 
 use std::collections::BTreeSet;
 
@@ -49,6 +50,7 @@ fn unknown_profile(intent: &ProductIntent, profile: &ProfileId, uri: &str) -> Di
 
 /// Everything one resolution produced.
 pub struct Resolution {
+    pub ui: Option<gearbox_ir::ui::ResolvedUi>,
     pub database: Option<gearbox_ir::PostgresDatabase>,
     pub sqlite_databases:
         std::collections::BTreeMap<gearbox_ir::GearId, gearbox_ir::SqliteDatabase>,
@@ -250,8 +252,10 @@ pub fn resolve_at(
     );
     cluster::report_stateful_replicas(catalogue, &partition, &cluster, &uri, &mut diagnostics);
 
+    let ui = ui::resolve(catalogue, intent, &closure, &uri, &mut diagnostics);
     diagnostics.finish();
     Resolution {
+        ui,
         database,
         sqlite_databases: intent
             .profiles

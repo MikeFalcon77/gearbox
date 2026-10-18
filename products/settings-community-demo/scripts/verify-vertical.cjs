@@ -44,8 +44,8 @@ const server = http.createServer(async (request, response) => {
     try {
       const value = JSON.parse(body);
       if (!['dasha', 'ilya'].includes(value.lab) || !['editor', 'observer'].includes(value.role)
-        || typeof value.tabId !== 'string' || typeof value.eventId !== 'string' || typeof value.value !== 'boolean') throw Error('Invalid result');
-      const receipt = {lab: value.lab, role: value.role, tabId: value.tabId, eventId: value.eventId, value: value.value, verifiedAt: new Date().toISOString()};
+        || typeof value.tabId !== 'string' || typeof value.eventId !== 'string' || typeof value.value !== 'boolean' || !Number.isSafeInteger(value.foreignTenantFrames) || value.foreignTenantFrames < 0) throw Error('Invalid result');
+      const receipt = {lab: value.lab, role: value.role, tabId: value.tabId, eventId: value.eventId, value: value.value, foreignTenantFrames: value.foreignTenantFrames, passed: value.foreignTenantFrames === 0, verifiedAt: new Date().toISOString()};
       fs.writeFileSync(path.join(repo, '.gearbox/settings-community-demo/private', 'vertical-' + value.lab + '-' + value.role + '.json'), JSON.stringify(receipt, null, 2) + '\n');
       response.writeHead(204).end();
     } catch {response.writeHead(400).end();}

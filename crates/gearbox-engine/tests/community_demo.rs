@@ -65,6 +65,55 @@ fn text<'a>(files: &'a FileSet, path: &str) -> &'a str {
 }
 
 #[test]
+fn ui_is_composed_from_package_exports_with_stream_safe_nginx() {
+    let Some((lock, files)) = resolved() else {
+        return;
+    };
+    let ui = lock.ui.as_ref().expect("explicit product UI");
+    assert!(
+        ui.modules
+            .keys()
+            .any(|id| id.as_str() == "settings-service")
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_str(text(&files, "ui/package.json")).unwrap();
+    assert_eq!(manifest["workspaces"][0], "packages/*");
+    assert!(
+        text(&files, "ui/src/module-registry.ts").contains("@gears/settings-service-ui/plugin")
+    );
+    let ui_lock: serde_json::Value = serde_json::from_str(text(&files, "ui/ui.lock.json")).unwrap();
+    assert_eq!(ui_lock["productLockHash"], lock.product.lock_hash);
+    assert_eq!(ui_lock["packages"].as_array().unwrap().len(), 3);
+    let nginx = text(&files, "ui/nginx.conf");
+    assert!(nginx.contains("demo-gateway.gearbox-demo.svc.cluster.local:8087"));
+    let schema: serde_json::Value = serde_json::from_str(text(
+        &files,
+        "helm/settings-community-demo/values.schema.json",
+    ))
+    .unwrap();
+    assert_eq!(schema["properties"]["demoUiImage"]["type"], "string");
+    assert_eq!(schema["additionalProperties"], false);
+    for required in [
+        "proxy_buffering off",
+        "proxy_cache off",
+        "proxy_read_timeout 3600s",
+        "X-Accel-Buffering no",
+    ] {
+        assert!(
+            nginx.contains(required),
+            "missing stream directive {required}"
+        );
+    }
+    assert!(
+        text(
+            &files,
+            "helm/settings-community-demo/templates/demo-ui.yaml"
+        )
+        .contains("runAsNonRoot: true")
+    );
+}
+
+#[test]
 fn each_process_links_the_selected_plugins_of_every_host_it_contains() {
     let Some((lock, _)) = resolved() else {
         return;

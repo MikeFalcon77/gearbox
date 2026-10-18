@@ -11,6 +11,7 @@ import type { ResolvedClusterBinding } from "./ResolvedClusterBinding";
 import type { ResolvedGear } from "./ResolvedGear";
 import type { ResolvedProductHeader } from "./ResolvedProductHeader";
 import type { ResolvedSource } from "./ResolvedSource";
+import type { ResolvedUi } from "./ResolvedUi";
 import type { SelfHostedSettings } from "./SelfHostedSettings";
 import type { SourceId } from "./SourceId";
 import type { SqliteDatabase } from "./SqliteDatabase";
@@ -53,4 +54,4 @@ cuttable_if_declared?: Array<CutCandidate>,
 /**
  * Ordered by source, kind, then target.
  */
-provenance?: Array<ProvenanceEdge>, diagnostics?: Diagnostics, };
+provenance?: Array<ProvenanceEdge>, diagnostics?: Diagnostics, ui?: ResolvedUi | null, };

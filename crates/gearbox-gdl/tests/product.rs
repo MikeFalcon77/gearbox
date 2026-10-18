@@ -66,6 +66,23 @@ fn a_minimal_product_evaluates() {
 }
 
 #[test]
+fn product_ui_explicitly_selects_modules_and_package_paths() {
+    let (intent, codes, messages) = eval(&product(
+        "ui = ui_product(shell = path(\"../../ui/shell\"), sdk = path(\"../../ui/sdk\"), modules = [\"settings-service\"]),",
+    ));
+    assert!(codes.is_empty(), "{codes:?} {messages}");
+    let ui = intent.unwrap().ui.unwrap();
+    assert_eq!(ui.shell, "../../ui/shell");
+    assert_eq!(
+        ui.modules
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>(),
+        ["settings-service"]
+    );
+}
+
+#[test]
 fn use_gear_on_the_third_line_records_line_two() {
     // 0-based: a call written on the third source line must not claim the start
     // of the file. That is the unit proof behind "the link opens on use_gear".

@@ -1410,6 +1410,9 @@ diagnostic_codes! {
     /// The registry could not be asked at all -- offline, or cargo failed -- so
     /// every crate of the source stays a path dependency.
     GenRegistryUnavailable = "GBX0711", Generator, Warning, false, "the registry could not be reached";
+
+    /// A UI package or composition cannot be built for this product.
+    UiInvalid = "GBX0720", Generator, Error, false, "invalid UI composition or package";
 }
 
 /// A diagnostic code string that this build does not know.

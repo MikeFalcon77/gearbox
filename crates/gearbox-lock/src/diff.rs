@@ -300,6 +300,7 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
     // "unchanged". Collections and diagnostics have their own lists; profile
     // is `profile_changed`.
     let gearbox_ir::ResolvedProduct {
+        ui: before_ui,
         sqlite_databases: before_sqlite,
         database: before_db,
         schema_version: before_schema,
@@ -316,6 +317,7 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
         diagnostics: _,
     } = before;
     let gearbox_ir::ResolvedProduct {
+        ui: after_ui,
         sqlite_databases: after_sqlite,
         database: after_db,
         schema_version: after_schema,
@@ -355,6 +357,7 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
         );
     }
 
+    compare("ui", format!("{before_ui:?}"), format!("{after_ui:?}"));
     compare(
         "schema_version",
         before_schema.to_string(),

@@ -496,3 +496,94 @@ approved plan, execution notes and tracked commit diffs; no private handoff,
 credentials or photos. The first read-only review attempt returned an expired
 OAuth session, so no Claude findings or approval are claimed. The user has been
 asked to refresh that CLI session while implementation continues.
+
+Claude review subsequently succeeded after the user refreshed the session and
+the CLI was updated from 2.1.76 to 2.1.302. The requested invocation explicitly
+used `--model claude-opus-5-5 --effort high`; returned usage confirms
+`claude-opus-5-5`. The local report is
+`.gearbox/phase3-claude-review-opus55-high.txt`. It reviewed the supplied committed
+diffs and evidence, without live checkout tools or private inputs.
+
+Review follow-up:
+
+- The active loader really could retry an immediate backend failure without
+  sleeping. This is fixed at the shard loop, for both tail and backfill work.
+  All 38 loader tests pass, including a paused-time regression that observes one
+  read before the tick, one retry after it, and prompt cancellation. There is no
+  per-failure warning in this path. The fix is committed as `bd26afcf4`.
+- The early browser page silently discarded foreign-tenant frames. Its guard
+  now fails explicitly, and receipts include the observed count and pass state.
+  The prior screenshot proves same-tenant updates and Ilya's unchanged value;
+  it does not by itself prove absence of foreign frames. The modular UI stream
+  must apply the same guard as well. The strengthened live run is recorded below.
+- Echo declarations now set immutable upstream/owner markers, and echo reflects
+  them. The helper checks them as well as request correlation. The live check
+  on release 20 confirms both upstream/owner pairs and request IDs.
+- Hostname exemptions intentionally follow the existing documented allow-first
+  policy, including resolved addresses. Changing precedence would change that
+  policy. This product exempts one exact, operator-controlled Kubernetes service
+  name; ordinary names still undergo IP checks. No broad demo exemption is added.
+- Startup readiness intentionally waits for managed producer registration. An
+  already started worker can commit during an EB outage; after a cold restart
+  it remains unready until registration recovers. No claim of cold-start write
+  availability during an EB outage is made.
+- Set/revert use the shared commit; batch calls it at `value_writes.rs:485` and
+  clone at `:849`. Pending-secret cleanup is not a public demo value mutation.
+  Internal errors go through the canonical Problem conversion; the existing
+  `an_unrecognized_error_leaks_nothing` test verifies redaction.
+- The bootstrap credential also serves as the private operator identity for
+  technical QA. Bootstrap code itself seeds declarations, not tenant overrides.
+  This is broader than a dedicated bootstrap-only token and remains a bounded
+  demo limitation. Real-user access checks use the separate Google sessions.
+- Optional event integration currently adds shared SDK dependencies/migrations
+  to every Settings build; direct REST broker URLs and the two-lab identifiers
+  are product-specific. Bulk reads repeat per-key authorization. These are
+  documented demo tradeoffs, not claims of a production integration framework.
+- Child override changes produce events; parent-driven effective-value fan-out
+  is outside this demo. Temporary QA groups need cleanup before final rehearsal.
+
+## Phase 4 — complete
+
+Implemented optional GDL 1.2 UI locators and explicit product composition,
+typed IR and lock schema 3, backend requirement validation, generated npm
+workspace/registry/runtime config/nginx/Dockerfile/Helm, and package.json
+identity/export/API checks without JavaScript execution. A companion UI lock
+records package content hashes and the parent lock hash. Existing products
+without UI still generate their backend artifacts.
+
+Added `@gears/ui-sdk`, `@gears/product-shell`, and the Settings UI package on the
+boring-pills stack. The shell owns Firebase login, backend `/me` identity,
+identity/tenant query keys, request cancellation/cache cleanup, navigation,
+notifications, lazy pages, widget slots and error boundaries. The existing
+public Firebase configuration is prepared with `scripts/prepare-ui.cjs`.
+
+Release 19 has a working nginx UI in minikube. Both existing Google sessions
+restored without another login, showed the correct server-selected laboratory,
+and read Settings through Gateway to worker. Screenshot:
+`.gearbox/phase4-product-ui-proof.png`. Actual SSE through the UI nginx proxy
+also passes (`phase4-nginx-events-proof.log`, event
+`01a14e4d-50cd-767b-9e6c-711cb1a61dc6`), with the temporary value restored.
+
+Current checks include 79 engine library tests, 7 community composition tests,
+53 prior generation tests, the missing-backend UI test, all GDL/IR/lock suites,
+TypeScript export/determinism, UI production build and five SDK transport/cache
+tests. Both engine and identity adapter pass Clippy. Final widget-slot sources
+also build, and release 20 deploys Gateway
+`sha256:f8b255b4e4c3c0c806b89b90240eebdf994c3c4c8a75d3dfeb3986abb56d6555`
+and UI `sha256:f8bfc7390bdc2a04556afb41dc916668367219dd31249465cde8b32c94d146d9`.
+The UI uses a content-derived image tag; the umbrella's strict values schema
+explicitly accepts its image override. Echo rolls on its code checksum. Helm
+rendering, strict lint and invalid SQLite override checks pass.
+
+The strengthened browser run uses the same three Google sessions through UI
+nginx. Both Dasha tabs received `01a14e5b-0582-760f-a1e9-f4834a0c2275` and reread
+`true`. All three tabs explicitly report zero foreign-tenant frames; Ilya
+remained `false` without a Dasha event. Both OAGW calls reflect the correct
+per-lab upstream ID and owner tenant, with matching request IDs. Reset then
+produced the same reset event in both Dasha tabs. Text and screenshot evidence:
+`.gearbox/phase3-review-browser-proof.txt` and `.png`. These close the two
+browser-proof gaps identified by Claude. The temporary proof page is excluded
+from the next product image build.
+
+Four full UI modules, photos and live confetti remain phase 5; the prepared
+one-click Deploy path remains phase 6. The approved plan itself is unchanged.

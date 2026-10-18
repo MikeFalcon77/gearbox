@@ -35,6 +35,7 @@ pub fn source() -> SourceId {
 /// case rather than inherited from a fixture.
 pub fn descriptor(id: &str) -> GearDescriptor {
     GearDescriptor {
+        ui: None,
         maturity: gearbox_ir::Maturity::Stable,
         one_per_installation: false,
         id: gid(id),
@@ -83,6 +84,7 @@ pub fn descriptor(id: &str) -> GearDescriptor {
 pub fn intent(gears: &[&str]) -> ProductIntent {
     let dev = ProfileId::new("dev").unwrap();
     ProductIntent {
+        ui: None,
         templates: None,
         layout: None,
         id: "fixture".to_owned(),

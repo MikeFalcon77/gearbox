@@ -1,4 +1,22 @@
 # Product extension owned by settings-community-demo.
+{{- define "demo.echo.code" -}}
+'use strict';
+const http = require('node:http');
+const { randomUUID } = require('node:crypto');
+http.createServer((request, response) => {
+  const requestId = request.headers['x-request-id'] || request.headers['x-correlation-id'] || randomUUID();
+  response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+  response.end(JSON.stringify({
+    service: 'demo-echo',
+    message: 'Hello from the private echo service.',
+    method: request.method,
+    path: request.url,
+    requestId,
+    upstreamId: request.headers['x-demo-upstream'] || null,
+    ownerTenant: request.headers['x-demo-owner-tenant'] || null,
+  }));
+}).listen(8080, '0.0.0.0');
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,20 +25,7 @@ metadata:
     app.kubernetes.io/part-of: settings-community-demo
 data:
   server.cjs: |
-    'use strict';
-    const http = require('node:http');
-    const { randomUUID } = require('node:crypto');
-    http.createServer((request, response) => {
-      const requestId = request.headers['x-request-id'] || request.headers['x-correlation-id'] || randomUUID();
-      response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      response.end(JSON.stringify({
-        service: 'demo-echo',
-        message: 'Hello from the private echo service.',
-        method: request.method,
-        path: request.url,
-        requestId,
-      }));
-    }).listen(8080, '0.0.0.0');
+    {{- include "demo.echo.code" . | nindent 4 }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -34,6 +39,8 @@ spec:
     matchLabels: {app: demo-echo}
   template:
     metadata:
+      annotations:
+        checksum/code: {{ include "demo.echo.code" . | sha256sum | quote }}
       labels: {app: demo-echo, app.kubernetes.io/part-of: settings-community-demo}
     spec:
       automountServiceAccountToken: false

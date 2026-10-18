@@ -66,6 +66,7 @@ pub fn assemble(
         cuttable_if_declared: resolution.cuts.blocked.clone(),
         provenance: explain(catalogue, intent, resolution).edges,
         diagnostics: resolution.diagnostics.clone(),
+        ui: resolution.ui.clone(),
     };
 
     gearbox_lock::canonicalize_order(&mut product);

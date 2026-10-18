@@ -575,6 +575,27 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         })
     }
 
+    /// Build-time shell composition with explicitly selected gear modules.
+    ///
+    /// # Arguments
+    /// * `shell`: The shell package directory, as path(...), relative to product.gdl.
+    /// * `sdk`: The shared UI SDK package directory, as path(...).
+    /// * `modules`: Gear ids with UI contributions included in this product.
+    fn ui_product<'v>(
+        #[starlark(require = named)] shell: &'v SourceAtRecord,
+        #[starlark(require = named)] sdk: &'v SourceAtRecord,
+        #[starlark(require = named)] modules: UnpackList<String>,
+    ) -> anyhow::Result<crate::records::UiProductRecord> {
+        if shell.kind != "path" || sdk.kind != "path" {
+            return Err(anyhow::anyhow!("UI shell and SDK require path(...)"));
+        }
+        Ok(crate::records::UiProductRecord {
+            shell: shell.at.clone().unwrap_or_default(),
+            sdk: sdk.at.clone().unwrap_or_default(),
+            modules: modules.items,
+        })
+    }
+
     /// `product(...)` -- the single top-level declaration of a `product.gdl`.
     ///
     /// # Arguments
@@ -585,6 +606,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     /// * `sources`: Where gears come from, as `source(...)`.
     /// * `templates`: The template overlay, as `path(...)`. The default is `templates/` beside this
     ///   file.
+    /// * `ui`: Optional shell and gear UI composition, as `ui_product(...)`.
     /// * `layout`: The directory generated applications go under. The default is `apps`.
     /// * `profiles`: The deployment profiles: `embedded(...)`, `self_hosted(...)`,
     ///   `kubernetes(...)`. At least one.
@@ -594,6 +616,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     /// * `cluster_profiles`: The cluster backends, as `cluster_profile(...)`.
     /// * `applications`: The applications, as `application(...)`.
     /// * `preferences`: What resolution prefers, as `prefer.*()`.
+
     fn product<'v>(
         // `"MAJOR.MINOR"`; read before evaluation by `version.rs`, accepted
         // here so that writing it is not an unknown argument.
@@ -604,6 +627,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] sources: UnpackList<&'v SourceRecord>,
         #[starlark(require = named)] templates: Option<&'v SourceAtRecord>,
         #[starlark(require = named)] layout: Option<&str>,
+        #[starlark(require = named)] ui: Option<&'v crate::records::UiProductRecord>,
         #[starlark(require = named)] profiles: UnpackList<&'v ProfileRecord>,
         #[starlark(require = named)] default_profile: &str,
         #[starlark(require = named)] gears: UnpackList<&'v UseGearRecord>,
@@ -628,6 +652,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
             ));
         }
         sink(eval)?.set_product(ProductDecl {
+            ui: ui.cloned(),
             id: id.to_owned(),
             display_name: name.unwrap_or(id).to_owned(),
             version: version.to_owned(),

@@ -3,23 +3,31 @@
 <style>body{font:16px/1.6 system-ui;background:#f2f6fc;color:#0e1a2c;max-width:900px;margin:50px auto;padding:24px}h1{color:#00204d}.card{background:white;border:1px solid #dce3ee;border-radius:16px;padding:24px;margin:20px 0}button{background:#0065e3;color:white;border:0;border-radius:8px;padding:12px 18px;font:inherit;cursor:pointer}button:disabled{opacity:.5}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{margin-right:16px;color:#0065e3}.value{font-size:32px;font-weight:650}</style>
 <h1 id="title">Family Labs · Live event check</h1>
 <p>Temporary verification of Settings → transactional outbox → remote Event Broker → authorized remote Settings reread.</p>
-<nav><a href="/?lab=dasha" target="_blank" rel="opener">Dasha editor</a><a href="/?lab=dasha&observe=1" target="_blank" rel="opener">Dasha observer</a><a href="/?lab=ilya&observe=1" target="_blank" rel="opener">Ilya observer</a></nav>
+<nav><a href="?lab=dasha" target="_blank" rel="opener">Dasha editor</a><a href="?lab=dasha&observe=1" target="_blank" rel="opener">Dasha observer</a><a href="?lab=ilya&observe=1" target="_blank" rel="opener">Ilya observer</a></nav>
 <div class="card"><button id="login" disabled>Sign in with Google</button><p id="identity">Checking session…</p></div>
 <div class="card"><div class="value" id="value">—</div><button id="change" disabled>Approve ice cream</button><pre id="status">Waiting for sign-in.</pre></div>
-<div class="card"><h2>Last real event</h2><pre id="event">No event received.</pre><button id="echo" disabled>Call private echo through OAGW</button><pre id="echo-result"></pre></div>
+<div class="card"><p id="checks">Foreign tenant frames: 0</p><pre id="receipt">No receipt yet.</pre><h2>Last real event</h2><pre id="event">No event received.</pre><button id="echo" disabled>Call private echo through OAGW</button><pre id="echo-result"></pre></div>
 <script type="module">
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
 import {getAuth, GoogleAuthProvider, signInWithPopup, setPersistence, browserSessionPersistence, onAuthStateChanged, signOut} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
 const params=new URLSearchParams(location.search),lab=params.get('lab')==='ilya'?'ilya':'dasha',observe=params.has('observe');
 const role=observe?'observer':'editor',tabId=crypto.randomUUID();
-const setup=await fetch('/setup').then(r=>r.json());
+const productMode=params.has('product');
+if(productMode)for(const link of document.querySelectorAll('nav a'))link.href+='&product=1';
+const setup=productMode?{webConfig:(await fetch('/runtime-config.json').then(r=>r.json())).firebase}:await fetch('/setup').then(r=>r.json());
 const tenant=lab==='dasha'?'d0000000-0000-4000-8000-000000000002':'a0000000-0000-4000-8000-000000000003';
 const key='gts.cf.core.settings.setting_type.v1~cf.family_labs.lab.ice_cream_approved.v1~';
 const topic='gts.cf.core.events.topic.v1~cf.demo.settings.changed.v1',eventType='gts.cf.core.events.event.v1~cf.demo.settings.changed.v1~';
 const auth=getAuth(initializeApp(setup.webConfig));await setPersistence(auth,browserSessionPersistence);
 const $=id=>document.getElementById(id);$('title').textContent=(lab==='dasha'?'Dasha’s Lab':'Ilya’s Lab')+(observe?' · Observer':' · Editor');
 if(observe)$('change').hidden=true;
-let current=false,stopStream;
+let current=false,stopStream,foreignTenantFrames=0;
+async function receipt(eventId=""){
+  const result={lab,role,tabId,eventId,value:current,foreignTenantFrames,passed:foreignTenantFrames===0};
+  $('checks').textContent='Foreign tenant frames: '+foreignTenantFrames;
+  $('receipt').textContent=JSON.stringify(result,null,2);
+  if(!productMode)await fetch("/receipt",{method:"POST",headers:{"Content-Type":"application/json","X-Demo-Nonce":setup.nonce},body:JSON.stringify(result)});
+}
 async function api(route,options={}){
   const token=await auth.currentUser.getIdToken();
   const response=await fetch('/api'+route,{...options,headers:{Authorization:'Bearer '+token,'X-Demo-Nonce':setup.nonce,...(options.body?{'Content-Type':'application/json'}:{}),...options.headers}});
@@ -41,6 +49,7 @@ async function stream(signal){
     await api('/event-broker/v1/subscriptions/'+sub.id+':seek',{method:'POST',body:JSON.stringify({topology_version:1,positions:{[topic]:[{partition:0,value:'latest'}]}})});
     const response=await api('/event-broker/v1/events:sse?subscription_id='+encodeURIComponent(sub.id),{signal});
     $('status').textContent='Live stream connected. This widget has no polling or focus refresh.';
+    await receipt();
     const seen=new Set();let buffer='';const decoder=new TextDecoder();
     for await(const chunk of response.body){
       buffer+=decoder.decode(chunk,{stream:true});if(buffer.length>1048576)throw Error('Oversized SSE frame');
@@ -48,12 +57,14 @@ async function stream(signal){
         const frame=buffer.slice(0,boundary.index);buffer=buffer.slice(boundary.index+boundary[0].length);
         const data=frame.split(/\r?\n/).filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trimStart()).join('\n');if(!data)continue;
         const message=JSON.parse(data),event=message.payload;
-        if(message.kind!=='event'||event.tenant_id!==tenant||seen.has(event.id))continue;
+        if(message.kind!=='event')continue;
+        if(event.tenant_id!==tenant){foreignTenantFrames++;await receipt(event.id);throw Error('FAILED: foreign tenant frame received');}
+        if(seen.has(event.id))continue;
         seen.add(event.id);if(seen.size>1000)seen.delete(seen.values().next().value);
         $('event').textContent=JSON.stringify(event,null,2);
         if(event.data?.key===key){
           await read();$('status').textContent='Updated by real event '+event.id+' and remote Settings reread.';
-          await fetch('/receipt',{method:'POST',headers:{'Content-Type':'application/json','X-Demo-Nonce':setup.nonce},body:JSON.stringify({lab,role,tabId,eventId:event.id,value:current})});
+          await receipt(event.id);
         }
       }
     }
@@ -63,12 +74,13 @@ async function stream(signal){
   }
 }
 $('login').disabled=false;$('login').onclick=async()=>{
-  try{const provider=new GoogleAuthProvider();provider.setCustomParameters({login_hint:setup.expected[lab]});await signInWithPopup(auth,provider);}catch(error){$('identity').textContent=error.message;}
+  try{const provider=new GoogleAuthProvider();if(!productMode)provider.setCustomParameters({login_hint:setup.expected[lab]});await signInWithPopup(auth,provider);}catch(error){$('identity').textContent=error.message;}
 };
 onAuthStateChanged(auth,async user=>{
   stopStream?.abort();if(!user){$('identity').textContent='Sign in with the configured '+lab+' account.';return;}
   try{
-    if(user.email?.toLowerCase()!==setup.expected[lab].toLowerCase()){await signOut(auth);throw Error('Use the configured account for this laboratory.');}
+    if(productMode){const identity=await api('/family-labs/v1/me').then(r=>r.json());if(identity.tenant_id!==tenant)throw Error('This session belongs to another laboratory.');}
+    else if(user.email?.toLowerCase()!==setup.expected[lab].toLowerCase()){await signOut(auth);throw Error('Use the configured account for this laboratory.');}
     $('identity').textContent='Google session accepted for this laboratory.';$('login').hidden=true;
     await read();$('change').disabled=false;$('echo').disabled=false;
     stopStream=new AbortController();await stream(stopStream.signal);
@@ -84,7 +96,9 @@ $('change').onclick=async()=>{
 $('echo').onclick=async()=>{
   const requestId=crypto.randomUUID();try{
     const result=await api('/oagw/v1/proxy/demo-echo.gearbox-demo.svc.cluster.local:8080/echo',{headers:{'X-Request-Id':requestId}}).then(r=>r.json());
-    if(result.requestId!==requestId)throw Error('Echo correlation mismatch');$('echo-result').textContent=JSON.stringify(result,null,2);
+    if(result.requestId!==requestId)throw Error('Echo correlation mismatch');
+    const upstream=lab==='dasha'?'d0000000-0000-4000-8000-000000000101':'a0000000-0000-4000-8000-000000000101';
+    if(result.upstreamId!==upstream||result.ownerTenant!==tenant)throw Error('Echo upstream owner mismatch');$('echo-result').textContent=JSON.stringify(result,null,2);
   }catch(error){$('echo-result').textContent=error.message;}
 };
 </script></html>

@@ -311,6 +311,11 @@ fn umbrella_values(
         );
     }
     let values = UmbrellaValues {
+        demo_ui_image: input
+            .lock
+            .ui
+            .as_ref()
+            .map(|_| format!("gbx-demo-ui:{}", input.lock.product.version)),
         // Emitted empty rather than omitted. `global` is where a house policy
         // puts the labels it requires on everything, and a key absent from the
         // file an operator edits is a key nobody finds. `imageRegistry` stays
@@ -360,6 +365,12 @@ fn values_schema(input: &GenerateInput<'_>) -> Result<FileEntry, GenerateError> 
     let subchart = draft7_subchart_schema()?;
     let mut properties = serde_json::Map::new();
     properties.insert("global".to_owned(), global_schema()?);
+    if input.lock.ui.is_some() {
+        properties.insert(
+            "demoUiImage".to_owned(),
+            serde_json::json!({"type":"string", "minLength":1}),
+        );
+    }
     let mut required = Vec::new();
     for application in &input.lock.applications {
         let name = subchart_name(application);
@@ -664,6 +675,8 @@ struct SubchartValues {
 
 #[derive(serde::Serialize)]
 struct UmbrellaValues {
+    #[serde(rename = "demoUiImage", skip_serializing_if = "Option::is_none")]
+    demo_ui_image: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     global: Option<GlobalValues>,
     #[serde(flatten)]

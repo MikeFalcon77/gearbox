@@ -29,6 +29,7 @@ export const GEAR_FUNCTIONS: readonly string[] = [
   "rest",
   "role",
   "scenario",
+  "ui_module",
 ];
 
 /** The callable vocabulary of a `product.gdl`. */
@@ -47,6 +48,7 @@ export const PRODUCT_FUNCTIONS: readonly string[] = [
   "registry",
   "self_hosted",
   "source",
+  "ui_product",
   "use_gear",
 ];
 

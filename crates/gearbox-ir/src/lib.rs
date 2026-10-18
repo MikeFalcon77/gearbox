@@ -16,6 +16,7 @@ pub mod ids;
 pub mod intent;
 pub mod requirement;
 pub mod resolved;
+pub mod ui;
 
 pub use catalogue::{
     CargoFeature, Catalogue, ConfigFieldDecl, ConfigFieldType, ConfigSchema, DeclaredRole,

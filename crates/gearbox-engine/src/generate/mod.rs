@@ -47,6 +47,7 @@ mod merge3;
 mod paths;
 mod rust;
 mod templates;
+mod ui;
 mod workspace;
 
 use std::collections::BTreeMap;
@@ -91,6 +92,8 @@ pub(crate) const K8S_HOME_DIR: &str = "/var/lib/gearbox";
 /// says immediately.
 #[derive(Debug, thiserror::Error)]
 pub enum GenerateError {
+    #[error("GBX0720: invalid UI composition: {0}")]
+    Ui(String),
     #[error("invalid database configuration: {0}")]
     Database(String),
     #[error("gear `{gear}` is in application `{application}` but not in the lock's gear table")]
@@ -339,6 +342,9 @@ pub fn generate(input: &GenerateInput<'_>) -> Result<Generated, GenerateError> {
         insert(&mut files, config::app_config(input, application)?)?;
     }
 
+    for entry in ui::files(input)? {
+        insert(&mut files, entry)?;
+    }
     for entry in docker::files(input)? {
         insert(&mut files, entry)?;
     }

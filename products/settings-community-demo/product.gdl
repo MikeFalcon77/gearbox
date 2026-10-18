@@ -2,6 +2,12 @@
 # manual gear composition is required. Private configuration stays in .gearbox/.
 load("auth.gdl", "AUTHENTICATION", "AUTHORIZATION", "GATEWAY_POLICIES")
 product(
+    gdl_version = "1.2",
+    ui = ui_product(
+        shell = path("../../../gears-rust-mikefalcon77/ui/product-shell"),
+        sdk = path("../../../gears-rust-mikefalcon77/ui/ui-sdk"),
+        modules = ["settings-service"],
+    ),
     id = "settings-community-demo",
     name = "Family Labs — Settings Community Demo",
     version = "0.1.0",
