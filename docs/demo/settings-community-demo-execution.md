@@ -814,3 +814,20 @@ Provisioning now creates it at host .10 of the named minikube /24 network and
 validates that reservation instead of permitting dynamic allocation. It refuses
 an existing unreserved endpoint rather than silently disconnecting a live DB.
 No minikube deletion, network database deletion or volume recreation was used.
+
+
+The interrupted disk-full upgrade left Helm revision 24 pending-upgrade. The
+runner now checks the named release before any build and before a deployment,
+and reports an unfinished Helm operation rather than starting another upgrade.
+This was reproduced against the actual pending release; preparation stopped
+before generation/build. Recovery uses an explicit rollback to successful
+revision 23, preserving the retained PVC and external DB.
+
+A further host-only startup race was identified: the original WSL Docker daemon
+failed after replacing global Docker FORWARD chains, leaving the isolated
+bridge without its forwarding rules. The isolated service is now ordered after
+`docker.service`. Restarting only that owned daemon regenerated its bridge
+rules; the existing minikube container restarted and its real TCP connection to
+Postgres at 192.168.58.10:5432 passed. No manual firewall bypass or removal of
+Docker network metadata was used. The waiting first rollback client was stopped
+and recovery was retried after network restoration.

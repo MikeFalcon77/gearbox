@@ -270,6 +270,38 @@ async function engine() {
     "target/debug/gearbox" + (process.platform === "win32" ? ".exe" : ""),
   );
 }
+async function idleHelm() {
+  const helm = (await shCapture("ensure-helm.sh", "helm")).trim();
+  const releases = JSON.parse(
+    await run(
+      helm,
+      [
+        "list",
+        "--all",
+        "--filter",
+        "^settings-community-demo$",
+        "--kubeconfig",
+        machine.kubeconfig,
+        "--kube-context",
+        profile,
+        "--namespace",
+        namespace,
+        "-o",
+        "json",
+      ],
+      "helm-release-state",
+      true,
+    ),
+  );
+  const status = releases[0]?.status;
+  if (typeof status === "string" && status.startsWith("pending-"))
+    throw Error(
+      "The previous demo Helm operation is unfinished (" +
+        status +
+        "). Recover the owned release before retrying; no new upgrade was started.",
+    );
+  return helm;
+}
 async function prepare() {
   stage(
     "preflight",
@@ -316,6 +348,7 @@ async function prepare() {
     );
   }
   const target = await cluster();
+  await idleHelm();
   const diskImage = cp.spawnSync(
     "docker",
     ["image", "inspect", "node:24.21.0-alpine"],
@@ -595,6 +628,7 @@ async function validate(allowUnverified = false) {
 async function deploy(allowUnverified = false) {
   stage("validate", "Validating the prepared bundle");
   const bundle = await validate(allowUnverified);
+  const helm = await idleHelm();
   pinnedPostgres = bundle.images.find(
     (image) => image.name === "postgres-server",
   ).ref;
@@ -635,7 +669,6 @@ async function deploy(allowUnverified = false) {
     "deploy",
     "Applying Helm; startup runs migrations and idempotent bootstrap",
   );
-  const helm = (await shCapture("ensure-helm.sh", "helm")).trim();
   await run(
     helm,
     [
