@@ -325,6 +325,10 @@ function prepareOfflinePrivateInputs() {
       fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
       fs.chmodSync(destination, 0o600);
     }
+    const unchanged = relative.endsWith('runtime-secrets.json')
+      ? Object.entries(JSON.parse(fs.readFileSync(source, 'utf8'))).every(([key, value]) => JSON.parse(fs.readFileSync(destination, 'utf8'))[key] === value)
+      : fs.readFileSync(source).equals(fs.readFileSync(destination));
+    if (!unchanged) throw Error('Normal private input changed: review and refresh the reserve copy before preparing offline: ' + relative);
   }
 }
 async function reusePreparedBackends() {

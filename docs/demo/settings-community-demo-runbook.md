@@ -52,6 +52,10 @@ do not commit them, push images or publish an ingress.
 6. Sign into the product with the already configured Google accounts. Prepare
    two Dasha tabs and an independent browser context for Ilya before the talk.
    A lab character/photo is separate from the actual signed-in account.
+   Keep these exact tabs open: Firebase session persistence is per tab and origin.
+   A fresh Open UI tab on port 8080 requires normal Google sign-in even when the
+   verified rehearsal tabs on port 4175 are already signed in. This is browser
+   sign-in, not another Firebase project/CLI setup.
 7. Run the explicit scene reset while the service is healthy:
 
    ```sh
@@ -99,6 +103,10 @@ do not commit them, push images or publish an ingress.
    backend configuration, UI module registry and Helm resources. AI chat is
    optional and is not required for the demonstrated deployment.
 
+Run cleanup with presentation tabs closed; its subscription checks and the broker
+active-member guard do not provide a distributed maintenance lock against a
+concurrent reconnect.
+
 Cluster primitives are configured with the external Postgres provider and are
 used by EB cache/routing/ingest notification paths. Delivery also uses bounded
 partition-loader polling/local notification. Do not describe native prefix watch
@@ -112,7 +120,8 @@ checkpoints, JOIN/SEEK and event-ID deduplication.
   the frontend after a backend restart, inspect the operation/cluster and recover
   any pending Helm revision before explicitly starting a new operation.
   Frontend page reload during a running Deploy is supported.
-- **UI connection lost:** use Reconnect UI. It restores the owned loopback
+- **UI connection lost:** press Check status if the panel still shows Open UI,
+  then Reconnect UI. It restores the owned loopback
   forward without redeploying. A Service port-forward binds one pod; a successful
   deployment reconnects it to the current workload.
 - **Missing/stale bundle:** run prepare before presenting. The error identifies
@@ -149,7 +158,10 @@ and waits. It copies the entire EB volume, including both SQLite databases and
 any WAL/SHM companions, and logically dumps only the four dedicated Postgres
 DBs: `credstore`, `settings_service`, `types_registry`, `gearbox_demo_cluster`.
 It also saves an allowlist of private product inputs, processed portraits and
-the existing Firebase handoff. Writers resume and readiness is checked.
+the existing Firebase handoff. Writers resume and readiness is checked. A backup
+is marked complete only after the saved approval baseline matches a post-resume
+API read. Keep all presentation writes paused throughout; the CLI mutex does not
+lock browsers. A changed baseline requires another backup.
 A partial directory without a complete `snapshot.json` is not a usable backup.
 
 Use the matching `backup-offline`, `restore-offline`, `reset-offline` and
@@ -170,15 +182,26 @@ backend source/migrations. It restores the isolated demo databases and complete
 EB state, resumes Gateway then Settings and checks readiness and saved approval
 values. If a multi-store restore fails, writers stay stopped: fix the reported
 cause and retry the same snapshot before resuming. Never start the presentation
-against a partial restore.
+against a partial restore. The original failure is retained and additional helper
+cleanup/resume failures are reported separately. If quiesce itself failed, shutdown
+may be partial: inspect replicas instead of assuming both writers are stopped.
+
+Before another archive operation the runner checks for an existing pg_dump or
+pg_restore process inside the owned Postgres container. A timed-out Docker client
+can leave its in-container process running. Inspect/wait for that process before
+retrying; do not overlap restores or kill unrelated services.
 
 For a lost minikube profile, privately restore the snapshot's input files and
 Firebase handoff to their original relative work directories, check out the
-recorded backend revision, prepare compatible images/infrastructure, then restore
+source content matching the recorded backend/input digest, prepare compatible
+images/infrastructure, then restore
 the selected snapshot. A restored snapshot may rewind the event log; if an
 inspector reports an out-of-range client checkpoint, use **Start live** and
 reload/verify the baseline before the next approval. Browser checkpoints are
-separate from server-side business cursors. Source checkouts and tools must also be available; this
+separate from server-side business cursors. Bundle revision/dirty metadata describes preparation time; a later content-only
+commit can be valid without rewriting that metadata. Use execution-note commits
+and the required digest when locating those sources. Source checkouts and tools
+must also be available; this
 snapshot is not a universal whole-machine backup. Controlled restore acceptance
 and actual host-specific reboot acceptance are recorded separately in execution
 notes.
@@ -214,6 +237,8 @@ private offline runtime-secrets file. Do this before presenting that mode. The
 shell retains these credentials in memory only. It visibly labels the session
 **Offline Demo / Static identity**. Unknown tokens and sibling access must fail;
 Google sign-in is not attempted. Never paste operator/worker tokens into UI.
+Preparation refuses a reserve copy whose shared technical credentials or portraits
+differ from the normal inputs; review and refresh that private copy explicitly.
 
 Use normal `deploy` to return to the verified Firebase mode and reload UI. The
 existing Google provider/project/accounts stay configured throughout. Do not

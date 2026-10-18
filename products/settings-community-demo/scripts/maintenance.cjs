@@ -145,6 +145,11 @@ async function maintenance(command, ctx, backupId) {
     stage('ready', 'Removed ' + removed.length + ' inactive old demo UI groups; active and business groups retained', 'ready');
     return;
   }
+  // A timed-out docker client can leave its archive process alive in the
+  // container. Refuse a retry while that bounded demo process is still running.
+  const postgresProcesses = await run('docker', ['top', 'gearbox-demo-postgres', '-eo', 'pid,comm'], 'snapshot-postgres-processes', true);
+  assert(!postgresProcesses.split(/\r?\n/).some(line => /^(pg_dump|pg_restore)$/.test(line.trim().split(/\s+/).at(-1))),
+    'A PostgreSQL archive process is still running; inspect it before retrying maintenance');
   const helperName = 'demo-snapshot-' + crypto.randomUUID().slice(0, 8);
   let helperCreated = false;
   const helperArgs = ['--context', 'gearbox-demo', '--namespace', 'gearbox-demo', 'exec', helperName, '--'];
@@ -215,10 +220,10 @@ async function maintenance(command, ctx, backupId) {
     const values = await api(scopes.map(tenant => ({path: approval + '?tenant=' + tenant})));
     manifest.approvals = values.map(value => value.body.value);
   }
-  let stopped = false, restored = false;
+  let quiesceStarted = false, restored = false, primaryError, helperError, resumeError;
   try {
     stage('quiesce', 'Stopping Settings and Gateway writers for a consistent private snapshot');
-    stopped = true;
+    quiesceStarted = true;
     for (const deployment of deployments) {
       await k(['scale', 'deployment/' + deployment.name, '--replicas=0'], 'snapshot-stop-writer');
       await k(['wait', '--for=delete', 'pods', '-l', deployment.selector, '--timeout=120s'], 'snapshot-writer-stopped');
@@ -234,9 +239,6 @@ async function maintenance(command, ctx, backupId) {
         await transfer('docker', ['exec', 'gearbox-demo-postgres', 'pg_dump', '-U', 'gearbox_demo', '-Fc', '--no-owner', '--no-acl', database], file, 'out');
         files.push({name: database + '.dump', sha256: await hashFile(file)});
       }
-      manifest.complete = true;
-      fs.writeFileSync(path.join(folder, 'snapshot.json.tmp'), JSON.stringify(manifest, null, 2) + '\n', {mode: 0o600});
-      fs.renameSync(path.join(folder, 'snapshot.json.tmp'), path.join(folder, 'snapshot.json'));
     } else {
       stage('restore', 'Restoring the selected private snapshot into the stopped demo only');
       for (const database of databases) await transfer('docker', ['exec', '-i', 'gearbox-demo-postgres', 'pg_restore', '-U', 'gearbox_demo', '--dbname=' + database, '--clean', '--if-exists', '--no-owner', '--no-acl', '--exit-on-error', '--single-transaction'], path.join(folder, database + '.dump'), 'in');
@@ -246,20 +248,33 @@ async function maintenance(command, ctx, backupId) {
       await transfer('kubectl', ['--context', 'gearbox-demo', '--namespace', 'gearbox-demo', 'exec', '-i', helperName, '--', 'tar', '--no-same-owner', '-C', '/data', '-xf', '-'], path.join(folder, 'sqlite.tar'), 'in');
       restored = true;
     }
-  } finally {
-    let helperError;
+  } catch (error) {primaryError = error;} finally {
     try {if (helperCreated) await k(['delete', 'pod', helperName, '--wait=true', '--timeout=90s'], 'snapshot-helper-remove');}
     catch (error) {helperError = error;}
     // A failed restore can span several stores; never start writers on a partial
     // restore. Re-run the same validated snapshot after fixing the reported cause.
-    if (stopped && (command === 'backup' || restored)) {
-      for (const deployment of [...deployments].reverse()) {
-        await k(['scale', 'deployment/' + deployment.name, '--replicas=1'], 'snapshot-resume-writer');
-        await k(['rollout', 'status', 'deployment/' + deployment.name, '--timeout=180s'], 'snapshot-writer-ready');
-      }
-      await smoke();
-    } else if (stopped) stage('error', 'Restore failed. Writers remain stopped; repair the cause and restore the same backup before resuming.', 'error');
-    if (helperError) throw helperError;
+    if (quiesceStarted && (command === 'backup' || restored)) {
+      try {
+        for (const deployment of [...deployments].reverse()) {
+          await k(['scale', 'deployment/' + deployment.name, '--replicas=1'], 'snapshot-resume-writer');
+          await k(['rollout', 'status', 'deployment/' + deployment.name, '--timeout=180s'], 'snapshot-writer-ready');
+        }
+        await smoke();
+      } catch (error) {resumeError = error;}
+    } else if (quiesceStarted) stage('error', 'Restore did not finish. Writer shutdown may be partial; inspect replicas, repair the cause and restore the same backup before resuming.', 'error');
+  }
+  const failures = [primaryError, helperError, resumeError].filter(Boolean);
+  for (const secondary of failures.slice(1)) stage('error', 'Additional maintenance failure: ' + secondary.message, 'error');
+  if (failures.length) throw failures[0];
+  if (command === 'backup') {
+    // The operator must pause UI writes throughout maintenance. Detect a value
+    // change across quiesce/resume instead of certifying a misleading snapshot.
+    const values = await api(scopes.map(tenant => ({path: approval + '?tenant=' + tenant})));
+    assert.deepEqual(values.map(value => value.body.value), manifest.approvals,
+      'Approval values changed during backup; pause presentation writes and retry');
+    manifest.complete = true;
+    fs.writeFileSync(path.join(folder, 'snapshot.json.tmp'), JSON.stringify(manifest, null, 2) + '\n', {mode: 0o600});
+    fs.renameSync(path.join(folder, 'snapshot.json.tmp'), path.join(folder, 'snapshot.json'));
   }
   if (command === 'restore') {
     if (manifest.files.some(file => file.name === 'inputs/private/runtime-smoke.json')) fs.copyFileSync(path.join(folder, 'inputs/private/runtime-smoke.json'), path.join(work, 'private/runtime-smoke.json'));

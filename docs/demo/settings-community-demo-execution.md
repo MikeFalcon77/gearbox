@@ -4,6 +4,18 @@ The approved scope is [settings-community-demo-plan.md](settings-community-demo-
 Keep that plan unchanged. This file records implementation and verification; a
 phase is complete only when its exit checks have actually passed.
 
+## Current handoff status
+
+Phases 0–6 and phase-7 implementation/available Windows–WSL acceptance have
+passed. The final normal-mode snapshot after review fixes is
+`20261018T140024Z-0d93bb64`. Runtime/private configuration paths and the current
+source/backup references are in the ignored
+`.gearbox/settings-community-demo/ready-for-agent.json`.
+
+Actual presentation-device rehearsal, independent browser contexts, presenter
+hotspot and complete rehearsal recording remain external checks. They are not
+claimed completed by the separate Chrome-tab checks on this host.
+
 ## Source baseline
 
 - Gearbox: `codex/settings-community-demo`, based on `feature/gdl-extensible`
@@ -1037,3 +1049,83 @@ browser contexts, presenter hotspot or complete rehearsal video were available
 for verification here. Browser evidence uses separate session-persistent tabs
 in one Chrome profile. These are preparation/rehearsal items for the actual
 presentation environment, not claimed completed by these Windows/WSL checks.
+
+
+### Phase-7 completed-source review and bounded follow-up
+
+Implementation commits: Gearbox `df328ff`, gears-rust `67bac5f9d`. Both normal
+and offline bundle validation passed after committing identical prepared input
+content. The final normal-mode snapshot before review was
+`backups/20261018T134757Z-72c89937`, complete with 19 hashed files, both approval
+values false and the private reserve lab credentials included. The restored
+Google tabs showed false/zero initial celebrations and connected live streams;
+original-event replay still passed after that backup.
+
+The authorized completed-phase review ran with tools/MCP disabled as
+`claude-opus-5-5 --effort high`; actual model usage confirms that model. Source-only
+report: `.gearbox/phase7-claude-review-opus55-high.txt` (no private files, portraits,
+credentials or runtime logs in its packet). It found no high-severity defects.
+Two low-severity findings were accepted: finalize a backup only after baseline
+values still match following resume, and preserve the first failure if helper
+cleanup or writer resume also fails. The follow-up also makes partial quiesce
+wording truthful, refuses archive retries while an in-container pg_dump/pg_restore
+still runs, and detects stale shared credentials/portraits in an offline copy.
+These source changes require fresh preparation and maintenance acceptance; their
+results are appended below rather than assumed here.
+
+Review uncertainties were checked against full source and retained runtime proof:
+normal/offline UI refs are separate immutable image IDs and returning to normal
+Deploy was rehearsed; ROOT listing and the consumer_group wire field are correct
+(the real cleanup removed 36 candidates while retaining active/business groups);
+privateHash explicitly includes runtime-secrets.json. Broker deletion also refuses
+groups with active members, but cleanup is documented with presentation tabs closed
+because list/delete is not a distributed lock against reconnects. Backup requires
+presentation writes paused throughout; comparing pre/post values is a drift check,
+not a lock over arbitrary concurrent browser writes.
+
+
+Follow-up runtime checks passed after fresh normal preparation:
+
+- A real read-only `pg_restore --list` process waiting on stdin blocked backup
+  before quiesce. It was ended by closing its own stdin; no database mutation
+  or unrelated process kill was involved. Proof:
+  `.gearbox/phase7-archive-process-guard-proof.json`.
+- A controlled interleaving used the real Settings API to change Dasha from
+  false to true after baseline capture but before writer shutdown. Archive
+  transfer/resume completed, then the CLI rejected the changed baseline with
+  exit 1. That partial directory has no complete snapshot.json, and the prior
+  successful backup receipt was preserved. Proof:
+  `.gearbox/phase7-backup-write-race-proof.json`. This is the negative regression
+  for the review's D1; it is not an unresolved backup failure.
+- Restore of `20261018T134757Z-72c89937` passed under the follow-up implementation,
+  returning both approval values to false. A new successful backup completed
+  only after resume/readiness and post-resume baseline comparison:
+  `backups/20261018T140024Z-0d93bb64`.
+- All 12 Node bundle/mutex/archive checks and CLI syntax checks passed following
+  the maintenance changes. Additional-error preservation is source-reviewed;
+  no simultaneous primary-plus-resume fault injection is claimed.
+
+The private operational handoff is
+`.gearbox/settings-community-demo/ready-for-agent.json`; it contains paths,
+commits, verified state and the backup ID, not credential values. The Firebase
+handoff's five selected JSON files were also checked: no raw browser JWTs are
+included. Full offline re-preparation/return-to-normal and final commit validation
+are the last checks below.
+
+
+Final follow-up checks passed: offline re-preparation accepted unchanged shared
+private inputs, reused identical verified backends, deployed and passed both
+restricted static-identity probes. Normal Firebase Deploy then passed readiness
+and Google connectivity. Original business metadata/cursors and original event
+replayed through nginx again without seeding. All three preserved real-Google
+tabs on port 4175 show both settings false, zero celebrations and Live stream
+connected. A checkpoint rewound by the controlled restore was reset through
+Start live in each affected Dasha tab. Screenshot:
+`.gearbox/phase7-final-ready.png`.
+
+After out-of-band mode switching the Studio panel needed Check status, then
+Reconnect UI; its managed port 8080 now serves the normal Google sign-in page
+and the panel shows Open UI / Deployment is ready. Port 8080 is a separate origin
+from the already signed-in rehearsal tabs on 4175. A fresh tab requires normal
+Google sign-in; no Firebase cloud/CLI setup was repeated. Keep the prepared
+signed-in tabs open for presenting.
