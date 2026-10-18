@@ -15,25 +15,22 @@
     reason = "clippy.toml's allow-unwrap-in-tests covers #[test] fns but not the helpers here"
 )]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use gearbox_engine::{SourceRoot, load_catalogue};
-use gearbox_ir::{Catalogue, GearId, RuntimeCap, SourceId};
+use gearbox_ir::{Catalogue, DiagnosticCode, GearId, RuntimeCap, SourceId};
+
+#[path = "common/corpus.rs"]
+mod corpus_support;
 
 fn gears_rust() -> Option<PathBuf> {
-    let mut dir: &Path = Path::new(env!("CARGO_MANIFEST_DIR"));
-    loop {
-        let candidate = dir.join("gears-rust");
-        if candidate.join("gears").is_dir() {
-            return candidate.canonicalize().ok();
-        }
-        dir = dir.parent()?;
-    }
+    corpus_support::root()
 }
 
 fn catalogue() -> Option<Catalogue> {
     let root = gears_rust()?;
-    let source = SourceRoot::open(SourceId::new("gears-rust").unwrap(), root).ok()?;
+    let source = SourceRoot::open(SourceId::new("gears-rust").unwrap(), root)
+        .unwrap_or_else(|error| panic!("the discovered corpus must be readable: {error}"));
     Some(load_catalogue(&[source]).catalogue)
 }
 
@@ -59,6 +56,9 @@ fn the_slice_loads_without_diagnostics() {
     let problems: Vec<String> = catalogue
         .diagnostics
         .iter()
+        // A local fork legitimately has a different remote URL. This test checks
+        // projection, while the source-origin diagnostic remains visible in CLI.
+        .filter(|d| d.code != DiagnosticCode::GdlSourceMismatch)
         .map(|d| format!("[{}] {}", d.code, d.message))
         .collect();
     assert!(

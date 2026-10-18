@@ -100,18 +100,11 @@ fn errors(diagnostics: &[Diagnostic]) -> Vec<String> {
         .collect()
 }
 
+#[path = "common/corpus.rs"]
+mod corpus_support;
+
 fn corpus() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("GEARBOX_CORPUS_ROOT") {
-        return PathBuf::from(path).canonicalize().ok();
-    }
-    let mut dir: &Path = Path::new(env!("CARGO_MANIFEST_DIR"));
-    loop {
-        let candidate = dir.join("gears-rust");
-        if candidate.join("gears").is_dir() {
-            return candidate.canonicalize().ok();
-        }
-        dir = dir.parent()?;
-    }
+    corpus_support::root()
 }
 
 #[test]
