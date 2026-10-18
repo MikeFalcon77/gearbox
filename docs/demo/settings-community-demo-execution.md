@@ -301,3 +301,75 @@ integration and final rehearsal remain phases 2–7. Phase 1's technical smoke
 test restores V1 declarations through the authenticated API; phase 2 supplies
 the approved SDK-owned startup bootstrap. Freeze a common generated Cargo.lock
 and use locked builds when preparing the final warmed bundle in phase 6.
+
+## Phase 2 — complete
+
+The existing Firebase handoff is reused without cloud changes. New standalone
+Firebase authentication and explicit demo authentication/authorization plugins
+are configured by `products/settings-community-demo/auth.gdl`. Real account
+mappings are expanded from the ignored private handoff into Kubernetes Secrets;
+tracked templates contain no personal identities. Credential schema migration
+preserves the phase-1 database, internal-auth and bootstrap credentials and adds
+a distinct, restricted worker token.
+
+Verified so far:
+
+- Firebase verifier: 18 tests, including real RSA/JWK signature verification,
+  issuer/audience/timing, unknown keys, outages and ignored forged tenant claims.
+- Explicit Firebase/static dispatcher: 3 tests; JWT failure never falls back.
+- Demo action policy: 6 translation tests; concrete owner-tenant checks preserve
+  the hierarchy plugin's decision. These are unit tests, not runtime proof.
+- New auth crates pass Clippy with warnings denied.
+- A real product test caught worker-only `include` contributions also seeding the
+  default host. Resolver placement now preserves intentional shared dependencies
+  without pulling the Settings bootstrap and Settings itself into Gateway.
+  Community generation (5) and partition (19) tests pass; engine Clippy passes.
+- SDK bootstrap runs in the lifecycle after migrations, before worker readiness.
+  It reconciles public, non-step-up demo defaults without writing tenant values.
+  Existing declarations now restore their process-local derived Types schemas
+  on reconciliation. Contribution tests: 32 passed, including restart restoration.
+
+Runtime evidence now available:
+
+- Actual linked inventories equal the generated lock: Gateway 19, worker 15.
+- SDK bootstrap successfully creates both declarations in the real worker after
+  migrations, before its routes become ready.
+- Catch-all scope enforcement initially blocked Kubernetes probes. The existing
+  Gateway contract documents `/healthz`, `/readyz` and `/health` as public. Exact
+  GET probes now remain public; POST and similarly named application routes stay
+  protected. All 22 scope-enforcement tests and Gateway Clippy pass.
+- The interrupted Helm upgrade was recovered with Helm rollback followed by a
+  corrected deployment. Release 12 is deployed and both backend pods are Ready.
+  The same retained PVC is still Bound; no data resources were deleted.
+- `phase2-runtime-proof.log`: authenticated Directory registration and actual
+  Gateway-to-worker proxy pass; anonymous access fails. Metadata/cursors and the
+  original phase-1 event still replay through real SSE after the failed rollout
+  and recovery.
+- `phase2-technical-proof.log`: unknown opaque/malformed JWT credentials fail;
+  worker access to Settings/schema writes fails; publications for root, unknown
+  tenant and foreign event types fail; demo events for both allowed tenants pass.
+- Changed-file scan finds no runtime credentials or real account mappings in
+  either repository (`phase2-private-content-scan.log`).
+- `phase2-bootstrap-restart-proof.log`: a non-default demo override is committed
+  through the authenticated API, the real worker is restarted, and the value
+  remains unchanged after its SDK bootstrap. Another validated write succeeds
+  with the freshly restored derived type. The temporary QA override is then
+  reverted through the scoped API and the original schema-default state is
+  verified. No business rows are edited with SQL.
+
+Both real Google accounts pass the deployed backend checks
+(`private/identity-check-dasha.json`, `private/identity-check-ilya.json`, verified
+2026-10-18 07:51 UTC). Each token is assigned its expected tenant; own-tenant
+write/subscription and read-only diagnostics succeed. Sibling Settings read,
+write and EB subscription fail; schema writes and producer management fail.
+The user completed ordinary sign-in after browser automation could not control
+the OAuth popup. No cloud setup was repeated. The harness keeps tokens in request
+memory and saves only check results under ignored private storage.
+
+Phase 2 exit conditions are satisfied. Transactional Settings events, remote
+Settings contracts, the final UI and prepared Deploy remain phases 3–7.
+
+The failed rollout exposed a final-preparation requirement: immutable image tags
+derived from image content must accompany the phase-6 fingerprint. Reusing one
+mutable tag allows a Helm rollback to pair an older config with a newer binary.
+Record and retain prior prepared image identities for reproducible rollback.

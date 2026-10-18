@@ -484,11 +484,20 @@ fn split(
         worker_anchors.remove(&pin.anchor);
     }
 
-    // The host keeps every selected gear that is not moving out, and everything
-    // those reach. A worker anchor still reached from the host is in both.
+    // Explicit worker contributions are placed with that worker rather than
+    // seeded in the default host as well. A host dependency (or explicit host
+    // include) can still reach them, preserving legitimate overlapping closures.
+    let worker_includes: BTreeSet<&GearId> = scoped
+        .application_pins
+        .iter()
+        .filter(|pin| worker_anchors.contains(&pin.anchor))
+        .flat_map(|pin| pin.include.iter())
+        .collect();
+    // The host keeps every other selected gear and everything those reach.
     let mut host_seeds: Vec<GearId> = selected
         .iter()
         .filter(|g| !worker_anchors.contains(*g))
+        .filter(|g| !worker_includes.contains(*g))
         // Plugins follow their host below; being selected under a worker's
         // host is not a request for an additional copy in the main process.
         .filter(|g| {

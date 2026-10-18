@@ -1,5 +1,6 @@
 # Prepared community product. Build and deploy before presenting; no AI chat or
 # manual gear composition is required. Private configuration stays in .gearbox/.
+load("auth.gdl", "AUTHENTICATION", "AUTHORIZATION", "GATEWAY_POLICIES")
 product(
     id = "settings-community-demo",
     name = "Family Labs — Settings Community Demo",
@@ -20,6 +21,7 @@ product(
     gears = [
         use_gear("api-gateway", source = "gears-rust", config = {
             "auth_disabled": False,
+            "route_policies": GATEWAY_POLICIES,
             "advertise_uri": "http://demo-gateway.gearbox-demo.svc.cluster.local:8087",
             "gateway_proxy": {
                 "enabled": True,
@@ -33,10 +35,11 @@ product(
             "internal_auth": {"provider": "shared_secret", "secret": "", "peer_name": "settings-service"},
         }),
         use_gear("service-discovery", source = "gears-rust"),
-        # Phase 2 adds SDK-owned startup registrations for the EB declarations.
-        use_gear("types-registry", source = "gears-rust", config = {"entities": [
-            {"$id": "gts://gts.cf.demo.settings.setting.v1~", "$schema": "http://json-schema.org/draft-07/schema#", "type": "object"},
-        ]}),
+        use_gear("types-registry", source = "gears-rust"),
+        use_gear("demo-catalogue", source = "gears-rust"),
+        use_gear("family-labs-bootstrap", source = "gears-rust", config = {
+            "bootstrap_token": "${DEMO_BOOTSTRAP_TOKEN}",
+        }),
         use_gear("event-broker", source = "gears-rust", config = {
             "mode": "standalone",
             "default_storage_backend": "gts.cf.core.events.backend.v1~cf.core.backend.sqlite.v1~",
@@ -55,22 +58,8 @@ product(
             "allow_http_upstream": True,
             "ssrf_policy": {"allow_hostnames": ["demo-echo.gearbox-demo.svc.cluster.local"]},
         }),
-        # Phase 2 replaces the technical-only AuthN selection with the explicit
-        # Firebase + technical-credentials adapter. No accept_all profile exists.
-        use_gear("authn-resolver", source = "gears-rust", plugins = [
-            plugin("static-authn-plugin", config = {
-                "mode": "static_tokens",
-                "tokens": [{
-                    "token": "${DEMO_BOOTSTRAP_TOKEN}",
-                    "identity": {
-                        "subject_id": "f0000000-0000-4000-8000-000000000010",
-                        "subject_tenant_id": "f0000000-0000-4000-8000-000000000001",
-                        "token_scopes": ["*"],
-                    },
-                }],
-            }),
-        ]),
-        use_gear("authz-resolver", source = "gears-rust", plugins = [plugin("tr-authz-plugin")]),
+        use_gear("authn-resolver", source = "gears-rust", plugins = AUTHENTICATION),
+        use_gear("authz-resolver", source = "gears-rust", plugins = AUTHORIZATION),
         use_gear("tenant-resolver", source = "gears-rust", plugins = [
             plugin("static-tr-plugin", config = {"tenants": [
                 {"id": "f0000000-0000-4000-8000-000000000001", "name": "Family"},
@@ -94,7 +83,7 @@ product(
         ),
     )],
     applications = [
-        application("demo-gateway", anchor = "api-gateway", replicas = 1),
-        application("demo-settings-worker", anchor = "settings-service", include = ["authn-resolver"], replicas = 1),
+        application("demo-gateway", anchor = "api-gateway", include = ["demo-catalogue"], replicas = 1),
+        application("demo-settings-worker", anchor = "settings-service", include = ["authn-resolver", "family-labs-bootstrap"], replicas = 1),
     ],
 )

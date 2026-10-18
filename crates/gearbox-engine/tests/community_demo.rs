@@ -105,6 +105,38 @@ fn each_process_links_the_selected_plugins_of_every_host_it_contains() {
 }
 
 #[test]
+fn worker_bootstrap_does_not_pull_settings_back_into_the_gateway() {
+    let Some((lock, _)) = resolved() else {
+        return;
+    };
+    let gateway = lock
+        .applications
+        .iter()
+        .find(|app| app.name.as_str() == "demo-gateway")
+        .unwrap();
+    let worker = lock
+        .applications
+        .iter()
+        .find(|app| app.name.as_str() == "demo-settings-worker")
+        .unwrap();
+    for id in ["settings-service", "family-labs-bootstrap"] {
+        assert!(
+            !gateway.gears.iter().any(|gear| gear.as_str() == id),
+            "{id} must stay remote"
+        );
+        assert!(worker.gears.iter().any(|gear| gear.as_str() == id));
+    }
+    // Both processes intentionally restore their own local V1 catalogue.
+    for app in [&gateway, &worker] {
+        assert!(
+            app.gears
+                .iter()
+                .any(|gear| gear.as_str() == "demo-catalogue")
+        );
+    }
+}
+
+#[test]
 fn eb_metadata_and_event_log_use_files_under_the_persistent_home() {
     let Some((lock, files)) = resolved() else {
         return;

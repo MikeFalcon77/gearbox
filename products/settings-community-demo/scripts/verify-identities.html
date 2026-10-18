@@ -1,0 +1,26 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Family Labs · Backend identity checks</title>
+<style>body{font:16px/1.6 system-ui;background:#f2f6fc;color:#0e1a2c;max-width:940px;margin:64px auto;padding:0 24px}h1{color:#00204d}.grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}section{background:white;border:1px solid #dce3ee;border-radius:16px;padding:24px}button{font:inherit;background:#0065e3;color:white;padding:12px 18px;border:0;border-radius:8px;cursor:pointer}button:disabled{opacity:.5}pre{white-space:pre-wrap;font:14px/1.6 system-ui}.pass{color:#14764b}.error{color:#b32b32}</style>
+<h1>Backend identity checks</h1><p>Sign in with each configured Google account. This checks the deployed backend and real tenant boundaries. Firebase cloud setup is already complete.</p>
+<div class="grid"><section><h2>Dasha’s Lab</h2><button id="dasha" disabled>Verify Dasha’s Lab</button><pre id="dasha-result">Ready to check.</pre></section><section><h2>Ilya’s Lab</h2><button id="ilya" disabled>Verify Ilya’s Lab</button><pre id="ilya-result">Ready to check.</pre></section></div>
+<p>Tokens remain in memory and are discarded after the request. Only check results are saved. A successful own-tenant write stores the existing value again.</p>
+<script type="module">
+import {initializeApp} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
+import {getAuth, GoogleAuthProvider, signInWithPopup, setPersistence, inMemoryPersistence, signOut} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
+const setup = await fetch('/setup').then(r => r.json());
+const auth = getAuth(initializeApp(setup.webConfig)); await setPersistence(auth,inMemoryPersistence);
+for (const lab of ['dasha','ilya']) {
+  const button = document.getElementById(lab), status = document.getElementById(lab+'-result'); button.disabled=false;
+  button.onclick=async()=>{
+    button.disabled=true;status.className='';status.textContent='Complete Google sign-in…';
+    try {
+      const provider=new GoogleAuthProvider();provider.setCustomParameters({login_hint:setup.expected[lab]});
+      const credential=await signInWithPopup(auth,provider);
+      const response=await fetch('/verify',{method:'POST',headers:{'Content-Type':'application/json','X-Demo-Nonce':setup.nonce},body:JSON.stringify({lab,token:await credential.user.getIdToken(true)})});
+      const result=await response.json();if(!response.ok)throw Error(result.error);
+      status.className='pass';status.textContent='PASSED\n'+result.checks.join('\n');
+    } catch(error){status.className='error';status.textContent=error.message;}
+    finally{await signOut(auth);button.disabled=false;}
+  };
+}
+</script></html>

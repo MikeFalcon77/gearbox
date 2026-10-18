@@ -712,6 +712,9 @@ including their dependencies and selected plugins. For example,
 gives the worker its own authentication stack for bearer re-validation. This
 does not add a lifecycle dependency to the Settings gear. An unknown or
 unselected included gear is refused before generation.
+An explicitly included worker gear is not also seeded into the default host.
+It can still appear in both processes when a host dependency or host `include`
+requires it there.
 
 ### `product(...)`
 

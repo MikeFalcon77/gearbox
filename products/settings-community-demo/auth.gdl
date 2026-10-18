@@ -1,0 +1,73 @@
+# Authentication and action grants are product data. Actual account mappings and
+# credentials are expanded from the existing private Firebase handoff/Secret.
+ROOT = "f0000000-0000-4000-8000-000000000001"
+DASHA = "d0000000-0000-4000-8000-000000000002"
+ILYA = "a0000000-0000-4000-8000-000000000003"
+BOOTSTRAP_SUBJECT = "f0000000-0000-4000-8000-000000000010"
+WORKER_SUBJECT = "f0000000-0000-4000-8000-000000000011"
+TOPIC = "gts.cf.core.events.topic.v1~cf.demo.settings.changed.v1"
+EVENT_TYPE = "gts.cf.core.events.event.v1~cf.demo.settings.changed.v1~"
+SETTING_TYPE = "gts.cf.demo.settings.setting.v1~"
+
+AUTHENTICATION = [
+    plugin("demo-authn-plugin", config = {"priority": 0}),
+    plugin("firebase-authn-plugin", config = {
+        "priority": 25, "project_id": "${DEMO_FIREBASE_PROJECT_ID}",
+        "identities": [
+            {"uid": "${DEMO_DASHA_FIREBASE_UID}", "email": "${DEMO_DASHA_FIREBASE_EMAIL}", "tenant_id": DASHA, "token_scopes": ["demo:user", "demo:diagnostics"]},
+            {"uid": "${DEMO_ILYA_FIREBASE_UID}", "email": "${DEMO_ILYA_FIREBASE_EMAIL}", "tenant_id": ILYA, "token_scopes": ["demo:user", "demo:diagnostics"]},
+        ],
+    }),
+    plugin("static-authn-plugin", config = {
+        "priority": 100, "mode": "static_tokens",
+        "tokens": [
+            {"token": "${DEMO_BOOTSTRAP_TOKEN}", "identity": {"subject_id": BOOTSTRAP_SUBJECT, "subject_tenant_id": ROOT, "subject_type": "service", "token_scopes": ["demo:bootstrap"]}},
+            {"token": "${DEMO_WORKER_TOKEN}", "identity": {"subject_id": WORKER_SUBJECT, "subject_tenant_id": ROOT, "subject_type": "service", "token_scopes": ["demo:worker"]}},
+        ],
+    }),
+]
+
+AUTHORIZATION = [
+    plugin("demo-authz-plugin", config = {
+        "priority": 0, "allowed_tenants": [ROOT, DASHA, ILYA],
+        "grants": [
+            {"scope": "demo:bootstrap", "resource_type": "*", "actions": ["*"], "subject_ids": [BOOTSTRAP_SUBJECT], "subject_tenants": [ROOT]},
+            {"scope": "demo:user", "resource_type": "gts.cf.core.settings.declaration.v1~", "actions": ["read"], "subject_tenants": [DASHA, ILYA]},
+            {"scope": "demo:user", "resource_type": "gts.cf.core.settings.category.v1~", "actions": ["read"], "subject_tenants": [DASHA, ILYA]},
+            {"scope": "demo:user", "resource_type": "gts.cf.core.settings.value.v1~", "actions": ["read", "write"], "subject_tenants": [DASHA, ILYA]},
+            {"scope": "demo:user", "resource_type": "gts.cf.core.events.consumer_group.v1~", "actions": ["define", "consume", "manage"], "subject_tenants": [DASHA, ILYA]},
+            {"scope": "demo:user", "resource_type": "gts.cf.core.events.topic.v1~", "actions": ["consume"], "properties": {"topic_id": [TOPIC]}, "subject_tenants": [DASHA, ILYA]},
+            {"scope": "demo:user", "resource_type": "gts.cf.core.events.event_type.v1~", "actions": ["consume"], "properties": {"event_type_id": [EVENT_TYPE]}, "subject_tenants": [DASHA, ILYA]},
+            {"scope": "demo:user", "resource_type": SETTING_TYPE, "actions": ["consume"], "subject_tenants": [DASHA, ILYA]},
+            {"scope": "demo:user", "resource_type": "gts.cf.core.events.request.v1~", "actions": ["consume", "define", "manage"], "properties": {"owner_tenant_id": [DASHA, ILYA]}, "subject_tenants": [DASHA, ILYA]},
+            {"scope": "demo:user", "resource_type": "gts.cf.core.oagw.proxy.v1~", "actions": ["invoke"], "subject_tenants": [DASHA, ILYA]},
+            {"scope": "demo:worker", "resource_type": "gts.cf.core.events.event_type.v1~", "actions": ["produce"], "properties": {"event_type_id": [EVENT_TYPE]}, "subject_ids": [WORKER_SUBJECT], "subject_tenants": [ROOT]},
+            {"scope": "demo:worker", "resource_type": SETTING_TYPE, "actions": ["produce"], "subject_ids": [WORKER_SUBJECT], "subject_tenants": [ROOT]},
+            {"scope": "demo:worker", "resource_type": "gts.cf.core.events.request.v1~", "actions": ["produce"], "properties": {"owner_tenant_id": [DASHA, ILYA]}, "subject_ids": [WORKER_SUBJECT], "subject_tenants": [ROOT]},
+        ],
+    }),
+    plugin("tr-authz-plugin", config = {"priority": 50}),
+]
+
+# First matching rule wins. Diagnostics is separate from settings/events.
+# The final rule denies authenticated access to undeclared public routes.
+GATEWAY_POLICIES = {
+    "enabled": True,
+    "rules": [
+        {"path": "/types-registry/v1/entities", "method": "GET", "required_scopes": ["demo:diagnostics", "demo:bootstrap"]},
+        {"path": "/types-registry/**", "required_scopes": ["demo:bootstrap"]},
+        {"path": "/service-discovery/**", "method": "GET", "required_scopes": ["demo:diagnostics", "demo:bootstrap"]},
+        {"path": "/family-labs/**", "required_scopes": ["demo:user", "demo:diagnostics", "demo:bootstrap"]},
+        {"path": "/settings-service/**", "required_scopes": ["demo:user", "demo:bootstrap"]},
+        {"path": "/event-broker/v1/events", "method": "POST", "required_scopes": ["demo:worker", "demo:bootstrap"]},
+        {"path": "/event-broker/v1/events:batch", "method": "POST", "required_scopes": ["demo:worker", "demo:bootstrap"]},
+        {"path": "/event-broker/v1/producers", "required_scopes": ["demo:worker", "demo:bootstrap"]},
+        {"path": "/event-broker/v1/producers/**", "required_scopes": ["demo:worker", "demo:bootstrap"]},
+        {"path": "/event-broker/v1/topics", "method": "GET", "required_scopes": ["demo:user", "demo:worker", "demo:bootstrap"]},
+        {"path": "/event-broker/v1/event-types", "method": "GET", "required_scopes": ["demo:user", "demo:worker", "demo:bootstrap"]},
+        {"path": "/event-broker/**", "required_scopes": ["demo:user", "demo:bootstrap"]},
+        {"path": "/oagw/v1/proxy/**", "required_scopes": ["demo:user", "demo:bootstrap"]},
+        {"path": "/oagw/**", "required_scopes": ["demo:bootstrap"]},
+        {"path": "/**", "required_scopes": ["demo:bootstrap"]},
+    ],
+}

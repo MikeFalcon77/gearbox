@@ -10,8 +10,8 @@ Deploy → Open UI**. AI chat and manual gear composition are optional.
 The backend composition runs in minikube: Gateway, Event Broker, Discovery,
 Types Registry V1, OAGW and a separate Settings worker with its own AuthN stack.
 Its real routing and EB persistence checks pass across pod recreation, repeated
-Deploy and minikube stop/start. The UI, Firebase adapter and final Deploy
-integration are added in subsequent phases.
+Deploy and minikube stop/start. The UI and final Deploy integration are added
+in subsequent phases. Firebase integration is configured in `auth.gdl`.
 
 ## Storage and authentication
 
@@ -36,6 +36,15 @@ Do not commit, print or bake these files into images. Platform-plane shared
 secrets enter typed runtime config through `APP__` environment overrides; the
 tracked empty values cannot authenticate a caller. Technical bearer credentials
 use strict static token matching with environment expansion.
+The resolver selects the explicit demo adapter. JWT-shaped tokens go to Firebase;
+opaque technical tokens go to the strict static SDK. Rejection never causes an
+authentication fallback. Bootstrap and worker have distinct identities and scopes;
+the action policy delegates concrete tenant checks to the hierarchy plugin.
+
+`demo-catalogue` restores each process's V1 event declarations through the Types
+SDK. `family-labs-bootstrap` reconciles Settings declarations after migrations,
+before worker readiness. Restarts preserve tenant overrides and restore derived
+setting types. There is no public bootstrap endpoint.
 
 Firebase is already configured and both accounts were verified. The existing
 handoff is `.gearbox/firebase-preflight/authn-demo-inputs.json`, with
@@ -70,3 +79,22 @@ The product-owned `deploy/extra-templates` files are copied into the generated
 umbrella chart by `prepare-chart.cjs`. They supply the private HTTP echo helper;
 they do not replace generated backend workloads. Final preparation and one-click
 Deploy will wrap these stages and validate input/image fingerprints.
+
+## Identity integration checks
+
+With a loopback-only forward to Gateway on `127.0.0.1:18087`, run:
+
+```sh
+node products/settings-community-demo/scripts/verify-identities.cjs technical
+node products/settings-community-demo/scripts/verify-identities.cjs
+```
+
+The second command serves `http://localhost:4174`. Sign in with each already
+configured Google account to verify real backend authentication, tenant mapping,
+own-tenant writes and rejection of sibling Settings access and EB subscriptions.
+It also checks read-only diagnostics and rejection of schema/producer mutations.
+Only outcomes are saved under ignored private storage; user tokens are never
+saved. The technical check verifies the restricted worker credential, allowed
+demo publications and denied root/unknown tenants and foreign event types.
+
+This is a development integration harness, separate from the final product UI.
