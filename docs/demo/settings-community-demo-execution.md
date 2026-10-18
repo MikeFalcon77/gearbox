@@ -374,7 +374,7 @@ derived from image content must accompany the phase-6 fingerprint. Reusing one
 mutable tag allows a Helm rollback to pair an older config with a newer binary.
 Record and retain prior prepared image identities for reproducible rollback.
 
-## Phase 3 — in progress
+## Phase 3 — complete
 
 The new authorized `SettingsReadApi v1` and its generated REST projection reuse
 the established effective-value DTOs. The trusted embedded reader remains
@@ -454,9 +454,10 @@ Real runtime evidence:
   These are actual provider writes; the current loader, rather than prefix watch,
   performs the delivery rechecks. No new invalidation mechanism is added for show.
 
-The early browser vertical and real-user OAGW call are still pending.
+At the backend checkpoint, the early browser vertical and real-user OAGW call
+were still pending; their completed checks are recorded below.
 The temporary `verify-events.cjs` and loopback-only `verify-vertical.cjs` helpers
-exercise these before the modular UI is introduced. Phase 3 is not complete yet.
+exercise these before the modular UI is introduced.
 
 The verified backend checkpoint is committed in gears-rust as `1a03e7aa7`.
 Release 17 is deployed; the final worker image includes the native timestamp,
@@ -465,3 +466,33 @@ Google sign-in at `http://localhost:4175/?lab=dasha` and
 `http://localhost:4175/?lab=ilya&observe=1`. This is a temporary backend proof,
 not the final product UI. Firebase cloud configuration remains unchanged.
 UI SDK implementation has not started before this phase's browser exit check.
+
+The user completed both normal Google sessions for the browser vertical.
+Two independently subscribed Dasha tabs received event
+`01a14e34-905d-75c7-b935-3620badaf73b`, then reread `true` through the remote
+Settings contract. Ilya remained `false` with no Dasha event. Resetting through
+the editor produced the same reset event in both Dasha tabs; their private
+receipts have distinct tab IDs. The observer screenshot is retained locally as
+`.gearbox/phase3-live-proof.png`.
+
+The real-user OAGW check exposed an existing SSRF inconsistency: the explicit
+hostname exemption passed management validation, but both DNS-result filters
+still rejected the service's private IP. The fix carries the configured hostname
+exemption into those filters, while ordinary hosts remain subject to IP checks.
+All 689 OAGW library tests pass, including scoped exemptions and the actual DNS
+discovery regression. Release 18 deploys Gateway image
+`sha256:7bc299e90b2aae2891b0556c7b96446d53d7972553d4d825bef412d442a05f8d`.
+Both real Google users successfully invoked the private echo through OAGW.
+Dasha's returned request ID was `41608c26-2b71-4014-a61a-f73177a3c34a` and
+Ilya's was `c9eb4402-c99d-48fc-a40e-6350af82e748`; the browser helper checks
+each against its outgoing header. The screenshot is retained locally as
+`.gearbox/phase3-oagw-user-proof.png`. OAGW Clippy passes with warnings denied.
+All phase-3 technical exit checks are now satisfied. The corresponding
+gears-rust fix is committed as `0a1639865`.
+
+The user authorized Claude review of completed phases. Claude Code is installed
+in WSL at `/home/mike/.local/bin/claude`. The phase-3 packet contains only the
+approved plan, execution notes and tracked commit diffs; no private handoff,
+credentials or photos. The first read-only review attempt returned an expired
+OAuth session, so no Claude findings or approval are claimed. The user has been
+asked to refresh that CLI session while implementation continues.
