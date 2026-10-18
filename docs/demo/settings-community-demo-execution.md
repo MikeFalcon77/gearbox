@@ -804,3 +804,13 @@ Linux invokes Windows PowerShell. Its real WSL-to-Windows check passes against
 the freed D: volume, as do all eight bundle/host regressions. The current Studio
 TypeScript and browser/backend builds pass after recovery. The previous bundle
 is still unverified/stale and must be prepared again before Studio Deploy.
+
+
+Recovery exposed a real restart race: Docker dynamically assigned Postgres the
+stopped minikube node's static 192.168.58.2 address, preventing the existing node
+container from starting. The owned Postgres endpoint was moved to fixed
+192.168.58.10 with the same container and data volume; pg_isready passed.
+Provisioning now creates it at host .10 of the named minikube /24 network and
+validates that reservation instead of permitting dynamic allocation. It refuses
+an existing unreserved endpoint rather than silently disconnecting a live DB.
+No minikube deletion, network database deletion or volume recreation was used.

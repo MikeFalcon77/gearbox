@@ -9,6 +9,11 @@ owner=settings-community-demo
 image=${DEMO_POSTGRES_IMAGE:-postgres:17-bookworm}
 network=${DEMO_MINIKUBE_PROFILE:-gearbox-demo}
 docker network inspect "$network" >/dev/null
+network_subnet=$(docker network inspect --format '{{ (index .IPAM.Config 0).Subnet }}' "$network")
+case "$network_subnet" in
+  *.*.*.0/24) postgres_address="${network_subnet%0/24}10" ;;
+  *) echo 'The bounded demo expects a one-node minikube IPv4 /24 network.' >&2; exit 1 ;;
+esac
 
 test -f "$work/private/postgres.env" || {
   echo 'Run prepare-inputs.cjs before provisioning Postgres.' >&2; exit 1;
@@ -31,7 +36,7 @@ else
   docker run --pull never -d --name "$container" --restart unless-stopped \
     --label "app.kubernetes.io/part-of=$owner" \
     --env-file "$work/private/postgres.env" \
-    --network "$network" \
+    --network "$network" --ip "$postgres_address" \
     --publish "127.0.0.1:55432:5432" \
     --mount "type=volume,source=$volume,target=/var/lib/postgresql/data" \
     "$image" >/dev/null
@@ -39,6 +44,10 @@ fi
 network_id=$(docker network inspect --format '{{.Id}}' "$network")
 container_network_id=$(docker container inspect --format "{{ with index .NetworkSettings.Networks \"$network\" }}{{ .NetworkID }}{{ end }}" "$container")
 test "$container_network_id" = "$network_id" || { echo 'Postgres must join the private demo Docker network.' >&2; exit 1; }
+fixed_address=$(docker container inspect --format "{{ with index .NetworkSettings.Networks \"$network\" }}{{ if .IPAMConfig }}{{ .IPAMConfig.IPv4Address }}{{ end }}{{ end }}" "$container")
+test "$fixed_address" = "$postgres_address" || {
+  echo 'Existing demo Postgres needs a fixed .10 address on the owned network before deployment; migrate it with application writers stopped.' >&2; exit 1;
+}
 ports=$(docker container inspect --format '{{ json .HostConfig.PortBindings }}' "$container")
 test "$ports" = '{"5432/tcp":[{"HostIp":"127.0.0.1","HostPort":"55432"}]}' || {
   echo 'Postgres must expose only its loopback operator port.' >&2; exit 1;
