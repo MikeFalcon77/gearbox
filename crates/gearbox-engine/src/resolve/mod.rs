@@ -15,6 +15,7 @@ pub mod closure;
 pub mod cluster;
 pub mod cluster_options;
 pub mod cuts;
+pub mod database;
 pub mod partition;
 pub mod product;
 pub mod profile;
@@ -48,6 +49,7 @@ fn unknown_profile(intent: &ProductIntent, profile: &ProfileId, uri: &str) -> Di
 
 /// Everything one resolution produced.
 pub struct Resolution {
+    pub database: Option<gearbox_ir::PostgresDatabase>,
     /// Which profile this is for.
     pub profile: ProfileId,
     /// The closure of gears, with why each is present.
@@ -123,6 +125,10 @@ pub fn resolve_at(
         &uri,
         &mut diagnostics,
     );
+
+    let database = intent.profiles.get(profile).and_then(|declaration| {
+        database::resolve(catalogue, &closure, declaration, &uri, &mut diagnostics)
+    });
 
     // Step 3 -- which edges could carry a boundary.
     let cuts = cuts::classify(catalogue, &closure, &uri, &mut diagnostics);
@@ -243,6 +249,7 @@ pub fn resolve_at(
 
     diagnostics.finish();
     Resolution {
+        database,
         profile: profile.clone(),
         closure,
         cuts,

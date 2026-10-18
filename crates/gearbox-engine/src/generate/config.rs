@@ -33,6 +33,8 @@ const CLUSTER_GEAR: &str = "cluster";
 #[derive(Serialize)]
 struct AppConfig {
     server: ServerSection,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    database: Option<DatabaseSection>,
     /// How a worker serves its own REST surface. Absent for a host.
     ///
     /// Its **absence is a decision the runtime acts on**: without this section
@@ -61,6 +63,8 @@ struct ServerSection {
 
 #[derive(Serialize)]
 struct GearSection {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    database: Option<GearDatabaseSection>,
     /// Present only for a gear the host spawns out of process.
     #[serde(skip_serializing_if = "Option::is_none")]
     runtime: Option<RuntimeSection>,
@@ -89,6 +93,79 @@ struct ExecutionSection {
     working_directory: Option<String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     environment: BTreeMap<String, String>,
+}
+
+#[derive(Serialize)]
+struct DatabaseSection {
+    servers: BTreeMap<&'static str, PostgresServerSection>,
+}
+#[derive(Serialize)]
+struct PostgresServerSection {
+    engine: &'static str,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    params: BTreeMap<String, String>,
+}
+#[derive(Serialize)]
+struct GearDatabaseSection {
+    server: &'static str,
+    dbname: String,
+}
+
+fn write_database(
+    input: &GenerateInput<'_>,
+    application: &ResolvedApplication,
+    gears: &mut BTreeMap<String, GearSection>,
+) -> Result<Option<DatabaseSection>, GenerateError> {
+    let mut used = false;
+    for id in &application.gears {
+        if !input
+            .lock
+            .gears
+            .get(id)
+            .is_some_and(|gear| gear.runtime_caps.contains(&gearbox_ir::RuntimeCap::Db))
+        {
+            continue;
+        }
+        let db = input.lock.database.as_ref().ok_or_else(|| {
+            GenerateError::Database(format!(
+                "gear `{id}` needs a database; re-resolve with database = postgres(...)"
+            ))
+        })?;
+        db.validate().map_err(GenerateError::Database)?;
+        let name = db.database_names.get(id).ok_or_else(|| {
+            GenerateError::Database(format!(
+                "lock has no database name for gear `{id}`; re-resolve the product"
+            ))
+        })?;
+        if let Some(gear) = gears.get_mut(id.as_str()) {
+            gear.database = Some(GearDatabaseSection {
+                server: "pg",
+                dbname: name.clone(),
+            });
+        }
+        used = true;
+    }
+    Ok(if used {
+        input.lock.database.as_ref().map(|db| DatabaseSection {
+            servers: BTreeMap::from([(
+                "pg",
+                PostgresServerSection {
+                    engine: "postgres",
+                    host: db.host.clone(),
+                    port: db.port,
+                    user: db.user.clone(),
+                    password: db.password.clone(),
+                    params: db.params.clone(),
+                },
+            )]),
+        })
+    } else {
+        None
+    })
 }
 
 /// The runtime configuration for one process.
@@ -125,6 +202,7 @@ pub fn app_config(
             (
                 id.to_string(),
                 GearSection {
+                    database: None,
                     runtime: None,
                     config,
                 },
@@ -132,6 +210,7 @@ pub fn app_config(
         })
         .collect();
 
+    let database = write_database(input, application, &mut gears)?;
     write_endpoints(application, &mut gears)?;
     write_consumer_wiring(input, application, &mut gears);
     write_cluster(input, &mut gears);
@@ -150,6 +229,7 @@ pub fn app_config(
     };
     let config = AppConfig {
         server: ServerSection { home_dir },
+        database,
         oop_http: application.serve.as_ref().map(|serve| OopHttpSection {
             listen_addr: serve.listen_addr.clone(),
             advertise_uri: serve.advertise_uri.clone(),
@@ -339,6 +419,7 @@ fn write_spawns(
         let section = gears
             .entry(spawn.gear.to_string())
             .or_insert_with(|| GearSection {
+                database: None,
                 runtime: None,
                 config: Map::new(),
             });

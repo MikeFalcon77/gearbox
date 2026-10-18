@@ -300,6 +300,7 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
     // "unchanged". Collections and diagnostics have their own lists; profile
     // is `profile_changed`.
     let gearbox_ir::ResolvedProduct {
+        database: before_db,
         schema_version: before_schema,
         product: before_header,
         kubernetes: before_k8s,
@@ -314,6 +315,7 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
         diagnostics: _,
     } = before;
     let gearbox_ir::ResolvedProduct {
+        database: after_db,
         schema_version: after_schema,
         product: after_header,
         kubernetes: after_k8s,
@@ -327,6 +329,19 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
         provenance: _,
         diagnostics: _,
     } = after;
+
+    let before_database = database_fields(before_db.as_ref());
+    let after_database = database_fields(after_db.as_ref());
+    let mut database_keys = std::collections::BTreeSet::new();
+    database_keys.extend(before_database.keys());
+    database_keys.extend(after_database.keys());
+    for key in database_keys {
+        compare(
+            key,
+            before_database.get(key).cloned().unwrap_or_default(),
+            after_database.get(key).cloned().unwrap_or_default(),
+        );
+    }
 
     compare(
         "schema_version",
@@ -409,6 +424,44 @@ fn scalar_fields(before: &ResolvedProduct, after: &ResolvedProduct) -> Vec<Field
 
     out.sort();
     out
+}
+
+fn database_fields(
+    database: Option<&gearbox_ir::PostgresDatabase>,
+) -> std::collections::BTreeMap<String, String> {
+    let Some(gearbox_ir::PostgresDatabase {
+        host,
+        port,
+        user,
+        password,
+        params,
+        database_names,
+        existing_secret,
+    }) = database
+    else {
+        return std::collections::BTreeMap::new();
+    };
+    let mut fields = std::collections::BTreeMap::from([
+        ("database.host".to_owned(), host.clone()),
+        ("database.port".to_owned(), port.to_string()),
+        ("database.user".to_owned(), user.clone()),
+        ("database.password".to_owned(), password.clone()),
+        (
+            "database.existing_secret".to_owned(),
+            existing_secret.clone().unwrap_or_default(),
+        ),
+    ]);
+    fields.extend(
+        params
+            .iter()
+            .map(|(k, v)| (format!("database.params.{k}"), v.clone())),
+    );
+    fields.extend(
+        database_names
+            .iter()
+            .map(|(k, v)| (format!("database.database_names.{k}"), v.clone())),
+    );
+    fields
 }
 
 /// Append `+`/`-`/`~` lines for one category, in that order.

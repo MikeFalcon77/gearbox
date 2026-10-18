@@ -41,6 +41,7 @@ export const PRODUCT_FUNCTIONS: readonly string[] = [
   "kubernetes",
   "path",
   "plugin",
+  "postgres",
   "product",
   "provider",
   "registry",

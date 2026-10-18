@@ -316,7 +316,7 @@ export const DIAGNOSTIC_CATALOGUE: {
     title: "database gear with no database configured",
     severity: "error",
     domain: "topology",
-    docs: "A process contains a database-backed gear but no database is configured.",
+    docs: "A selected gear needs a database but its deployment profile has no usable\nexternal Postgres configuration. This includes gears reached by closure,\ninvalid or colliding database names and missing Kubernetes Secret references.\nConfigure `database = postgres(...)` on the profile; see ADR-0025.\nResolution, lock verification and generation never connect or expand passwords.",
     requiresEvidence: false,
   },
   GBX0307: {

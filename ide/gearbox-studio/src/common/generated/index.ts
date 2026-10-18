@@ -97,6 +97,7 @@ export * from "./PluginScaffold";
 export * from "./PluginSelection";
 export * from "./PluginTarget";
 export * from "./Position";
+export * from "./PostgresDatabase";
 export * from "./Preference";
 export * from "./PreviewAddGear";
 export * from "./ProductEdit";

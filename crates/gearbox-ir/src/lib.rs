@@ -7,6 +7,8 @@
 
 pub mod catalogue;
 pub mod contract;
+pub mod database;
+pub use database::PostgresDatabase;
 pub mod diagnostics;
 pub mod explain;
 pub mod fileset;

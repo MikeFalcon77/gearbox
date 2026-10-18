@@ -2,6 +2,7 @@
 import type { ApplicationId } from "./ApplicationId";
 import type { Discovery } from "./Discovery";
 import type { Location } from "./Location";
+import type { PostgresDatabase } from "./PostgresDatabase";
 import type { ProfileId } from "./ProfileId";
 
 /**
@@ -10,11 +11,11 @@ import type { ProfileId } from "./ProfileId";
  * A composition-time concept: the runtime has no such type, only a per-gear
  * runtime kind. Each variant is projected onto that plus a deployment topology.
  */
-export type DeploymentProfileDecl = { "profile": "embedded", id: ProfileId, 
+export type DeploymentProfileDecl = { "profile": "embedded", id: ProfileId, database?: PostgresDatabase | null, 
 /**
  * Where `embedded(...)` was written in the product description.
  */
-declared_at?: Location | null, } | { "profile": "self_hosted", id: ProfileId, 
+declared_at?: Location | null, } | { "profile": "self_hosted", id: ProfileId, database?: PostgresDatabase | null, 
 /**
  * Which application is the host.
  */
@@ -34,7 +35,7 @@ cargo_profile?: string | null,
 /**
  * Where `self_hosted(...)` was written in the product description.
  */
-declared_at?: Location | null, } | { "profile": "kubernetes", id: ProfileId, discovery: Discovery, namespace?: string | null, image_registry?: string | null, 
+declared_at?: Location | null, } | { "profile": "kubernetes", id: ProfileId, database?: PostgresDatabase | null, discovery: Discovery, namespace?: string | null, image_registry?: string | null, 
 /**
  * Where `kubernetes(...)` was written in the product description.
  */

@@ -17,6 +17,12 @@ use gearbox_engine::{Continue, LoadEvent, SourceRoot, load_catalogue, load_catal
 use gearbox_ir::{LoadStage, SourceId};
 
 fn root() -> Option<SourceRoot> {
+    if let Some(path) = std::env::var_os("GEARBOX_CORPUS_ROOT") {
+        return Some(
+            SourceRoot::open(SourceId::new("gears-rust").unwrap(), path)
+                .unwrap_or_else(|error| panic!("GEARBOX_CORPUS_ROOT: {error}")),
+        );
+    }
     let mut dir: &Path = Path::new(env!("CARGO_MANIFEST_DIR"));
     let root = loop {
         let candidate = dir.join("gears-rust");

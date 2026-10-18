@@ -281,6 +281,7 @@ pub fn pin_static_endpoints(
     if !matches!(
         declaration,
         DeploymentProfileDecl::Kubernetes {
+            database: None,
             discovery: Discovery::Static,
             ..
         }

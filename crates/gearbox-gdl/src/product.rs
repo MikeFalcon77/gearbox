@@ -153,6 +153,21 @@ fn config_map(
     }
 }
 
+fn string_map(
+    what: &str,
+    value: Option<Value<'_>>,
+) -> anyhow::Result<std::collections::BTreeMap<String, String>> {
+    config_map(what, value)?
+        .into_iter()
+        .map(|(key, value)| {
+            value
+                .as_str()
+                .map(|s| (key, s.to_owned()))
+                .ok_or_else(|| anyhow::anyhow!("`{what}` values must be strings"))
+        })
+        .collect()
+}
+
 fn strings(list: Option<UnpackList<String>>) -> Vec<String> {
     list.map(|l| l.items).unwrap_or_default()
 }
@@ -232,15 +247,56 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         })
     }
 
+    /// `postgres(host = ..., user = ..., password = "${ENV_NAME}")` -- an external Postgres server.
+    ///
+    /// # Arguments
+    /// * `host`: Server hostname or address; no connection is made during resolution.
+    /// * `port`: TCP port, defaults to 5432.
+    /// * `user`: Database role.
+    /// * `password`: Environment reference only, for example `${GEARS_PG_PASSWORD}`.
+    /// * `params`: String-valued connection parameters such as `sslmode`.
+    /// * `database_names`: Database name overrides keyed by gear id; defaults replace hyphens with underscores.
+    /// * `existing_secret`: Kubernetes Secret containing a key named by the password environment variable.
+    fn postgres(
+        #[starlark(require = named)] host: &str,
+        #[starlark(require = named)] port: Option<i64>,
+        #[starlark(require = named)] user: &str,
+        #[starlark(require = named)] password: &str,
+        #[starlark(require = named)] params: Option<Value<'_>>,
+        #[starlark(require = named)] database_names: Option<Value<'_>>,
+        #[starlark(require = named)] existing_secret: Option<&str>,
+    ) -> anyhow::Result<crate::records::PostgresRecord> {
+        let params = string_map("params", params)?;
+        let database_names = string_map("database_names", database_names)?
+            .into_iter()
+            .map(|(id, name)| Ok((gearbox_ir::GearId::new(id)?, name)))
+            .collect::<anyhow::Result<_>>()?;
+        let settings = gearbox_ir::PostgresDatabase {
+            host: host.to_owned(),
+            port: u16::try_from(port.unwrap_or(5432))
+                .map_err(|_| anyhow::anyhow!("postgres port must be between 1 and 65535"))?,
+            user: user.to_owned(),
+            password: password.to_owned(),
+            params,
+            database_names,
+            existing_secret: existing_secret.map(str::to_owned),
+        };
+        settings.validate().map_err(anyhow::Error::msg)?;
+        Ok(crate::records::PostgresRecord { settings })
+    }
+
     /// `embedded(id = ...)` -- one process; every binding is local by construction.
     ///
     /// # Arguments
     /// * `id`: The profile's id, kebab-case.
+    /// * `database`: Optional external `postgres(...)` configuration for DB-backed gears.
     fn embedded<'v>(
         #[starlark(require = named)] id: &str,
+        #[starlark(require = named)] database: Option<&crate::records::PostgresRecord>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ProfileRecord> {
         Ok(ProfileRecord {
+            database: database.cloned(),
             kind: "embedded".to_owned(),
             id: id.to_owned(),
             host: None,
@@ -257,6 +313,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     ///
     /// # Arguments
     /// * `id`: The profile's id, kebab-case.
+    /// * `database`: Optional external `postgres(...)` configuration for DB-backed gears.
     /// * `host`: The application that hosts the workers.
     /// * `worker_discovery`: `"static"` or `"directory"`.
     /// * `target_dir`: The Cargo target directory the host starts workers from, relative to this
@@ -268,9 +325,11 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] worker_discovery: &str,
         #[starlark(require = named)] target_dir: Option<&str>,
         #[starlark(require = named)] cargo_profile: Option<&str>,
+        #[starlark(require = named)] database: Option<&crate::records::PostgresRecord>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ProfileRecord> {
         Ok(ProfileRecord {
+            database: database.cloned(),
             kind: "self-hosted".to_owned(),
             id: id.to_owned(),
             host: Some(host.to_owned()),
@@ -287,6 +346,7 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
     ///
     /// # Arguments
     /// * `id`: The profile's id, kebab-case.
+    /// * `database`: Optional external `postgres(...)` configuration for DB-backed gears.
     /// * `discovery`: `"static"` or `"directory"`.
     /// * `namespace`: The namespace the chart deploys to.
     /// * `image_registry`: The registry images are pulled from.
@@ -295,9 +355,11 @@ fn gdl_product_vocabulary(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] discovery: &str,
         #[starlark(require = named)] namespace: Option<&str>,
         #[starlark(require = named)] image_registry: Option<&str>,
+        #[starlark(require = named)] database: Option<&crate::records::PostgresRecord>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<ProfileRecord> {
         Ok(ProfileRecord {
+            database: database.cloned(),
             kind: "kubernetes".to_owned(),
             id: id.to_owned(),
             host: None,

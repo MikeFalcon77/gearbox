@@ -63,6 +63,60 @@ Not refused, but outside the grammar above: arithmetic (`"a" + "b"`, `8000 + 80`
 
 ---
 
+## External database (GDL 1.1)
+
+Each `embedded`, `self_hosted` and `kubernetes` profile accepts an optional
+`database = postgres(...)`. The connection is deployment intent, independent of
+cluster provider options and of each gear's own `config` bag.
+
+```python
+embedded(
+    id = "dev",
+    database = postgres(
+        host = "127.0.0.1",
+        user = "app",
+        password = "${GEARS_PG_PASSWORD}",
+        port = 5432,
+        params = {"sslmode": "disable"},
+        database_names = {"resource-group": "resource_group"},
+    ),
+)
+```
+
+`host`, `user` and `password` are required. The port defaults to 5432 and must be
+1..65535. Passwords must be a single `${ENV_NAME}` reference (uppercase ASCII,
+digits and underscores, not starting with a digit); literals and `${VAR:-default}`
+are refused. Resolution and generation never expand the reference.
+
+`params` is a string-to-string map of runtime Postgres connection parameters.
+`database_names` overrides database names by selected DB-gear id; entries for
+unselected or non-DB gears are errors. Otherwise the name replaces the gear id's
+hyphens with underscores. Names must be unique, 1..63 lowercase ASCII letters,
+digits or underscores and start with a letter or underscore. Long ids require an
+override; names are never silently truncated or shared.
+
+A selected gear with projected `cap.db` requires the selected profile to configure
+a database (**GBX0306**). This includes gears pulled in by dependency closure.
+The lock records every resolved database name; generation writes
+`database.servers.pg` and `gears.<id>.database = {server: pg, dbname: ...}` only in
+processes that execute the DB gear. A host entry that only spawns a DB worker
+gets no connection for that worker.
+
+For Kubernetes add `existing_secret = "app-db"` to `postgres(...)`. The existing
+Secret must contain a key with the same name as the password environment variable.
+Each DB-using subchart exposes `database.existingSecret` and `database.passwordEnv`
+in its values/schema and injects that key through `secretKeyRef`, independently
+of cluster-provider `existingSecret`/`secretKeys`. Generated files contain only
+references. The operator provisions Postgres, each named database and the Secret;
+Gearbox creates none of them and bundles no database chart.
+
+This extends GDL 1.0 additively: older descriptions still parse; DB-backed products
+must add a connection before they can resolve successfully. Generated locks use
+schema 2. Schema-1 locks are refused with instructions to run `gearbox resolve`;
+there is no implicit upgrade or change to their recorded hash.
+
+---
+
 ## Namespaces
 
 A missing member is an attribute error, not a string.
@@ -564,12 +618,12 @@ A `registry` source is the registry itself rather than one package, so a product
 ### Deployment profiles
 
 ```
-embedded(id)
-self_hosted(id, host, worker_discovery, target_dir?, cargo_profile?)
-kubernetes(id, discovery, namespace?, image_registry?)
+embedded(id, database?)
+self_hosted(id, host, worker_discovery, target_dir?, cargo_profile?, database?)
+kubernetes(id, discovery, namespace?, image_registry?, database?)
 ```
 
-`id` is kebab-case. Duplicate ids are **GBX0110**. `worker_discovery` / `discovery` is `"static"` or `"directory"`, and nothing else. `host` is an application name, kebab-case. `cargo_profile` is a single path segment: `dev`, `release`, or a custom Cargo profile. `dev` writes under `target/debug`. `target_dir` is the Cargo target directory the host spawns workers out of, **as written** and relative to the description; a `self_hosted` profile without one cannot say where a worker binary is, which is **GBX0310**. On `kubernetes`, `namespace` and `image_registry` prefix what the chart deploys and where it pulls from; both are optional and both end up in the generated values rather than in the lock.
+`id` is kebab-case. Duplicate ids are **GBX0110**. `worker_discovery` / `discovery` is `"static"` or `"directory"`, and nothing else. `host` is an application name, kebab-case. `cargo_profile` is a single path segment: `dev`, `release`, or a custom Cargo profile. `dev` writes under `target/debug`. `target_dir` is the Cargo target directory the host spawns workers out of, **as written** and relative to the description; a `self_hosted` profile without one cannot say where a worker binary is, which is **GBX0310**. On `kubernetes`, `namespace` and `image_registry` prefix what the chart deploys and where it pulls from; both are optional, recorded in the lock and used to derive the generated deployment artifacts.
 
 ### Gears
 
@@ -785,10 +839,15 @@ product(
     layout = "apps",
     sources = [source(id = "gears-rust", at = path("../../../gears-rust"))],
     profiles = [
-        embedded(id = "dev"),
+        embedded(id = "dev", database = postgres(host = "127.0.0.1", user = "postgres",
+                    password = "${GEARS_PG_PASSWORD}", params = {"sslmode": "disable"})),
         self_hosted(id = "local", host = "gateway", worker_discovery = "directory",
-                    target_dir = "../../../gears-rust/target"),
-        kubernetes(id = "prod", discovery = "static", namespace = "payments"),
+                    target_dir = "../../../gears-rust/target",
+                    database = postgres(host = "127.0.0.1", user = "postgres",
+                        password = "${GEARS_PG_PASSWORD}", params = {"sslmode": "disable"})),
+        kubernetes(id = "prod", discovery = "static", namespace = "payments",
+                    database = postgres(host = "postgres.example.com", user = "payments",
+                        password = "${GEARS_PG_PASSWORD}", existing_secret = "payments-db")),
     ],
     default_profile = "dev",
     gears = [

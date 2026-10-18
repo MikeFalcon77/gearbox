@@ -28,6 +28,13 @@ use gearbox_ir::{
 };
 
 fn gears_rust() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("GEARBOX_CORPUS_ROOT") {
+        return Some(
+            PathBuf::from(path)
+                .canonicalize()
+                .unwrap_or_else(|error| panic!("GEARBOX_CORPUS_ROOT: {error}")),
+        );
+    }
     // Walks up instead of counting `..`, and the difference is not cosmetic.
     // `CARGO_MANIFEST_DIR/../../../gears-rust` is the sibling of the *repository*
     // root, so from a git worktree -- `.claude/worktrees/<name>/crates/...` -- it

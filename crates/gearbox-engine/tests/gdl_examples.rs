@@ -101,6 +101,9 @@ fn errors(diagnostics: &[Diagnostic]) -> Vec<String> {
 }
 
 fn corpus() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("GEARBOX_CORPUS_ROOT") {
+        return PathBuf::from(path).canonicalize().ok();
+    }
     let mut dir: &Path = Path::new(env!("CARGO_MANIFEST_DIR"));
     loop {
         let candidate = dir.join("gears-rust");

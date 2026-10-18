@@ -529,7 +529,11 @@ A process exposes REST interfaces but contains no REST host to mount them.
 
 **database gear with no database configured**
 
-A process contains a database-backed gear but no database is configured.
+A selected gear needs a database but its deployment profile has no usable
+external Postgres configuration. This includes gears reached by closure,
+invalid or colliding database names and missing Kubernetes Secret references.
+Configure `database = postgres(...)` on the profile; see ADR-0025.
+Resolution, lock verification and generation never connect or expand passwords.
 
 ### GBX0307
 

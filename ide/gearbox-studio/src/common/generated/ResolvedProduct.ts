@@ -3,6 +3,7 @@ import type { CutCandidate } from "./CutCandidate";
 import type { Diagnostics } from "./Diagnostics";
 import type { GearId } from "./GearId";
 import type { KubernetesSettings } from "./KubernetesSettings";
+import type { PostgresDatabase } from "./PostgresDatabase";
 import type { ProvenanceEdge } from "./ProvenanceEdge";
 import type { ResolvedApplication } from "./ResolvedApplication";
 import type { ResolvedBinding } from "./ResolvedBinding";
@@ -19,7 +20,11 @@ import type { SourceId } from "./SourceId";
  * Every collection is in canonical order, fixed by the resolver's final pass, so
  * two runs over the same inputs serialize identically.
  */
-export type ResolvedProduct = { schema_version: number, product: ResolvedProductHeader, kubernetes?: KubernetesSettings | null, 
+export type ResolvedProduct = { 
+/**
+ * Complete external database configuration, including resolved per-gear names.
+ */
+database?: PostgresDatabase | null, schema_version: number, product: ResolvedProductHeader, kubernetes?: KubernetesSettings | null, 
 /**
  * Present only for a `self_hosted` profile.
  */

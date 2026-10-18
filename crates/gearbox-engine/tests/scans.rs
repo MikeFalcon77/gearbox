@@ -15,6 +15,13 @@ use gearbox_engine::{CatalogueScan, SourceRoot, load_catalogue};
 use gearbox_ir::SourceId;
 
 fn gears_rust() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("GEARBOX_CORPUS_ROOT") {
+        return Some(
+            PathBuf::from(path)
+                .canonicalize()
+                .unwrap_or_else(|error| panic!("GEARBOX_CORPUS_ROOT: {error}")),
+        );
+    }
     let mut dir: &Path = Path::new(env!("CARGO_MANIFEST_DIR"));
     loop {
         let candidate = dir.join("gears-rust");

@@ -195,6 +195,29 @@ fn dependencies(
         },
     );
 
+    // The profile selects Postgres. toolkit-db deliberately has no default
+    // backend, so composing a DB gear must enable the matching driver even
+    // when that gear's own Cargo dependency does not choose one.
+    if application.needs_db && input.lock.database.is_some() {
+        let (version, registry, path) = located(
+            input,
+            "cf-gears-toolkit-db",
+            crate_dir,
+            &anchor_root.join("libs/toolkit-db"),
+        );
+        dependencies.insert(
+            "toolkit_db".to_owned(),
+            Dependency {
+                package: Some("cf-gears-toolkit-db".to_owned()),
+                version,
+                registry,
+                path,
+                features: vec!["pg".to_owned()],
+                default_features: None,
+            },
+        );
+    }
+
     for (name, dependency) in runtime_deps() {
         dependencies.insert(name.to_owned(), dependency);
     }

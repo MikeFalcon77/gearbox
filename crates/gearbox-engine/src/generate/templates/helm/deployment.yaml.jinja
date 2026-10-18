@@ -119,6 +119,13 @@ spec:
                   key: {{ . | quote }}
             {{- end }}
             {{- end }}
+            {{- with .Values.database }}
+            - name: {{ .passwordEnv | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .existingSecret | quote }}
+                  key: {{ .passwordEnv | quote }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

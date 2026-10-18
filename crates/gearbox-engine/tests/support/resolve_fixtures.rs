@@ -93,6 +93,7 @@ pub fn intent(gears: &[&str]) -> ProductIntent {
         profiles: [(
             dev.clone(),
             gearbox_ir::DeploymentProfileDecl::Embedded {
+                database: None,
                 id: dev.clone(),
                 declared_at: None,
             },
@@ -328,6 +329,7 @@ pub fn self_hosted_intent(gears: &[&str]) -> ProductIntent {
     intent.profiles.insert(
         local.clone(),
         gearbox_ir::DeploymentProfileDecl::SelfHosted {
+            database: None,
             id: local,
             host: gearbox_ir::ApplicationId::new("gateway").unwrap(),
             discovery: gearbox_ir::Discovery::Static,
@@ -371,6 +373,7 @@ pub fn self_hosted(
     intent.profiles.insert(
         local.clone(),
         gearbox_ir::DeploymentProfileDecl::SelfHosted {
+            database: None,
             id: local,
             host: gearbox_ir::ApplicationId::new("host").unwrap(),
             discovery,
@@ -389,6 +392,7 @@ pub fn kubernetes(gears: &[&str], discovery: gearbox_ir::Discovery) -> ProductIn
     intent.profiles.insert(
         prod.clone(),
         gearbox_ir::DeploymentProfileDecl::Kubernetes {
+            database: None,
             id: prod,
             discovery,
             namespace: None,

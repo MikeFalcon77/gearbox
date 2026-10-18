@@ -72,6 +72,48 @@ pub fn files(input: &GenerateInput<'_>, files: &FileSet) -> Result<Vec<FileEntry
     Ok(out)
 }
 
+#[derive(serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+struct DatabaseSecretValues {
+    existing_secret: String,
+    password_env: String,
+}
+
+fn database_secret(
+    application: &ResolvedApplication,
+    input: &GenerateInput<'_>,
+) -> Result<Option<DatabaseSecretValues>, GenerateError> {
+    if !application.gears.iter().any(|id| {
+        input
+            .lock
+            .gears
+            .get(id)
+            .is_some_and(|gear| gear.runtime_caps.contains(&gearbox_ir::RuntimeCap::Db))
+    }) {
+        return Ok(None);
+    }
+    let db = input
+        .lock
+        .database
+        .as_ref()
+        .ok_or_else(|| GenerateError::Database("missing Postgres settings".to_owned()))?;
+    db.validate().map_err(GenerateError::Database)?;
+    Ok(Some(DatabaseSecretValues {
+        existing_secret: db.existing_secret.clone().ok_or_else(|| {
+            GenerateError::Database("Kubernetes postgres requires existing_secret".to_owned())
+        })?,
+        password_env: db
+            .password_env()
+            .ok_or_else(|| {
+                GenerateError::Database(
+                    "password must reference an environment variable".to_owned(),
+                )
+            })?
+            .to_owned(),
+    }))
+}
+
 fn subchart_name(application: &ResolvedApplication) -> &str {
     application
         .subchart
@@ -173,14 +215,19 @@ fn umbrella_values(
     for application in &input.lock.applications {
         let image = image_values(application, input);
         let config_rel = paths::rel(&["config", &format!("{}.yaml", application.name)])?;
-        let keys = files
+        let mut keys = files
             .get(&config_rel)
             .and_then(FileEntry::as_text)
             .map(secret_vars)
             .unwrap_or_default();
+        let database = database_secret(application, input)?;
+        if let Some(secret) = &database {
+            keys.retain(|key| key != &secret.password_env);
+        }
         blocks.insert(
             subchart_name(application).to_owned(),
             SubchartValues {
+                database,
                 enabled: true,
                 replica_count: application.replicas,
                 image,
@@ -394,6 +441,8 @@ fn inline_refs(value: &mut serde_json::Value, defs: &serde_json::Value) {
 #[serde(rename_all = "camelCase")]
 #[schemars(deny_unknown_fields)]
 struct SubchartValues {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    database: Option<DatabaseSecretValues>,
     enabled: bool,
     replica_count: u32,
     image: ImageValues,

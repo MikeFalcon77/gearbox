@@ -123,6 +123,7 @@ fn intent(key: &str, value: serde_json::Value) -> ProductIntent {
         profiles: [(
             dev.clone(),
             gearbox_ir::DeploymentProfileDecl::Embedded {
+                database: None,
                 id: dev.clone(),
                 declared_at: None,
             },

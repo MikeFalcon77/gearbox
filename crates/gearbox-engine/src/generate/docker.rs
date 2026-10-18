@@ -251,7 +251,7 @@ fn sh_single(value: &str) -> String {
 /// generated `docker/` directory, not prefixed raw onto `SCRIPT_DIR` --
 /// `$SCRIPT_DIR//abs` is how an absolute `to_context` used to break the script.
 fn context_cd(to_context: &str) -> String {
-    if Path::new(to_context).is_absolute() {
+    if to_context.starts_with('/') || Path::new(to_context).is_absolute() {
         sh_single(to_context)
     } else {
         format!("\"$SCRIPT_DIR/\"{}", sh_single(to_context))

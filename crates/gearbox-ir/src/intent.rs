@@ -157,6 +157,8 @@ pub enum DeploymentProfileDecl {
     /// Everything in one process. Every contract binding is local by construction.
     Embedded {
         id: ProfileId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        database: Option<crate::PostgresDatabase>,
         /// Where `embedded(...)` was written in the product description.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         declared_at: Option<Location>,
@@ -168,6 +170,8 @@ pub enum DeploymentProfileDecl {
     /// implemented, so this profile is one machine.
     SelfHosted {
         id: ProfileId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        database: Option<crate::PostgresDatabase>,
         /// Which application is the host.
         host: ApplicationId,
         discovery: Discovery,
@@ -189,6 +193,8 @@ pub enum DeploymentProfileDecl {
     /// One container image and workload per process.
     Kubernetes {
         id: ProfileId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        database: Option<crate::PostgresDatabase>,
         discovery: Discovery,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         namespace: Option<String>,
@@ -201,6 +207,16 @@ pub enum DeploymentProfileDecl {
 }
 
 impl DeploymentProfileDecl {
+    /// The external database selected by this deployment profile.
+    #[must_use]
+    pub const fn database(&self) -> Option<&crate::PostgresDatabase> {
+        match self {
+            Self::Embedded { database, .. }
+            | Self::SelfHosted { database, .. }
+            | Self::Kubernetes { database, .. } => database.as_ref(),
+        }
+    }
+
     #[must_use]
     pub const fn id(&self) -> &ProfileId {
         match self {

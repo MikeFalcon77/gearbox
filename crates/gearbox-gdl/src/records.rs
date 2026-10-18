@@ -440,8 +440,17 @@ gdl_record! {
 }
 
 gdl_record! {
+    /// `postgres(...)`: a validated external database connection.
+    PostgresRecord as "gdl_postgres" {
+        #[allocative(skip)]
+        pub settings: gearbox_ir::PostgresDatabase,
+    }
+}
+
+gdl_record! {
     /// `embedded(...)`, `self_hosted(...)` or `kubernetes(...)`.
     ProfileRecord as "gdl_profile" {
+        pub database: Option<PostgresRecord>,
         /// `embedded`, `self-hosted` or `kubernetes`.
         pub kind: String,
         pub id: String,

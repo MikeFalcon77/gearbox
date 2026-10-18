@@ -803,6 +803,7 @@ fn deployment_profile(
     match record.kind.as_str() {
         "embedded" => Some(DeploymentProfileDecl::Embedded {
             id: id.clone(),
+            database: record.database.as_ref().map(|db| db.settings.clone()),
             declared_at: record.declared_at.clone(),
         }),
         "self-hosted" => {
@@ -833,6 +834,7 @@ fn deployment_profile(
             };
             Some(DeploymentProfileDecl::SelfHosted {
                 id: id.clone(),
+                database: record.database.as_ref().map(|db| db.settings.clone()),
                 host,
                 discovery: discovery(
                     uri,
@@ -848,6 +850,7 @@ fn deployment_profile(
         }
         "kubernetes" => Some(DeploymentProfileDecl::Kubernetes {
             id: id.clone(),
+            database: record.database.as_ref().map(|db| db.settings.clone()),
             discovery: discovery(
                 uri,
                 id,
